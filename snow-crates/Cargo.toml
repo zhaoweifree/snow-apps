@@ -3,6 +3,7 @@ members = [
     "crates/snow-memory",
     "crates/snow-media",
     "crates/snow-macos",
+    "crates/snow-linux",
     "crates/visual-region-detector",
     "crates/snow-visual-region-detector-c",
     "crates/snow-core",

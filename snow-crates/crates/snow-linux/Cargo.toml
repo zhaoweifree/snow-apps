@@ -1,0 +1,19 @@
+[package]
+name = "snow-linux"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "Linux (X11 / Wayland) platform backend for Snow Apps"
+
+[dependencies]
+snow-core = { path = "../snow-core" }
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Pure-Rust X11 bindings: no libxcb / no C toolchain required, which keeps the
+# crate cross-checkable from a Windows host with
+# `cargo check --target x86_64-unknown-linux-gnu`.
+x11rb = { version = "0.14", default-features = false, features = [
+    "randr",
+    "xfixes",
+] }

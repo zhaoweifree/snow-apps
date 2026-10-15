@@ -2,4 +2,17 @@
 channel = "1.97.1"
 profile = "minimal"
 components = ["clippy", "rustfmt"]
-targets = ["x86_64-pc-windows-msvc"]
+# The Windows target is the default build target on this workstation; the two
+# Linux targets exist so the UOS port can be type-checked without a Linux box:
+#
+#     cargo check -p snow-capture --target x86_64-unknown-linux-gnu
+#     cargo check -p snow-capture --target aarch64-unknown-linux-gnu
+#
+# `cargo check` needs the target's std but no linker, so these two targets turn
+# any Windows machine into a fast Linux/arm64 syntax + cfg + API gate. Real
+# builds and tests still have to run on UOS (see docs-uos-linux-port.md §7).
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]

@@ -5,7 +5,7 @@
 //! - [`CursorProjector`] for converting snapshots into target-relative samples.
 //! - [`CursorStreamHandle`] for consuming raw snapshots from a worker thread.
 //!
-//! Only Windows is currently supported. Other platforms return
+//! Windows (Win32) and Linux (X11) are supported. Other platforms return
 //! [`CursorCaptureError::UnsupportedPlatform`].
 
 mod error;
