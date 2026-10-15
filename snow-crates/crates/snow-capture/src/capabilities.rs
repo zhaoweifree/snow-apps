@@ -34,7 +34,35 @@ impl CaptureCapabilities {
                 window_enumeration: supported,
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        {
+            // X11 root-window capture produces CPU pixels only. Whether a server
+            // is actually reachable is a session question rather than a
+            // capability one: a headless or pure-Wayland host advertises no
+            // backend, and everything else fails later with `SessionMissing`,
+            // which callers already treat as "feature unavailable".
+            let kind = snow_linux::session::SessionKind::detect();
+            let supported = kind.has_x11();
+            Self {
+                backends: if supported {
+                    vec![CaptureBackendKind::X11]
+                } else {
+                    vec![]
+                },
+                // X11 root coordinates are pixels; a HiDPI compositor scales at
+                // the toolkit layer, never in the root window.
+                desktop_space: DesktopSpace::PhysicalPixels,
+                cpu_formats: if supported {
+                    vec![PixelFormat::Rgba8, PixelFormat::Bgra8]
+                } else {
+                    vec![]
+                },
+                native_frames: false,
+                hdr_capture: false,
+                window_enumeration: false,
+            }
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
             let supported = cfg!(windows);
             Self {

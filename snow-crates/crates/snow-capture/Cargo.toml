@@ -114,3 +114,6 @@ snow-d3d11 = { path = "../snow-d3d11" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 snow-macos = { path = "../snow-macos" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+snow-linux = { path = "../snow-linux" }

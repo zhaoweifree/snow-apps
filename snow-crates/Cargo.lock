@@ -3204,6 +3204,7 @@ dependencies = [
  "snow-core",
  "snow-cursor",
  "snow-d3d11",
+ "snow-linux",
  "snow-macos",
  "snow-media",
  "snow-memory",
