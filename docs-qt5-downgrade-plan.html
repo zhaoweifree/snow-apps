@@ -1,0 +1,2020 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qt6 降级 Qt5 实施方案（Windows 优先验证）</title>
+<style>
+:root{
+  --bg:#ffffff; --bg-soft:#f6f8fa; --bg-code:#f3f5f7;
+  --fg:#1f2328; --fg-soft:#57606a; --border:#d8dee4; --border-soft:#eaeef2;
+  --accent:#0b64c9; --accent-soft:#e8f1fc;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);
+  font-size:15px;line-height:1.72;-webkit-font-smoothing:antialiased}
+.layout{display:flex;max-width:1500px;margin:0 auto}
+nav.toc{position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;
+  width:290px;flex:0 0 290px;padding:28px 20px 60px;border-right:1px solid var(--border-soft);
+  background:var(--bg-soft);font-size:13px}
+nav.toc h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-soft);
+  margin:0 0 12px;font-weight:700}
+nav.toc ul{list-style:none;margin:0;padding:0}
+nav.toc li{margin:3px 0}
+nav.toc a{color:var(--fg-soft);text-decoration:none;display:block;padding:3px 8px;border-radius:5px;
+  border-left:2px solid transparent}
+nav.toc a:hover{background:var(--accent-soft);color:var(--accent);border-left-color:var(--accent)}
+nav.toc ul ul{padding-left:12px}
+nav.toc ul ul a{font-size:12.5px;opacity:.9}
+main{flex:1 1 auto;min-width:0;padding:40px 56px 120px;max-width:1080px}
+.hero{border-bottom:1px solid var(--border-soft);padding-bottom:22px;margin-bottom:14px}
+.hero .badge{display:inline-block;font-size:12px;font-weight:600;color:var(--accent);
+  background:var(--accent-soft);border:1px solid #cfe3fa;border-radius:999px;padding:3px 12px;margin-bottom:12px}
+.hero h1{font-size:30px;line-height:1.3;margin:0 0 10px;font-weight:700;letter-spacing:-.01em}
+.hero p{margin:0;color:var(--fg-soft);font-size:14px}
+h1,h2,h3,h4{line-height:1.35;font-weight:700;letter-spacing:-.005em}
+h2{font-size:23px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border-soft)}
+h3{font-size:18px;margin:30px 0 10px;color:#111}
+h4{font-size:15.5px;margin:22px 0 8px;color:#111}
+p{margin:12px 0}
+a{color:var(--accent)}
+strong{font-weight:650}
+hr{border:0;border-top:1px solid var(--border-soft);margin:38px 0}
+blockquote{margin:16px 0;padding:12px 18px;background:var(--bg-soft);
+  border-left:3px solid var(--accent);border-radius:0 6px 6px 0;color:#333}
+blockquote p{margin:6px 0}
+code{font-family:var(--mono);font-size:12.6px;background:var(--bg-code);
+  padding:2px 5px;border-radius:4px;border:1px solid var(--border-soft);word-break:break-word}
+pre{background:var(--bg-code);border:1px solid var(--border-soft);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;margin:16px 0;line-height:1.6}
+pre code{background:none;border:0;padding:0;font-size:12.5px;display:block;white-space:pre}
+table{border-collapse:collapse;width:100%;margin:18px 0;font-size:13.6px;
+  border:1px solid var(--border);border-radius:8px;overflow:hidden;display:table}
+thead{background:var(--bg-soft)}
+th{text-align:left;font-weight:650;padding:9px 12px;border-bottom:1px solid var(--border);
+  border-right:1px solid var(--border-soft);white-space:nowrap}
+th:last-child{border-right:0}
+td{padding:8px 12px;border-bottom:1px solid var(--border-soft);
+  border-right:1px solid var(--border-soft);vertical-align:top}
+td:last-child{border-right:0}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#fafbfc}
+ul,ol{margin:12px 0;padding-left:26px}
+li{margin:5px 0}
+li>ol,li>ul{margin:5px 0}
+del{color:var(--fg-soft)}
+@media (max-width:1080px){
+  nav.toc{display:none}
+  main{padding:26px 20px 90px}
+  table{font-size:12.8px}
+  th,td{padding:7px 9px;white-space:normal}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+<h2>目录</h2>
+<ul>
+<li><a href="#0-方案形态-为什么是-双版本-而不是-纯-qt5">0. 方案形态：为什么是「双版本」而不是「纯 Qt5」</a>
+</li>
+<li><a href="#1-实测改造面-grep-证据-对应当前-main-快照">1. 实测改造面（grep 证据，对应当前 main 快照）</a>
+<ul>
+<li><a href="#1-1-分类总览">1.1 分类总览</a></li>
+<li><a href="#1-2-去重后的真实工作量">1.2 去重后的真实工作量</a></li>
+<li><a href="#1-3-三个容易误判的点-已逐条核实-避免做无用功">1.3 三个容易误判的点（已逐条核实，避免做无用功）</a></li>
+<li><a href="#1-4-逐条实测的-qt5-qt6-api-差异-编译迭代中确认-均带证据">1.4 逐条实测的 Qt5 / Qt6 API 差异（编译迭代中确认，均带证据）</a></li>
+<li><a href="#1-5-两个改变计划的实测结论-本轮新增">1.5 两个改变计划的实测结论（本轮新增）</a></li>
+</ul>
+</li>
+<li><a href="#2-三层改造策略">2. 三层改造策略</a>
+<ul>
+<li><a href="#l1-兼容层-新增文件-业务代码零侵扰">L1 — 兼容层（新增文件，业务代码零侵扰）</a></li>
+<li><a href="#l2-机械改写-脚本驱动-逐条可-diff-审查">L2 — 机械改写（脚本驱动，逐条可 diff 审查）</a></li>
+<li><a href="#l3-人工改写-无法机械化的部分">L3 — 人工改写（无法机械化的部分）</a></li>
+<li><a href="#l3b-兼容头新增垫片-第-10-15-节-第-6-8-节新增-本轮">L3b — 兼容头新增垫片（第 10–15 节 + 第 6/8 节新增，本轮）</a></li>
+<li><a href="#l3c-事件坐标访问器-第-2b-节-补全">L3c — 事件坐标访问器（第 2b 节）补全</a></li>
+</ul>
+</li>
+<li><a href="#3-windows-测试路径-以及必须先解决的硬前置">3. Windows 测试路径——以及必须先解决的硬前置</a>
+<ul>
+<li><a href="#3-1-本机环境实测-这是当前真正的阻塞">3.1 本机环境实测（这是当前真正的阻塞）</a></li>
+<li><a href="#3-2-必须安装的清单-windows">3.2 必须安装的清单（Windows）</a></li>
+<li><a href="#3-3-qt5-套件的两个选项-需你拍板">3.3 Qt5 套件的两个选项（需你拍板）</a></li>
+<li><a href="#3-4-windows-冒烟测试验收清单-p5-出口">3.4 Windows 冒烟测试验收清单（P5 出口）</a></li>
+<li><a href="#3-5-本轮新增-一个真缺陷修复-三个可复跑的验证入口">3.5 本轮新增：一个真缺陷修复 + 三个可复跑的验证入口</a></li>
+<li><a href="#3-6-本轮新增-snow-shot-的-cmake-面首次过-qt5-r35">3.6 本轮新增：snow_shot 的 CMake 面首次过 Qt5（R35）</a></li>
+</ul>
+</li>
+<li><a href="#4-分阶段实施计划">4. 分阶段实施计划</a>
+</li>
+<li><a href="#5-风险控制与回滚">5. 风险控制与回滚</a>
+</li>
+<li><a href="#6-待你确认的三项">6. 待你确认的三项</a>
+<ul>
+<li><a href="#6-1-本轮新增的唯一决策点-第-3-项已被-1-5-改写-需要重新拍板">6.1 本轮新增的唯一决策点（第 3 项已被 1.5 改写，需要重新拍板）</a></li>
+<li><a href="#6-2-vcpkg-第三方依赖通道-镜像可行性实测">6.2 vcpkg 第三方依赖通道：镜像可行性实测</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+<main>
+<div class="hero">
+<span class="badge">Qt 5.15 / Qt 6.12 双版本兼容</span>
+<h1>Qt6 降级 Qt5 实施方案（Windows 优先验证）</h1>
+</div>
+<blockquote>
+<p>决策：<strong>维持 Qt5 路线</strong>；<strong>保留 Windows 分支</strong>，先在 Windows 用 Qt5 编译冒烟测试，通过后再上 UOS。
+策略：<strong>不删除 Qt6 支持</strong>，把工程改造成「一套源码，Qt 5.15 / Qt 6.12 双版本皆可编译」。
+基线：<code>SNOW_SHOT_VERSION = 1.2.8</code>（根 <code>CMakeLists.txt:18</code>）｜当前 Qt 契约：<code>6.12.0</code>（<code>scripts/qt-toolchain.json</code>）
+文档定位：与 <code>docs-uos-linux-port.md</code>（Linux 移植总方案）、<code>docs-windows-arm64-build.md</code> 同级</p>
+</blockquote>
+<hr>
+<h2 id="0-方案形态-为什么是-双版本-而不是-纯-qt5">0. 方案形态：为什么是「双版本」而不是「纯 Qt5」</h2>
+<p>这是本方案与前一版最大的区别，也是它成立的前提。</p>
+<p>Qt 公司官方自 <strong>Qt 5.15</strong> 起引入了 <strong>versionless 目标与命令</strong>，并且 <strong>Qt 6 同样提供</strong>：</p>
+<blockquote>
+<p>每个被加载的 Qt 模块都会定义库目标，名称以 <code>Qt6::</code> 开头……<strong>这些目标也可使用 <code>Qt::</code> 前缀：<code>Qt::Core</code>、<code>Qt::Gui</code> 等。</strong>
+—— Qt 6 官方文档 <em>Imported targets</em></p>
+<p>Qt 5.15 引入了 <em>versionless targets</em>……可以同时引用 <code>Qt6::Core</code> 或 <code>Qt::Core</code>。独立于使用 Qt 6 还是 Qt 5，都可以使用导入的 <code>Qt::Core</code> 目标。
+—— Qt 官方文档 <em>Qt 5 and Qt 6 compatibility</em></p>
+</blockquote>
+<p><strong>结论：<code>Qt6::X</code> → <code>Qt::X</code> 是一次官方背书、双向生效的重命名。</strong> 于是改造可以做成一棵分支树而非重写：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>纯 Qt5 重写（前一版方案）</th>
+<th><strong>双版本改造（本方案）</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>现有 Qt6 构建</td>
+<td>失效，不可回归</td>
+<td><strong>保持可用</strong>，作为对照基线</td>
+</tr>
+<tr>
+<td>定位「降级引入的 bug」</td>
+<td>无法区分</td>
+<td>可二分对比</td>
+</tr>
+<tr>
+<td>回滚成本</td>
+<td>高（跨 112 文件）</td>
+<td>低（每次一个 commit）</td>
+</tr>
+<tr>
+<td>迁移期工作量</td>
+<td>一次性大</td>
+<td><strong>增量、可中断</strong></td>
+</tr>
+<tr>
+<td>UOS 目标</td>
+<td>达成</td>
+<td>达成</td>
+</tr>
+</tbody>
+</table>
+<p><strong>落地含义</strong>：同一份源码在 <code>SNOW_QT_MAJOR=6</code> 与 <code>=5</code> 下都能配置、编译、运行。所有版本差异被收敛到
+<strong>3 个新增文件 + 1 个 CMake 模块</strong>里，不进业务代码。</p>
+<hr>
+<h2 id="1-实测改造面-grep-证据-对应当前-main-快照">1. 实测改造面（grep 证据，对应当前 <code>main</code> 快照）</h2>
+<p>以下数据均由实仓 grep 统计得出，可复现。</p>
+<h3 id="1-1-分类总览">1.1 分类总览</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>类别</th>
+<th>典型 API</th>
+<th>命中</th>
+<th>涉及文件</th>
+<th>处理方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td><strong>官方版本无关</strong></td>
+<td><code>Qt6::Core</code> 等 CMake 目标</td>
+<td><strong>882 行</strong></td>
+<td>全部 CMakeLists</td>
+<td>机械改名 <code>Qt6::</code> → <code>Qt::</code></td>
+</tr>
+<tr>
+<td>B</td>
+<td><strong>CMake 命令差异</strong></td>
+<td><code>qt_add_resources</code> 等 11 种</td>
+<td><strong>83 处</strong></td>
+<td>CMakeLists/<code>cmake/*.cmake</code></td>
+<td>compat 模块提供同名封装</td>
+</tr>
+<tr>
+<td>C</td>
+<td><strong>需兼容层</strong></td>
+<td><code>QKeyCombination</code></td>
+<td>52</td>
+<td>16</td>
+<td>L1 兼容头</td>
+</tr>
+<tr>
+<td>C</td>
+<td></td>
+<td><code>QEnterEvent</code> / <code>enterEvent()</code> 签名</td>
+<td>52 / 99</td>
+<td>45 / 51</td>
+<td>L1 兼容头 + 宏</td>
+</tr>
+<tr>
+<td>C</td>
+<td></td>
+<td><code>QList::removeIf</code></td>
+<td>49</td>
+<td>22</td>
+<td>L1 自由函数 + 脚本改写</td>
+</tr>
+<tr>
+<td>C</td>
+<td></td>
+<td><code>QLatin1StringView</code></td>
+<td>25</td>
+<td>7</td>
+<td>L1 一行别名</td>
+</tr>
+<tr>
+<td>C</td>
+<td></td>
+<td><code>QVariant::metaType()</code></td>
+<td>9</td>
+<td>2</td>
+<td>L1 内联函数</td>
+</tr>
+<tr>
+<td>C</td>
+<td></td>
+<td><code>QMetaType::fromType&lt;T&gt;()</code></td>
+<td>8</td>
+<td>2</td>
+<td>L1 内联模板</td>
+</tr>
+<tr>
+<td>C</td>
+<td></td>
+<td><code>QStringDecoder</code></td>
+<td>4</td>
+<td>1</td>
+<td>人工改写单文件</td>
+</tr>
+<tr>
+<td>D</td>
+<td><strong>无需改动</strong>（Qt5.15 已有）</td>
+<td><code>QImage::sizeInBytes()</code></td>
+<td>135</td>
+<td>42</td>
+<td>保留（Qt5 返回 <code>int</code>，见 1.3）</td>
+</tr>
+<tr>
+<td>D</td>
+<td></td>
+<td><code>QAction</code> / <code>QShortcut</code></td>
+<td>322 / 15</td>
+<td>20 / 4</td>
+<td>保留（Qt5 在 QtWidgets）</td>
+</tr>
+<tr>
+<td>D</td>
+<td></td>
+<td><code>Qt::SkipEmptyParts</code></td>
+<td>5</td>
+<td>4</td>
+<td>保留（5.14+ 已提供）</td>
+</tr>
+<tr>
+<td>D</td>
+<td></td>
+<td><code>QWindow::startSystemResize/Move</code></td>
+<td>9</td>
+<td>7</td>
+<td>保留（5.15+ 已提供）</td>
+</tr>
+<tr>
+<td>E</td>
+<td><strong>平台专属，Linux 不参与编译</strong></td>
+<td><code>QNativeInterface</code></td>
+<td>5</td>
+<td>4</td>
+<td>Windows/macOS 专用，保持原样</td>
+</tr>
+<tr>
+<td>E</td>
+<td></td>
+<td><code>QPromise</code></td>
+<td>7</td>
+<td>2</td>
+<td>仅 viewer 的 <code>windows_print.cpp</code></td>
+</tr>
+<tr>
+<td>F</td>
+<td><strong>换 include + 少量 API 分支</strong>（见 1.5，<strong>不再需要整文件重写</strong>）</td>
+<td><code>QRhi*</code></td>
+<td>246</td>
+<td>3</td>
+<td>viewer 渲染后端；Qt 5.15 <strong>以私有 API 形式自带 QRhi</strong></td>
+</tr>
+<tr>
+<td>G</td>
+<td><strong>构建契约</strong></td>
+<td><code>QT_DISABLE_DEPRECATED_UP_TO=0x060c00</code></td>
+<td>1</td>
+<td><code>cmake/SnowQt.cmake</code></td>
+<td>Qt6 专有宏，需条件化</td>
+</tr>
+</tbody>
+</table>
+<h3 id="1-2-去重后的真实工作量">1.2 去重后的真实工作量</h3>
+<pre><code>需改造 C++ 文件（不含 tests 与平台专属目录）: 112
+    snow_shot              67
+    ant_design_qt          39
+    snow_image_viewer       4
+    snow_draw_engine_qt     2
+CMake 需改动行数:                              882
+</code></pre>
+<p>占全部 1306 个非测试 C++ 文件（含头文件）的 <strong>8.6%</strong>。</p>
+<h3 id="1-3-三个容易误判的点-已逐条核实-避免做无用功">1.3 三个容易误判的点（已逐条核实，避免做无用功）</h3>
+<ol>
+<li><strong><code>QImage::sizeInBytes()</code> 不用改。</strong> 经查 Qt 5.15 文档，该方法存在，只是返回 <code>int</code>（Qt6 返回 <code>qsizetype</code>）。
+   135 处调用在 Qt5 下<strong>可编译</strong>；风险仅在超大位图（&gt;2GB）时的溢出，而截图工具不会触及。
+   → <strong>处理：保留，仅在 code review 时留意 <code>qint64</code> 累加场景。</strong></li>
+<li><strong><code>Qt::SkipEmptyParts</code> 不用改。</strong> 它是 Qt 5.14 引入的（<code>QString::SkipEmptyParts</code> 的替代名）。5 处调用在 5.15 下合法。</li>
+<li><strong><code>QAction</code> / <code>QShortcut</code> 不用改。</strong> 虽然 Qt6 把它们从 QtWidgets 移到了 QtGui，但 Qt5 里它们本就在 QtWidgets，
+   <code>#include &lt;QAction&gt;</code> 两种版本都能解析。</li>
+</ol>
+<p>反过来，<strong><code>QKeyCombination</code> 是必须处理的硬点</strong>：它<strong>自 Qt 6.0 引入，Qt5 中无等价类</strong>——Qt5 时代的写法是把
+<code>Qt::Key</code> 与 <code>Qt::KeyboardModifiers</code> 按位或成 <code>int</code> 直接传。<code>QKeyCombination::fromCombined()/toCombined()</code>
+这对 API 的存在本身就证明了这一点。</p>
+<h3 id="1-4-逐条实测的-qt5-qt6-api-差异-编译迭代中确认-均带证据">1.4 逐条实测的 Qt5 / Qt6 API 差异（编译迭代中确认，均带证据）</h3>
+<p>本机 Qt 套件为 <code>C:\Qt\5.15.2\msvc2019_64</code>，下列结论<strong>全部读该套件头文件或改写前备份里的 Qt6 原始源码得出</strong>，
+不是凭记忆写的。</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>差异</th>
+<th>Qt5.15 事实</th>
+<th>Qt6 事实</th>
+<th>证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>QLayoutItem::widget()</code> const 性</td>
+<td><code>virtual QWidget *widget();</code>（非 const）</td>
+<td><code>virtual QWidget *widget() const;</code></td>
+<td>Qt 5.15.2 <code>QtWidgets/qlayoutitem.h:78-82</code> <strong>自身写着版本分支</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>QWheelEvent::position()/globalPosition()</code></td>
+<td><strong>已回移</strong>，<code>inline QPointF position() const</code></td>
+<td>同</td>
+<td><code>QtGui/qevent.h:243-244</code>（旧名 <code>pos()/globalPos()</code> 标着 "Use position()"）</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>QMouseEvent::localPos()/globalPos()</code></td>
+<td>无 <code>position()/globalPosition()</code></td>
+<td>有</td>
+<td><code>QtGui/qevent.h</code> 读源确认</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>QHoverEvent::posF()</code></td>
+<td>无全局坐标访问器</td>
+<td><code>position()/globalPosition()</code></td>
+<td>同上</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>QTouchEvent::TouchPoint</code> 全局坐标</td>
+<td><code>screenPos()</code>（<strong>无 <code>globalPosF()</code></strong>）</td>
+<td><code>QEventPoint::globalPosition()</code></td>
+<td><code>QtGui/qevent.h</code> TouchPoint 段</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>QColor::getHslF()</code> 指针与返回</td>
+<td><code>void getHslF(qreal*,...</code></td>
+<td><code>void getHslF(float*,...</code></td>
+<td><code>QtGui/qcolor.h:202</code>；返回 <strong>void</strong>（改写前 Qt6 源码亦按语句调用）</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>QColor::alphaF()</code> 返回类型</td>
+<td><code>qreal</code></td>
+<td><code>float</code></td>
+<td>破坏 <code>std::clamp(x, 0.0F, 1.0F)</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>QWidget::setScreen()</code></td>
+<td><strong>不存在</strong>（grep <code>qwidget.h</code> 为 0）</td>
+<td>存在</td>
+<td>Qt5 只有 <code>QWindow::setScreen</code>，<code>QtGui/qwindow.h:258</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>QWidget::setAccessibleIdentifier()</code></td>
+<td>不存在</td>
+<td>存在</td>
+<td>全文 grep 仅 <code>QWidget</code> 侧调用</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>QFont</code> resolve 掩码</td>
+<td><code>uint resolve()</code>（<strong>public</strong>，无参）</td>
+<td><code>resolveMask()</code></td>
+<td><code>QtGui/qfont.h:300</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>QEvent</code> 屏幕/DPR 变化</td>
+<td><code>ScreenChangeInternal = 216</code></td>
+<td><code>DevicePixelRatioChange</code></td>
+<td><code>QtGui/qevent.h</code> 枚举</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>qHash</code> 几何类型重载</td>
+<td>QSize/QPoint/QRect/QMargins/QLine <strong>及其 float 变体全无</strong></td>
+<td>有</td>
+<td><code>grep -rhoE "qHash\((const )?Q[A-Za-z0-9_]+" QtCore/ QtGui/</code></td>
+</tr>
+<tr>
+<td>13</td>
+<td>自定义 <code>qHash</code> 的 seed 与返回类型</td>
+<td><code>uint</code>，且<strong>必须带默认值</strong></td>
+<td><code>size_t</code>，无需默认值</td>
+<td>Qt5 兜底模板 <code>QtCore/qhashfunctions.h:117</code> 会二次派发到单参 <code>qHash(t)</code></td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>QAbstractItemModel::dataChanged</code> 第三参</td>
+<td><code>QVector&lt;int&gt;</code></td>
+<td><code>QList&lt;int&gt;</code></td>
+<td>信号签名，<code>qOverload&lt;&gt;</code> 模板实参必须逐字一致</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>QString::size()/length()</code> 返回</td>
+<td><code>int</code></td>
+<td><code>qsizetype</code></td>
+<td><code>QtCore/qstring.h:277-279</code>；混合进 <code>std::clamp</code> 直接推导失败</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>QFlags::toInt()</code></td>
+<td>无（但已有 <code>int</code> 转换）</td>
+<td>有</td>
+<td>用于 <code>drawText(..., alignment)</code></td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>QLocale::positiveSign()/negativeSign()</code></td>
+<td><code>QChar</code>（<strong>无 <code>isEmpty()</code></strong>）</td>
+<td><code>QString</code></td>
+<td>用于数字输入前/负号</td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>QEvent::type()</code> 派生</td>
+<td>无 <code>typeId()</code></td>
+<td><code>QEvent::typeId()</code></td>
+<td>映射到 <code>userType()</code></td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>QAction::associatedObjects()</code></td>
+<td>无（只有 <code>associatedWidgets()</code>）</td>
+<td>有</td>
+<td><code>QWidgets/qaction.h</code></td>
+</tr>
+<tr>
+<td>20</td>
+<td><code>QAccessible::Event::Alert</code></td>
+<td><strong>存在</strong>（<code>0x0002</code>）</td>
+<td>—</td>
+<td>用于通告事件的 Qt5 近似</td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>QStyleHints::colorScheme()</code> / <code>Qt::ColorScheme</code></td>
+<td><strong>完全不存在</strong>（<code>QtGui/qstylehints.h</code>、<code>QtCore/qnamespace.h</code> grep 均为 0）</td>
+<td>Qt 6.5 引入</td>
+<td>真实调用点：<code>thememanager.cpp:38/241</code>、<code>snow_image_viewer/src/app/application_setup.cpp:18</code> ＋ 若干测试</td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>QStyleHints::colorSchemeChanged</code> 信号</td>
+<td>不存在</td>
+<td>Qt 6.5</td>
+<td>需改用 <code>QGuiApplication::paletteChanged</code></td>
+</tr>
+<tr>
+<td>23</td>
+<td><code>QChronoTimer</code></td>
+<td><strong>头文件不存在</strong>（<code>QtCore/QChronoTimer</code> 无）</td>
+<td>Qt 6.8 引入</td>
+<td><code>screenshotpresentationframescheduler.cpp</code> 1 处实现 + 2 处测试</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>QTimeZone::fromSecondsAheadOfUtc</code></td>
+<td>不存在（<code>qtimezone.h</code> grep 为 0）</td>
+<td>Qt 6.5 引入</td>
+<td><code>screenshot_pdf_export_tests.cpp:121</code></td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>QStringDecoder</code> / <code>QStringConverter</code> 家族</td>
+<td>不存在</td>
+<td>Qt6 才有</td>
+<td><code>screenshotclipboardcontent.cpp:548-550</code>（3 处），改用 <code>QTextCodec</code></td>
+</tr>
+<tr>
+<td>26</td>
+<td><code>QPromise</code></td>
+<td>不存在</td>
+<td>Qt6 才有</td>
+<td><code>windows_print.cpp</code>（4 处）+ <code>mcpasyncwork_p.h</code>（1 处）</td>
+</tr>
+<tr>
+<td>27</td>
+<td>QRhi 渲染栈</td>
+<td><strong>以私有 API 形式存在</strong>（<code>QtGui/5.15.2/QtGui/private/qrhi_p.h</code> + <code>qshader_p.h</code> + D3D11/GLES2/Vulkan/Metal/Null 全部后端，均已核实）</td>
+<td><code>QtGui/rhi/*</code> 公开</td>
+<td>261 处，集中在 <code>snow_image_viewer/src/render/rhi_image_window.cpp</code>；<strong>结论见 1.5</strong></td>
+</tr>
+<tr>
+<td>28</td>
+<td><code>QByteArrayView</code></td>
+<td><strong>不存在</strong>（无 <code>QtCore/QByteArrayView</code> 转发头，<code>qbytearray.h</code> 0 次提及）</td>
+<td>Qt 6.0 引入</td>
+<td>13 处：7 处是 <code>addData()</code> 的临时包装（R29），6 处是 <code>worker_protocol.cpp</code> 里的真实类型（第 15 节垫片）</td>
+</tr>
+<tr>
+<td>29</td>
+<td><code>QScreen::nativeInterface&lt;T&gt;()</code> / <code>QNativeInterface</code> 命名空间</td>
+<td><strong>完全不存在</strong></td>
+<td>Qt6 才有</td>
+<td>15 处，<code>focusedfullscreenwindow.cpp</code> / <code>monitorgeometry.cpp</code> / <code>screenshotgeometry.cpp</code> / <code>screenshotoriginalimagepreviewwindow.cpp</code> ＋ 测试</td>
+</tr>
+<tr>
+<td>30</td>
+<td><code>QPointingDevice</code></td>
+<td><strong>不存在</strong>（仅有 <code>QTouchDevice</code>）</td>
+<td>Qt6 才有</td>
+<td>5 处，均在 <code>screenshot_pinned_window_tests.cpp</code> 等测试里</td>
+</tr>
+<tr>
+<td>31</td>
+<td><code>QNativeGestureEvent::position()</code></td>
+<td><strong>不存在</strong>（只有 <code>localPos/windowPos/screenPos/globalPos</code>）</td>
+<td>继承 <code>QSinglePointEvent</code> 故有</td>
+<td>Qt 5.15.2 <code>QtGui/qevent.h:343-362</code>；真阳性 1 处</td>
+</tr>
+<tr>
+<td>32</td>
+<td><code>QTextDocument::toRawText()</code></td>
+<td><strong>存在</strong>（<code>qtextdocument.h:172</code>）</td>
+<td>存在</td>
+<td>扫描器一度误报，已核实为<strong>无需处理</strong></td>
+</tr>
+<tr>
+<td>33</td>
+<td><code>QImage::sizeInBytes()</code></td>
+<td><strong>存在</strong>（<code>qimage.h:223</code>）</td>
+<td>存在</td>
+<td>同上，195 处全部<strong>无需处理</strong>（<code>byteCount()</code> 才是弃用的那个）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>第 13 条最隐蔽</strong>：不是简单地换个类型别名就完事。Qt5 的 <code>qHash</code> 兜底模板长这样：</p>
+<pre><code class="language-cpp">template&lt;typename T&gt; inline uint qHash(const T &amp;t, uint seed)
+    noexcept(noexcept(qHash(t)))
+{ return qHash(t) ^ seed; }          // QtCore/qhashfunctions.h:117
+</code></pre>
+<p>它通过<strong>单参</strong> <code>qHash(t)</code> 二次派发，因此用户自定义重载在 Qt5 侧必须写成
+<code>SnowHashSeed qHash(const Key&amp; key, SnowHashSeed seed = 0)</code>——<strong>默认值是必需的</strong>，
+否则 Qt5 找不到单参可调用版本（Qt6 直接调 <code>qHash(key, seed)</code>，不需要）。加默认值对 Qt6 无害。</p>
+<p>第 21–27 条本轮已<strong>全部落垫片</strong>（兼容头第 10–15 节，见 L3b），不再只是「待处理清单」。
+第 28 条已用「R29 + 第 15 节垫片」两条腿解决；第 29/30 条的 Windows 侧已收敛（见 1.5），
+剩余 macOS 侧显式延后；第 31 条是真阳性，已补 <code>QNativeGestureEvent</code> 的 <code>snowPos/snowGlobalPos</code> 重载；
+第 32/33 条是扫描器的<strong>假阳性</strong>，核实后确认两版同名、无需处理——这正是
+「每条结论都要读头文件核实」的价值。</p>
+<p><strong>第 27 条（QRhi）的原判断是错的，本轮已纠正</strong>：原先按「私有头未公开 → 必须整文件
+重写为 <code>QOpenGLWidget</code>」处理，实测 Qt 5.15.2 的套件里 QRhi 是<strong>完整存在</strong>的（虽为私有
+API）。详见 1.5，那 2977 行的重写<strong>不必做</strong>。</p>
+<h3 id="1-5-两个改变计划的实测结论-本轮新增">1.5 两个改变计划的实测结论（本轮新增）</h3>
+<h4>(1) Qt 5.15 自带 QRhi —— viewer 渲染后端不必重写</h4>
+<p><code>C:/Qt/5.15.2/msvc2019_64/include/QtGui/5.15.2/QtGui/private/</code> 下实际存在：</p>
+<pre><code>qrhi_p.h  qrhi_p_p.h  qshader_p.h
+qrhid3d11_p.h  qrhigles2_p.h  qrhimetal_p.h  qrhinull_p.h  qrhivulkan_p.h  (+ 各自 _p_p.h)
+</code></pre>
+<p>且<strong>工程用到的调用点签名完全对得上</strong>（逐条读 Qt5 的 <code>qrhi_p.h</code> 核实）：</p>
+<table>
+<thead>
+<tr>
+<th>工程调用</th>
+<th>Qt 5.15 声明</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>QRhi::create(QRhi::D3D11, &amp;params)</code></td>
+<td><code>static QRhi *create(Implementation, QRhiInitParams *, Flags = {}, QRhiNativeHandles * = nullptr)</code></td>
+<td>形参是<strong>指针</strong>，与工程一致</td>
+</tr>
+<tr>
+<td><code>QRhi::D3D11 / OpenGLES2 / Vulkan / Null</code></td>
+<td><code>enum Implementation { Null, Vulkan, OpenGLES2, D3D11, Metal }</code></td>
+<td>四个取值全在</td>
+</tr>
+<tr>
+<td><code>newTexture(format, size, 1, flags)</code></td>
+<td><code>QRhiTexture *newTexture(Format, const QSize &amp;, int, Flags, ...)</code></td>
+<td>一致</td>
+</tr>
+<tr>
+<td><code>newBuffer/newSampler/newShaderResourceBindings/newGraphicsPipeline</code></td>
+<td>同名同形参</td>
+<td>一致</td>
+</tr>
+<tr>
+<td><code>QShader::fromSerialized(ba)</code></td>
+<td><code>qshader_p.h:150</code> 存在</td>
+<td>一致</td>
+</tr>
+</tbody>
+</table>
+<p><strong>仍需处理的两处真差异</strong>：</p>
+<ol>
+<li><strong>include 路径</strong>：Qt6 的公开头是 <code>&lt;rhi/qrhi.h&gt;</code> / <code>&lt;rhi/qrhi_platform.h&gt;</code> / <code>&lt;rhi/qshader.h&gt;</code>；
+   Qt5 只有私有头 <code>&lt;QtGui/private/qrhi_p.h&gt;</code> / <code>&lt;QtGui/private/qshader_p.h&gt;</code>，且各后端
+   （<code>QRhiVulkanInitParams</code> 等）要按需包含 <code>&lt;QtGui/private/qrhivulkan_p.h&gt;</code> 之流。</li>
+<li><strong>Qt5 无 HDR</strong>：<code>qrhi_p.h</code> 里 <code>Hdr</code>/<code>HDR</code> <strong>grep 为 0</strong>，因此工程里
+   <code>QRhiSwapChain::HDRExtendedSrgbLinear</code>、<code>swapChain_-&gt;hdrInfo()</code>、<code>QRhiSwapChainHdrInfo</code>、
+   <code>luminanceBehavior</code>、<code>limitsType</code> 全部不存在（<code>rhi_image_window.cpp</code> 中 3 组、约 10 行）。
+   Qt5 侧必须显式降级为 SDR 分支，并在代码里标注这是有损降级。</li>
+</ol>
+<p><strong>代价与风险</strong>：私有 API 在不同 5.15.x 补丁间无语义保证；UOS 上需要
+<code>qtbase5-private-dev</code> 才能拿到 <code>qrhivulkan_p.h</code> 等头文件（<strong>部署前置条件，需在 UOS 侧确认</strong>）。
+若该包在 UOS 上不可得，才回退到原「重写为 <code>QOpenGLWidget</code>」方案。</p>
+<h4>(2) QSB 版本不兼容 —— 这是走 QRhi 路线的<strong>真正硬卡点</strong></h4>
+<p><code>.qsb</code> 是预编译并入库的（<code>snow_image_viewer/resources/shaders/*.qsb</code>，
+由 <code>snow_image_viewer/scripts/compile-shaders.ps1</code> 调 Qt6 的 <code>qsb.exe</code> 生成，
+<code>scripts/test-qt-shader-contract.ps1</code> 强制其版本匹配 <code>scripts/qt-toolchain.json</code> 的 6.12.0）。
+运行时经 <code>:/shaders/*.qsb</code> 从 qrc 读取，交给 <code>QShader::fromSerialized()</code>。</p>
+<p>实测两条硬事实：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Qt 6.12（现状）</th>
+<th>Qt 5.15.2（目标）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>QShaderPrivate::QSB_VERSION</code></td>
+<td><strong>9</strong></td>
+<td><strong>5</strong>（白名单 1–5）</td>
+</tr>
+<tr>
+<td>版本不符时</td>
+<td>—</td>
+<td><code>qWarning("Attempted to deserialize QShader with unknown version %d.")</code> 后返回<strong>空 <code>QShader</code></strong></td>
+</tr>
+<tr>
+<td>套件自带烘焙工具</td>
+<td><code>qsb.exe</code>（契约要求存在）</td>
+<td><strong>无 <code>qsb.exe</code></strong>（<code>C:/Qt/5.15.2/msvc2019_64/bin/</code> 下不存在）</td>
+</tr>
+</tbody>
+</table>
+<p>即：现有 <code>.qsb</code>（v9）在 Qt5 下会被<strong>静默丢弃成空 shader</strong>（表现为黑屏/渲染异常），
+必须在 Qt5 路线下<strong>重新烘焙成 ≤ v5</strong>。而 Qt6 的 <code>qsb</code> 只提供
+<code>--qsbversion 64|65</code>（Qt 6.4 / 6.5）这类回退档，<strong>没有 v5 档</strong>，所以需要
+Qt 5.15 自身的 Shader Tools（<code>qtshadertools</code>，5.15 分支）来出包。</p>
+<p><strong>顺带澄清一个容易误判的格式问题</strong>：<code>.qsb</code> 文件开头不是 <code>QSB</code> 魔数，而是
+<code>4 字节大端原始长度 + zlib 流</code>（实测 <code>00 00 11 A0 78 9C ...</code>，解压后正好 4512 字节）。
+这不是坏文件——Qt 的 <code>QShader</code> 序列化本身就是 <code>qCompress</code> 封装，
+Qt5/Qt6 两侧一致，<strong>不需要手工解包</strong>。</p>
+<hr>
+<h2 id="2-三层改造策略">2. 三层改造策略</h2>
+<h3 id="l1-兼容层-新增文件-业务代码零侵扰">L1 — 兼容层（新增文件，业务代码零侵扰）</h3>
+<p>新增 <code>snow_shot/include/snow_shot/compat/qt_compat.h</code>，被所有模块统一 include（可在 PCH 或
+<code>target_precompile_headers</code> 中注入）。核心内容：</p>
+<pre><code class="language-cpp">#pragma once
+#include &lt;QtGlobal&gt;
+#include &lt;QEvent&gt;
+#include &lt;QList&gt;
+#include &lt;QMetaType&gt;
+#include &lt;QPointF&gt;
+#include &lt;QVariant&gt;
+
+// ── 版本判定 ──────────────────────────────────────────────
+#if QT_VERSION &gt;= QT_VERSION_CHECK(6, 0, 0)
+#  define SNOW_QT6 1
+#else
+#  define SNOW_QT6 0
+#endif
+
+// ── 1. QKeyCombination（Qt 6.0 引入，Qt5 无） ──────────────
+#if SNOW_QT6
+#  include &lt;QKeyCombination&gt;
+#  include &lt;QKeySequence&gt;
+#else
+namespace snow::compat {
+class QKeyCombination
+{
+public:
+    constexpr QKeyCombination(Qt::KeyboardModifiers mods, Qt::Key key) noexcept
+        : m_key(key), m_modifiers(mods) {}
+    constexpr explicit QKeyCombination(Qt::Key key = Qt::Key_unknown) noexcept
+        : m_key(key), m_modifiers(Qt::NoModifier) {}
+    [[nodiscard]] constexpr Qt::Key key() const noexcept { return m_key; }
+    [[nodiscard]] constexpr Qt::KeyboardModifiers keyboardModifiers() const noexcept { return m_modifiers; }
+    [[nodiscard]] constexpr int toCombined() const noexcept
+    {
+        return static_cast&lt;int&gt;(m_key) | static_cast&lt;int&gt;(m_modifiers);
+    }
+    [[nodiscard]] constexpr bool operator==(const QKeyCombination&amp;) const noexcept = default;
+private:
+    Qt::Key m_key;
+    Qt::KeyboardModifiers m_modifiers;
+};
+} // namespace snow::compat
+using snow::compat::QKeyCombination;   // 仅 Qt5 分支存在，无冲突
+#endif
+
+// Qt5 的 QShortcut/QAction 只接受 QKeySequence，需要一次桥接
+[[nodiscard]] inline QKeySequence snowKeySequence(const QKeyCombination&amp; combination)
+{
+#if SNOW_QT6
+    return QKeySequence(combination);
+#else
+    return QKeySequence(combination.toCombined());
+#endif
+}
+
+// ── 2. enterEvent 签名（Qt 6.0 改为 QEnterEvent*） ────────
+#if SNOW_QT6
+#  include &lt;QEnterEvent&gt;
+using SnowEnterEvent = QEnterEvent;
+#else
+using SnowEnterEvent = QEvent;   // Qt 5.14+ 已存在 QEnterEvent，但虚函数签名仍是 QEvent*
+#endif
+// 用法：void enterEvent(SnowEnterEvent* event) override;
+
+[[nodiscard]] inline QPointF snowEnterPosition(const QEvent* event)
+{
+#if SNOW_QT6
+    return static_cast&lt;const QEnterEvent*&gt;(event)-&gt;position();
+#else
+    // Qt 5.14+ 实际投递的仍是 QEnterEvent 实例，可安全下转型
+    if (event &amp;&amp; event-&gt;type() == QEvent::Enter) {
+        if (const auto* enter = dynamic_cast&lt;const QEnterEvent*&gt;(event))
+            return enter-&gt;position();
+    }
+    return {};
+#endif
+}
+
+// ── 3. QList::removeIf（Qt 6.1 引入） ─────────────────────
+namespace snow::compat {
+template &lt;typename Container, typename Predicate&gt;
+qsizetype removeIf(Container&amp; container, Predicate predicate)
+{
+#if QT_VERSION &gt;= QT_VERSION_CHECK(6, 1, 0)
+    return container.removeIf(predicate);
+#else
+    qsizetype removed = 0;
+    for (auto it = container.begin(); it != container.end();) {
+        if (predicate(*it)) { it = container.erase(it); ++removed; }
+        else { ++it; }
+    }
+    return removed;
+#endif
+}
+} // namespace snow::compat
+// 用法：snow::compat::removeIf(list, [](auto&amp; v){ ... });
+
+// ── 4. QLatin1StringView（Qt 6.4 改名） ───────────────────
+#if SNOW_QT6
+#  include &lt;QLatin1StringView&gt;
+#else
+#  include &lt;QLatin1String&gt;
+using QLatin1StringView = QLatin1String;
+#endif
+
+// ── 5. QMetaType / QVariant 类型查询 ──────────────────────
+template &lt;typename T&gt;
+[[nodiscard]] inline QMetaType snowMetaType()
+{
+#if SNOW_QT6
+    return QMetaType::fromType&lt;T&gt;();
+#else
+    return QMetaType(qMetaTypeId&lt;T&gt;());
+#endif
+}
+
+[[nodiscard]] inline QMetaType snowMetaTypeOf(const QVariant&amp; value)
+{
+#if SNOW_QT6
+    return value.metaType();
+#else
+    return QMetaType(value.userType());
+#endif
+}
+</code></pre>
+<h3 id="l2-机械改写-脚本驱动-逐条可-diff-审查">L2 — 机械改写（脚本驱动，逐条可 diff 审查）</h3>
+<p>新增 <code>scripts/port-qt6-to-qt5.py</code>，执行确定性规则，<strong>支持 <code>--dry-run</code> 先出差异清单</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>规则</th>
+<th>匹配</th>
+<th>替换</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R1</td>
+<td><code>Qt6::</code> (CMake)</td>
+<td><code>Qt::</code></td>
+</tr>
+<tr>
+<td>R2</td>
+<td><code>qt_&lt;name&gt;(</code> (CMake)</td>
+<td>由 compat 模块接管，<strong>不改</strong></td>
+</tr>
+<tr>
+<td>R3</td>
+<td><code>#include &lt;QKeyCombination&gt;</code></td>
+<td><code>#include "snow_shot/compat/qt_compat.h"</code></td>
+</tr>
+<tr>
+<td>R4</td>
+<td><code>void enterEvent(QEnterEvent*</code></td>
+<td><code>void enterEvent(SnowEnterEvent*</code>；并删除 <code>class QEnterEvent;</code> 前向声明</td>
+</tr>
+<tr>
+<td>R5</td>
+<td><code>&lt;receiver&gt;.removeIf(</code></td>
+<td><code>snow::compat::removeIf(&lt;receiver&gt;,</code></td>
+</tr>
+<tr>
+<td>R6</td>
+<td><code>#include &lt;QLatin1StringView&gt;</code></td>
+<td>compat 头</td>
+</tr>
+<tr>
+<td>R7</td>
+<td><code>QMetaType::fromType&lt;</code></td>
+<td><code>snowMetaType&lt;</code></td>
+</tr>
+<tr>
+<td>R8</td>
+<td><code>&lt;expr&gt;.metaType()</code> (QVariant)</td>
+<td><code>snowMetaTypeOf(&lt;expr&gt;)</code></td>
+</tr>
+<tr>
+<td>R9</td>
+<td><code>setShortcut(&lt;QKeyCombination&gt;)</code></td>
+<td>进人工清单，加 <code>snowKeySequence()</code> 包裹</td>
+</tr>
+<tr>
+<td>R10/R11</td>
+<td><code>&lt;ev&gt;-&gt;position()</code> / <code>-&gt;globalPosition()</code></td>
+<td><code>snowPos(&lt;ev&gt;)</code> / <code>snowGlobalPos(&lt;ev&gt;)</code>（保守：接收者须在本文件被声明为事件指针）</td>
+</tr>
+<tr>
+<td>R12</td>
+<td><code>nativeEvent(..., qintptr*)</code></td>
+<td><code>snowNativeEventResult*</code></td>
+</tr>
+<tr>
+<td>R13</td>
+<td><code>std::clamp(&lt;c&gt;.alphaF(), 0.0F, 1.0F)</code></td>
+<td><code>std::clamp(snowAlphaF(&lt;c&gt;), 0.0F, 1.0F)</code></td>
+</tr>
+<tr>
+<td>R14</td>
+<td><code>qHashMulti(</code></td>
+<td><code>snowHashMulti(</code></td>
+</tr>
+<tr>
+<td>R15</td>
+<td><code>&lt;c&gt;.deviceIndependentSize()</code></td>
+<td><code>snowDeviceIndependentSize(&lt;c&gt;)</code></td>
+</tr>
+<tr>
+<td>R16</td>
+<td><code>&lt;v&gt;.typeId()</code></td>
+<td><code>&lt;v&gt;.userType()</code></td>
+</tr>
+<tr>
+<td>R17</td>
+<td><code>QEvent::DevicePixelRatioChange</code></td>
+<td><code>snowDevicePixelRatioChange</code></td>
+</tr>
+<tr>
+<td>R18</td>
+<td><code>QPalette::Accent</code></td>
+<td><code>snowAccentRole</code></td>
+</tr>
+<tr>
+<td>R19</td>
+<td><code>&lt;w&gt;-&gt;setScreen(x)</code> / <code>&lt;w&gt;.setScreen(x)</code> / <code>setScreen(x)</code></td>
+<td><code>snowSetWidgetScreen(&lt;w&gt;\|&amp;&lt;w&gt;\|this, x)</code></td>
+</tr>
+<tr>
+<td>R20</td>
+<td><code>&lt;w&gt;-&gt;setAccessibleIdentifier(id)</code></td>
+<td><code>snowSetAccessibleIdentifier(&lt;w&gt;, id)</code></td>
+</tr>
+<tr>
+<td>R21</td>
+<td><code>&lt;a&gt;-&gt;associatedObjects()</code></td>
+<td><code>snowAssociatedObjects(&lt;a&gt;)</code></td>
+</tr>
+<tr>
+<td>R22</td>
+<td><code>QAccessible::AnnouncementPoliteness</code></td>
+<td><code>SnowAnnouncementPoliteness</code></td>
+</tr>
+<tr>
+<td>R22b</td>
+<td><code>QAccessibleAnnouncementEvent</code></td>
+<td><code>SnowAccessibleAnnouncementEvent</code></td>
+</tr>
+<tr>
+<td>R23</td>
+<td><code>&lt;f&gt;.resolveMask()</code></td>
+<td><code>snowFontResolveMask(&lt;f&gt;)</code></td>
+</tr>
+<tr>
+<td>R24</td>
+<td><code>Qt::ColorScheme[::Dark\|Light\|Unknown]</code></td>
+<td><code>SnowColorScheme[Dark\|Light\|Unknown]</code></td>
+</tr>
+<tr>
+<td>R25</td>
+<td><code>QTimeZone::fromSecondsAheadOfUtc(</code></td>
+<td><code>snowTimeZoneFromSecondsAheadOfUtc(</code></td>
+</tr>
+<tr>
+<td>R26</td>
+<td><code>QPromise&lt;</code></td>
+<td><code>SnowPromise&lt;</code></td>
+</tr>
+<tr>
+<td>R27</td>
+<td><code>QChronoTimer</code></td>
+<td><code>SnowChronoTimer</code>（<strong>跳过 <code>#include</code> 行</strong>）</td>
+</tr>
+<tr>
+<td>R28</td>
+<td><code>&lt;styleHints&gt;-&gt;colorScheme()</code> / <code>X::styleHints()-&gt;colorScheme()</code></td>
+<td><code>snowColorScheme(&lt;styleHints&gt;)</code>（接收者名字不像 style hints 则转人工）</td>
+</tr>
+<tr>
+<td>R29</td>
+<td><code>addData(QByteArrayView(a, b))</code></td>
+<td><code>addData(a, static_cast&lt;int&gt;(b))</code>（Qt5 无视图重载，见第 15 节垫片）</td>
+</tr>
+<tr>
+<td>R30</td>
+<td><code>QNativeInterface::Q*Screen</code></td>
+<td>登记人工清单（Qt5 无 <code>QScreen::nativeInterface&lt;&gt;()</code>）。<strong>Windows 侧已收敛</strong>：13 处全部改为 <code>snow_shot/platform/windows/monitorgeometry.h</code> 的 <code>nativeMonitorHandle()</code>，Qt6 分支保留原写法、Qt5 分支走 <code>QPlatformNativeInterface::nativeResourceForScreen("handle", screen)</code>；剩 2 处 macOS cocoa 为已文档化的延后项</td>
+</tr>
+<tr>
+<td>R31</td>
+<td><code>QPointingDevice</code></td>
+<td><strong>已收敛</strong>：4 处（均在 <code>screenshot_pinned_window_tests.cpp</code>）改为调用兼容头新增的工厂 <code>snowNativeGestureEvent(type, localPos, windowPos, screenPos, value)</code>；Qt6 分支补 <code>QPointingDevice::primaryPointingDevice()</code> + <code>fingerCount=2</code> + 尾参 <code>delta</code>，Qt5 分支传 <code>nullptr</code> 设备 + 尾参 <code>(0, 0)</code>。工厂有探针覆盖（<code>compat-shim-probe.cpp</code> 第 33 段）证明 Qt5 分支真实可编译</td>
+</tr>
+<tr>
+<td>R32</td>
+<td><code>&lt;recv&gt;.sliced(pos[, n])</code></td>
+<td><code>.mid(pos[, n])</code>。<strong>这是本轮新发现的真缺口</strong>：<code>.sliced()</code> 是 Qt 6.0 引入的成员，Qt 5.15.2 的 <code>qstring.h</code> / <code>qbytearray.h</code> / <code>qlist.h</code> / <code>qvector.h</code> 里 grep <code>sliced</code> 全部 0 命中。共 6 处（<code>settingssearchindex.cpp</code> ×2、<code>screenshottoolpalette.cpp</code>、<code>screenshottoolpalettestylecontrols.cpp</code>、<code>settingsadapters.cpp</code>、<code>angle_annotation_integration_tests.cpp</code>），接收者类型逐一确认为 <code>QString</code> ×4 / <code>QByteArray</code> ×1 / <code>QVector&lt;QStringList&gt;</code> ×1，均可用 <code>mid()</code> 精确等价替换（<code>n&lt;0</code> 语义都是"截到末尾"）</td>
+</tr>
+<tr>
+<td>R33</td>
+<td><code>QLibraryInfo::path(...)</code></td>
+<td><code>snowLibraryInfoPath(...)</code>。<strong>本轮新发现的真缺口</strong>：Qt 5.15.2 只有 <code>location()</code>，它的头文件自己就写着 <code>// ### Qt 6: consider renaming it to path()</code>（<code>QtCore/qlibraryinfo.h:105</code>），grep <code>path(</code> 无命中。垫片做成<strong>模板</strong>以回避 Qt6 侧 <code>LibraryLocation</code>（<code>path()</code> 用）与 <code>Qt6LibraryLocation</code>（已弃用的 <code>location()</code> 用）双枚举的命名问题。1 处，在剪贴板性能基准里</td>
+</tr>
+<tr>
+<td>R34</td>
+<td><code>QFont::Tag(...)</code></td>
+<td><code>SNOW_FONT_SET_VARIABLE_AXIS</code> / <code>SNOW_FONT_SET_FEATURE</code> 宏。<strong>本轮新发现的真缺口</strong>：Qt 6.7 的 <code>setVariableAxis(QFont::Tag, float)</code> 与 Qt 6.1 的 <code>setFeature(QFont::Tag, quint32)</code> 在 Qt 5.15 <strong>完全没有</strong>（grep <code>QtGui/qfont.h</code>：<code>Tag</code> / <code>setVariableAxis</code> / <code>setFeature</code> / <code>featureTags</code> 全 0）。且<strong>无等价物可回落</strong>：Qt5 的 <code>QFont::Weight</code> 是 0..99 旧刻度，承载不了任意 <code>wght</code> 轴值（如 650），Qt5 也没有任何字体特性 API。故垫片在 Qt5 展开成 no-op（2 行，在 <code>snow_draw_engine_qt/tests/snow_canvas_filter_safety_tests.cpp</code>）。<strong>为什么用宏而不是 inline 函数</strong>：Qt5 展开时不能出现 <code>QFont::Tag</code>（不存在），Qt6 展开又必须与现有已编译通过的表达式逐字一致——宏是唯一同时满足两者的形态，且不必猜 <code>QFont::Tag</code> 的构造函数重载</td>
+</tr>
+</tbody>
+</table>
+<p>R24–R28 的实现要点：替换目标都是<strong>类名本身</strong>，所以必须跳过 <code>#include &lt;QChronoTimer&gt;</code>
+这类行（换成 <code>#include &lt;SnowChronoTimer&gt;</code> 会直接编译失败）。R28 又是另一个假阳性陷阱：
+<code>colorScheme()</code> 在本工程里<strong>同时是 adqt 自有 API</strong>（<code>AdContextMenu::colorScheme()</code>、
+<code>AdTag::colorScheme()</code>），无条件改写会把
+<code>menu-&gt;colorScheme() != AdContextMenu::ColorScheme::Inherit</code> 变成 <code>snowColorScheme(menu)</code>。
+因此 R28 只对「形如 <code>styleHints</code> 的接收者」自动改写，其余送人工清单——实测命中数
+从 11 收窄到 1（真阳性），10 处假阳性被挡下。<strong>R28 还漏了第二种形态</strong>
+<code>QGuiApplication::styleHints()-&gt;colorScheme()</code>（接收者是<strong>调表达式</strong>而不是标识符），
+它既不匹配 <code>_MEMBER_RECV</code> 也不进人工清单，属于<strong>静默漏改</strong>，实测 2 处；
+现已在 R28 内单独加一条 <code>\w+(?:::\w+)*\(\)-&gt;colorScheme()</code> 分支补上。</p>
+<p>R5/R8/R10/R11/R19/R20 需要括号配对与接收者表达式提取——脚本只自动处理<strong>可静态判定</strong>的接收者，
+其余<strong>打印到 <code>manual-review.txt</code> 交人工</strong>，绝不猜。</p>
+<h4>规则实现中的三个真实陷阱（本轮实测踩到，已修）</h4>
+<ol>
+<li>
+<p><strong>负向后行断言会废掉整个「带接收者」分支。</strong> R19 最初写成
+   <code>(?:((RECV))\s*-&gt;\s*)?(?&lt;!-&gt;)(?&lt;!\.)setScreen...</code>，本意是挡住
+   <code>windowHandle()-&gt;setScreen()</code>（接收者带 <code>()</code>，<code>RECV</code> 吃不下，可选组不参与匹配，
+   于是退化成「裸调用」被误改）。但 lookbehind 的判定位置正好落在 <code>-&gt;</code> 之后，
+   结果<strong>连 <code>popup-&gt;setScreen()</code> 这类合法调用也被一并挡住</strong>——规则整体失效
+   （实测 R19 只命中 4 处裸调用，<code>popup-&gt;/popup_-&gt;/popupSurface_-&gt;</code> 全部漏改）。
+   改为：正则只切「可选接收者 + 实参」，是否受保护由 Python 端按接收者名字、
+   以及裸匹配前一个字符显式判定。</p>
+</li>
+<li>
+<p><strong><code>[^()]*</code> 匹配不了含括号的实参。</strong> <code>setScreen(anchor-&gt;screen())</code>、
+   <code>setAccessibleIdentifier(button-&gt;objectName())</code> 这类实参本身带 <code>()</code>，
+   原模式直接失配（R20 漏改的第二个原因）。改用允许一层嵌套的
+   <code>(?:[^()]|\([^()]*\))*</code>。</p>
+</li>
+<li>
+<p><strong>R5 的截断点用错运算符位置，产出语法错误代码（最严重的一个）。</strong>
+   R5 原文是 <code>replaced = replaced[:m.start()] + new + replaced[m.end():]</code>，
+   而 <code>m.start()</code> 指向 <code>.</code> / <code>-</code>，于是<strong>接收者被原样留下</strong>：</p>
+</li>
+</ol>
+<p><code>cpp
+   paths.removeIf(pred)
+       -&gt;  pathssnow::compat::removeIf(paths, pred)   // 语法错误</code></p>
+<p>这是<strong>编译不过但肉眼极难发现</strong>的损坏，而且 <code>ant_design_qt</code> 里没有 removeIf
+   调用点，所以「ant_design_qt 全绿」并不能暴露它。实测波及 <strong>22 个文件、49 处</strong>。
+   修法：截断点必须用 <code>extract_receiver()</code> 返回的<strong>接收者起点</strong> <code>recv_start</code>。
+   已写一次性修复脚本 <code>.workbuddy/qt5-port/repair-r5-prefix-duplication.py</code>
+   （只在能证明前缀确为重复时才删，其余原样保留并打印），另在 <code>collect_manual</code>
+   里加<strong>回归哨兵</strong>：出现 <code>[A-Za-z0-9_]snow::compat::</code> 即无条件报出。</p>
+<p>顺带：<code>it-&gt;removeIf(...)</code> 里 <code>it</code> 是 <code>QHash::iterator</code>（<code>-&gt;</code> 返回 <code>T*</code>），
+   兼容头的 <code>removeIf</code> 取的是<strong>容器引用</strong>，因此 <code>-&gt;</code> 形态必须显式解引用成
+   <code>snow::compat::removeIf(*it, pred)</code>；<code>&amp;&amp;operator</code> 已按运算符分支处理。</p>
+<h4>已复核抑制表：让人工清单重新变得可读</h4>
+<p><code>manual-review.txt</code> 的价值在于「列出来的都还没人看过」。本轮一开始它挂着 64 条，
+逐条核对后发现<strong>只有 1 条是真阳性</strong>（<code>gesture-&gt;position()</code>，<code>QNativeGestureEvent</code>
+在 Qt5 没有 <code>position()</code>）——真阳性正是被假阳性埋掉的。因此：</p>
+<ul>
+<li>建立 <code>REVIEWED_SAFE</code> 表（<code>scripts/port-qt6-to-qt5.py</code>），按
+  <code>(规则, 路径, 命中文本)</code> 登记<strong>已复核-无需处理</strong>的项，每条写明判定依据与证据行号，
+  输出到独立的 <code>manual-reviewed-safe.txt</code>（可审计，不会静默消失）。</li>
+<li>同时修掉两类<strong>假阳性的产生源</strong>：
+  1. <code>EVENT_TYPE_ALT</code> 漏登记 <code>QWheelEvent</code> → 16 处 QWheelEvent 的
+     <code>position()/globalPosition()</code> 被误判成待改（Qt 5.15 早已回移这两个成员）；
+  2. 残留检测把「标识符接收者」也重复报了一遍 → <code>sink-&gt;position()</code> 被 标识符路径
+     与 残留路径 各记一次，清单条目凭空翻倍。现在残留检测只覆盖<strong>非简单标识符</strong>
+     接收者（如 <code>block.layout()-&gt;position()</code>，即 <code>QTextLayout::position()</code>）。</li>
+<li>结果：待人工清单 <strong>64 → 0</strong>（24 条转入已复核文件），此后新增的 R30/R31 共 20 条
+  才是真正待办；R30 的 Windows 侧 13 处与 R31 的 4 处收敛后，清单落到 <strong>2 条</strong>，
+  且这 2 条都是已文档化的 macOS cocoa 延后项。所有已复核项的判定依据都写进了代码注释与下表。</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>族</th>
+<th>条数</th>
+<th>判定</th>
+<th>依据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R10 <code>wheel-&gt;position()</code> / QWheelEvent <code>-&gt;globalPosition()</code></td>
+<td>16</td>
+<td>无需改</td>
+<td>Qt 5.15 已回移 <code>QWheelEvent::position()/globalPosition()</code></td>
+</tr>
+<tr>
+<td>R10 <code>sink-&gt;position()</code></td>
+<td>8</td>
+<td>无需改</td>
+<td><code>RasterWriterSink::position()</code> 返回 <code>Result&lt;std::uint64_t&gt;</code></td>
+</tr>
+<tr>
+<td>R10 <code>m_physicalCursor-&gt;position()</code></td>
+<td>4</td>
+<td>无需改</td>
+<td><code>snow_shot::platform::PhysicalCursor::position()</code></td>
+</tr>
+<tr>
+<td>R10 <code>block.layout()-&gt;position()</code></td>
+<td>5</td>
+<td>无需改</td>
+<td><code>QTextLayout::position()</code>，两版同名</td>
+</tr>
+<tr>
+<td>R28 <code>-&gt;colorScheme()</code>（工程自有）</td>
+<td>11</td>
+<td>无需改</td>
+<td><code>AdContextMenu/AdNavigationMenu/AdTag</code> 各自类内 <code>enum class ColorScheme</code></td>
+</tr>
+<tr>
+<td>R9 <code>setShortcut(shortcut)</code></td>
+<td>1</td>
+<td>无需改</td>
+<td>形参本就是 <code>const QKeySequence&amp;</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="l3-人工改写-无法机械化的部分">L3 — 人工改写（无法机械化的部分）</h3>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>文件</th>
+<th>方案</th>
+<th>量级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>viewer RHI 渲染</strong></td>
+<td><code>snow_image_viewer/src/render/rhi_image_window.cpp</code>（2977 行）+ <code>.h</code>（345 行）</td>
+<td><strong>不再重写</strong>：Qt 5.15 自带 QRhi（私有 API）。改为 ① <code>#include &lt;rhi/qrhi.h&gt;</code> → <code>&lt;QtGui/private/qrhi_p.h&gt;</code> 等；② Qt5 无 HDR，把 <code>HDRExtendedSrgbLinear</code> / <code>hdrInfo()</code> / <code>QRhiSwapChainHdrInfo</code> 显式降级为 SDR 分支；③ <strong>重新烘焙 <code>.qsb</code> 为 QSB ≤ v5</strong>（见 1.5(2)，这是真正卡点）</td>
+<td><strong>中</strong>，但依赖 UOS 侧 <code>qtbase5-private-dev</code> 与 Qt 5.15 Shader Tools；若二者不可得才回退到 <code>QOpenGLWidget</code></td>
+</tr>
+<tr>
+<td><strong>Windows 打印</strong></td>
+<td><code>snow_image_viewer/src/platform/windows_print.cpp</code>（用 <code>QPromise</code>）</td>
+<td>Qt5 用 <code>QtConcurrent::run</code> + <code>QFutureInterface</code> 或自实现 promise</td>
+<td>小，仅 viewer</td>
+</tr>
+<tr>
+<td>~~<strong>QStringDecoder</strong>~~</td>
+<td>~~1 个文件~~</td>
+<td><strong>已完成</strong>：改为版本无关的 <code>snowTextDecoder(bytes, isHtml)</code>（垫片第 11 节），Qt5 侧走 <code>QTextCodec::codecForHtml/codecForUtfText</code>，并<strong>显式以 UTF-8 作为回落</strong>以对齐原 <code>value_or(QStringDecoder::Utf8)</code></td>
+<td>已闭环</td>
+</tr>
+<tr>
+<td><strong>QNativeInterface（R30）</strong></td>
+<td>原 15 处</td>
+<td><strong>Windows 侧 13 处已收敛</strong>为 <code>snow_shot/platform/windows/monitorgeometry.h</code> 的 <code>nativeMonitorHandle()</code>：Qt6 走 <code>QNativeInterface::QWindowsScreen::handle()</code>，Qt5 走 <code>QPlatformNativeInterface::nativeResourceForScreen("handle", screen)</code>（读 Qt5 上游 <code>qwindowsnativeinterface.cpp</code> 确认其 <code>resourceType</code> 表的 <code>HandleType</code> 即 <code>"handle"</code>，返回 <code>QWindowsScreen::handle()</code> → <code>HMONITOR</code>，语义完全一致）。剩 2 处 macOS <code>QCocoaScreen</code> 延后：Qt 5.15 的 cocoa 插件<strong>并未</strong>实现 <code>nativeResourceForScreen</code>（读上游 <code>qcocoascreen.mm</code> 确认），<code>NSScreen*</code> 只能经插件私有头取得，而 macOS 不在交付范围</td>
+<td>Windows 侧已完成</td>
+</tr>
+<tr>
+<td><strong>QPointingDevice（R31）</strong></td>
+<td>4 处，均在 <code>screenshot_pinned_window_tests.cpp</code></td>
+<td><strong>已完成</strong>：Qt5 侧 <code>QPointingDevice</code> <strong>完全不存在</strong>（Qt 5.15 只有 <code>QTouchDevice</code>，且 <code>QInputEvent</code> 不带设备指针），<code>QNativeGestureEvent</code> 构造形参个数也不同（Qt6：<code>type, device, fingerCount, local, scene, global, value, delta</code>；Qt5：<code>type, dev, local, window, screen, value, sequenceId, intArgument</code>）。改为调用兼容头新增工厂 <code>snowNativeGestureEvent()</code> 吸收差异，4 处调用点不再出现 <code>QPointingDevice</code></td>
+<td>已闭环</td>
+</tr>
+<tr>
+<td><strong>CMake 插件体系</strong></td>
+<td><code>ant_design_qt/CMakeLists.txt</code> 等 61 处 <code>qt_import_plugins</code></td>
+<td>Qt5.15 提供 <code>qt5_import_plugins()</code>（语义相同，自 5.14 引入），由 compat 模块转发</td>
+<td>中，机械</td>
+</tr>
+<tr>
+<td><strong>构建契约</strong></td>
+<td><code>cmake/SnowQt.cmake:29</code> <code>find_package(Qt6 ... EXACT)</code>、<code>QT_DISABLE_DEPRECATED_UP_TO</code></td>
+<td>抽象为按 <code>SNOW_QT_MAJOR</code> 分派</td>
+<td>小</td>
+</tr>
+</tbody>
+</table>
+<h3 id="l3b-兼容头新增垫片-第-10-15-节-第-6-8-节新增-本轮">L3b — 兼容头新增垫片（第 10–15 节 + 第 6/8 节新增，本轮）</h3>
+<table>
+<thead>
+<tr>
+<th>节</th>
+<th>垫片</th>
+<th>Qt6 侧</th>
+<th>Qt5 侧</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10</td>
+<td><code>SnowPromise&lt;T&gt;</code></td>
+<td><code>QPromise&lt;T&gt;</code></td>
+<td>类内持 <code>QFutureInterface&lt;T&gt;</code>，析构未 finish 时补 <code>reportFinished()</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>SnowStringDecoder</code> / <code>snowTextDecoder(data, html)</code></td>
+<td><code>QStringDecoder</code></td>
+<td><code>QTextCodec::codecForHtml/codecForUtfText</code> + <code>ConverterState::invalidChars</code>，显式 UTF-8 回落</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>snowTimeZoneFromSecondsAheadOfUtc(int)</code></td>
+<td><code>QTimeZone::fromSecondsAheadOfUtc</code></td>
+<td><code>QTimeZone(int offsetSeconds)</code>（<code>qtimezone.h:94</code>）</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>SnowChronoTimer</code></td>
+<td><code>QChronoTimer</code></td>
+<td><code>QTimer</code> 子类，chrono 纳秒向上取整到毫秒（Qt5 的 QTimer 只有毫秒精度）</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>SnowColorScheme</code> / <code>snowColorScheme(hints)</code></td>
+<td><code>Qt::ColorScheme</code> / <code>QStyleHints::colorScheme()</code></td>
+<td>类内枚举 + 按 <code>QPalette::Window</code> 亮度推断</td>
+</tr>
+<tr>
+<td>14b</td>
+<td><code>snowConnectColorSchemeChanged(hints, ctx, fn)</code></td>
+<td><code>QStyleHints::colorSchemeChanged</code> 信号</td>
+<td><code>QGuiApplication::paletteChanged</code>（Qt 5.15.2 <code>qguiapplication.h:191</code>）+ 重新推断；<strong>有损降级</strong>，非幂等的调用点不可用</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>QByteArrayView</code>（最小子集）</td>
+<td>原生</td>
+<td>自实现类：<code>(const char*, qsizetype)</code> / <code>const char[N]</code> / <code>QByteArray</code> 构造 + <code>size/data/empty/operator[]/begin/end</code></td>
+</tr>
+<tr>
+<td>6（新）</td>
+<td><code>SNOW_FONT_SET_VARIABLE_AXIS</code> / <code>SNOW_FONT_SET_FEATURE</code></td>
+<td><code>QFont::setVariableAxis/setFeature(QFont::Tag, ...)</code></td>
+<td><strong>no-op 宏</strong>（Qt5 无字体变体轴 / OpenType 特性 API，且无等价物：<code>QFont::Weight</code> 是 0..99 旧刻度）</td>
+</tr>
+<tr>
+<td>8（新）</td>
+<td><code>snowNativeGestureEvent(type, local, window, screen, value)</code></td>
+<td><code>QNativeGestureEvent(type, QPointingDevice::primaryPointingDevice(), 2, local, scene, global, value, QPointF())</code></td>
+<td><code>QNativeGestureEvent(type, nullptr, local, window, screen, value, 0, 0)</code>（Qt5 收 <code>QTouchDevice*</code> + 尾参对）</td>
+</tr>
+<tr>
+<td>8（新）</td>
+<td><code>snowLibraryInfoPath(Location)</code></td>
+<td><code>QLibraryInfo::path(loc)</code></td>
+<td><code>QLibraryInfo::location(loc)</code>（模板转发，回避 Qt6 双枚举命名）</td>
+</tr>
+</tbody>
+</table>
+<p>三个新垫片都有探针覆盖（<code>compat-shim-probe.cpp</code> 第 33/34/35 段），因此它们的 Qt5 分支
+不是"纸面正确"而是<strong>编译验证过</strong>的。</p>
+<p>同时修正了两处<strong>此前编造的 API</strong>（已用 Qt5/Qt6 双份头文件交叉验证）：
+<code>snowGetHslF</code> 返回类型 <code>bool → void</code>（<code>QColor::getHslF</code> 两版都返回 <code>void</code>），
+<code>snowFirstTouchGlobalPos</code> 的 Qt5 分支 <code>globalPosF() → screenPos()</code>
+（Qt5 <code>QTouchEvent::TouchPoint</code> 无 <code>globalPosF()</code>）。</p>
+<h3 id="l3c-事件坐标访问器-第-2b-节-补全">L3c — 事件坐标访问器（第 2b 节）补全</h3>
+<p><code>QNativeGestureEvent</code> 必须计入事件类型表：Qt6 里它继承 <code>QSinglePointEvent</code> 因而有
+<code>position()/globalPosition()</code>，而 Qt5 只有 <code>localPos()/windowPos()/screenPos()/globalPos()</code>
+（<code>QtGui/qevent.h:343-362</code>）。漏登记会让这处<strong>真阳性</strong>沉进人工清单——
+<code>screenshotpinnedinteraction.cpp:546</code> 的 <code>gesture-&gt;position()</code> 就是这么漏掉的，
+现已补 <code>snowPos/snowGlobalPos(const QNativeGestureEvent*)</code> 重载与
+<code>snowPos(const QEvent*)</code> 运行时分发里的 <code>QEvent::NativeGesture</code> 分支。</p>
+<hr>
+<h2 id="3-windows-测试路径-以及必须先解决的硬前置">3. Windows 测试路径——以及必须先解决的硬前置</h2>
+<h3 id="3-1-本机环境实测-这是当前真正的阻塞">3.1 本机环境实测（这是当前真正的阻塞）</h3>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>实测结果（首轮快照）</th>
+<th>现况</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Qt（任意版本）</td>
+<td><strong>未安装</strong>（无 <code>C:\Qt</code>、无 <code>D:\Qt</code>）</td>
+<td>已装 <code>C:\Qt\5.15.2\msvc2019_64</code></td>
+</tr>
+<tr>
+<td>CMake / Ninja</td>
+<td><strong>未安装</strong>（<code>cmake</code>、<code>ninja</code> 均不在 PATH，全盘抽样未找到 <code>cmake.exe</code>）</td>
+<td>已装 <code>C:\snow-tools\cmake</code>（4.2.3）与 <code>C:\snow-tools\ninja</code></td>
+</tr>
+<tr>
+<td>MSVC / Visual Studio</td>
+<td><strong>未安装</strong>（<code>vswhere.exe</code> 不存在，常见安装目录均不存在）</td>
+<td>已装 <code>C:\snow-tools\vs2022bt</code>（v143 + Windows SDK）</td>
+</tr>
+<tr>
+<td>Rust（1.97.1，<code>rust-toolchain.toml</code> 要求）</td>
+<td><strong>未安装</strong>（无 <code>~/.cargo/bin</code>）</td>
+<td>仍未装</td>
+</tr>
+<tr>
+<td>vcpkg</td>
+<td><strong>未安装</strong></td>
+<td>已在 <code>.tools/vcpkg</code>（baseline <code>4497409a</code>，promisor 局部克隆）；32 包安装计划已推进到 <strong>30/32</strong>——<code>ffmpeg</code> / <code>libheif</code> / <code>x264</code> / <code>x265</code> 等历史上最难的包已装成，剩余 <code>onnxruntime[directml]</code> / <code>opencv4</code> / <code>tinyxml2</code>（见 §3.6 说明为何 snow_shot 的 CMake 面不等它也能验）</td>
+</tr>
+<tr>
+<td>既有构建产物</td>
+<td><strong>无</strong>——仓库内不存在任何 <code>build/</code> 目录，从未在本机构建过</td>
+<td>已有 <code>build/windows-qt5-smoke</code>（Qt5 冒烟）、<code>build/windows-qt5-preset-proof</code>（全新目录全量证明）、<code>.workbuddy/qt5-probe</code>（Qt5 路径探针）</td>
+</tr>
+<tr>
+<td>磁盘</td>
+<td>C: 68 GB 可用 / D: 5.6 GB 可用</td>
+<td>基本不变，构建产物需注意占用</td>
+</tr>
+</tbody>
+</table>
+<p><strong>含义</strong>：编译器与 Qt5 套件已就位，Qt5 冒烟链已能在本机全量构建（见 §3.5）。
+现在唯一未打通的是 <strong>vcpkg 第三方依赖</strong>（OpenCV/ffmpeg/onnxruntime 等），其网络可行性实测见 §6.2。</p>
+<h3 id="3-2-必须安装的清单-windows">3.2 必须安装的清单（Windows）</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>组件</th>
+<th>用途</th>
+<th>下载体积</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Visual Studio 2022 Build Tools（<strong>v143 工具集</strong>）+ Windows SDK</td>
+<td>C++/Rust 编译</td>
+<td>~7 GB</td>
+<td><strong>不要用 VS2026 v14.5x</strong>，见 3.3</td>
+</tr>
+<tr>
+<td>2</td>
+<td>CMake ≥ 3.22（建议最新）</td>
+<td>配置/生成</td>
+<td>~100 MB</td>
+<td><code>CMakePresets.json</code> 目前写的是 VS2026 生成器，需加 preset</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Ninja</td>
+<td>快速生成器</td>
+<td>~5 MB</td>
+<td>可选，但强烈建议</td>
+</tr>
+<tr>
+<td>4</td>
+<td>rustup + Rust 1.97.1</td>
+<td>Rust 静态库</td>
+<td>~1.5 GB</td>
+<td><code>rustup toolchain install 1.97.1</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Qt 5.15.x 套件</strong></td>
+<td>降级目标</td>
+<td>见 3.3</td>
+<td>关键决策点</td>
+</tr>
+<tr>
+<td>6</td>
+<td>vcpkg + 依赖（OpenCV 等）</td>
+<td>第三方库</td>
+<td>数 GB / 1–3 h</td>
+<td>已有 <code>cmake/vcpkg-overlay-triplets/*-windows*.cmake</code>，但<strong>无 Linux 三元组</strong></td>
+</tr>
+</tbody>
+</table>
+<p>总计约 <strong>10–12 GB 下载 + 数小时</strong>。C: 的 68 GB 够用；<strong>D: 只有 5.6 GB，构建目录建议全部放 C: 或外接盘</strong>。</p>
+<h3 id="3-3-qt5-套件的两个选项-需你拍板">3.3 Qt5 套件的两个选项（需你拍板）</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>A. 官方预编译动态 Qt 5.15.2</th>
+<th>B. 自建静态 Qt 5.15.2</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>获取</td>
+<td>Qt 官方归档 <code>qt-opensource-windows-x86-5.15.2.exe</code> / 模块化 <code>msvc2019_64</code></td>
+<td><code>scripts/build-static-qt.ps1</code> 改版本号后自建</td>
+</tr>
+<tr>
+<td>体积 / 时间</td>
+<td>~1.5 GB / <strong>10 分钟</strong></td>
+<td>~18 GB / <strong>1.5–3 小时</strong></td>
+</tr>
+<tr>
+<td>与发布形态一致</td>
+<td>✗（发布是静态 Qt）</td>
+<td>✓（<code>SNOW_SHOT_QT_STATIC</code> 要求静态套件）</td>
+</tr>
+<tr>
+<td>编译器要求</td>
+<td>MSVC 2019+（v14x 二进制兼容，可用 v143）</td>
+<td>需 MSVC 2019/2022；<strong>Qt 5.15.2 源码不支持 VS2026 的 v14.5x 工具集</strong>，必须回退 v143</td>
+</tr>
+<tr>
+<td>适合</td>
+<td><strong>本机冒烟测试（推荐先走这条）</strong></td>
+<td>后续出包</td>
+</tr>
+<tr>
+<td>许可</td>
+<td>LGPLv3</td>
+<td>LGPLv3（静态链接需提供可重链接目标文件）</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>许可提示（重要）</strong>：Qt 5.15.2 是 5.15 系列<strong>最后一个开源版本</strong>；5.15.3 起 LTS 仅对商业订阅开放。
+官方对 5.15 的公共支持已于 <strong>2025-05-26</strong> 结束；5.15.19 于 <strong>2026-05-19</strong> 转为公开。
+若采用 5.15.2 + 静态链接，需按 LGPLv3 履行"可重链接"义务（提供 <code>.lib</code>/<code>.obj</code> 或目标文件），
+或改用动态链接。<strong>这是信创/合规审查会问到的点，建议提前准备说明。</strong></p>
+</blockquote>
+<h3 id="3-4-windows-冒烟测试验收清单-p5-出口">3.4 Windows 冒烟测试验收清单（P5 出口）</h3>
+<p>配置 → 编译 → 逐项手测：</p>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>验收要点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>启动</td>
+<td>无 <code>This application failed to start because no Qt platform plugin could be initialized</code></td>
+</tr>
+<tr>
+<td>截图</td>
+<td>全屏 / 区域 / 窗口三种模式各成一次</td>
+</tr>
+<tr>
+<td>贴图</td>
+<td>贴图窗口置顶、拖动、缩放、关闭</td>
+</tr>
+<tr>
+<td>快捷键</td>
+<td><strong>重点</strong>——<code>QKeyCombination</code> 改造的正确性直接体现在这里（含 Ctrl+Shift+Tab 区域类型循环）</td>
+</tr>
+<tr>
+<td>工具栏悬停</td>
+<td><strong>重点</strong>——<code>enterEvent</code> 签名改造的正确性（悬停高亮、弹出菜单）</td>
+</tr>
+<tr>
+<td>设置页</td>
+<td>各页可切换、无 <code>removeIf</code> 相关崩溃</td>
+</tr>
+<tr>
+<td>OCR</td>
+<td>中文识别出文字</td>
+</tr>
+<tr>
+<td>录屏</td>
+<td>能起录、能停、产物可播</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-5-本轮新增-一个真缺陷修复-三个可复跑的验证入口">3.5 本轮新增：一个真缺陷修复 + 三个可复跑的验证入口</h3>
+<h4>(1) 修复了 Qt5 翻译管线的构建顺序缺陷（<code>cmake/SnowQtVersionShims.cmake</code>）</h4>
+<p><strong>症状</strong>：在<strong>全新</strong>构建目录里 <code>cmake --build</code> 会在构图阶段直接失败：</p>
+<pre><code>ninja: error: 'ant_design_qt/i18n/ant_design_qt_zh_CN.qm',
+  needed by 'ant_design_qt/qrc_ant_design_qt_translations.cpp',
+  missing and no known rule to make it
+</code></pre>
+<p><strong>根因</strong>：<code>qt_add_translations</code> 的 Qt5 垫片用 <code>add_custom_target(... COMMAND lrelease ...)</code>
+跑 lrelease，<strong>没有把 <code>.qm</code> 声明成产物</strong>。而下面生成的 <code>.qrc</code> 会把 <code>.qm</code> 列进资源清单，
+<code>qt5_add_resources</code> 于是把它写进 <code>qrc_*_translations.cpp</code> 这条边的<strong>输入</strong>里。Ninja 在
+加载构图阶段就要求每个输入都有"产出它的边"，找不到即报错——<strong>且发生在任何命令执行之前</strong>，
+所以 <code>add_dependencies(${target} ${lrelease_target})</code> 给的先后顺序救不了它。</p>
+<p>这个缺陷此前一直没暴露，原因很具体：<code>build/windows-qt5-smoke</code> 里 <code>.qm</code> <strong>恰好已经躺在
+磁盘上</strong>（上一轮构建的残留），Ninja 见到文件存在就不再抱怨。<strong>只有全新目录才暴露它</strong>。</p>
+<p><strong>修复</strong>：改为 <code>add_custom_command(OUTPUT "${_snow_qm}" COMMAND lrelease ... DEPENDS "${_snow_ts}")</code>
++ <code>add_custom_target(${t} DEPENDS ${_snow_qm_files})</code>。附带收益：每个 <code>.qm</code> 只依赖自己的
+<code>.ts</code>，改一个翻译文件只重跑一次 lrelease，增量更准。</p>
+<p><strong>验证</strong>：全新目录 <code>build/windows-qt5-preset-proof</code> 全量构建 <strong>153 目标 / 0 error / EXIT=0</strong>。</p>
+<h4>(2) <code>CMakePresets.json</code> 新增 Qt5 预设（此前只能靠命令行直配）</h4>
+<table>
+<thead>
+<tr>
+<th>preset</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>windows-qt5-base</code>（hidden）</td>
+<td>Qt5 路线的公共面：Ninja、<code>CMAKE_PREFIX_PATH=C:/Qt/5.15.2/msvc2019_64</code>、<code>SNOW_QT_MAJOR=5</code>、<code>CMAKE_POLICY_VERSION_MINIMUM=3.5</code>、<code>CMAKE_CXX_SCAN_FOR_MODULES=OFF</code>。<strong>刻意不继承 <code>windows-msvc-base</code></strong>，也<strong>刻意不设 toolchainFile</strong> —— 那个预设用 vcpkg toolchain 把 Qt 钉在 Qt6 上，正是本路线要避开的；不设 toolchain 则 vcpkg manifest 步骤根本不执行，于是第三方依赖通道没打通也能配置、编译</td>
+</tr>
+<tr>
+<td><code>windows-qt5-smoke</code></td>
+<td>只开 <code>ant_design_qt</code> + <code>snow_image</code>，其余全 OFF（与历轮回归所用配置逐项对齐）</td>
+</tr>
+<tr>
+<td><code>build-windows-qt5-smoke</code></td>
+<td>对应 build 预设</td>
+</tr>
+</tbody>
+</table>
+<p>配套包装：<code>bash .workbuddy/qt5-port/run-qt5-preset.sh {configure|reconfigure|build} [目标...]</code>。
+<strong>为什么需要包装</strong>：Ninja 从 <strong>PATH</strong> 取 <code>cl.exe</code>（不像 VS 生成器能靠 toolset 字段解析），
+而本机 MSVC 在 VS2022 BuildTools 下、不在 PATH，且 <code>vcvarsall.bat</code> 因 <code>reg.exe</code> 被安全策略
+拦截而无法定位 Windows SDK —— 必须经 <code>run-vcvars.py</code> 注入环境，所以预设不能在别处直接
+<code>cmake --preset</code>。</p>
+<p><strong>验证</strong>：<code>cmake --list-presets</code> 能识别；全新目录仅靠预设配置 + 构建，<strong>0 error / 0 warning / EXIT=0</strong>。
+（顺带修掉一个死变量：预设里原先写的 <code>VCPKG_MANIFEST_INSTALL</code> 在工程侧无人引用，
+只由 vcpkg 自己的 toolchain 读取，每次 configure 都会报 "Manually-specified variables were not used"。
+既然本路线不加载 vcpkg toolchain，它既是死变量、又会误导将来继承该 base 的人，已删除。）</p>
+<h4>(3) 兼容头探针扩为两个 TU（<code>run-compat-probe.sh</code>）</h4>
+<p><code>build/windows-qt5-smoke</code> 不含 <code>snow_shot</code>，所以兼容头里的<strong>模板</strong>平时只被解析、从未被
+实例化，R30 改的 Windows 屏幕句柄解析更是<strong>完全没有编译证据</strong>。探针现在编两个 TU：</p>
+<ol>
+<li><code>compat-shim-probe.cpp</code> —— 显式实例化全部垫片（<code>SnowPromise</code> / <code>snowTextDecoder</code> /
+   <code>QByteArrayView</code> / <code>SnowChronoTimer</code> / <code>snowConnectColorSchemeChanged</code> …），
+   并在第 33 段构造 <code>QNativeGestureEvent</code> 以覆盖 <strong>R31</strong> 的 Qt5 分支
+   （<code>QTouchDevice*</code> + 尾参 <code>(0, 0)</code>），同时验证 <code>&amp;pinch</code> 能隐式转成测试访问器要的
+   <strong>非 const</strong> <code>QEvent*</code>（<code>gesture(ScreenshotPinnedWindow&amp;, QEvent*)</code>）；</li>
+<li><code>snow_shot/src/platform/windows/monitorgeometry.cpp</code> —— 覆盖 R30 的 Qt5 分支：
+   <code>#include &lt;qpa/qplatformnativeinterface.h&gt;</code> 能否解析（Qt5 把它装在
+   <code>include/QtGui/5.15.2/QtGui/qpa/</code> 而不是顶层 <code>include/QtGui/qpa/</code>）、
+   <code>nativeResourceForScreen("handle", QScreen*)</code> 的实参类型、<code>const_cast</code> 与 <code>void*</code> 返回是否自洽。</li>
+</ol>
+<p>两者均 <code>EXIT=0</code>。这两条命令是当前<strong>唯一</strong>能覆盖"vcpkg 依赖之外的 Qt5 代码"的编译级证据。</p>
+<h4>(4) 兼容头的 include 面本身也是一类缺口（本轮新增的排查方法）</h4>
+<p>R32/R33 不是靠读代码发现的，而是靠<strong>反向扫描</strong>：先按"Qt6 新增 API"清单在全仓 grep 计数，
+再逐个拿本机 <code>C:/Qt/5.15.2/msvc2019_64/include</code> 的头文件去证伪。这一轮扫出两个真缺口
+（<code>.sliced()</code> 6 处、<code>QLibraryInfo::path()</code> 1 处），也顺手把 3 个<strong>曾被怀疑但实际存在</strong>的
+成员钉死为"无需处理"，避免以后重复排查：</p>
+<table>
+<thead>
+<tr>
+<th>被怀疑的 API</th>
+<th>Qt 5.15.2 判定</th>
+<th>证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.sliced(pos[, n])</code></td>
+<td><strong>不存在</strong>（真缺口，R32）</td>
+<td><code>qstring.h</code>/<code>qbytearray.h</code>/<code>qlist.h</code>/<code>qvector.h</code> grep <code>sliced</code> 全 0</td>
+</tr>
+<tr>
+<td><code>QLibraryInfo::path()</code></td>
+<td><strong>不存在</strong>（真缺口，R33）</td>
+<td>只有 <code>location()</code>，<code>qlibraryinfo.h:105</code> 自带 <code>### Qt 6</code> 注释</td>
+</tr>
+<tr>
+<td><code>QFont::Tag</code> / <code>setVariableAxis</code> / <code>setFeature</code></td>
+<td><strong>不存在</strong>（真缺口，R34）</td>
+<td><code>QtGui/qfont.h</code> grep 全 0；Qt5 无任何字体变体轴 / 特性 API</td>
+</tr>
+<tr>
+<td><code>QPointingDevice</code></td>
+<td><strong>完全不存在</strong>，连类型都没有</td>
+<td><code>QtGui/</code> 下无 <code>qpointingdevice.h</code>；<code>QInputEvent</code> 也不带设备指针</td>
+</tr>
+<tr>
+<td><code>QEventPoint</code></td>
+<td><strong>不存在</strong></td>
+<td><code>QtGui/</code> 下无 <code>qeventpoint.h</code>；仅 <code>QPointingDeviceUniqueId</code></td>
+</tr>
+<tr>
+<td><code>QLatin1StringView</code></td>
+<td><strong>不存在</strong>，但已有别名垫片</td>
+<td>Qt5 是 <code>QLatin1String</code>；兼容头第 4 节 <code>using</code> 别名覆盖 26 处</td>
+</tr>
+<tr>
+<td><code>QFileInfo::isJunction()</code></td>
+<td>存在</td>
+<td><code>qfileinfo.h:116</code></td>
+</tr>
+<tr>
+<td><code>QNetworkRequest::setTransferTimeout(int)</code></td>
+<td>存在</td>
+<td><code>qnetworkrequest.h:194</code>（6 处调用无需改）</td>
+</tr>
+<tr>
+<td><code>QString::toStdU16String()</code> / <code>toStdU32String()</code></td>
+<td>存在</td>
+<td><code>qstring.h:939/941</code>（13 + 1 处调用无需改）</td>
+</tr>
+<tr>
+<td><code>QList::assign</code></td>
+<td><strong>不存在</strong>，但全仓 43 处 <code>.assign(</code> 都是 <code>std::vector</code>/<code>std::string</code></td>
+<td>逐站点核对接收者类型后确认</td>
+</tr>
+<tr>
+<td><code>QTouchDevice</code></td>
+<td>存在（R31 的 Qt5 落点）</td>
+<td><code>QtGui/qtouchdevice.h</code>，<code>qevent.h:57</code> 直接包含它</td>
+</tr>
+</tbody>
+</table>
+<p><strong>方法论要点</strong>：<code>QLatin1StringView</code> 这类"名字变了但东西还在"的成员最容易被误报成缺口——
+它在 <code>qt_compat.h</code> 里是 <code>using QLatin1StringView = QLatin1String;</code>，而该头由
+<code>snow_find_qt()</code> 以<strong>目录级 <code>/FI</code></strong> 强制注入，所以 <code>QLatin1StringView</code> 的 26 处调用点
+无需逐个加 include。判断"是不是缺口"必须同时看<strong>符号存不存在</strong>和<strong>垫片是否已注入</strong>。</p>
+<hr>
+<h3 id="3-6-本轮新增-snow-shot-的-cmake-面首次过-qt5-r35">3.6 本轮新增：<code>snow_shot</code> 的 CMake 面首次过 Qt5（R35）</h3>
+<p><strong>为什么此前没被发现</strong>：<code>windows-qt5-smoke</code> 只开 <code>ant_design_qt</code> + <code>snow_image</code>，
+<code>snow_shot</code> 那份 9400+ 行的 <code>CMakeLists.txt</code> <strong>从未在 Qt5 路线下被解析过</strong>；而完整
+configure 又被第 330 行的 <code>find_package(OpenCV CONFIG REQUIRED)</code> 挡在前面（vcpkg
+依赖尚未齐）。也就是说，这一整面处于"既没验过、也还没轮到"的盲区。</p>
+<p>本轮用探针把这条路径<strong>单独</strong>打通：同一份 <code>cmake/</code> 脚本、真实 Qt 5.15.2 套件、
+不引入任何第三方依赖。一次跑出 <strong>5 个必然失败的 Qt5 阻塞</strong>，其中 4 个只能在这条
+路径上暴露（<code>ant_design_qt</code> 那条路径走到它们的概率为零）：</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>位置</th>
+<th>症状</th>
+<th>根因</th>
+<th>处置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>snow_shot/CMakeLists.txt:1148</code></td>
+<td>Qt5 下 configure 硬失败</td>
+<td>裸的 <code>find_package(Qt6 REQUIRED COMPONENTS Concurrent)</code>——本路线<strong>刻意不加载</strong> Qt6 kit（不设 toolchainFile），所以找不到</td>
+<td>改走共享解析入口 <code>snow_find_qt(COMPONENTS Concurrent)</code>；探针断言 <code>Qt::Concurrent</code> 与 <code>Qt5::Concurrent</code> 均可解析、可链接</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>cmake/SnowShotTranslationRelease.cmake</code></td>
+<td>紧随其后的 <code>qtbase_zh_CN.qm</code> 检查必然 FATAL</td>
+<td>目录解析整段用 Qt6 专有变量（<code>QT_INTERNAL_ABSOLUTE_TRANSLATIONS_DIR</code> / <code>QT6_INSTALL_PREFIX</code> / <code>QT6_INSTALL_TRANSLATIONS</code>），Qt5 下三者皆空 ⇒ 路径退化成 <code>"/"</code></td>
+<td>按版本分支：Qt5 依次取 <code>SNOW_QT5_TRANSLATIONS_DIR</code> → 由 <code>Qt5Core_DIR</code> 反推 <code>&lt;prefix&gt;/translations</code> → 由 <code>SNOW_QT_BIN_DIR</code> 反推</td>
+</tr>
+<tr>
+<td>3</td>
+<td>同上（<strong>命名</strong>问题）</td>
+<td>即便目录修对，检查仍永远不可能通过</td>
+<td>官方 Qt 5.15.2 套件<strong>没有 <code>qtbase_zh_CN.qm</code></strong>：实测该套件 <code>qtbase_*.qm</code> 共 23 个，含 <code>qtbase_zh_TW.qm</code>，<strong>不含</strong> <code>qtbase_zh_CN.qm</code>（简体只以聚合目录 <code>qt_zh_CN.qm</code> 发布）</td>
+<td>Qt5 分支接受套件自己的命名：<code>zh_CN</code> ← <code>qtbase_zh_CN.qm</code> 或 <code>qt_zh_CN.qm</code>；<code>zh_TW</code> ← <code>qtbase_zh_TW.qm</code> 或 <code>qt_zh_TW.qm</code>。守卫仍在（一个都找不到才失败），只是不再假设 Qt6 的命名</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>cmake/SnowQtVersionShims.cmake</code> 的 <code>qt_add_lrelease</code> 垫片</td>
+<td><strong>一个 <code>.qm</code> 都不产出</strong>，只留一条 WARNING</td>
+<td>垫片签名为 <code>function(qt_add_lrelease target)</code>（位置参数形态），而仓库调用用的是 Qt6 6.7+ 的<strong>关键字形态</strong>（<code>TS_FILES ... LRELEASE_TARGET ...</code>）⇒ 形参 <code>target</code> 绑到字面量 <code>"TS_FILES"</code>，<code>cmake_parse_arguments</code> 的关键字/值配对整体错位，<code>TS_FILES</code> 解析为空</td>
+<td>兼容两种形态：首个实参不是关键字才当目标名；目标名按 <code>LRELEASE_TARGET</code> → <code>TARGET</code> → 位置参数 的顺序取值</td>
+</tr>
+<tr>
+<td>5</td>
+<td>同上（<strong>门禁</strong>）</td>
+<td>翻译目标必然构建失败</td>
+<td>工程依赖 Qt6 lrelease 的 <code>-fail-on-unfinished</code>（AGENTS.md 要求"不得留下 unfinished"），而 <strong>Qt 5.15.2 的 lrelease 没有这个开关</strong>（<code>-help</code> 只列 <code>-nounfinished</code>/<code>-removeidentical</code>/…），原样透传会让 lrelease 打印用法并非零退出</td>
+<td>新增 <code>cmake/SnowQt5LreleaseEnforce.cmake</code>：把开关从 Qt5 命令行摘掉，改为逐 <code>.ts</code> 做等价校验</td>
+</tr>
+</tbody>
+</table>
+<h4>(1) 第 5 条的坑中坑：Qt5 的 lrelease <strong>不会</strong>因为未完成而失败，统计行也看不出来</h4>
+<p>同一份 <code>.ts</code>（1 条已完成 + 1 条 <code>type="unfinished"</code>）在 Qt 5.15.2 下的<strong>原始输出</strong>：</p>
+<pre><code>Updating 'mix.qm'...
+    Generated 1 translation(s) (1 finished and 0 unfinished)
+    Ignored 1 untranslated source text(s)
+$ echo $?
+0
+</code></pre>
+<p><code>(X finished and Y unfinished)</code> 里的 <code>Y</code> 描述的是<strong>已生成条目</strong>的完成度，未完成条目
+被归到另一行；加不加 <code>-nounfinished</code> 都不改变这两行，<strong>退出码恒为 0</strong>。
+所以"照抄统计行做门禁"会得到一条<strong>永远通过</strong>的假门禁——比构建失败危险得多
+（残缺目录会照常进安装包）。<code>SnowQt5LreleaseEnforce.cmake</code> 因此用两个独立信号：</p>
+<ol>
+<li><strong>主判据</strong>：源 <code>.ts</code> 里是否存在 <code>type="unfinished"</code>（与 AGENTS.md 的措辞逐字对应，
+   不依赖任何工具的文案）；</li>
+<li><strong>交叉校验</strong>：lrelease 是否报了 <code>Ignored N untranslated source text(s)</code>（<code>N &gt; 0</code>）。</li>
+</ol>
+<p>实测两者在同一条件下触发（都只针对 <code>type="unfinished"</code>）；一个<strong>空但没有</strong>
+<code>type="unfinished"</code> 的 <code>&lt;translation&gt;&lt;/translation&gt;</code> 两个信号都不报——这与 Qt6 行为一致，
+故不额外收紧。</p>
+<h4>(2) 验证入口（可复跑，不依赖 vcpkg）</h4>
+<pre><code class="language-bash">bash .workbuddy/qt5-port/run-qt5-probe.sh
+</code></pre>
+<p>四段：Qt5 configure（断言 <code>Qt::Concurrent</code> 可解析）→ 构建翻译目标（真实 lrelease，
+断言产出 3 个 locale 的 <code>.qm</code>）→ <strong>反向</strong>注入 <code>type="unfinished"</code>（断言构建<strong>失败</strong>）
+→ 恢复夹具复检。第三段是这条链的价值所在：没有它，"门禁"只是个看起来像门禁的东西。</p>
+<p>另有回归测试扩为 8 例（原有 4 例 Qt6 夹具 + 3 例 Qt5 套件命名 + 1 例需真机的 skip）：</p>
+<pre><code class="language-bash">PATH=&quot;/c/snow-tools/cmake/cmake-4.2.3-windows-x86_64/bin:$PATH&quot; \
+  python scripts/test-qt-translation-release.py
+</code></pre>
+<blockquote>
+<p><strong><code>PATH</code> 必须写 MSYS 风格（<code>/c/...</code>）</strong>：写成 <code>C:/...</code> 时 Windows 版 python 的
+<code>shutil.which('cmake')</code> 返回 <code>None</code>，测试会以 <code>TypeError: ... not NoneType</code> 报错——
+那是环境问题，不是测试失败。</p>
+</blockquote>
+<p><strong>回归证据</strong>：<code>windows-qt5-smoke</code> 全量构建在垫片改动后仍 <code>EXIT=0</code>（只重建了 MOC 与
+<code>ant_design_qt.lib</code>，翻译目标无需重跑——<code>ant_design_qt</code> 传的 <code>LRELEASE_OPTIONS</code> 本来就
+是空的，故第 5 条的门禁对它不生效，行为逐字不变）。</p>
+<h4>(3) 仍未闭合的 Qt5 缺口（本轮只记录，不静默降级）</h4>
+<p><strong>stock 对话框目录的合并</strong>：Qt6 的 <code>MERGE_QT_TRANSLATIONS</code> 会把 <code>qtbase_&lt;locale&gt;.qm</code>
+并进 <code>snow_shot_&lt;locale&gt;.qm</code>；Qt5 垫片没有对应实现，只打一条 STATUS 说"由打包步骤处理"
+（而<strong>目前没有任何打包步骤真的处理它</strong>）。而 <code>LanguageManager::discoverCatalogs()</code>
+只从 <code>:/i18n</code> 装载 <code>snow_shot_*.qm</code> 并安装为 <code>QTranslator</code>，<strong>没有</strong>第二个翻译器去读
+Qt 自带的 stock 目录。因此 Qt5 路线下 <code>QFileDialog</code>/<code>QColorDialog</code> 等标准对话框的
+中文会退回英文——<strong>编译与链接不受影响，属运行时外观回归</strong>。</p>
+<p>两条可选的收口方式（择一，尚未实现）：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>做法</th>
+<th>代价</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>甲：运行时装载</td>
+<td>Qt5 分支在 <code>LanguageManager</code> 里额外安装一个 <code>QTranslator</code>，从 <code>QLibraryInfo::location(TranslationsPath)</code>（回退应用目录）读 <code>qt_zh_CN.qm</code> / <code>qtbase_zh_TW.qm</code>；打包时把对应 <code>.qm</code> 一并带上</td>
+<td>改动小，但要动安装包清单</td>
+</tr>
+<tr>
+<td>乙：构建期合并</td>
+<td>在 Qt5 垫片里实现等价的目录合并（需 <code>lconvert</code> 往返 <code>.qm</code>），使产物与 Qt6 逐字一致</td>
+<td>成本高，且 <code>.qm</code> 往返会丢元信息</td>
+</tr>
+</tbody>
+</table>
+<p>顺带记录两处 Qt6 命名的既有假设，进 UOS 前需要一并按版本分流：
+<code>scripts/snow-build-environment.ps1:252</code> 与 <code>scripts/validate-static-qt.py:192</code>
+都写死了 <code>translations/qtbase_$language.qm</code>，在 Qt5 套件（无 <code>qtbase_zh_CN.qm</code>）上会判失败。</p>
+<hr>
+<h2 id="4-分阶段实施计划">4. 分阶段实施计划</h2>
+<table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>内容</th>
+<th>出口判据（可验证）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P0</strong></td>
+<td>Windows 环境 bootstrap：装 MSVC v143 / CMake / Ninja / Rust / Qt5 套件</td>
+<td><code>cmake --version</code>、<code>qmake -v</code>（或 <code>qtpaths --qt-version</code>）、<code>rustc -V</code> 三者均返回预期版本</td>
+</tr>
+<tr>
+<td><strong>P1</strong></td>
+<td>落地 L1 兼容层（<code>qt_compat.h</code> + <code>SnowQtVersionShims.cmake</code>），<strong>Qt6 构建保持不变</strong></td>
+<td>Qt6 分支仍可 configure；新增文件零警告</td>
+</tr>
+<tr>
+<td><strong>P2</strong></td>
+<td>CMake 双版本化：<code>Qt6::</code>→<code>Qt::</code>(882)、<code>qt_*</code> 命令封装、<code>QT_DISABLE_DEPRECATED_UP_TO</code> 条件化、新增 <code>windows-qt5-*</code> preset</td>
+<td><strong>已完成</strong>：<code>windows-qt5-base/smoke</code> + <code>build-windows-qt5-smoke</code> 三个预设已入库，全新目录仅靠预设即 <code>EXIT=0</code>；出口判据（能走到编译阶段）已超额满足——已能全量编译链接 <code>ant_design_qt</code> + <code>snow_image</code></td>
+</tr>
+<tr>
+<td><strong>P2b</strong></td>
+<td>CMake 面的 <strong><code>snow_shot</code> 覆盖</strong>（§3.6）：<code>Concurrent</code> 包解析、翻译目录解析与套件命名、<code>qt_add_lrelease</code> 垫片签名、Qt5 的未完成翻译门禁</td>
+<td><strong>本轮完成</strong>：5 个 Qt5 硬阻塞已修；探针 <code>run-qt5-probe.sh</code> 四段全绿（含反向验证）；<code>snow_shot</code> 完整 configure 仍等 vcpkg（OpenCV/onnxruntime），但<strong>它挡不住的那部分已验完</strong></td>
+</tr>
+<tr>
+<td><strong>P3</strong></td>
+<td>L2 机械改写 8 条规则，按规则逐条提交（每条一个 commit）</td>
+<td>每条规则后都能 <code>git diff --stat</code> 复核；Qt5 编译错误数单调下降</td>
+</tr>
+<tr>
+<td><strong>P4</strong></td>
+<td>L3 人工改写：viewer RHI 后端、<code>QStringDecoder</code>、Windows 打印</td>
+<td>viewer 可编译；若决策为"首版不交付"，则改为在 CMake 中整模块 <code>option()</code> 关闭</td>
+</tr>
+<tr>
+<td><strong>P5</strong></td>
+<td><strong>Windows Qt5 编译打通 + 3.4 冒烟清单全绿</strong></td>
+<td>冒烟清单逐项通过，无红色误报弹窗</td>
+</tr>
+<tr>
+<td><strong>P6</strong></td>
+<td>UOS 编译：amd64 → arm64，按 <code>docs-uos-linux-port.md</code> 的 P2–P4 推进平台后端</td>
+<td>UOS amd64 能起界面；arm64 真机（飞腾/鲲鹏）终验</td>
+</tr>
+<tr>
+<td><strong>P7</strong></td>
+<td>收尾：changelog、版本号、双架构打包</td>
+<td>产物齐全，<code>snow-shot-installation.json</code> 校验通过</td>
+</tr>
+</tbody>
+</table>
+<p><strong>顺序上的硬依赖</strong>：P0 → P1 → P2 不可调换；P3 依赖 P2 的 CMake 能配置；P5 依赖 P0。
+<strong>P6 的平台后端工作与 P1–P5 完全独立，可并行</strong>（不碰 Qt 版本的部分）。</p>
+<hr>
+<h2 id="5-风险控制与回滚">5. 风险控制与回滚</h2>
+<table>
+<thead>
+<tr>
+<th>风险</th>
+<th>控制手段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>机械改写引入隐蔽错误</td>
+<td>每条规则独立 commit；Qt6 构建全程保持可编译，作为对照基线做二分定位</td>
+</tr>
+<tr>
+<td><code>removeIf</code> / <code>metaType()</code> 接收者提取错位</td>
+<td>脚本只处理简单接收者，复杂表达式输出到 <code>manual-review.txt</code> 人工确认</td>
+</tr>
+<tr>
+<td>Qt5 静态套件构建失败（v14.5x 工具集）</td>
+<td>P0 阶段就用 <strong>v143</strong> 工具集；若仍有障碍，先用选项 A（预编译动态）推进 P1–P5，打包留到后面</td>
+</tr>
+<tr>
+<td><code>qt_*</code> 命令在 Qt 5.15 的 versionless 覆盖不全</td>
+<td>P2 第一步先跑一个探测脚本，打印 Qt5 下实际存在的 <code>qt_*</code> 命令清单，再补齐 compat 模块（<strong>不靠记忆猜</strong>）</td>
+</tr>
+<tr>
+<td>C 盘空间</td>
+<td>构建目录全部指向 C:（68 GB 可用），<strong>不要放 D:</strong>（仅 5.6 GB）</td>
+</tr>
+<tr>
+<td>回滚</td>
+<td>全流程在 <code>qt5-dual</code> 分支；<code>main</code> 不动。最坏情况 <code>git checkout main</code> 即完全恢复</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="6-待你确认的三项">6. 待你确认的三项</h2>
+<ol>
+<li><strong>Qt5 套件走 A（预编译动态，10 分钟，先测）还是 B（自建静态，1.5–3 小时，与发布一致）？</strong>
+   建议 <strong>A 先走</strong>，把 P5 冒烟跑通再补 B。</li>
+<li><strong>是否同意安装 P0 清单（约 10–12 GB 下载、数小时）？</strong> 这是本机测试不可绕过的前置。</li>
+<li><strong><code>snow_image_viewer</code> 首版是否交付？</strong> 建议 P4 先在 CMake 中用 <code>option(SNOW_BUILD_IMAGE_VIEWER)</code> 关闭，
+   把 viewer 渲染后端排到 Windows 冒烟通过之后，避免它阻塞主线。</li>
+</ol>
+<h3 id="6-1-本轮新增的唯一决策点-第-3-项已被-1-5-改写-需要重新拍板">6.1 本轮新增的<strong>唯一</strong>决策点（第 3 项已被 1.5 改写，需要重新拍板）</h3>
+<p>原先的 "RHI → <code>QOpenGLWidget</code> 重写" 计划已被 1.5 推翻。现在 viewer 有两条路：</p>
+<table>
+<thead>
+<tr>
+<th>路线</th>
+<th>做法</th>
+<th>成本</th>
+<th>风险</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>甲：保留 QRhi</strong></td>
+<td>换 include 到 Qt5 私有头；把 3 组 HDR 调用显式降级为 SDR；把 <code>.qsb</code> 重新烘焙成 QSB ≤ v5</td>
+<td><strong>中</strong>（改动局限在 <code>rhi_image_window.cpp</code> 的 include 与 HDR 分支）</td>
+<td>UOS 侧需 <strong><code>qtbase5-private-dev</code></strong>（拿 <code>qrhivulkan_p.h</code> 等）与 <strong>Qt 5.15 Shader Tools</strong>（出 QSB v5）。二者若有任一个在 UOS 上不可得，此路不通</td>
+</tr>
+<tr>
+<td><strong>乙：重写为 <code>QOpenGLWidget</code></strong></td>
+<td>2977 行重写，GLSL 需从 QSB 目标改成手写着色器</td>
+<td><strong>大</strong></td>
+<td>不依赖私有 API 与 Shader Tools；但工作量大且行为等价性难验证</td>
+</tr>
+</tbody>
+</table>
+<p><strong>建议先做一次 10 分钟的前置探测</strong>（在 UOS 上确认 <code>qtbase5-private-dev</code> 与 <code>qsb</code> 是否可得），
+再决定走甲还是乙。在此之前 viewer 保持 <code>SNOW_APPS_BUILD_IMAGE_VIEWER=OFF</code>，不阻塞主线。</p>
+<p><strong>这次探测已经脚本化</strong>，不用手工逐条查：</p>
+<pre><code class="language-bash">bash scripts/uos-preflight.sh --probe      # 在 UOS / Deepin 真机上跑，直接给结论
+</code></pre>
+<p>它输出 10 段，最后一段就是上面的甲/乙判定，输入全部来自实测而非假设：</p>
+<table>
+<thead>
+<tr>
+<th>段</th>
+<th>采集内容</th>
+<th>对应决策输入</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>发行版 / glibc / gcc / cmake ≥ 3.20 / ninja</td>
+<td>方案附录 A.3 的 glibc 基线</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>Qt5Core/Gui/Widgets/Svg/...</code> pkg-config 版本与 include 目录</td>
+<td>Qt 5.15 下限</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>qrhi_p.h</code>、<code>qshader_p.h</code> 是否在 <code>.../QtGui/5.15.x/QtGui/private/</code>；实际编了哪些后端（GLES2/Vulkan/...）；<strong>Qt5 <code>qrhi_p.h</code> 里是否真的没有 HDR</strong></td>
+<td><strong>甲</strong> 的可行性</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>qsb</code> 是否存在；从<strong>私有头</strong>读 <code>QSB_VERSION</code> / <code>QSB_VERSION_MIN</code>（这才是 Qt5 真正接受的版本白名单，不是工具自报的版本）；仓库里已有 <code>.qsb</code> 的个数与样例</td>
+<td><strong>甲</strong> 的第二个硬条件</td>
+</tr>
+<tr>
+<td>5</td>
+<td>xcb/xkbcommon/wayland/pipewire/pulse/dbus/fontconfig、opencv4（含 <code>wechat_qrcode</code>、<code>objdetect/barcode</code> 两个本工程真用的模块）、libheif/libjxl/onnxruntime/minizip-ng</td>
+<td>§9.1 依赖清单</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>XDG_SESSION_TYPE</code> / <code>WAYLAND_DISPLAY</code> / <code>DISPLAY</code> / <code>QT_QPA_PLATFORM</code></td>
+<td>先 X11 后 Wayland 的路线（§5 未决问题 5）</td>
+</tr>
+<tr>
+<td>7</td>
+<td>rustc/cargo 版本、已装 target、libclang</td>
+<td>§9.4</td>
+</tr>
+<tr>
+<td>8</td>
+<td>CPU 型号与该架构的 SIMD 标志（x86: avx2/avx512f/fma；arm64: asimd/sve）</td>
+<td>§7.2 SIMD 补强优先级</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>--probe</code>：现场编译一个同时 include 私有 <code>qrhi_p.h</code> + 调 <code>QShader::fromSerialized()</code> 读<strong>本仓库真实 <code>.qsb</code></strong> 的小程序</td>
+<td>把"头文件在不在"升级成"我们的 shader 资源 Qt5 到底能不能读"</td>
+</tr>
+</tbody>
+</table>
+<p>第 9 段是关键：QSB 版本号不在 <code>.qsb</code> 前缀里（前 4 字节是大端原始长度，后面直接是 zlib 流
+<code>78 9c</code>），所以没法靠读文件头部判断，只能真跑一次反序列化。<code>QShader::fromSerialized()</code>
+返回空对象时 Qt5 只打一句 <code>qWarning</code>，不抛异常 —— 若不在 UOS 上先测，症状会表现为
+<strong>viewer 编译全绿但上屏一片黑</strong>，排查成本远高于这 10 分钟。</p>
+<h3 id="6-2-vcpkg-第三方依赖通道-镜像可行性实测">6.2 vcpkg 第三方依赖通道：镜像可行性实测</h3>
+<p>问题只问一句「vcpkg 能不能配国内镜像」，实测答案要分三截：</p>
+<p><strong>(1) 网上流传的三条说法都不成立</strong></p>
+<table>
+<thead>
+<tr>
+<th>说法</th>
+<th>实测</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>设 <code>VCPKG_DOWNLOAD_MIRROR</code> 换源</td>
+<td>该变量<strong>在 vcpkg 里不存在</strong>（全仓 grep 0 命中）</td>
+</tr>
+<tr>
+<td>清华有 <code>mirrors.tuna.tsinghua.edu.cn/vcpkg/assets/</code></td>
+<td><strong>404</strong>，没有这个镜像</td>
+</tr>
+<tr>
+<td>清华 <code>github-release/</code> 能兜住 GitHub Release 附件</td>
+<td>只镜像约 40 个白名单仓库；<strong>没有</strong> <code>Kitware/</code>、<strong>没有</strong> <code>ninja-build/</code>（均 404）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>(2) vcpkg 官方只给四条杠杆</strong>（<code>X_VCPKG_ASSET_SOURCES</code> 的后端就 <code>clear</code> / <code>x-azurl</code> / <code>x-block-origin</code> / <code>x-script</code> 四个）</p>
+<table>
+<thead>
+<tr>
+<th>杠杆</th>
+<th>说明</th>
+<th>本机适配度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>x-script,&lt;模板&gt;</code></td>
+<td>把下载交给任意外部命令，vcpkg 传 <code>{url}</code>/<code>{sha512}</code>/<code>{dst}</code></td>
+<td><strong>已用</strong>。vcpkg 走 WinHTTP 拿 <strong>502</strong>，同 URL 上 <code>curl</code> 能拿到字节 → 换成 curl 立刻见效</td>
+</tr>
+<tr>
+<td><code>x-azurl,&lt;url&gt;,\|file://&lt;dir&gt;</code></td>
+<td>Azure Blob 兼容端点 / 本地或 UNC 目录做资产缓存</td>
+<td>适合团队共享盘</td>
+</tr>
+<tr>
+<td>预置 <code>downloads/</code></td>
+<td>按 vcpkg 打印的目标名放文件，哈希过则不再联网</td>
+<td><strong>已用</strong>，把 CMake 4.2.3 从 <code>C:\snow-tools\cmake.zip</code> 预置成功</td>
+</tr>
+<tr>
+<td><code>VCPKG_BINARY_SOURCES</code></td>
+<td>二进制缓存（编译产物），与源码下载<strong>两回事</strong></td>
+<td>建议开，跨机器零编译</td>
+</tr>
+</tbody>
+</table>
+<p><strong>(3) 本机真正有用的两条改写</strong></p>
+<ul>
+<li><strong>源码包走 <code>codeload</code></strong>：<code>github.com/o/r/archive/&lt;ref&gt;.tar.gz</code> → <code>codeload.github.com/o/r/tar.gz/&lt;ref&gt;</code>
+  （注意<strong>去掉扩展名</strong>）。实测 <code>EXIT=0</code>，一次拉全 1,572,744 字节。</li>
+<li><strong>Release 附件</strong>（工具链 7zip/ninja、部分端口的包）仍是抖动区，需要重试 + 预置。</li>
+</ul>
+<p><strong>注意：这</strong>不是<strong>「封禁」，是「抖动」</strong>——同一 URL 曾测到 3 MB/s（50 MB / 17.1 s）
+也测到 ~8 KB/s / 502。所以工具链一律按「重试 + 断点续传 + 整轮重跑」设计。</p>
+<p>配套脚本与逐条证据：<code>.workbuddy/qt5-port/vcpkg-mirror/README.md</code>
+（<code>fetch-asset.py</code> / <code>hash-rename.py</code> / <code>env-vcpkg-mirror.{sh,ps1}</code> / <code>install-deps.sh</code>）。</p>
+<hr>
+<p><em>本文档所有命中数、文件数均由当前 <code>main</code> 快照 grep 统计得出，可复现。</em></p>
+</main>
+</div>
+</body>
+</html>
