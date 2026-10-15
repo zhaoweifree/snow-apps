@@ -69,6 +69,14 @@ pub struct ElementRect {
     rect: PixelRect,
 }
 impl ElementRect {
+    /// Only the platform providers build these: the Windows (UIA/MSAA) and
+    /// macOS (AX) traversals today, the Linux AT-SPI2 one when it lands. On a
+    /// platform with no provider yet the constructor has no caller, which would
+    /// otherwise trip `dead_code` under `-Dwarnings`.
+    #[cfg_attr(
+        not(any(target_os = "windows", target_os = "macos")),
+        allow(dead_code)
+    )]
     pub(crate) fn new(rect: impl Into<PixelRect>) -> Self {
         Self { rect: rect.into() }
     }

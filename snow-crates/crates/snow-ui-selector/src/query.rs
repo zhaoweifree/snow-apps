@@ -22,6 +22,16 @@ pub struct QueryResult {
     pub reason: StopReason,
 }
 
+/// Budgets and cancellation hooks handed to a platform provider.
+///
+/// The fields are public API surface consumed by the Windows and macOS
+/// traversals; on a platform that has no provider yet nothing reads them, so
+/// the struct carries a platform-scoped `allow` rather than making the public
+/// type disappear from the crate's API.
+#[cfg_attr(
+    not(any(target_os = "windows", target_os = "macos")),
+    allow(dead_code)
+)]
 pub struct QueryControl<'a> {
     pub(crate) budget: Duration,
     pub(crate) call_limit: Duration,
