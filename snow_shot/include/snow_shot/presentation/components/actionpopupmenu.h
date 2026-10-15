@@ -143,7 +143,7 @@ class ActionPopupMenu final : public QObject {
                 m_keyboard = false;
                 const auto* mouse = static_cast<QMouseEvent*>(event);
                 // Native menus also grab mouse moves outside their popup window.
-                if (pointerOverMenuOrTrigger(mouse->globalPosition().toPoint()))
+                if (pointerOverMenuOrTrigger(snowGlobalPos(mouse).toPoint()))
                     m_closeTimer.stop();
                 else if (!m_closeTimer.isActive())
                     m_closeTimer.start();

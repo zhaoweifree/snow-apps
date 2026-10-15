@@ -173,7 +173,7 @@ void MainWindow::setupNativeTitleBar() {
 #endif
 
 #ifdef Q_OS_WIN
-bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
+bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) {
     if (snow_shot::platform::windows::handleNativeWindowEvent(m_titleBar, message, result)) {
         return true;
     }

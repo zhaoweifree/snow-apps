@@ -151,7 +151,7 @@ void runMcpApplicationTests() {
                 "MCP discovery exposes the canonical persisted palette without losing alpha");
         QVariant decodedPalette;
         require(settingsValue(*palette, paletteJson, &decodedPalette) &&
-                    decodedPalette.metaType() == QMetaType::fromType<QVector<QColor>>() &&
+                    snowMetaTypeOf(decodedPalette) == snowMetaType<QVector<QColor>>() &&
                     decodedPalette.value<QVector<QColor>>() == paletteColors,
                 "MCP palette decoding produces the typed value accepted by the runtime");
         auto normalizedInput = paletteJson;
@@ -226,7 +226,7 @@ void runMcpApplicationTests() {
     require(session.applySelectValue(settings::SettingsSelectBinding::ScreenRecordingFrameRate, 60),
             "prepare an unrelated recording setting before toolbar reset");
     auto recordingLayout = defaultRecordingLayout;
-    recordingLayout.positions.removeIf(
+    snow::compat::removeIf(recordingLayout.positions, 
         [](const QStringList& position) { return position.contains(QStringLiteral("duration")); });
     recordingLayout.hidden.append(QStringLiteral("duration"));
     std::reverse(recordingLayout.positions.begin(), recordingLayout.positions.end());

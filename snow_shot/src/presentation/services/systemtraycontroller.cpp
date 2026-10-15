@@ -267,7 +267,7 @@ class TrayMenuSkinBinding final : public QObject {
         }
         const auto type = event->type();
         if (type != QEvent::Show && type != QEvent::Hide &&
-            ((type != QEvent::Resize && type != QEvent::DevicePixelRatioChange) || !controller_ ||
+            ((type != QEvent::Resize && type != snowDevicePixelRatioChange) || !controller_ ||
              !attached_)) {
             return QObject::eventFilter(watched, event);
         }
@@ -281,10 +281,10 @@ class TrayMenuSkinBinding final : public QObject {
             releaseFrame();
             break;
         case QEvent::Resize:
-        case QEvent::DevicePixelRatioChange:
+        case snowDevicePixelRatioChange:
             if (controller_ && attached_) {
                 controller_->setViewport(menu_, menu_->size(), menu_->devicePixelRatioF(),
-                                         event->type() == QEvent::DevicePixelRatioChange);
+                                         event->type() == snowDevicePixelRatioChange);
             }
             break;
         default:
@@ -496,7 +496,7 @@ class SystemTrayController::Impl {
         if (menu)
             menu->dismissPopup();
         menu = new adqt::widgets::AdContextMenu;
-        menus.removeIf([](const auto& popup) { return popup.isNull(); });
+        snow::compat::removeIf(menus, [](const auto& popup) { return popup.isNull(); });
         menus.append(menu);
         menu->setDeleteOnHide();
         menu->setObjectName(QStringLiteral("systemTrayMenu"));

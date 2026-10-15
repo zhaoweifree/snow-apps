@@ -5,7 +5,7 @@
 
 #include <QFuture>
 #include <QMetaObject>
-#include <QPromise>
+#include "snow_shot/compat/qt_compat.h"
 #include <QThreadPool>
 #include <exception>
 #include <type_traits>
@@ -22,7 +22,7 @@ template <typename Work> bool queueMcpWork(QObject* receiver, Work work) {
 // and completion signals even in the application's minimal static Qt build.
 template <typename Work> auto runMcpWork(QThreadPool* pool, Work work) {
     using Result = std::invoke_result_t<Work>;
-    QPromise<Result> promise;
+    SnowPromise<Result> promise;
     auto future = promise.future();
     promise.start();
     pool->start(snow_shot::runtime::trackRuntimeWork(

@@ -354,7 +354,7 @@ class CursorRefresh::Impl final : public QAbstractNativeEventFilter {
         return {reinterpret_cast<quintptr>(target), GetWindowThreadProcessId(target, nullptr),
                 QPoint(position.x, position.y)};
     }
-    bool nativeEventFilter(const QByteArray&, void* message, qintptr*) override {
+    bool nativeEventFilter(const QByteArray&, void* message, snowNativeEventResult*) override {
         const auto* msg = static_cast<const MSG*>(message);
         if (msg->message == WM_MOUSEMOVE || msg->message == WM_NCMOUSEMOVE) {
             POINT position{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};

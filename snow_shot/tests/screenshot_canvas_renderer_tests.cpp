@@ -7858,7 +7858,7 @@ void overlayBackingStorePreparationCancelsObsoleteWork() {
     QCoreApplication::sendPostedEvents(&overlay);
     verifyCanceled();
 
-    for (const auto type : {QEvent::DevicePixelRatioChange, QEvent::ScreenChangeInternal}) {
+    for (const auto type : {snowDevicePixelRatioChange, QEvent::ScreenChangeInternal}) {
         startPartialPreparation();
         QEvent changed(type);
         QApplication::sendEvent(&overlay, &changed);

@@ -17,7 +17,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QColor>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QHBoxLayout>
 #include <QMouseEvent>
 #include <QPaintEvent>
@@ -94,7 +94,7 @@ class WindowControlButton final : public adqt::widgets::AdButton {
     }
 
   protected:
-    void enterEvent(QEnterEvent* event) override {
+    void enterEvent(SnowEnterEvent* event) override {
         adqt::widgets::AdButton::enterEvent(event);
         syncAccentRole();
     }
@@ -151,7 +151,7 @@ class WindowControlButton final : public QAbstractButton {
     }
 
   protected:
-    void enterEvent(QEnterEvent* event) override {
+    void enterEvent(SnowEnterEvent* event) override {
         QAbstractButton::enterEvent(event);
         update();
     }
@@ -292,7 +292,7 @@ TitleBarWidget::TitleBarWidget(const snow_shot::presentation::styles::ThemeAlias
 bool TitleBarWidget::event(QEvent* event) {
     const bool handled = QFrame::event(event);
 #ifdef Q_OS_WIN
-    if (event->type() == QEvent::DevicePixelRatioChange && m_applicationIcon != nullptr) {
+    if (event->type() == snowDevicePixelRatioChange && m_applicationIcon != nullptr) {
         applyTheme(snow_shot::presentation::styles::ThemeManager::instance().themeColorScheme());
     }
 #endif

@@ -83,7 +83,7 @@ class PermissionGuideDragRow final : public QAbstractButton {
     }
     void mousePressEvent(QMouseEvent* event) override {
         if (event->button() == Qt::LeftButton) {
-            m_origin = event->position().toPoint();
+            m_origin = snowPos(event).toPoint();
             m_owner.setInteracting(true);
         }
         QAbstractButton::mousePressEvent(event);
@@ -94,7 +94,7 @@ class PermissionGuideDragRow final : public QAbstractButton {
     }
     void mouseMoveEvent(QMouseEvent* event) override {
         if (!(event->buttons() & Qt::LeftButton) || !isDown() ||
-            (event->position().toPoint() - m_origin).manhattanLength() <
+            (snowPos(event).toPoint() - m_origin).manhattanLength() <
                 QApplication::startDragDistance()) {
             QAbstractButton::mouseMoveEvent(event);
             return;
@@ -160,10 +160,15 @@ PermissionGuideWidget::PermissionGuideWidget(PermissionGuideApplication applicat
     layout->addWidget(m_request, 0, Qt::AlignRight);
     connect(m_close, &QPushButton::clicked, this, &PermissionGuideWidget::dismissed);
     connect(m_request, &QPushButton::clicked, this, &PermissionGuideWidget::requestAccess);
-    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
-            &PermissionGuideWidget::setColorScheme);
+    // Qt5 has no QStyleHints::colorSchemeChanged signal, and a signal cannot be
+    // shimmed (connect() needs a pointer-to-member). The helper subscribes to
+    // QGuiApplication::paletteChanged instead and re-derives the scheme from the
+    // application palette - a documented lossy downgrade, see
+    // snow_shot/compat/qt_compat.h section 14b.
+    snowConnectColorSchemeChanged(QGuiApplication::styleHints(), this,
+                                  [this](SnowColorScheme scheme) { setColorScheme(scheme); });
     retranslate();
-    setColorScheme(QGuiApplication::styleHints()->colorScheme());
+    setColorScheme(snowColorScheme(QGuiApplication::styleHints()));
 }
 void PermissionGuideWidget::setPermission(AppPermission permission, AppPermissionStatus status,
                                           bool pending, bool fallback) {
@@ -246,8 +251,8 @@ void PermissionGuideWidget::retranslate() {
     layout()->invalidate();
     emit contentSizeChanged();
 }
-void PermissionGuideWidget::setColorScheme(Qt::ColorScheme scheme) {
-    m_dark = scheme == Qt::ColorScheme::Dark;
+void PermissionGuideWidget::setColorScheme(SnowColorScheme scheme) {
+    m_dark = scheme == SnowColorSchemeDark;
     const bool dark = m_dark;
     setStyleSheet(
         QStringLiteral("QLabel { color: %1; background: transparent; font-size: 13px; }"

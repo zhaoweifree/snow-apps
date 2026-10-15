@@ -271,7 +271,7 @@ void CloudUploadSettingsWidget::deleteConfiguration(const QString& id) {
             return;
         }
         auto values = m_session.cloudUploadSettings();
-        values.configurations.removeIf([&id](const auto& value) { return value.id == id; });
+        snow::compat::removeIf(values.configurations, [&id](const auto& value) { return value.id == id; });
         if (values.defaultId == id)
             values.defaultId.clear();
         if (save(values))

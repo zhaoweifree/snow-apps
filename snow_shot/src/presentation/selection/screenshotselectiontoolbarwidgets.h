@@ -11,7 +11,6 @@
 #include <QRegion>
 #include <QWidget>
 
-class QEnterEvent;
 class QHideEvent;
 class QPainter;
 
@@ -51,7 +50,7 @@ class SelectionToolbarPanel final : public QFrame {
     void hoverChanged(bool hovered);
 
   protected:
-    void enterEvent(QEnterEvent* event) override;
+    void enterEvent(SnowEnterEvent* event) override;
     void hideEvent(QHideEvent* event) override;
     void leaveEvent(QEvent* event) override;
     void paintEvent(QPaintEvent* event) override;

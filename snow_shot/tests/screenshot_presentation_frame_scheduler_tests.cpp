@@ -1,7 +1,7 @@
 #include "snow_shot/presentation/screenshotpresentationframeclock.h"
 #include "snow_shot/presentation/screenshotpresentationframescheduler.h"
 
-#include <QChronoTimer>
+#include "snow_shot/compat/qt_compat.h"
 #include <QCoreApplication>
 #include <QEvent>
 #include <QEventLoop>
@@ -236,7 +236,7 @@ void qtBackendArmsOnlyTheRemainingDeadline() {
     int callbacks = 0;
     ScreenshotPresentationFrameScheduler scheduler([&] { return now; }, [&] { ++callbacks; },
                                                    Backend::QtTimer);
-    auto* timer = qobject_cast<QChronoTimer*>(scheduler.wakeupObject());
+    auto* timer = qobject_cast<SnowChronoTimer*>(scheduler.wakeupObject());
     require(timer && timer->isSingleShot() && timer->timerType() == Qt::PreciseTimer,
             "the Qt backend must retain a precise single-shot timer");
     WakeupObserver observer(timer);

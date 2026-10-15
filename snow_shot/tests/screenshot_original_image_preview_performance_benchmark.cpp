@@ -10,7 +10,7 @@
 #include <vector>
 
 #if defined(Q_OS_WIN) || defined(_WIN32)
-#include <QtGui/qscreen_platform.h>
+#include "snow_shot/platform/windows/monitorgeometry.h"
 #include <qt_windows.h>
 #endif
 
@@ -39,11 +39,10 @@ int main(int argc, char** argv) {
 #if defined(Q_OS_WIN) || defined(_WIN32)
     if (nativeBenchmark) {
         QScreen* screen = QGuiApplication::primaryScreen();
-        const auto* native =
-            screen ? screen->nativeInterface<QNativeInterface::QWindowsScreen>() : nullptr;
+        const auto native = snow_shot::platform::windows::nativeMonitorHandle(screen);
         MONITORINFO info{};
         info.cbSize = sizeof(info);
-        if (!native || GetMonitorInfoW(native->handle(), &info) == FALSE)
+        if (native == nullptr || GetMonitorInfoW(static_cast<HMONITOR>(native), &info) == FALSE)
             return 2;
         viewport.moveTopLeft(QPoint(info.rcWork.left + 500, info.rcWork.top + 100));
     }

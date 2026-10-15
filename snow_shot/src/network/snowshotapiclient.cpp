@@ -1106,7 +1106,7 @@ SnowShotApiClient::ensureChatModels(const QString& locale, QObject* receiver,
 
 void SnowShotApiClient::finishModelCatalogSubscribers(RequestToken owner,
                                                       SnowShotChatModelsResult result) {
-    m_pendingModelCatalogs.removeIf(
+    snow::compat::removeIf(m_pendingModelCatalogs, 
         [owner](QHash<QString, RequestToken>::iterator item) { return item.value() == owner; });
     const auto subscribers = m_modelCatalogSubscribers.take(owner);
     const QPointer<SnowShotApiClient> guard(this);
@@ -1783,7 +1783,7 @@ void SnowShotApiClient::cancel(RequestToken token) {
         request->report(QStringLiteral("cancelled"));
     const RequestToken catalogOwner = request->catalogOwner;
     const auto subscribers = m_modelCatalogSubscribers.take(token);
-    m_pendingModelCatalogs.removeIf(
+    snow::compat::removeIf(m_pendingModelCatalogs, 
         [token](QHash<QString, RequestToken>::iterator item) { return item.value() == token; });
     const bool translation = request->textTranslation;
     const bool custom = request->custom;

@@ -16,7 +16,7 @@ class PermissionGuideWidget final : public QWidget {
     void setPermission(AppPermission permission, AppPermissionStatus status, bool pending,
                        bool fallback);
     int heightForGuideWidth(int width) const;
-    void setColorScheme(Qt::ColorScheme scheme);
+    void setColorScheme(SnowColorScheme scheme);
     bool interacting() const {
         return m_interacting;
     }

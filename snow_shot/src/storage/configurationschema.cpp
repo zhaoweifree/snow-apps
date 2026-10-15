@@ -34,17 +34,17 @@
 namespace snow_shot::storage {
 namespace {
 QStringList editionActionIds(QStringList ids) {
-    ids.removeIf([](const QString& id) { return !presentation::editionActionToolAvailable(id); });
+    snow::compat::removeIf(ids, [](const QString& id) { return !presentation::editionActionToolAvailable(id); });
     return ids;
 }
 QVector<QStringList> editionActionPositions(QVector<QStringList> positions) {
     for (QStringList& position : positions) {
-        position.removeIf([](const QString& id) {
+        snow::compat::removeIf(position, [](const QString& id) {
             return !presentation::editionActionToolAvailable(id) ||
                    (app::edition::isMini && id == QStringLiteral("text-recognition"));
         });
     }
-    positions.removeIf([](const QStringList& position) { return position.isEmpty(); });
+    snow::compat::removeIf(positions, [](const QStringList& position) { return position.isEmpty(); });
     return positions;
 }
 const QStringList kDrawingToolIds = {
@@ -1731,7 +1731,7 @@ QVector<ConfigurationSchemaEntry> buildEntries() {
     replaceDefault(QStringLiteral("global_shortcuts/pin_clipboard_content"),
                    macGlobalShortcutDefault(QStringLiteral("Meta+3"), 20));
 #endif
-    result.removeIf([](const ConfigurationSchemaEntry& entry) {
+    snow::compat::removeIf(result, [](const ConfigurationSchemaEntry& entry) {
         return !presentation::editionConfigurationKeyAvailable(entry.key);
     });
     if constexpr (!app::edition::textTranslation) {
@@ -2199,7 +2199,7 @@ normalizeToolbarLayout(const QJsonValue& value, const QStringList& itemIds,
             for (const QString& id : hidden)
                 position.removeAll(id);
         }
-        defaults.removeIf([](const QStringList& position) { return position.isEmpty(); });
+        snow::compat::removeIf(defaults, [](const QStringList& position) { return position.isEmpty(); });
         return defaults;
     };
     if (!missingAnnotations.isEmpty() && positions == visibleDefaults(previousDrawingDefaults)) {
@@ -2270,7 +2270,7 @@ normalizeToolbarLayout(const QJsonValue& value, const QStringList& itemIds,
         // Upgrade earlier defaults without changing custom placements.
         auto previousScreenshotDefault = defaultPositions;
         if (known.contains(QStringLiteral("cancel"))) {
-            previousScreenshotDefault.removeIf([](const QStringList& position) {
+            snow::compat::removeIf(previousScreenshotDefault, [](const QStringList& position) {
                 return position == QStringList{QStringLiteral("separator")} ||
                        position == QStringList{QStringLiteral("cancel")} ||
                        position == QStringList{QStringLiteral("copy")};

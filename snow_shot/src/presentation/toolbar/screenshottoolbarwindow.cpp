@@ -121,7 +121,7 @@ void ScreenshotToolbarWindow::setToolbarLayout(
     }
 }
 
-void ScreenshotToolbarWindow::enterEvent(QEnterEvent* event) {
+void ScreenshotToolbarWindow::enterEvent(SnowEnterEvent* event) {
     m_commands.hideColorPickersForScreenshotUi();
     ScreenshotFloatingToolPaletteWindow::enterEvent(event);
 }

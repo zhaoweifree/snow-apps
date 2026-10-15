@@ -3,7 +3,7 @@
 #include "snow_shot/presentation/screenshotselectionsettingsstore.h"
 #include "widgets/select.h"
 
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QItemSelectionModel>
 #include <QKeyEvent>
 #include <QLineEdit>
@@ -179,7 +179,7 @@ void compoundSelectionsCanSwitchBetweenPreviousAndSavedPresets() {
                         !dropdown->lineEdit()->text().isEmpty(),
                     "a disabled current ratio must retain its value and indicator");
             const QPointF position(dropdown->rect().center());
-            QEnterEvent hover(position, position, dropdown->mapToGlobal(position.toPoint()));
+            SnowEnterEvent hover(position, position, dropdown->mapToGlobal(position.toPoint()));
             QApplication::sendEvent(dropdown, &hover);
             fixture.flush();
             require(dropdown->popupVisible(), "compound selection presets must open on hover");

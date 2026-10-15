@@ -163,7 +163,7 @@ void popupFontsKeepSmoothRendering() {
             submenu->setColorScheme(scheme);
             for (auto* popup : {&menu, submenu}) {
                 popup->ensurePolished();
-                for (auto type : {QEvent::LanguageChange, QEvent::DevicePixelRatioChange}) {
+                for (auto type : {QEvent::LanguageChange, snowDevicePixelRatioChange}) {
                     QEvent event(type);
                     QCoreApplication::sendEvent(popup, &event);
                 }

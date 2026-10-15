@@ -22,7 +22,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QFontMetricsF>
 #include <QFocusEvent>
 #include <QHideEvent>
@@ -1642,7 +1642,7 @@ void printScreenHookRecordsBeforeRegisteredHotkeys() {
             UnregisterHotKey(nullptr, id);
             QCoreApplication::instance()->removeNativeEventFilter(this);
         }
-        bool nativeEventFilter(const QByteArray&, void* message, qintptr*) override {
+        bool nativeEventFilter(const QByteArray&, void* message, snowNativeEventResult*) override {
             const auto& native = *static_cast<const MSG*>(message);
             if (native.message == WM_HOTKEY && native.wParam == id) {
                 ++activations;
@@ -2021,7 +2021,7 @@ void adjustableDelayUsesWheelAndClampsRange() {
             "scrolling over the delay title must persist and publish a one-second increment");
 
     const QPoint titlePoint = delayTitleLabel->rect().center();
-    QEnterEvent enterEvent(QPointF(titlePoint), QPointF(delayTitleLabel->mapTo(&row, titlePoint)),
+    SnowEnterEvent enterEvent(QPointF(titlePoint), QPointF(delayTitleLabel->mapTo(&row, titlePoint)),
                            QPointF(delayTitleLabel->mapToGlobal(titlePoint)));
     QCoreApplication::sendEvent(delayTitleLabel, &enterEvent);
     require(delayUnderline->isVisible() && delayUnderline->height() == 2 &&

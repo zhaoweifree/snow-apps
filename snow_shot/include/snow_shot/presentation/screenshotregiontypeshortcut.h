@@ -1,7 +1,6 @@
 #pragma once
 
-#include <QKeyCombination>
-
+#include "snow_shot/compat/qt_compat.h"
 [[nodiscard]] constexpr QKeyCombination screenshotRegionTypeCycleKey(bool reverse = false) {
 #ifdef Q_OS_MACOS
     // Qt maps the physical Control key to Meta on macOS.

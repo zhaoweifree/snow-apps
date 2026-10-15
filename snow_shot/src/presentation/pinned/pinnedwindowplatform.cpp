@@ -129,7 +129,7 @@ bool PinnedWindowPlatform::eventFilter(QObject* watched, QEvent* event) {
     } else if (event->type() == QEvent::WinIdChange || event->type() == QEvent::Show) {
         if (m_window->internalWinId() != 0)
             static_cast<void>(attach());
-    } else if (event->type() == QEvent::DevicePixelRatioChange ||
+    } else if (event->type() == snowDevicePixelRatioChange ||
                event->type() == QEvent::ScreenChangeInternal) {
         if (environmentChanged)
             environmentChanged(false);

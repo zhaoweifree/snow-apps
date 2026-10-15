@@ -639,13 +639,13 @@ void ScreenshotTableEditor::clearSelectionContents() {
 
 void ScreenshotTableEditor::mousePressEvent(QMouseEvent* event) {
     m_pointerDragged = false;
-    m_pressPosition = event != nullptr ? event->position().toPoint() : QPoint();
+    m_pressPosition = event != nullptr ? snowPos(event).toPoint() : QPoint();
     m_pressedIndex = event != nullptr ? anchorIndex(indexAt(m_pressPosition)) : QModelIndex();
     QTableView::mousePressEvent(event);
 }
 
 void ScreenshotTableEditor::mouseMoveEvent(QMouseEvent* event) {
-    if (event != nullptr && (event->position().toPoint() - m_pressPosition).manhattanLength() >=
+    if (event != nullptr && (snowPos(event).toPoint() - m_pressPosition).manhattanLength() >=
                                 QApplication::startDragDistance()) {
         m_pointerDragged = true;
     }
@@ -658,7 +658,7 @@ void ScreenshotTableEditor::mouseReleaseEvent(QMouseEvent* event) {
         event->modifiers() != Qt::NoModifier || !m_pressedIndex.isValid()) {
         return;
     }
-    const QModelIndex released = anchorIndex(indexAt(event->position().toPoint()));
+    const QModelIndex released = anchorIndex(indexAt(snowPos(event).toPoint()));
     if (released == m_pressedIndex) {
         setCurrentIndex(released);
         edit(released);
@@ -667,7 +667,7 @@ void ScreenshotTableEditor::mouseReleaseEvent(QMouseEvent* event) {
 
 void ScreenshotTableEditor::mouseDoubleClickEvent(QMouseEvent* event) {
     const QModelIndex index =
-        event != nullptr ? anchorIndex(indexAt(event->position().toPoint())) : QModelIndex();
+        event != nullptr ? anchorIndex(indexAt(snowPos(event).toPoint())) : QModelIndex();
     if (index.isValid()) {
         setCurrentIndex(index);
         edit(index);

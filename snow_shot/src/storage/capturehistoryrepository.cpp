@@ -1038,7 +1038,7 @@ class CaptureHistoryRepositoryImpl final : public CaptureHistoryRepository {
                 --count;
             }
         }
-        next.records.removeIf(
+        snow::compat::removeIf(next.records, 
             [&](const auto& record) { return victims.contains(record.record.id); });
     }
 

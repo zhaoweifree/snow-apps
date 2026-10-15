@@ -396,7 +396,7 @@ void mainWindowTitlesKeepSmoothRendering() {
             requireSmoothTitles(*card, titleSize);
             QEvent languageChange(QEvent::LanguageChange);
             QApplication::sendEvent(&window, &languageChange);
-            QEvent dpiChange(QEvent::DevicePixelRatioChange);
+            QEvent dpiChange(snowDevicePixelRatioChange);
             QApplication::sendEvent(&window, &dpiChange);
             flushEvents();
             requireSmoothTitles(*card, titleSize);
@@ -525,7 +525,7 @@ void mainWindowSkinIsContinuousAndRestoresTheme(const QString& previewDirectory)
             "an unset skin must use the original QWidget without any skin runtime or hooks");
     for (int step = 0; step < 12; ++step) {
         window.resize(900 + step, 640 + step);
-        QEvent dprChange(QEvent::DevicePixelRatioChange);
+        QEvent dprChange(snowDevicePixelRatioChange);
         QApplication::sendEvent(root, &dprChange);
         flushEvents();
     }

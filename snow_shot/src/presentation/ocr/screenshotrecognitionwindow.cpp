@@ -2155,10 +2155,10 @@ bool ScreenshotRecognitionWindow::handleSelectionResizeEvent(QObject* watched, Q
     }
 
     auto* mouseEvent = static_cast<QMouseEvent*>(event);
-    QPointF localPosition = mouseEvent->position();
+    QPointF localPosition = snowPos(mouseEvent);
     if (auto* watchedWidget = qobject_cast<QWidget*>(watched);
         watchedWidget != nullptr && watchedWidget != this) {
-        localPosition = QPointF(watchedWidget->mapTo(this, mouseEvent->position().toPoint()));
+        localPosition = QPointF(watchedWidget->mapTo(this, snowPos(mouseEvent).toPoint()));
     }
     const QPointF canvasPosition = canvasPositionForLocalPoint(localPosition);
     const QPointer<ScreenshotRecognitionWindow> lifetime(this);
@@ -2251,14 +2251,14 @@ bool ScreenshotRecognitionWindow::forwardFormattedTextPointerEvent(QObject* watc
         return false;
     }
     auto* mouse = static_cast<QMouseEvent*>(event);
-    const QPointF local = m_formattedTextLayer->viewport()->mapTo(this, mouse->position());
+    const QPointF local = m_formattedTextLayer->viewport()->mapTo(this, snowPos(mouse));
     if (!isOcrBackgroundAt(local) &&
         !mouse->modifiers().testAnyFlags(Qt::ControlModifier | Qt::AltModifier)) {
         return false;
     }
     // Blank document space belongs to the host's pin gestures, including double-clicks.
     // An active native text selection retains every phase of its mouse gesture.
-    QMouseEvent forwarded(mouse->type(), local, mapTo(window(), local), mouse->globalPosition(),
+    QMouseEvent forwarded(mouse->type(), local, mapTo(window(), local), snowGlobalPos(mouse),
                           mouse->button(), mouse->buttons(), mouse->modifiers(), mouse->source(),
                           mouse->pointingDevice());
     forwarded.setTimestamp(mouse->timestamp());
@@ -2284,7 +2284,7 @@ bool ScreenshotRecognitionWindow::eventFilter(QObject* watched, QEvent* event) {
         case QEvent::WindowDeactivate:
         case QEvent::UngrabMouse:
         case QEvent::ScreenChangeInternal:
-        case QEvent::DevicePixelRatioChange:
+        case snowDevicePixelRatioChange:
             cancelLineBoxSelection();
             break;
         default:
@@ -2307,7 +2307,7 @@ bool ScreenshotRecognitionWindow::eventFilter(QObject* watched, QEvent* event) {
         case QEvent::Resize:
         case QEvent::WindowStateChange:
         case QEvent::ScreenChangeInternal:
-        case QEvent::DevicePixelRatioChange:
+        case snowDevicePixelRatioChange:
         case QEvent::WinIdChange:
         case QEvent::PlatformSurface:
             refreshOriginalImagePreview();
@@ -2366,13 +2366,13 @@ void ScreenshotRecognitionWindow::mousePressEvent(QMouseEvent* event) {
     if (event != nullptr && event->button() == Qt::LeftButton && !m_showOriginalImage &&
         m_ocrPresentation != nullptr) {
         setFocus(Qt::MouseFocusReason);
-        const QPointF canvasPosition = canvasPositionForLocalPoint(event->position());
+        const QPointF canvasPosition = canvasPositionForLocalPoint(snowPos(event));
         const ScreenshotOcrTextPosition textPosition =
             m_textLayer->textPositionAt(canvasPosition, false);
         if (boxSelectionEnabled() && event->modifiers() == Qt::NoModifier &&
             !textPosition.valid()) {
             cancelLineBoxSelection();
-            m_lineBoxPressPosition = event->position();
+            m_lineBoxPressPosition = snowPos(event);
             m_lineBoxThresholdReached = false;
             m_ocrPresentation->beginLineBoxSelection(canvasPosition);
             grabMouse();
@@ -2400,7 +2400,7 @@ void ScreenshotRecognitionWindow::mouseDoubleClickEvent(QMouseEvent* event) {
         event->accept();
         if (m_selectionResizeActive)
             return;
-        const auto dragMode = selectionResizeDragModeAtLocalPoint(event->position());
+        const auto dragMode = selectionResizeDragModeAtLocalPoint(snowPos(event));
         if (!lifetime || dragMode != ScreenshotSelectionDragMode::None)
             return;
         event->setAccepted(wasAccepted);
@@ -2412,7 +2412,7 @@ void ScreenshotRecognitionWindow::mouseDoubleClickEvent(QMouseEvent* event) {
     }
 
     const ScreenshotOcrTextPosition position =
-        m_textLayer->textPositionAt(canvasPositionForLocalPoint(event->position()), false);
+        m_textLayer->textPositionAt(canvasPositionForLocalPoint(snowPos(event)), false);
     if (!position.valid() || m_ocrPresentation->lines.at(position.lineIndex).text.isEmpty()) {
         QWidget::mouseDoubleClickEvent(event);
         return;
@@ -2491,7 +2491,7 @@ void ScreenshotRecognitionWindow::mouseMoveEvent(QMouseEvent* event) {
         if (!event->buttons().testFlag(Qt::LeftButton)) {
             cancelLineBoxSelection();
         } else {
-            updateLineBoxSelection(event->position());
+            updateLineBoxSelection(snowPos(event));
             setCursor(Qt::CrossCursor);
             event->accept();
             return;
@@ -2501,7 +2501,7 @@ void ScreenshotRecognitionWindow::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     if (event != nullptr && !m_showOriginalImage && m_ocrPresentation != nullptr) {
-        const QPointF canvasPosition = canvasPositionForLocalPoint(event->position());
+        const QPointF canvasPosition = canvasPositionForLocalPoint(snowPos(event));
         const ScreenshotOcrTextPosition exactPosition =
             m_textLayer->textPositionAt(canvasPosition, false);
         if (m_ocrPresentation->textSelectionActive()) {
@@ -2522,7 +2522,7 @@ void ScreenshotRecognitionWindow::mouseMoveEvent(QMouseEvent* event) {
 
 void ScreenshotRecognitionWindow::mouseReleaseEvent(QMouseEvent* event) {
     if (event != nullptr && event->button() == Qt::LeftButton && m_lineBoxPressPosition) {
-        updateLineBoxSelection(event->position());
+        updateLineBoxSelection(snowPos(event));
         const bool boxDragged = m_lineBoxThresholdReached;
         m_lineBoxPressPosition.reset();
         m_lineBoxThresholdReached = false;
@@ -2535,7 +2535,7 @@ void ScreenshotRecognitionWindow::mouseReleaseEvent(QMouseEvent* event) {
         if (QWidget::mouseGrabber() == this) {
             releaseMouse();
         }
-        updateSelectionResizeCursor(event->position());
+        updateSelectionResizeCursor(snowPos(event));
         event->accept();
         return;
     }
@@ -2546,7 +2546,7 @@ void ScreenshotRecognitionWindow::mouseReleaseEvent(QMouseEvent* event) {
         m_ocrPresentation != nullptr && m_ocrPresentation->textSelectionActive()) {
         const quint64 previousRevision = m_ocrPresentation->selectionRevision();
         m_ocrPresentation->updateTextSelection(
-            m_textLayer->textPositionAt(canvasPositionForLocalPoint(event->position()), true));
+            m_textLayer->textPositionAt(canvasPositionForLocalPoint(snowPos(event)), true));
         m_ocrPresentation->finishTextSelection();
         if (m_ocrPresentation->selectionRevision() != previousRevision) {
             m_textLayer->updateSelection();

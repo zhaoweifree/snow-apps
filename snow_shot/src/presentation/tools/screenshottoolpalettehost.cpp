@@ -22,7 +22,7 @@ QPoint globalMousePosition(const QMouseEvent* event) {
         return {};
     }
 
-    return event->globalPosition().toPoint();
+    return snowGlobalPos(event).toPoint();
 }
 
 } // namespace

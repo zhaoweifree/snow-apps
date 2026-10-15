@@ -1402,7 +1402,7 @@ void effectsPreviewPhysicalPixels() {
                 cleared.pixelColor(qRound(center.x() / dpr), qRound(center.y() / dpr)).alpha() == 0,
             "expired effects must clear their display-scaled canvas regions");
         for (const auto eventType :
-             {QEvent::DevicePixelRatioChange, QEvent::ScreenChangeInternal}) {
+             {snowDevicePixelRatioChange, QEvent::ScreenChangeInternal}) {
             const int startsBeforeScaleChange = state->starts;
             const quint64 generationBeforeScaleChange = preview.generation();
             QEvent scaleChange(eventType);
@@ -4719,7 +4719,7 @@ void recordingTrimmingTests(const QString& directory, bool uiOnly = false) {
                     first->clearFocus();
                     end->clearFocus();
                     saveState(QStringLiteral("rest"));
-                    QEnterEvent enter{QPointF(), QPointF(), QPointF()};
+                    SnowEnterEvent enter{QPointF(), QPointF(), QPointF()};
                     QApplication::sendEvent(end, &enter);
                     saveState(QStringLiteral("hover"));
                     QEvent leave(QEvent::Leave);

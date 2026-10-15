@@ -152,7 +152,7 @@ bool RecordingColorSampler::eventFilter(QObject* watched, QEvent* event) {
         return true;
     if (event->type() == QEvent::MouseMove) {
         if (canvasInput)
-            static_cast<void>(previewAt(static_cast<QMouseEvent*>(event)->globalPosition()));
+            static_cast<void>(previewAt(snowGlobalPos(static_cast<QMouseEvent*>(event))));
         else
             m_preview->hide();
         return canvasInput;
@@ -174,7 +174,7 @@ bool RecordingColorSampler::eventFilter(QObject* watched, QEvent* event) {
         return true;
     const QPointer<adqt::widgets::AdColorPicker> picker = m_target;
     const QImage preview =
-        mouse->button() == Qt::LeftButton ? previewAt(mouse->globalPosition()) : QImage();
+        mouse->button() == Qt::LeftButton ? previewAt(snowGlobalPos(mouse)) : QImage();
     cancel();
     if (picker && !preview.isNull()) {
         picker->commitValue(adqt::widgets::AdColorValue::solid(

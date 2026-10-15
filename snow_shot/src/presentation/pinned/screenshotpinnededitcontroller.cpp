@@ -218,7 +218,7 @@ bool ScreenshotPinnedEditController::eventFilter(QObject* watched, QEvent* event
         event->type() == QEvent::MouseButtonDblClick || event->type() == QEvent::Wheel) {
         const QPointF local = event->type() == QEvent::Wheel
                                   ? static_cast<QWheelEvent*>(event)->position()
-                                  : static_cast<QMouseEvent*>(event)->position();
+                                  : snowPos(static_cast<QMouseEvent*>(event));
         if (!m_pinnedWindow.contentViewRect().contains(
                 m_pinnedWindow.windowPositionForEvent(watched, local))) {
             // The host owns the reserved frame, including while a color picker
@@ -233,8 +233,8 @@ bool ScreenshotPinnedEditController::eventFilter(QObject* watched, QEvent* event
         case QEvent::MouseMove: {
             auto* mouseEvent = static_cast<QMouseEvent*>(event);
             updateCanvasColorSamplingPreviewAtPhysicalPoint(
-                canvasColorPhysicalPositionAt(mouseEvent->position()),
-                mouseEvent->globalPosition().toPoint());
+                canvasColorPhysicalPositionAt(snowPos(mouseEvent)),
+                snowGlobalPos(mouseEvent).toPoint());
             mouseEvent->accept();
             return true;
         }
@@ -245,7 +245,7 @@ bool ScreenshotPinnedEditController::eventFilter(QObject* watched, QEvent* event
                 cancelCanvasColorSampling();
             } else if (mouseEvent->button() == Qt::LeftButton) {
                 static_cast<void>(commitCanvasColorSampleAtPhysicalPoint(
-                    canvasColorPhysicalPositionAt(mouseEvent->position())));
+                    canvasColorPhysicalPositionAt(snowPos(mouseEvent))));
             }
             mouseEvent->accept();
             return true;

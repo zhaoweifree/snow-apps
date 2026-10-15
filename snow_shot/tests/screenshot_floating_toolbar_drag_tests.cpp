@@ -51,7 +51,7 @@
 #include <vector>
 
 #if defined(Q_OS_WIN) || defined(_WIN32)
-#include <QtGui/qscreen_platform.h>
+#include "snow_shot/platform/windows/monitorgeometry.h"
 #include <qt_windows.h>
 #ifndef WM_GETDPISCALEDSIZE
 #define WM_GETDPISCALEDSIZE 0x02E4
@@ -67,7 +67,7 @@ class ScreenshotFloatingToolPaletteWindowTestAccess {
   public:
     static void simulateDpr(ScreenshotFloatingToolPaletteWindow& window, qreal dpr) {
         window.m_testWindowDevicePixelRatio = dpr;
-        QEvent change(QEvent::DevicePixelRatioChange);
+        QEvent change(snowDevicePixelRatioChange);
         QApplication::sendEvent(&window, &change);
     }
 
@@ -143,7 +143,7 @@ class LayeredSurfaceMonitor final : public QAbstractNativeEventFilter {
     }
     int resets = 0;
 
-    bool nativeEventFilter(const QByteArray&, void* message, qintptr*) override {
+    bool nativeEventFilter(const QByteArray&, void* message, snowNativeEventResult*) override {
         const auto* msg = static_cast<MSG*>(message);
         if (msg->hwnd == reinterpret_cast<HWND>(m_id) && msg->message == WM_STYLECHANGED &&
             msg->wParam == static_cast<WPARAM>(GWL_EXSTYLE)) {
@@ -389,10 +389,9 @@ QPoint monitorCenter(const HardwareMonitor& monitor) {
 
 QScreen* qtScreenForMonitor(const HardwareMonitor& monitor) {
     for (QScreen* screen : QGuiApplication::screens()) {
-        auto* nativeScreen = screen != nullptr
-                                 ? screen->nativeInterface<QNativeInterface::QWindowsScreen>()
-                                 : nullptr;
-        if (nativeScreen != nullptr && nativeScreen->handle() == monitor.handle) {
+        const HMONITOR nativeScreen =
+            static_cast<HMONITOR>(snow_shot::platform::windows::nativeMonitorHandle(screen));
+        if (nativeScreen != nullptr && nativeScreen == monitor.handle) {
             return screen;
         }
     }

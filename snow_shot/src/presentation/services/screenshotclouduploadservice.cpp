@@ -188,7 +188,7 @@ void ScreenshotCloudUploadJob::prepare() {
                     const auto bytesRead = file.read(buffer.data(), buffer.size());
                     if (bytesRead <= 0)
                         return QByteArray{};
-                    hash.addData(QByteArrayView(buffer.constData(), bytesRead));
+                    hash.addData(buffer.constData(), static_cast<int>(bytesRead));
                 }
                 return hash.result().toHex();
             })));

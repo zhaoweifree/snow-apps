@@ -76,7 +76,7 @@ class HashedOutput final : public QIODevice {
     qint64 writeData(const char* data, qint64 size) override {
         const qint64 written = m_output.write(data, size);
         if (written > 0) {
-            m_hash.addData(QByteArrayView(data, written));
+            m_hash.addData(data, static_cast<int>(written));
             m_count += written;
         }
         if (written != size)

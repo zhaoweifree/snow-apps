@@ -1140,10 +1140,10 @@ void formattedTextUsesOwningDisplayDevicePixelRatio() {
                 qFuzzyCompare(highDpi->formattedTextDevicePixelRatio, 2.0),
             "formatted text should allocate its physical backing image from the owning display "
             "DPR");
-    require(qFuzzyCompare(highDpi->image.deviceIndependentSize().width(),
-                          standard->image.deviceIndependentSize().width()) &&
-                qFuzzyCompare(highDpi->image.deviceIndependentSize().height(),
-                              standard->image.deviceIndependentSize().height()) &&
+    require(qFuzzyCompare(snowDeviceIndependentSize(highDpi->image).width(),
+                          snowDeviceIndependentSize(standard->image).width()) &&
+                qFuzzyCompare(snowDeviceIndependentSize(highDpi->image).height(),
+                              snowDeviceIndependentSize(standard->image).height()) &&
                 qFuzzyCompare(highDpi->formattedDocument->textWidth(),
                               standard->formattedDocument->textWidth()),
             "display DPR should not change the formatted document's logical layout size");

@@ -35,7 +35,7 @@ QString encodeThemeMode(ThemeMode mode) {
 
 ThemeAppearance systemThemeAppearance() {
     const QStyleHints* styleHints = QApplication::styleHints();
-    if (styleHints != nullptr && styleHints->colorScheme() == Qt::ColorScheme::Dark) {
+    if (styleHints != nullptr && snowColorScheme(styleHints) == SnowColorSchemeDark) {
         return ThemeAppearance::Dark;
     }
     return ThemeAppearance::Light;
@@ -238,7 +238,9 @@ void ThemeManager::initialize(QApplication& application) {
 
     if (QStyleHints* styleHints = QApplication::styleHints(); styleHints != nullptr) {
         m_systemColorSchemeConnection =
-            connect(styleHints, &QStyleHints::colorSchemeChanged, this, [this](Qt::ColorScheme) {
+            // Qt5: no QStyleHints::colorSchemeChanged; helper falls back to
+            // QGuiApplication::paletteChanged (compat/qt_compat.h section 14b).
+            snowConnectColorSchemeChanged(styleHints, this, [this](SnowColorScheme) {
                 if (m_mode == ThemeMode::FollowSystem) {
                     applyThemeMode();
                 }
@@ -300,7 +302,7 @@ void ThemeManager::setThemeStyleConfig(const ThemeStyleConfig& config) {
 }
 
 QString ThemeManager::appFontFamily() const {
-    return (m_config.appFont.resolveMask() & (QFont::FamilyResolved | QFont::FamiliesResolved)) != 0
+    return (snowFontResolveMask(m_config.appFont) & (QFont::FamilyResolved | QFont::FamiliesResolved)) != 0
                ? m_config.appFont.family()
                : QString();
 }
@@ -352,7 +354,7 @@ void ThemeManager::applyFontSize(ThemeStyleConfig& config) const {
         config.appFont.setPixelSize(qRound(m_baseAppFont.pixelSize() * scale));
     }
     if (m_appFontSizePercentage == 100) {
-        config.appFont.setResolveMask(config.appFont.resolveMask() &
+        config.appFont.setResolveMask(snowFontResolveMask(config.appFont) &
                                       ~static_cast<uint>(QFont::SizeResolved));
     }
 }

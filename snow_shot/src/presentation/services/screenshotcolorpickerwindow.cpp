@@ -230,7 +230,7 @@ void ScreenshotColorPickerWindow::setOwnerWindow(QWidget* owner) {
         return;
     }
 
-    setScreen(owner->screen());
+    snowSetWidgetScreen(this, owner->screen());
     // The initial native geometry must also belong to the owner's monitor.
     // Leaving it at (0, 0) can select another monitor's DPI before first reveal.
     move(owner->mapToGlobal(owner->rect().center()) - rect().center());

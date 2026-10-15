@@ -871,7 +871,7 @@ bool ScreenshotOverlayWindow::event(QEvent* event) {
     }
     if (event != nullptr &&
         (event->type() == QEvent::Resize || event->type() == QEvent::ScreenChangeInternal ||
-         event->type() == QEvent::DevicePixelRatioChange ||
+         event->type() == snowDevicePixelRatioChange ||
          event->type() == QEvent::PlatformSurface)) {
         cancelBackingStorePreparation();
     }
@@ -884,7 +884,7 @@ bool ScreenshotOverlayWindow::event(QEvent* event) {
         retirePresentation();
         clearScrollingResultPreview();
     }
-    if (event != nullptr && (event->type() == QEvent::DevicePixelRatioChange ||
+    if (event != nullptr && (event->type() == snowDevicePixelRatioChange ||
                              event->type() == QEvent::ScreenChangeInternal)) {
         updateScrollingResultPreviewReadout();
     }
@@ -1097,7 +1097,7 @@ bool ScreenshotOverlayWindow::handleCanvasEvent(QEvent* event) {
         return true;
     }
     if (event->type() == QEvent::MouseMove && m_screenshotRenderer) {
-        const QPointF position = static_cast<QMouseEvent*>(event)->position();
+        const QPointF position = snowPos(static_cast<QMouseEvent*>(event));
         if (!m_eventSink.presentOverlayPointer(this, position))
             m_screenshotRenderer->setGuideCursorPosition(position);
     }
@@ -1136,17 +1136,17 @@ bool ScreenshotOverlayWindow::handleCanvasMouseEvent(QMouseEvent* event) {
     }
 
     if (event->type() == QEvent::MouseButtonDblClick && event->button() == Qt::LeftButton &&
-        m_eventSink.handleEffectDoubleClick(this, event->position())) {
+        m_eventSink.handleEffectDoubleClick(this, snowPos(event))) {
         event->accept();
         return true;
     }
     if (event->type() == QEvent::MouseButtonDblClick && event->button() == Qt::LeftButton &&
-        m_eventSink.handleRegionDoubleClick(this, event->position())) {
+        m_eventSink.handleRegionDoubleClick(this, snowPos(event))) {
         event->accept();
         return true;
     }
     if (event->type() == QEvent::MouseButtonPress && event->button() == Qt::RightButton) {
-        const auto action = m_eventSink.handleOverlayRightClick(this, event->position());
+        const auto action = m_eventSink.handleOverlayRightClick(this, snowPos(event));
         if (action == ScreenshotOverlayRightClickResult::CancelCapture) {
             static_cast<void>(m_mouseReleaseAction.arm(
                 this, Qt::RightButton, [this] { m_eventSink.completeRightClickCancellation(); }));
@@ -1167,13 +1167,13 @@ bool ScreenshotOverlayWindow::handleCanvasMouseEvent(QMouseEvent* event) {
 
     if (event->type() == QEvent::MouseMove && !event->buttons().testFlag(Qt::LeftButton)) {
         m_eventSink.cancelEffectDrag();
-        m_eventSink.handleOverlayMouseMove(this, event->position());
+        m_eventSink.handleOverlayMouseMove(this, snowPos(event));
     }
 
     const bool leftButtonActive = event->type() == QEvent::MouseButtonPress
                                       ? event->button() == Qt::LeftButton
                                       : event->buttons().testFlag(Qt::LeftButton);
-    if (!m_eventSink.shouldHandleOverlayMouseEvent(this, event->position(), leftButtonActive)) {
+    if (!m_eventSink.shouldHandleOverlayMouseEvent(this, snowPos(event), leftButtonActive)) {
         if (event->type() == QEvent::MouseButtonPress) {
             m_eventSink.raiseToolbarForCanvasInteraction();
         }
@@ -1203,12 +1203,12 @@ bool ScreenshotOverlayWindow::dispatchHandledMouseEvent(QMouseEvent* event) {
     }
 
     if (event->type() == QEvent::MouseButtonPress && event->button() == Qt::LeftButton) {
-        m_eventSink.handleOverlayMousePress(this, event->position());
+        m_eventSink.handleOverlayMousePress(this, snowPos(event));
         event->accept();
         return true;
     }
     if (event->type() == QEvent::MouseMove && event->buttons().testFlag(Qt::LeftButton)) {
-        m_eventSink.handleOverlayMouseMove(this, event->position());
+        m_eventSink.handleOverlayMouseMove(this, snowPos(event));
         event->accept();
         return true;
     }
@@ -1217,7 +1217,7 @@ bool ScreenshotOverlayWindow::dispatchHandledMouseEvent(QMouseEvent* event) {
         return true;
     }
     if (event->type() == QEvent::MouseButtonRelease && event->button() == Qt::LeftButton) {
-        m_eventSink.handleOverlayMouseRelease(this, event->position());
+        m_eventSink.handleOverlayMouseRelease(this, snowPos(event));
         event->accept();
         return true;
     }

@@ -656,7 +656,7 @@ QJsonObject environmentMetadata() {
         {QStringLiteral("cpu_identifier"), QString::fromLocal8Bit(qgetenv("PROCESSOR_IDENTIFIER"))},
         {QStringLiteral("logical_cpu_count"), QThread::idealThreadCount()},
         {QStringLiteral("qt_version"), QString::fromLatin1(qVersion())},
-        {QStringLiteral("qt_library_path"), QLibraryInfo::path(QLibraryInfo::LibrariesPath)},
+        {QStringLiteral("qt_library_path"), snowLibraryInfoPath(QLibraryInfo::LibrariesPath)},
         {QStringLiteral("compiler"), compilerDescription()},
 #if defined(NDEBUG)
         {QStringLiteral("build_configuration"), QStringLiteral("release")},

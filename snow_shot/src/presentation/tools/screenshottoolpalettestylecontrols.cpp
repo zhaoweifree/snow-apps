@@ -319,7 +319,7 @@ int watermarkTemplateIndex(const QString& key) {
         return -1;
     }
     bool ok = false;
-    const int index = key.sliced(QStringLiteral("watermark-template:").size()).toInt(&ok);
+    const int index = key.mid(QStringLiteral("watermark-template:").size()).toInt(&ok);
     return ok ? index : -1;
 }
 
@@ -405,11 +405,11 @@ class WatermarkTemplateOptionActionDelegate final : public QAbstractItemDelegate
         }
 
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
-        const QModelIndex index = m_view->indexAt(mouseEvent->position().toPoint());
+        const QModelIndex index = m_view->indexAt(snowPos(mouseEvent).toPoint());
         const QString key = index.data(Qt::UserRole).toString();
         const bool overAction = index.isValid() && isWatermarkTemplateKey(key) &&
                                 watermarkTemplateActionRect(m_view->visualRect(index))
-                                    .contains(mouseEvent->position().toPoint());
+                                    .contains(snowPos(mouseEvent).toPoint());
         setHoveredActionKey(overAction ? key : QString());
         if (event->type() == QEvent::MouseMove || mouseEvent->button() != Qt::LeftButton) {
             return false;

@@ -79,7 +79,7 @@ void MainWindowSkinWidget::resizeEvent(QResizeEvent* event) {
 
 bool MainWindowSkinWidget::event(QEvent* event) {
     if (event->type() != QEvent::Show && event->type() != QEvent::Hide &&
-        event->type() != QEvent::DevicePixelRatioChange) {
+        event->type() != snowDevicePixelRatioChange) {
         return QWidget::event(event);
     }
     const QPointer<MainWindowSkinWidget> lifetime(this);
@@ -100,7 +100,7 @@ bool MainWindowSkinWidget::event(QEvent* event) {
             syncFrame();
         }
     } else if (m_controller && m_attached &&
-               (event->type() == QEvent::DevicePixelRatioChange || event->type() == QEvent::Show)) {
+               (event->type() == snowDevicePixelRatioChange || event->type() == QEvent::Show)) {
         m_controller->setViewport(this, size(), devicePixelRatioF(), true);
     }
     return handled;

@@ -38,7 +38,7 @@
 #include <QCoreApplication>
 #include <QClipboard>
 #include <QDir>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QCursor>
 #include <QEventLoop>
 #include <QComboBox>
@@ -571,7 +571,7 @@ void recordingPostProcessingOptionsBindState() {
                          if (visible)
                              loop.quit();
                      });
-    QEnterEvent enter(local, button->mapTo(button->window(), local), button->mapToGlobal(local));
+    SnowEnterEvent enter(local, button->mapTo(button->window(), local), button->mapToGlobal(local));
     QCoreApplication::sendEvent(button, &enter);
     QTimer::singleShot(2000, &loop, &QEventLoop::quit);
     if (!popover->isVisible())
@@ -3974,7 +3974,7 @@ void tableBusyStatePreservesSiblingGroupPopovers(bool recoverFromMove = false) {
                              }
                          });
         const QPoint local = trigger->rect().center();
-        QEnterEvent enter(local, trigger->mapTo(trigger->window(), local),
+        SnowEnterEvent enter(local, trigger->mapTo(trigger->window(), local),
                           trigger->mapToGlobal(local));
         if (recoverFromMove) {
             QMouseEvent move(QEvent::MouseMove, local, trigger->mapToGlobal(local), Qt::NoButton,
@@ -5407,7 +5407,7 @@ void pinnedActionLayoutUsesGenericStacks() {
     expected.positions.append({QStringLiteral("confirm-separator")});
     expected.positions.append({QStringLiteral("confirm")});
     const auto buttonPositions = [](ScreenshotToolbarLayout value) {
-        value.positions.removeIf([](const QStringList& position) {
+        snow::compat::removeIf(value.positions, [](const QStringList& position) {
             return std::any_of(position.cbegin(), position.cend(), layout::isSeparator);
         });
         return value.positions;

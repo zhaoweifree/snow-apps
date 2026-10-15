@@ -8,7 +8,6 @@
 
 #include <QRect>
 
-class QEnterEvent;
 class QScreen;
 class ScreenshotToolbarCommandSink;
 
@@ -61,7 +60,7 @@ class ScreenshotToolbarWindow final : public ScreenshotFloatingToolPaletteWindow
     void resetPositionForSelection(const QPoint& position);
 
   protected:
-    void enterEvent(QEnterEvent* event) override;
+    void enterEvent(SnowEnterEvent* event) override;
 
   private:
     void initializePalette();

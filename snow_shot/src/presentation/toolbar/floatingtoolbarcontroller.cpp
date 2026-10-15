@@ -159,7 +159,7 @@ class DropSurface final : public QWidget {
     bool isDropReady() const {
         return m_dropReady;
     }
-    void enterEvent(QEnterEvent* event) override {
+    void enterEvent(SnowEnterEvent* event) override {
         setHovered(true);
         QWidget::enterEvent(event);
     }
@@ -480,7 +480,7 @@ class FloatingToolbarController::Impl {
     adqt::widgets::AdContextMenu* makeMenu(QWidget* parent) {
         auto* menu = new adqt::widgets::AdContextMenu(parent);
         menu->setDeleteOnHide();
-        menus.removeIf([](const auto& entry) { return entry.isNull(); });
+        snow::compat::removeIf(menus, [](const auto& entry) { return entry.isNull(); });
         menus.push_back(menu);
         QObject::connect(menu, &QMenu::aboutToShow, &q, [this] {
             ++menuDepth;
@@ -572,7 +572,7 @@ class FloatingToolbarController::Impl {
         if (overflow)
             delete overflow;
         overflow = nullptr;
-        menus.removeIf([](const auto& menu) { return menu.isNull(); });
+        snow::compat::removeIf(menus, [](const auto& menu) { return menu.isNull(); });
         panel->resetContentLayout();
         const auto layout = toolbar_layout::normalizedLayout(
             storage::ScreenshotToolbarSettings().layout(kKind), kKind);
@@ -939,14 +939,14 @@ class FloatingToolbarController::Impl {
                 pressed = true;
                 dragging = false;
                 static_cast<QAbstractButton*>(watched)->setDown(true);
-                pressPosition = mouse->globalPosition().toPoint();
+                pressPosition = snowGlobalPos(mouse).toPoint();
                 pressAnchor = toolbarMode ? toolbarIcon->mapToGlobal(QPoint()) : anchor;
                 reveal.stop();
                 return true;
             }
         } else if (handle && event->type() == QEvent::MouseMove && pressed) {
             auto* mouse = static_cast<QMouseEvent*>(event);
-            const auto delta = mouse->globalPosition().toPoint() - pressPosition;
+            const auto delta = snowGlobalPos(mouse).toPoint() - pressPosition;
             if (!dragging && delta.manhattanLength() >= QApplication::startDragDistance()) {
                 dragRight = right();
                 dragging = true;
@@ -956,7 +956,7 @@ class FloatingToolbarController::Impl {
                 static_cast<QWidget*>(watched)->setCursor(Qt::ClosedHandCursor);
             }
             if (dragging) {
-                if (auto* next = QGuiApplication::screenAt(mouse->globalPosition().toPoint()))
+                if (auto* next = QGuiApplication::screenAt(snowGlobalPos(mouse).toPoint()))
                     screen = next;
                 anchor = pressAnchor + delta;
                 place();

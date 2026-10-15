@@ -106,7 +106,7 @@ void ScreenshotCanvasColorSamplerWindow::beginSampling(QWidget* owner) {
     if (owner->windowHandle() == nullptr) {
         static_cast<void>(owner->winId());
     }
-    setScreen(owner->screen());
+    snowSetWidgetScreen(this, owner->screen());
     // Keep controller ownership, but join the sampling window's transient hierarchy.
     // On macOS this lets the screenshot stacking policy elevate the HUD above its
     // owner; an unowned stays-on-top tool remains below the screenshot overlay.

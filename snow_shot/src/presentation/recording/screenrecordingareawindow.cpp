@@ -25,7 +25,7 @@
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
 
 #include <QEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -432,15 +432,15 @@ bool ScreenRecordingAreaWindow::eventFilter(QObject* watched, QEvent* event) {
         return QWidget::eventFilter(watched, event);
     if (watched == m_canvas && regionEditingEnabled()) {
         if (event->type() == QEvent::Enter) {
-            updateRegionCursor(mapFromGlobal(static_cast<QEnterEvent*>(event)->globalPosition()));
+            updateRegionCursor(mapFromGlobal(snowGlobalPos(static_cast<SnowEnterEvent*>(event))));
         } else if (event->type() == QEvent::MouseMove) {
-            updateRegionCursor(mapFromGlobal(static_cast<QMouseEvent*>(event)->globalPosition()));
+            updateRegionCursor(mapFromGlobal(snowGlobalPos(static_cast<QMouseEvent*>(event))));
         } else if (event->type() == QEvent::MouseButtonPress ||
                    event->type() == QEvent::MouseButtonDblClick) {
             auto* mouse = static_cast<QMouseEvent*>(event);
-            const auto edges = resizeEdgesAt(mapFromGlobal(mouse->globalPosition()));
+            const auto edges = resizeEdgesAt(mapFromGlobal(snowGlobalPos(mouse)));
             if (mouse->button() == Qt::LeftButton && edges) {
-                beginRegionDrag(regionPointer(mouse->globalPosition()), edges);
+                beginRegionDrag(regionPointer(snowGlobalPos(mouse)), edges);
                 return true;
             }
         }
@@ -456,7 +456,7 @@ bool ScreenRecordingAreaWindow::eventFilter(QObject* watched, QEvent* event) {
         if (m_gestureButton == Qt::NoButton &&
             (mouse->button() == Qt::LeftButton ||
              (mouse->button() == Qt::RightButton &&
-              m_canvas->hasQuickSelectionTargetAt(mouse->position(), Qt::RightButton)))) {
+              m_canvas->hasQuickSelectionTargetAt(snowPos(mouse), Qt::RightButton)))) {
             m_gestureButton = mouse->button();
         }
         break;
@@ -843,7 +843,7 @@ bool ScreenRecordingAreaWindow::event(QEvent* event) {
     const bool handled = QWidget::event(event);
     // A translucent backing-store flush can round the native surface by one pixel
     // after the last resize event, without delivering another logical resize.
-    if (event->type() == QEvent::UpdateRequest || event->type() == QEvent::DevicePixelRatioChange ||
+    if (event->type() == QEvent::UpdateRequest || event->type() == snowDevicePixelRatioChange ||
         event->type() == QEvent::ScreenChangeInternal) {
         synchronizeWindowGeometry();
     }
@@ -867,16 +867,16 @@ void ScreenRecordingAreaWindow::closeEvent(QCloseEvent* event) {
     emit closeRequested();
 }
 
-void ScreenRecordingAreaWindow::enterEvent(QEnterEvent* event) {
+void ScreenRecordingAreaWindow::enterEvent(SnowEnterEvent* event) {
     if (regionEditingEnabled())
-        updateRegionCursor(event->position());
+        updateRegionCursor(snowPos(event));
     QWidget::enterEvent(event);
 }
 
 void ScreenRecordingAreaWindow::mousePressEvent(QMouseEvent* event) {
-    const auto edges = resizeEdgesAt(event->position());
+    const auto edges = resizeEdgesAt(snowPos(event));
     if (event->button() == Qt::LeftButton && (edges || m_trimming)) {
-        beginRegionDrag(regionPointer(event->globalPosition()), edges);
+        beginRegionDrag(regionPointer(snowGlobalPos(event)), edges);
         event->accept();
         return;
     }
@@ -886,20 +886,20 @@ void ScreenRecordingAreaWindow::mousePressEvent(QMouseEvent* event) {
 void ScreenRecordingAreaWindow::mouseMoveEvent(QMouseEvent* event) {
     if (m_regionDragActive && m_regionDragSource == this) {
         if (event->buttons().testFlag(Qt::LeftButton))
-            updateRegionDrag(regionPointer(event->globalPosition()));
+            updateRegionDrag(regionPointer(snowGlobalPos(event)));
         else
             cancelRegionInteraction();
         event->accept();
         return;
     }
     if (regionEditingEnabled())
-        updateRegionCursor(event->position());
+        updateRegionCursor(snowPos(event));
     QWidget::mouseMoveEvent(event);
 }
 
 void ScreenRecordingAreaWindow::mouseReleaseEvent(QMouseEvent* event) {
     if (m_regionDragActive && m_regionDragSource == this && event->button() == Qt::LeftButton) {
-        updateRegionDrag(regionPointer(event->globalPosition()));
+        updateRegionDrag(regionPointer(snowGlobalPos(event)));
         finishRegionInteraction();
         event->accept();
         return;

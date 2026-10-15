@@ -21,7 +21,7 @@ class WindowGroupSwitcherPopup final : public QWidget {
   protected:
     void changeEvent(QEvent* event) override;
     void showEvent(QShowEvent* event) override;
-    bool nativeEvent(const QByteArray& type, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& type, void* message, snowNativeEventResult* result) override;
 
   private:
     class Impl;

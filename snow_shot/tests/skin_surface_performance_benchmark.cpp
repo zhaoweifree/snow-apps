@@ -333,7 +333,7 @@ QJsonObject exerciseInactiveChanges(const SurfaceFixture& fixture) {
         for (int step = 1; step <= 10; ++step)
             surface.widget->resize(originalSize + QSize(step, step));
         surface.widget->resize(originalSize);
-        QEvent dprChange(QEvent::DevicePixelRatioChange);
+        QEvent dprChange(snowDevicePixelRatioChange);
         QCoreApplication::sendEvent(surface.widget, &dprChange);
     }
     for (int blur = 0; blur <= 16; ++blur) {

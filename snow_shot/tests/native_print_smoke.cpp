@@ -24,7 +24,7 @@ class NativePrintFixtureWindow final : public QWidget {
     }
 
   protected:
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override {
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override {
         if (m_observingPrint)
             m_topmostPreserved = m_topmostPreserved && isNativeTopmost();
         return QWidget::nativeEvent(eventType, message, result);

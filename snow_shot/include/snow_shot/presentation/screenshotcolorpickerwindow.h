@@ -54,7 +54,7 @@ class ScreenshotColorPickerWindow final : public QWidget {
 
   protected:
     bool event(QEvent* event) override;
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
     void paintEvent(QPaintEvent* event) override;
     void changeEvent(QEvent* event) override;
 

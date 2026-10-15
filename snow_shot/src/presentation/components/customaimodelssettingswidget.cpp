@@ -271,7 +271,7 @@ void CustomAiModelsSettingsWidget::deleteModel(const QString& id) {
             return;
         }
         auto models = m_session.customAiModels();
-        models.removeIf([&id](const auto& model) { return model.id == id; });
+        snow::compat::removeIf(models, [&id](const auto& model) { return model.id == id; });
         if (save(models)) {
             modal->accept();
         } else {

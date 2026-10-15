@@ -293,7 +293,7 @@ class ScreenshotPinnedWindow final : public QWidget {
     };
 
     bool event(QEvent* event) override;
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
     void changeEvent(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;

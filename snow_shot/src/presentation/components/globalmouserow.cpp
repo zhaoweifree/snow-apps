@@ -142,7 +142,7 @@ void GlobalMouseRow::changeEvent(QEvent* event) {
 void GlobalMouseRow::mousePressEvent(QMouseEvent* event) {
     ActionRow::mousePressEvent(event);
     if (event->button() == Qt::LeftButton && isEnabled() && m_modal == nullptr &&
-        rect().contains(event->position().toPoint())) {
+        rect().contains(snowPos(event).toPoint())) {
         emit dragRequested(m_action);
     }
 }

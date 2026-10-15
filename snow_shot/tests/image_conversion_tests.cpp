@@ -1978,7 +1978,7 @@ void conversionToolbarMigration() {
     const QVector<QStringList> formerFixedPositions{
         {QStringLiteral("separator")}, {QStringLiteral("cancel")}, {QStringLiteral("copy")}};
     auto historicalDefaults = defaults;
-    historicalDefaults.positions.removeIf(
+    snow::compat::removeIf(historicalDefaults.positions, 
         [&](const QStringList& position) { return formerFixedPositions.contains(position); });
     auto previousDefault = historicalDefaults;
     previousDefault.positions[0] = {QStringLiteral("barcode-recognition"),

@@ -36,7 +36,7 @@
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QInputMethodEvent>
@@ -714,7 +714,7 @@ void editorAndShortcutBehavior() {
 
     const QPointF local = floating->rect().center();
     QCursor::setPos(floating->mapToGlobal(local.toPoint()));
-    QEnterEvent hover(local, local, floating->mapToGlobal(local.toPoint()));
+    SnowEnterEvent hover(local, local, floating->mapToGlobal(local.toPoint()));
     QApplication::sendEvent(floating, &hover);
 #ifdef Q_OS_MACOS
     require(!menu || !menu->isPopupVisible(), "macOS action menus do not open on hover");
@@ -729,7 +729,7 @@ void editorAndShortcutBehavior() {
     QEvent leave(QEvent::Leave);
     QApplication::sendEvent(floating, &leave);
     QCursor::setPos(menu->mapToGlobal(menu->actionGeometry(copy).center()));
-    QEnterEvent actionHover(QPointF(5, 5), QPointF(5, 5),
+    SnowEnterEvent actionHover(QPointF(5, 5), QPointF(5, 5),
                             menu->mapToGlobal(menu->actionGeometry(copy).center()));
     QApplication::sendEvent(menu, &actionHover);
     flushEvents();

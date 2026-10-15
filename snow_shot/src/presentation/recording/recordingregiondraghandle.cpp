@@ -47,7 +47,7 @@ bool RecordingRegionDragHandle::event(QEvent* event) {
 }
 
 void RecordingRegionDragHandle::mousePressEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton || !rect().contains(event->position().toPoint()) ||
+    if (event->button() != Qt::LeftButton || !rect().contains(snowPos(event).toPoint()) ||
         m_dragging) {
         event->ignore();
         return;
@@ -56,7 +56,7 @@ void RecordingRegionDragHandle::mousePressEvent(QMouseEvent* event) {
     setDown(true);
     grabMouse();
     event->accept();
-    emit dragStarted(event->globalPosition());
+    emit dragStarted(snowGlobalPos(event));
 }
 
 void RecordingRegionDragHandle::mouseMoveEvent(QMouseEvent* event) {
@@ -67,7 +67,7 @@ void RecordingRegionDragHandle::mouseMoveEvent(QMouseEvent* event) {
     if (!event->buttons().testFlag(Qt::LeftButton))
         cancelDrag();
     else
-        emit dragMoved(event->globalPosition());
+        emit dragMoved(snowGlobalPos(event));
     event->accept();
 }
 
@@ -79,6 +79,6 @@ void RecordingRegionDragHandle::mouseReleaseEvent(QMouseEvent* event) {
     m_dragging = false;
     setDown(false);
     event->accept();
-    emit dragFinished(event->globalPosition());
+    emit dragFinished(snowGlobalPos(event));
     stopDragging();
 }

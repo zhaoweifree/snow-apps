@@ -111,7 +111,7 @@ bool ScreenshotPinnedWindow::handleExportDrag(QObject* watched, QEvent* event) {
             }
             if (!m_exportDragAborted && !m_exportDragPreparing &&
                 (!m_dragExport || !m_dragExport->busy()) &&
-                (mouse->globalPosition().toPoint() - *m_exportDragOrigin).manhattanLength() >=
+                (snowGlobalPos(mouse).toPoint() - *m_exportDragOrigin).manhattanLength() >=
                     QApplication::startDragDistance())
                 beginExportDrag();
             return true;
@@ -123,10 +123,10 @@ bool ScreenshotPinnedWindow::handleExportDrag(QObject* watched, QEvent* event) {
         return false;
     auto* mouse = static_cast<QMouseEvent*>(event);
     if (mouse->button() != Qt::LeftButton || !mouse->modifiers().testFlag(Qt::ControlModifier) ||
-        !exportDragEnabledAt(windowPositionForEvent(watched, mouse->position()).toPoint(),
+        !exportDragEnabledAt(windowPositionForEvent(watched, snowPos(mouse)).toPoint(),
                              mouse->modifiers()))
         return false;
-    m_exportDragOrigin = mouse->globalPosition().toPoint();
+    m_exportDragOrigin = snowGlobalPos(mouse).toPoint();
     m_exportDragAborted = false;
     m_exportDragSpontaneous = mouse->spontaneous();
     qApp->installEventFilter(this);
@@ -406,7 +406,7 @@ bool ScreenshotPinnedWindow::handleLockedPointer(QObject* watched, QEvent* event
                                               !mouse->modifiers().testFlag(Qt::AltModifier)))
         return false;
     if (!moveControl) {
-        const QPointF local = windowPositionForEvent(watched, mouse->position());
+        const QPointF local = windowPositionForEvent(watched, snowPos(mouse));
         const bool resize =
             !m_geometryAnimating && !m_thumbnailMode && resizeHandleAt(local).has_value();
         if (!resize && !windowMoveEligibleForPointer(local.toPoint(), mouse->modifiers()))
@@ -458,7 +458,7 @@ bool ScreenshotPinnedWindow::handleControlledPointer(QObject* watched, QEvent* e
             }
             if (event->type() == QEvent::MouseButtonRelease && mouse->button() != Qt::LeftButton)
                 return false;
-            updateControlledInteraction(mouse->globalPosition());
+            updateControlledInteraction(snowGlobalPos(mouse));
             if (event->type() == QEvent::MouseButtonRelease)
                 endControlledInteraction(false);
             return true;
@@ -489,7 +489,7 @@ bool ScreenshotPinnedWindow::handleControlledPointer(QObject* watched, QEvent* e
         clearWindowDragCursor();
         return false;
     }
-    const QPointF local = windowPositionForEvent(watched, mouse->position());
+    const QPointF local = windowPositionForEvent(watched, snowPos(mouse));
     const auto handle =
         interactiveResizingEnabled() && !moveControl ? resizeHandleAt(local) : std::nullopt;
     if (event->type() == QEvent::MouseMove) {
@@ -505,7 +505,7 @@ bool ScreenshotPinnedWindow::handleControlledPointer(QObject* watched, QEvent* e
     }
     if (mouse->button() == Qt::LeftButton &&
         (handle || moveControl || windowMoveEnabledForPointer(local.toPoint(), mouse->modifiers())))
-        return beginControlledInteraction(mouse->globalPosition(), handle);
+        return beginControlledInteraction(snowGlobalPos(mouse), handle);
     return false;
 }
 
@@ -543,7 +543,7 @@ bool ScreenshotPinnedWindow::handlePinnedGesture(QObject* watched, QEvent* event
             return false;
         const double factor = 1. + gesture->value();
         if (std::isfinite(factor) && factor > 0) {
-            const QPointF local = windowPositionForEvent(watched, gesture->position());
+            const QPointF local = windowPositionForEvent(watched, snowPos(gesture));
             applyWheelScale(std::clamp(m_scalePercent * factor, 10., 500.),
                             nativePositionForWindowPosition(local));
         }

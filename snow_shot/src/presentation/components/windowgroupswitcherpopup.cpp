@@ -344,7 +344,7 @@ void WindowGroupSwitcherPopup::showEvent(QShowEvent* event) {
     adqt::widgets::detail::applyNativeWindowChrome(this);
     QWidget::showEvent(event);
 }
-bool WindowGroupSwitcherPopup::nativeEvent(const QByteArray& type, void* message, qintptr* result) {
+bool WindowGroupSwitcherPopup::nativeEvent(const QByteArray& type, void* message, snowNativeEventResult* result) {
 #ifdef Q_OS_WIN
     if (static_cast<MSG*>(message)->message == WM_NCCALCSIZE) {
         // Keep the native frame decoration while our content fills the client area.

@@ -4074,28 +4074,28 @@ SettingsCatalog::SettingsCatalog(QVector<SettingsPageDefinition> pages,
                    (app::edition::apiConfiguration || id != QStringLiteral("api-configuration")) &&
                    (app::edition::extendedFeatures || id != QStringLiteral("extended-features"));
         };
-        m_pages.removeIf([&pageAvailable](const SettingsPageDefinition& page) {
+        snow::compat::removeIf(m_pages, [&pageAvailable](const SettingsPageDefinition& page) {
             return !pageAvailable(page.id);
         });
         for (auto& page : m_pages) {
             for (auto& section : page.sections) {
-                section.items.removeIf([](const SettingsItemDefinition& item) {
+                snow::compat::removeIf(section.items, [](const SettingsItemDefinition& item) {
                     return !item.configurationKey.isEmpty() &&
                            !editionConfigurationKeyAvailable(item.configurationKey);
                 });
             }
-            page.sections.removeIf(
+            snow::compat::removeIf(page.sections, 
                 [](const SettingsSectionDefinition& section) { return section.items.isEmpty(); });
         }
         for (auto& node : m_navigation) {
             if (auto* group = std::get_if<SettingsNavigationGroupDefinition>(&node)) {
-                group->pages.removeIf(
+                snow::compat::removeIf(group->pages, 
                     [&pageAvailable](const SettingsNavigationPageDefinition& page) {
                         return !pageAvailable(page.pageId);
                     });
             }
         }
-        m_navigation.removeIf([&pageAvailable](const SettingsNavigationNode& node) {
+        snow::compat::removeIf(m_navigation, [&pageAvailable](const SettingsNavigationNode& node) {
             const auto* page = std::get_if<SettingsNavigationPageDefinition>(&node);
             return page != nullptr && !pageAvailable(page->pageId);
         });
@@ -4434,7 +4434,7 @@ TrayCommandManifest buildBuiltInTrayCommandManifest() {
 
     if constexpr (!app::edition::textTranslation) {
         for (auto& group : manifest.groups) {
-            group.options.removeIf([](const SettingsTrayMenuOptionDefinition& option) {
+            snow::compat::removeIf(group.options, [](const SettingsTrayMenuOptionDefinition& option) {
                 return option.shortcutAction == GlobalShortcutAction::ScreenshotTranslation ||
                        option.shortcutAction == GlobalShortcutAction::TranslateSelectedText;
             });

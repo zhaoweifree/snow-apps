@@ -118,7 +118,7 @@ void losslessTilesAndMetadata(const QString& directory) {
                 count == 4,
             "all lossless tiles must decode");
     const QDateTime time(QDate(2026, 9, 13), QTime(11, 12, 13),
-                         QTimeZone::fromSecondsAheadOfUtc(8 * 3600));
+                         snowTimeZoneFromSecondsAheadOfUtc(8 * 3600));
     for (auto paper : {ScreenshotPdfPageSize::ImageSize, ScreenshotPdfPageSize::PortraitA4,
                        ScreenshotPdfPageSize::LandscapeA4}) {
         const QString name = QStringLiteral("lossless-%1.pdf").arg(int(paper));

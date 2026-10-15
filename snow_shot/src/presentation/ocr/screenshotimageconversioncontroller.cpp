@@ -85,7 +85,7 @@ void ScreenshotImageConversionController::setProvider(SnowShotApiClient* provide
     // Provider subscriptions are part of the binding transaction, not a conversion request.
     // Complete them before any observer can reset a conversion or replace the provider again.
     bindProviderSignals();
-    m_cache.removeIf([this](const auto& cached) { return !entryMatchesProvider(cached.result); });
+    snow::compat::removeIf(m_cache, [this](const auto& cached) { return !entryMatchesProvider(cached.result); });
     const bool failedToRestore =
         m_active && (busy() || !restoreCachedResult(Settings().visionModel()));
     if (!lifetime || providerGeneration != m_providerGeneration)
@@ -106,7 +106,7 @@ void ScreenshotImageConversionController::bindProviderSignals() {
             if (providerGeneration != m_providerGeneration)
                 return;
             const QPointer<ScreenshotImageConversionController> lifetime(this);
-            m_cache.removeIf([](const auto& cached) {
+            snow::compat::removeIf(m_cache, [](const auto& cached) {
                 return !cached.result.model.startsWith(QStringLiteral("custom:"));
             });
             if (m_active && !m_requestModel.startsWith(QStringLiteral("custom:"))) {
@@ -127,7 +127,7 @@ void ScreenshotImageConversionController::bindProviderSignals() {
                 if (!vision) {
                     return;
                 }
-                m_cache.removeIf([&id](const auto& cached) { return cached.result.model == id; });
+                snow::compat::removeIf(m_cache, [&id](const auto& cached) { return cached.result.model == id; });
                 if (Settings().visionModel() == id || (m_active && m_requestModel == id)) {
                     cancelRequests();
                     m_source.clear();
@@ -215,7 +215,7 @@ bool ScreenshotImageConversionController::restoreCachedResult(const QString& mod
 
 void ScreenshotImageConversionController::cacheResult(const QString& key,
                                                       ScreenshotImageConversionEntry entry) {
-    m_cache.removeIf([&](const auto& cached) {
+    snow::compat::removeIf(m_cache, [&](const auto& cached) {
         return cached.key == key &&
                snow_shot::presentation::sameImageConversionRequest(cached.result, entry);
     });
@@ -285,7 +285,7 @@ void ScreenshotImageConversionController::seed(
     if (key.isEmpty()) {
         return;
     }
-    m_cache.removeIf([&key](const auto& cached) { return cached.key == key; });
+    snow::compat::removeIf(m_cache, [&key](const auto& cached) { return cached.key == key; });
     for (const auto& entry : entries) {
         if (entryMatchesProvider(entry))
             cacheResult(key, entry);

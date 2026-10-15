@@ -247,7 +247,7 @@ struct EditorDescriptor {
              QT_TRANSLATE_NOOP("ScreenshotToolbarEditorSettingsWidget", "Cancel screenshot"),
              Icon::Cancel},
         };
-        result.removeIf([](const EditorDescriptor& descriptor) {
+        snow::compat::removeIf(result, [](const EditorDescriptor& descriptor) {
             return !editionActionToolAvailable(QString::fromLatin1(descriptor.id));
         });
         return result;
@@ -340,7 +340,7 @@ editorDescriptors(storage::ScreenshotToolbarLayoutKind kind) {
     if (kind == storage::ScreenshotToolbarLayoutKind::FloatingTools) {
         auto result = actionDescriptors();
         const auto ids = storage::floatingToolbarItemIds();
-        result.removeIf([&ids](const EditorDescriptor& item) {
+        snow::compat::removeIf(result, [&ids](const EditorDescriptor& item) {
             return !ids.contains(QString::fromLatin1(item.id));
         });
         for (auto& item : result) {
@@ -391,7 +391,7 @@ editorDescriptors(storage::ScreenshotToolbarLayoutKind kind) {
     }
     if (kind == storage::ScreenshotToolbarLayoutKind::ActionTools) {
         auto result = actionDescriptors();
-        result.removeIf([](const EditorDescriptor& descriptor) {
+        snow::compat::removeIf(result, [](const EditorDescriptor& descriptor) {
             return QLatin1String(descriptor.id) == QLatin1String("confirm");
         });
         result.push_back(
@@ -434,12 +434,12 @@ editorDescriptors(storage::ScreenshotToolbarLayoutKind kind) {
 
 [[nodiscard]] inline QVector<QStringList> editionActionPositions(QVector<QStringList> positions) {
     for (QStringList& position : positions) {
-        position.removeIf([](const QString& id) {
+        snow::compat::removeIf(position, [](const QString& id) {
             return !editionActionToolAvailable(id) ||
                    (app::edition::isMini && id == QStringLiteral("text-recognition"));
         });
     }
-    positions.removeIf([](const QStringList& position) { return position.isEmpty(); });
+    snow::compat::removeIf(positions, [](const QStringList& position) { return position.isEmpty(); });
     return positions;
 }
 
@@ -615,7 +615,7 @@ normalizedLayout(const storage::ScreenshotToolbarLayout& input, const QStringLis
         // Upgrade earlier defaults without changing custom placements.
         auto previousScreenshotDefault = defaultLayout;
         if (known.contains(QStringLiteral("cancel"))) {
-            previousScreenshotDefault.removeIf([](const QStringList& position) {
+            snow::compat::removeIf(previousScreenshotDefault, [](const QStringList& position) {
                 return position == QStringList{QStringLiteral("separator")} ||
                        position == QStringList{QStringLiteral("cancel")} ||
                        position == QStringList{QStringLiteral("copy")};
@@ -708,7 +708,7 @@ normalizedLayout(const storage::ScreenshotToolbarLayout& input, const QStringLis
         for (const QString& id : result.hidden)
             position.removeAll(id);
     }
-    previousDrawingDefaults.removeIf(
+    snow::compat::removeIf(previousDrawingDefaults, 
         [](const QStringList& position) { return position.isEmpty(); });
     if (!missingAnnotations.isEmpty() && result.positions == previousDrawingDefaults) {
         result.positions = defaultLayout;
@@ -716,7 +716,7 @@ normalizedLayout(const storage::ScreenshotToolbarLayout& input, const QStringLis
             for (const QString& id : result.hidden)
                 position.removeAll(id);
         }
-        result.positions.removeIf([](const QStringList& position) { return position.isEmpty(); });
+        snow::compat::removeIf(result.positions, [](const QStringList& position) { return position.isEmpty(); });
         for (const QString& id : missingAnnotations)
             positioned.insert(id);
     }

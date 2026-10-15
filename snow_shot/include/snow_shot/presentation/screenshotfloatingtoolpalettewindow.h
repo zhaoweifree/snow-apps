@@ -85,7 +85,7 @@ class ScreenshotFloatingToolPaletteWindow : public QWidget {
   protected:
     bool event(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
     void hideEvent(QHideEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void showEvent(QShowEvent* event) override;

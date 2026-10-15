@@ -1,7 +1,7 @@
 #ifndef SNOW_SHOT_SHORTCUTS_SHORTCUTBINDING_H
 #define SNOW_SHOT_SHORTCUTS_SHORTCUTBINDING_H
 
-#include <QKeyCombination>
+#include "snow_shot/compat/qt_compat.h"
 #include <QKeySequence>
 #include <QJsonArray>
 #include <QJsonObject>

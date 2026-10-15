@@ -59,14 +59,14 @@ class ControlledWindow final : public QWidget {
     void mousePressEvent(QMouseEvent* event) override {
         if (event->button() != Qt::LeftButton)
             return;
-        m_origin = event->globalPosition();
+        m_origin = snowGlobalPos(event);
         m_geometry = geometry();
-        m_resizing = event->position().x() >= width() - 6;
+        m_resizing = snowPos(event).x() >= width() - 6;
     }
     void mouseMoveEvent(QMouseEvent* event) override {
         if (!event->buttons().testFlag(Qt::LeftButton) || !m_origin.has_value())
             return;
-        const QPoint delta = (event->globalPosition() - *m_origin).toPoint();
+        const QPoint delta = (snowGlobalPos(event) - *m_origin).toPoint();
         if (m_resizing)
             setGeometry(m_geometry.adjusted(0, 0, delta.x(), delta.y()));
         else

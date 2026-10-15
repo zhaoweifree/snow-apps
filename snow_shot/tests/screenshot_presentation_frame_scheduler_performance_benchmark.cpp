@@ -2,7 +2,7 @@
 #include "snow_shot/presentation/screenshotpresentationframescheduler.h"
 
 #include <QCommandLineParser>
-#include <QChronoTimer>
+#include "snow_shot/compat/qt_compat.h"
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QEvent>
@@ -132,7 +132,7 @@ class WakeupObserver final {
         if (sample.timerEvent) {
             const auto eventId = static_cast<QTimerEvent*>(event)->id();
             Qt::TimerId liveId = Qt::TimerId::Invalid;
-            if (auto* chronoTimer = qobject_cast<QChronoTimer*>(receiver))
+            if (auto* chronoTimer = qobject_cast<SnowChronoTimer*>(receiver))
                 liveId = chronoTimer->id();
             else if (auto* timer = qobject_cast<QTimer*>(receiver))
                 liveId = timer->id();

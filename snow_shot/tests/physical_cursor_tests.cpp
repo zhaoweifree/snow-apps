@@ -47,13 +47,13 @@ class PointerSurface final : public QWidget {
 
   protected:
     void mousePressEvent(QMouseEvent* event) override {
-        anchor = event->position();
+        anchor = snowPos(event);
         event->accept();
     }
     void mouseMoveEvent(QMouseEvent* event) override {
         ++moves;
-        lastPosition = event->position();
-        lastGlobalPosition = event->globalPosition();
+        lastPosition = snowPos(event);
+        lastGlobalPosition = snowGlobalPos(event);
         lastButtons = event->buttons();
         lastModifiers = event->modifiers();
         if (event->buttons().testFlag(Qt::LeftButton))

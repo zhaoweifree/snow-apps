@@ -109,7 +109,7 @@ const QStringList& screenshotShortcutActionIds() {
             QStringLiteral("undo"),
             QStringLiteral("redo"),
         };
-        result.removeIf([](const QString& id) {
+        snow::compat::removeIf(result, [](const QString& id) {
             return !snow_shot::presentation::editionConfigurationKeyAvailable(
                 QStringLiteral("screenshot_shortcuts/") + id);
         });
@@ -405,7 +405,7 @@ QColor colorFromRgbaString(const QString& value) {
         return {};
     }
     bool valid = false;
-    const uint rgba = normalized.sliced(1).toUInt(&valid, 16);
+    const uint rgba = normalized.mid(1).toUInt(&valid, 16);
     if (!valid) {
         return {};
     }

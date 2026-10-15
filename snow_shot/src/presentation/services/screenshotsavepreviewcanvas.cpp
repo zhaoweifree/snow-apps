@@ -169,7 +169,7 @@ void ScreenshotSavePreviewCanvas::mousePressEvent(QMouseEvent* event) {
     if (event->button() != Qt::LeftButton)
         return;
     setFocus();
-    m_last = event->position();
+    m_last = snowPos(event);
     m_dragging = true;
     m_splitDragging = splitHandleContains(m_last);
     m_splitHovered = m_splitDragging;
@@ -178,7 +178,7 @@ void ScreenshotSavePreviewCanvas::mousePressEvent(QMouseEvent* event) {
 }
 void ScreenshotSavePreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (!m_dragging) {
-        const bool hovered = splitHandleContains(event->position());
+        const bool hovered = splitHandleContains(snowPos(event));
         if (hovered != m_splitHovered) {
             m_splitHovered = hovered;
             update();
@@ -187,18 +187,18 @@ void ScreenshotSavePreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     if (m_splitDragging)
-        setSplitRatio(event->position().x() / std::max(1, width()));
+        setSplitRatio(snowPos(event).x() / std::max(1, width()));
     else {
         m_fit = false;
-        m_pan += event->position() - m_last;
+        m_pan += snowPos(event) - m_last;
         update();
     }
-    m_last = event->position();
+    m_last = snowPos(event);
 }
 void ScreenshotSavePreviewCanvas::mouseReleaseEvent(QMouseEvent* event) {
     m_dragging = false;
     m_splitDragging = false;
-    m_splitHovered = splitHandleContains(event->position());
+    m_splitHovered = splitHandleContains(snowPos(event));
     setCursor(m_splitHovered ? Qt::SplitHCursor : Qt::OpenHandCursor);
     update();
 }
@@ -235,7 +235,7 @@ void ScreenshotSavePreviewCanvas::wheelEvent(QWheelEvent* event) {
                              ? event->pixelDelta().y() / 100.0
                              : event->angleDelta().y() / 120.0;
     if (steps != 0)
-        zoomAt(m_zoom * std::pow(1.15, steps), event->position());
+        zoomAt(m_zoom * std::pow(1.15, steps), snowPos(event));
     event->accept();
 }
 void ScreenshotSavePreviewCanvas::keyPressEvent(QKeyEvent* event) {

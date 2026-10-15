@@ -222,14 +222,14 @@ class ToolbarDragButton final : public adqt::widgets::AdButton {
   protected:
     void mousePressEvent(QMouseEvent* event) override {
         if (event != nullptr && event->button() == Qt::LeftButton) {
-            m_pressPosition = event->position().toPoint();
+            m_pressPosition = snowPos(event).toPoint();
         }
         adqt::widgets::AdButton::mousePressEvent(event);
     }
 
     void mouseMoveEvent(QMouseEvent* event) override {
         if (event == nullptr || !(event->buttons() & Qt::LeftButton) ||
-            (event->position().toPoint() - m_pressPosition).manhattanLength() <
+            (snowPos(event).toPoint() - m_pressPosition).manhattanLength() <
                 QApplication::startDragDistance()) {
             adqt::widgets::AdButton::mouseMoveEvent(event);
             return;
@@ -375,7 +375,7 @@ class ToolbarDropSurface final : public QFrame {
     void dragEnterEvent(QDragEnterEvent* event) override {
         if (hasToolbarItem(event != nullptr ? event->mimeData() : nullptr)) {
             m_dragActive = true;
-            updateIndicator(event->position().toPoint(),
+            updateIndicator(snowPos(event).toPoint(),
                             QString::fromUtf8(event->mimeData()->data(kToolbarItemMimeType)));
             update();
             event->acceptProposedAction();
@@ -386,7 +386,7 @@ class ToolbarDropSurface final : public QFrame {
 
     void dragMoveEvent(QDragMoveEvent* event) override {
         if (hasToolbarItem(event != nullptr ? event->mimeData() : nullptr)) {
-            updateIndicator(event->position().toPoint(),
+            updateIndicator(snowPos(event).toPoint(),
                             QString::fromUtf8(event->mimeData()->data(kToolbarItemMimeType)));
             event->acceptProposedAction();
             return;
@@ -415,7 +415,7 @@ class ToolbarDropSurface final : public QFrame {
             return;
         }
         if (m_dropHandler) {
-            m_dropHandler(itemId, dropLocation(event->position().toPoint(), itemId));
+            m_dropHandler(itemId, dropLocation(snowPos(event).toPoint(), itemId));
         }
         event->setDropAction(Qt::MoveAction);
         event->accept();
@@ -685,7 +685,7 @@ class ToolbarHiddenDropZone final : public QFrame {
             return;
         }
         if (m_dropHandler) {
-            m_dropHandler(itemId, insertionIndex(event->position().toPoint()));
+            m_dropHandler(itemId, insertionIndex(snowPos(event).toPoint()));
         }
         event->setDropAction(Qt::MoveAction);
         event->accept();

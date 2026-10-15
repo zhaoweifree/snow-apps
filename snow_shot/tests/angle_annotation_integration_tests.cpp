@@ -101,7 +101,7 @@ void toolConfigurationUpgradesDefaultsAndPreservesCustomLayouts() {
     custom.hidden.clear();
     custom.positions.swapItemsAt(2, 3);
     const auto normalizedCustom = presentation::toolbar_layout::normalizedLayout(custom);
-    require(normalizedCustom.positions.sliced(0, custom.positions.size()) == custom.positions &&
+    require(normalizedCustom.positions.mid(0, custom.positions.size()) == custom.positions &&
                 normalizedCustom.positions.last() == QStringList{QStringLiteral("angle")} &&
                 toolbar.setLayout(kind, custom) &&
                 toolbar.layout(kind).positions == normalizedCustom.positions,

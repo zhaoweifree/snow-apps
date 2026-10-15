@@ -45,8 +45,8 @@ QByteArray rasterHash(const QImage& image) {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     const qsizetype rowBytes = (static_cast<qsizetype>(image.width()) * image.depth() + 7) / 8;
     for (int y = 0; y < image.height(); ++y)
-        hash.addData(
-            QByteArrayView(reinterpret_cast<const char*>(image.constScanLine(y)), rowBytes));
+        hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)),
+                     static_cast<int>(rowBytes));
     return hash.result().toHex();
 }
 

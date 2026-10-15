@@ -138,7 +138,7 @@ bool ScreenshotOverlayCoordinator::preparePreCaptureOverlayWindows(
             continue;
         }
         if (overlay->screen() != screen) {
-            overlay->setScreen(screen);
+            snowSetWidgetScreen(overlay, screen);
         }
         overlay->setCaptureGeometry(display.logicalRect);
         overlay->setCanvasClearBackgroundEnabled(false);

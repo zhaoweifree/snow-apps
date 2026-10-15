@@ -35,7 +35,7 @@
 #include <QCursor>
 #include <QDynamicPropertyChangeEvent>
 #include <QElapsedTimer>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QFile>
 #include <QFileDialog>
 #include <QJsonArray>
@@ -207,7 +207,7 @@ AdModal* openDialog(QWidget& owner, const QImage& image,
 void centersOnDisplayOverlay() {
     for (QScreen* screen : QApplication::screens()) {
         QWidget overlay(nullptr, Qt::Tool | Qt::FramelessWindowHint);
-        overlay.setScreen(screen);
+        snowSetWidgetScreen(&overlay, screen);
         overlay.setGeometry(screen->geometry());
         overlay.show();
         flush();
@@ -1294,7 +1294,7 @@ void shortcutPopupInteraction(QWidget& owner, const QTemporaryDir& temp) {
         const QPoint global = widget->mapToGlobal(local);
         QCursor::setPos(global);
         flush();
-        QEnterEvent event(local, local, global);
+        SnowEnterEvent event(local, local, global);
         QApplication::sendEvent(widget, &event);
     };
     auto leave = [](QWidget* widget) {
@@ -1407,7 +1407,7 @@ void shortcutPopupInteraction(QWidget& owner, const QTemporaryDir& temp) {
     require(menu.isNull(),
             "a covered trigger must retire its hover popup session after pointer movement");
     const QPoint triggerCenter = trigger->rect().center();
-    QEnterEvent coveredEnter(triggerCenter, triggerCenter, coveredTrigger);
+    SnowEnterEvent coveredEnter(triggerCenter, triggerCenter, coveredTrigger);
     QApplication::sendEvent(trigger, &coveredEnter);
     const auto menus = content->findChildren<AdContextMenu*>(QStringLiteral("savePathMenu"));
     require(

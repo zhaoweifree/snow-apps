@@ -24,7 +24,7 @@
 #include <QFrame>
 #include <QBoxLayout>
 #include <QEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPointer>
@@ -843,7 +843,7 @@ int main(int argc, char** argv) {
                 "saved image has a preview viewer");
         const QColor idleCorner = imagePreview->grab().toImage().pixelColor(20, 20);
         const QPointF hoverPoint = imagePreview->rect().center();
-        QEnterEvent hover(hoverPoint, hoverPoint, imagePreview->mapToGlobal(hoverPoint.toPoint()));
+        SnowEnterEvent hover(hoverPoint, hoverPoint, imagePreview->mapToGlobal(hoverPoint.toPoint()));
         QApplication::sendEvent(imagePreview, &hover);
         require(imagePreview->grab().toImage().pixelColor(20, 20) != idleCorner,
                 "hovering a pinned image draws the shared Preview overlay");

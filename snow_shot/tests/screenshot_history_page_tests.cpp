@@ -586,7 +586,7 @@ void entriesUseBordersAndSupportCrossPageSelection() {
     require(summary->text() == QStringLiteral("Selected 2 items"),
             "refresh-pruning fixture must begin with two selected records");
     QVector<storage::CaptureHistoryRecord> reducedRecords = records;
-    reducedRecords.removeIf([&](const auto& record) { return record.id == removedSelectionId; });
+    snow::compat::removeIf(reducedRecords, [&](const auto& record) { return record.id == removedSelectionId; });
     dataSource.setRecords(reducedRecords);
     page.refresh();
     flushEvents();
@@ -795,7 +795,7 @@ void moreMenuOffersPinAndDelete() {
         const QPoint local = widget->rect().center();
         const QPoint global = widget->mapToGlobal(local);
         QCursor::setPos(global);
-        QEnterEvent event(local, local, global);
+        SnowEnterEvent event(local, local, global);
         QApplication::sendEvent(widget, &event);
     };
     auto activate = [](QMenu* menu, QAction* action) {

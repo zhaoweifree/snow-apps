@@ -652,7 +652,7 @@ void displayTopologyClosesBeforeNativeReroute(QApplication& app) {
     // Match Qt's screen-removal ordering: snapshot visibility after the signal,
     // move the surviving native window, then restore that snapshotted visibility.
     const bool wasVisible = surface->windowHandle()->isVisible();
-    surface->setScreen(app.primaryScreen());
+    snowSetWidgetScreen(surface, app.primaryScreen());
     surface->windowHandle()->setVisible(wasVisible);
     flush();
     require(!surface->isVisible(), "native reroute cannot re-show an unacknowledged surface");

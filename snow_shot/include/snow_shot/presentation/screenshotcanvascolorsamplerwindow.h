@@ -21,7 +21,7 @@ class ScreenshotCanvasColorSamplerWindow final : public QWidget {
     [[nodiscard]] QSize sizeHint() const override;
 
   protected:
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
     void paintEvent(QPaintEvent* event) override;
 
   private:

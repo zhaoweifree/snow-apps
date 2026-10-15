@@ -467,7 +467,7 @@ bool ScreenshotFloatingToolPaletteWindow::event(QEvent* event) {
         finishPaletteDrag(true);
     }
     const bool devicePixelRatioChanged =
-        event != nullptr && event->type() == QEvent::DevicePixelRatioChange;
+        event != nullptr && event->type() == snowDevicePixelRatioChange;
     if (event != nullptr) {
         if (event->type() == QEvent::WinIdChange) {
             applyPlacementScreen();

@@ -399,7 +399,7 @@ void hoverPopoverPreservesOwnerStacking() {
         QApplication::processEvents();
         verify();
         auto* marker = f.marker(0);
-        QEnterEvent enter(QPointF(12, 12), QPointF(12, 12), marker->mapToGlobal(QPoint(12, 12)));
+        SnowEnterEvent enter(QPointF(12, 12), QPointF(12, 12), marker->mapToGlobal(QPoint(12, 12)));
         QApplication::sendEvent(marker, &enter);
         until([&] { return f.popover() && f.popover()->isVisible(); },
               "QR hover must reveal the popover");
@@ -419,7 +419,7 @@ void hoverPopoverPreservesOwnerStacking() {
 
 void enterMarker(QWidget* marker) {
     const QPoint center = marker->rect().center();
-    QEnterEvent enter(center, marker->mapTo(marker->window(), center), marker->mapToGlobal(center));
+    SnowEnterEvent enter(center, marker->mapTo(marker->window(), center), marker->mapToGlobal(center));
     QApplication::sendEvent(marker, &enter);
 }
 
@@ -547,7 +547,7 @@ void popoverActionsAndHover() {
     const QString payload = QStringLiteral("  <b>Text</b>\n二维码\n  ");
     f.complete({{payload, quad(50, 60)}});
     auto* marker = f.marker(0);
-    QEnterEvent enter(QPointF(12, 12), QPointF(12, 12), marker->mapToGlobal(QPoint(12, 12)));
+    SnowEnterEvent enter(QPointF(12, 12), QPointF(12, 12), marker->mapToGlobal(QPoint(12, 12)));
     QApplication::sendEvent(marker, &enter);
     require(!f.popover(), "hover opening is delayed");
     advance(175);

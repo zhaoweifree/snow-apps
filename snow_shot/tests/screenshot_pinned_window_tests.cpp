@@ -113,7 +113,7 @@
 #include <QDragLeaveEvent>
 #include <QDropEvent>
 #include <QElapsedTimer>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFrame>
 #include <QFileDialog>
@@ -4245,7 +4245,7 @@ void setPinnedWindowHovered(ScreenshotPinnedWindow& window, bool hovered) {
     }
 #endif
     if (hovered) {
-        QEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(10, 10));
+        SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(10, 10));
         QCoreApplication::sendEvent(&window, &enter);
     } else {
         QEvent leave(QEvent::Leave);
@@ -5591,7 +5591,7 @@ void pinnedControlsMatchReferenceStyle(SnowCanvasRuntime&) {
             "pinned controls should have a transparent eight pixel gap without a panel surface");
 
     const QPointF center(editButton->rect().center());
-    QEnterEvent editEnter(center, center, QPointF(editButton->mapToGlobal(center.toPoint())));
+    SnowEnterEvent editEnter(center, center, QPointF(editButton->mapToGlobal(center.toPoint())));
     QCoreApplication::sendEvent(editButton, &editEnter);
     const QColor primary =
         adqt::theme::ThemeManager::instance().resolveTheme(editButton).colorPrimary;
@@ -5599,7 +5599,7 @@ void pinnedControlsMatchReferenceStyle(SnowCanvasRuntime&) {
                      "pinned edit button should use the theme primary color on hover");
 
     const QPointF closeCenter(closeButton->rect().center());
-    QEnterEvent closeEnter(closeCenter, closeCenter,
+    SnowEnterEvent closeEnter(closeCenter, closeCenter,
                            QPointF(closeButton->mapToGlobal(closeCenter.toPoint())));
     QCoreApplication::sendEvent(closeButton, &closeEnter);
     const QColor error = adqt::theme::ThemeManager::instance().resolveTheme(closeButton).colorError;
@@ -7767,7 +7767,7 @@ void pinnedGeometryQueriesDoNotCreateNativeWindows() {
     require(!window.currentNativeGeometry().isValid(),
             "uninitialized geometry must not fall back to logical QWidget coordinates");
     require(window.internalWinId() == 0, "reading pinned geometry must not create a native window");
-    QEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(10, 10));
+    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(10, 10));
     QCoreApplication::sendEvent(&window, &enter);
     require(window.internalWinId() == 0,
             "hover delivery must not create an unpresented native window");
@@ -7895,7 +7895,7 @@ void pinnedWindowButtonsFollowSettings() {
     auto* close =
         window.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotPinnedCloseButton"));
     require(panel && edit && close, "the settings fixture needs both window buttons");
-    QEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
+    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
     QCoreApplication::sendEvent(&window, &enter);
     require(!panel->isVisible() && !edit->isVisible() && !close->isVisible(),
             "new pinned windows must honor disabled window buttons even on hover");
@@ -7937,7 +7937,7 @@ void pinnedPointerPresenceFollowsEvents() {
     auto* canvas = window.findChild<SnowCanvasWidget*>();
     require(panel && canvas, "the hover fixture needs controls and a canvas");
 
-    QEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
+    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
     QEvent leave(QEvent::Leave);
     QCoreApplication::sendEvent(&window, &enter);
     require(panel->isVisible(), "top-level entry must reveal controls");
@@ -7978,7 +7978,7 @@ void pinnedPointerPresenceIsDebounced() {
     require(panel && edit && close, "the controls fixture needs both buttons");
     auto& timer = ScreenshotPinnedWindowTestAccess::pointerPresenceTimer(window);
     const auto inside = [&]() { return ScreenshotPinnedWindowTestAccess::pointerInside(window); };
-    QEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
+    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
     QEvent leave(QEvent::Leave);
     require(timer.interval() == 100 && timer.isSingleShot() &&
                 timer.timerType() == Qt::PreciseTimer,
@@ -8056,7 +8056,7 @@ void pinnedControlsRemainAboveRecognitionContent() {
     auto* close =
         window.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotPinnedCloseButton"));
     require(session && panel && edit && close, "recognition stacking fixture needs controls");
-    QEnterEvent enter(QPointF(10, 10), QPointF(10, 10), window.mapToGlobal(QPoint(10, 10)));
+    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), window.mapToGlobal(QPoint(10, 10)));
     QCoreApplication::sendEvent(window.windowHandle(), &enter);
     require(panel->isVisible(), "controls must be visible before recognition completes");
     const auto requireButtonTargets = [&] {
@@ -10410,9 +10410,9 @@ void pinnedLockOffscreen() {
     clearReadout();
     QApplication::sendEvent(canvas, &wheel);
     assertLocked();
-    QNativeGestureEvent pinch(Qt::ZoomNativeGesture, QPointingDevice::primaryPointingDevice(), 2,
-                              QPointF(40, 40), QPointF(40, 40),
-                              QPointF(window.mapToGlobal(QPoint(40, 40))), .5, QPointF());
+    QNativeGestureEvent pinch =
+        snowNativeGestureEvent(Qt::ZoomNativeGesture, QPointF(40, 40), QPointF(40, 40),
+                               QPointF(window.mapToGlobal(QPoint(40, 40))), .5);
     clearReadout();
     require(Access::gesture(window, &pinch), "lock must consume pinch zoom");
     assertLocked();
@@ -11959,7 +11959,7 @@ void pinnedClickThroughNative() {
         }
     } lowerWindow;
     lowerWindow.setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
-    lowerWindow.setScreen(screen);
+    snowSetWidgetScreen(&lowerWindow, screen);
     lowerWindow.setGeometry(
         ScreenshotGeometryMapper::logicalRectForPhysicalRect(config.nativeGeometry, screen));
     lowerWindow.show();
@@ -12125,7 +12125,7 @@ void restoredThumbnailStateOffscreen(const QString& scenario) {
         // at that earlier scale, then deliver the final DPR notification alone.
         for (const qreal ratio : {0.5, 1.25, 2.0}) {
             ScreenshotPinnedWindowTestAccess::leaveViewportAtPreviousDpi(window, ratio);
-            QEvent dpiChanged(QEvent::DevicePixelRatioChange);
+            QEvent dpiChanged(snowDevicePixelRatioChange);
             QCoreApplication::sendEvent(&window, &dpiChanged);
             waitForUi(30);
             require(
@@ -13562,7 +13562,7 @@ void pinnedHiddenFormattedTextSelectionOffscreen() {
             window.activateWindow();
             QApplication::processEvents();
             const QPoint textPoint = layer->viewport()->mapTo(&window, point(1));
-            QEnterEvent enter(QPointF(textPoint), QPointF(textPoint),
+            SnowEnterEvent enter(QPointF(textPoint), QPointF(textPoint),
                               window.mapToGlobal(textPoint));
             QApplication::sendEvent(window.windowHandle(), &enter);
             const auto hover = [&](QPoint position, Qt::CursorShape cursor) {
@@ -18555,8 +18555,8 @@ void pinnedControlledInteractionAndGestures() {
     require(ScreenshotPinnedWindowTestAccess::gesture(window, &momentum) &&
                 std::abs(ScreenshotPinnedWindowTestAccess::scale(window) - 110.) < .01,
             "momentum must not change zoom");
-    QNativeGestureEvent pinch(Qt::ZoomNativeGesture, QPointingDevice::primaryPointingDevice(), 2,
-                              local, local, global, .5, QPointF());
+    QNativeGestureEvent pinch =
+        snowNativeGestureEvent(Qt::ZoomNativeGesture, local, local, global, .5);
     require(ScreenshotPinnedWindowTestAccess::gesture(window, &pinch) &&
                 std::abs(ScreenshotPinnedWindowTestAccess::scale(window) - 165.) < .01,
             "pinch must apply continuous magnification");
@@ -21503,8 +21503,8 @@ void pinnedMultiSelectionGesturesAndRollback() {
     expectScale(120, "a full continued precise wheel step scales every peer exactly once");
     scroll(120, Qt::ScrollMomentum);
     expectScale(120, "precise wheel momentum cannot alter a selected group");
-    QNativeGestureEvent pinch(Qt::ZoomNativeGesture, QPointingDevice::primaryPointingDevice(), 2,
-                              local, local, desktop, .25, QPointF());
+    QNativeGestureEvent pinch =
+        snowNativeGestureEvent(Qt::ZoomNativeGesture, local, local, desktop, .25);
     require(Access::gesture(first, &pinch), "selected pinch preserves native gesture handling");
     expectScale(150, "continuous pinch applies one common relative factor to the selected group");
     scroll(120, Qt::ScrollMomentum);
@@ -21516,9 +21516,8 @@ void pinnedMultiSelectionGesturesAndRollback() {
             "modifier opacity wheel remains local while shared scaling is enabled");
     Access::setRecognitionInteraction(second, true);
     scroll(120, Qt::ScrollBegin);
-    QNativeGestureEvent blockedPinch(Qt::ZoomNativeGesture,
-                                     QPointingDevice::primaryPointingDevice(), 2, local, local,
-                                     desktop, .5, QPointF());
+    QNativeGestureEvent blockedPinch =
+        snowNativeGestureEvent(Qt::ZoomNativeGesture, local, local, desktop, .5);
     require(Access::gesture(first, &blockedPinch),
             "recognition-blocked group pinch remains consumed");
     expectScale(160, "ordinary OCR in a selected follower blocks partial wheel and pinch scaling");
@@ -21630,7 +21629,7 @@ void pinnedMultiSelectionNativePointer() {
                 event->type() == QEvent::MouseButtonRelease || event->type() == QEvent::MouseMove) {
                 const auto* mouse = static_cast<QMouseEvent*>(event);
                 qInfo() << "native-selection-input" << watched << event->type()
-                        << mouse->globalPosition() << mouse->modifiers() << mouse->buttons()
+                        << snowGlobalPos(mouse) << mouse->modifiers() << mouse->buttons()
                         << mouse->spontaneous();
             }
             return QObject::eventFilter(watched, event);

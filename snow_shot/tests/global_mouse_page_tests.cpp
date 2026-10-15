@@ -24,7 +24,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QHash>
 #include <QLabel>
 #include <QLayout>
@@ -709,7 +709,7 @@ void globalMouseAndHotkeyTitlesRenderIdentically() {
     const auto sendHover = [](QWidget& widget, bool hovered) {
         widget.setAttribute(Qt::WA_UnderMouse, hovered);
         if (hovered) {
-            QEnterEvent event(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1));
+            SnowEnterEvent event(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1));
             QApplication::sendEvent(&widget, &event);
         } else {
             QEvent event(QEvent::Leave);
@@ -900,7 +900,7 @@ void globalMousePopupStaysAboveModalDuringLayout() {
             "modal selectors use a separate QtTool popup surface");
     for (int i = 0; i < 3; ++i) {
         const QPointF local = viewport->rect().center();
-        QEnterEvent hover(local, viewport->mapTo(viewport->window(), local.toPoint()),
+        SnowEnterEvent hover(local, viewport->mapTo(viewport->window(), local.toPoint()),
                           viewport->mapToGlobal(local.toPoint()));
         QApplication::sendEvent(viewport, &hover);
         QEvent layout(QEvent::LayoutRequest);

@@ -156,7 +156,7 @@ class PrintScreenShortcutRecorder::Impl final : public QObject, public QAbstract
         return false;
     }
 
-    bool nativeEventFilter(const QByteArray&, void* message, qintptr* result) override {
+    bool nativeEventFilter(const QByteArray&, void* message, snowNativeEventResult* result) override {
 #ifdef Q_OS_WIN
         if (message == nullptr || !isActive()) {
             return false;

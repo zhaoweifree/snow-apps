@@ -1639,7 +1639,7 @@ struct McpDocumentService::Impl {
                            region.bounds.width() * bounds.width() / pixels.width(),
                            region.bounds.height() * bounds.height() / pixels.height())
                         .intersected(bounds);
-            regions.removeIf([](const auto& region) { return region.bounds.isEmpty(); });
+            snow::compat::removeIf(regions, [](const auto& region) { return region.bounds.isEmpty(); });
             // Once the engine transaction is queued it must complete atomically; a
             // cancel acknowledgment may not race a successful document mutation.
             if (!ports.jobs->setCancellation(id, {}))

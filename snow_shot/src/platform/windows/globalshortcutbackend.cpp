@@ -326,7 +326,7 @@ class WindowsGlobalShortcutBackend final : public GlobalShortcutBackend,
                         ((native.modifiers & MOD_WIN) != 0 && (down(VK_LWIN) || down(VK_RWIN))));
         return state;
     }
-    bool nativeEventFilter(const QByteArray&, void* message, qintptr*) override {
+    bool nativeEventFilter(const QByteArray&, void* message, snowNativeEventResult*) override {
         if (message != nullptr) {
             const auto* native = static_cast<const MSG*>(message);
             if (native->message == WM_HOTKEY && m_handler) {

@@ -23,9 +23,9 @@ inline ScreenshotToolbarLayout defaultFloatingToolbarLayout() {
         return !presentation::editionActionToolAvailable(id);
     };
     for (auto& position : layout.positions)
-        position.removeIf(unavailable);
-    layout.positions.removeIf([](const QStringList& position) { return position.isEmpty(); });
-    layout.hidden.removeIf(unavailable);
+        snow::compat::removeIf(position, unavailable);
+    snow::compat::removeIf(layout.positions, [](const QStringList& position) { return position.isEmpty(); });
+    snow::compat::removeIf(layout.hidden, unavailable);
     return layout;
 }
 

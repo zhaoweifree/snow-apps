@@ -34,7 +34,7 @@
 #include <utility>
 
 #if defined(Q_OS_WIN) || defined(_WIN32)
-#include <QtGui/qscreen_platform.h>
+#include "snow_shot/platform/windows/monitorgeometry.h"
 #include <qt_windows.h>
 #endif
 
@@ -99,8 +99,8 @@ PlacementContext placementContext(const QRect& result) {
             return {};
         QScreen* selected = nullptr;
         for (QScreen* screen : QGuiApplication::screens()) {
-            const auto* native = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
-            if (native && native->handle() == monitor) {
+            if (static_cast<HMONITOR>(
+                    snow_shot::platform::windows::nativeMonitorHandle(screen)) == monitor) {
                 selected = screen;
                 break;
             }
@@ -668,7 +668,7 @@ bool ScreenshotOriginalImagePreviewWindow::applyGeometry(const QRect& target, QS
     const QScopedValueRollback<bool> applying(m_applyingGeometry, true);
     m_targetGeometry = target;
     if (internalWinId() == 0) {
-        setScreen(screen);
+        snowSetWidgetScreen(this, screen);
         // winId() marks this tool WA_NativeWindow and can promote its owner's alien
         // recognition/canvas siblings. Create only the preview's own native surface.
         create();
@@ -1101,7 +1101,7 @@ bool ScreenshotOriginalImagePreviewWindow::event(QEvent* event) {
     if (event && (event->type() == QEvent::Hide || event->type() == QEvent::WinIdChange))
         m_siblingStackedAbove = false;
     if (event &&
-        (event->type() == QEvent::DevicePixelRatioChange ||
+        (event->type() == snowDevicePixelRatioChange ||
          event->type() == QEvent::ScreenChangeInternal || event->type() == QEvent::WinIdChange) &&
         !m_applyingGeometry)
         scheduleRefresh();

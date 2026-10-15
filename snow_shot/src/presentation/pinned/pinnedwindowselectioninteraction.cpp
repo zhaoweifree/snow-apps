@@ -561,10 +561,10 @@ bool PinnedWindowSelectionController::handlePointer(ScreenshotPinnedWindow* wind
             }
             if (state->active) {
                 if (release) {
-                    updateGeometry(mouse->globalPosition());
+                    updateGeometry(snowGlobalPos(mouse));
                     endGeometry(false);
                 } else {
-                    state->queuedPosition = mouse->globalPosition();
+                    state->queuedPosition = snowGlobalPos(mouse);
                     if (!state->updateQueued) {
                         state->updateQueued = true;
                         QTimer::singleShot(0, this, [this, state] {
@@ -579,7 +579,7 @@ bool PinnedWindowSelectionController::handlePointer(ScreenshotPinnedWindow* wind
             if (!state->press)
                 return false;
             const auto press = *state->press;
-            const QPointF delta = mouse->globalPosition() - press.desktopPosition;
+            const QPointF delta = snowGlobalPos(mouse) - press.desktopPosition;
             const bool threshold =
                 std::abs(delta.x()) + std::abs(delta.y()) >= QApplication::startDragDistance();
             if (release && !press.crossedThreshold && !threshold) {
@@ -601,7 +601,7 @@ bool PinnedWindowSelectionController::handlePointer(ScreenshotPinnedWindow* wind
                     const auto handle = press.command ? std::optional<int>{} : press.handle;
                     if (beginGeometry(window, press.desktopPosition, handle,
                                       press.nativePosition)) {
-                        updateGeometry(mouse->globalPosition());
+                        updateGeometry(snowGlobalPos(mouse));
                         if (release)
                             endGeometry(false);
                     } else {
@@ -626,7 +626,7 @@ bool PinnedWindowSelectionController::handlePointer(ScreenshotPinnedWindow* wind
                     if (window->beginControlledInteraction(press.desktopPosition, press.handle)) {
                         if (press.handle)
                             window->m_interactionNativePointer = press.nativePosition;
-                        window->updateControlledInteraction(mouse->globalPosition());
+                        window->updateControlledInteraction(snowGlobalPos(mouse));
                         if (release)
                             window->endControlledInteraction(false);
                     }
@@ -669,7 +669,7 @@ bool PinnedWindowSelectionController::handlePointer(ScreenshotPinnedWindow* wind
         return false;
     if (command && !selectable)
         return false;
-    const QPointF local = window->windowPositionForEvent(watched, mouse->position());
+    const QPointF local = window->windowPositionForEvent(watched, snowPos(mouse));
     const bool controls = window->isControlsPanelPosition(local.toPoint());
     const auto handle = selectable && window->interactiveResizingEnabled() && !controls
                             ? window->resizeHandleAt(local)
@@ -690,8 +690,8 @@ bool PinnedWindowSelectionController::handlePointer(ScreenshotPinnedWindow* wind
     GeometryState::Press press;
     press.owner = window;
     press.receiver = widget;
-    press.localPosition = mouse->position();
-    press.desktopPosition = mouse->globalPosition();
+    press.localPosition = snowPos(mouse);
+    press.desktopPosition = snowGlobalPos(mouse);
     if (mouse->spontaneous() && !window->m_platform->usesControlledInteraction())
         press.nativePosition = window->physicalCursorPosition();
     press.handle = handle;

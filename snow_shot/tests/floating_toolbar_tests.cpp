@@ -28,7 +28,7 @@
 #include <QDropEvent>
 #include <QElapsedTimer>
 #include <QEventLoop>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QJsonDocument>
 #include <QMenu>
 #include <QPointer>
@@ -185,7 +185,7 @@ void verifyOpacity() {
         QApplication::sendEvent(surface, &event);
     };
     const auto enter = [](QWidget* surface) {
-        QEnterEvent event(QPointF(1, 1), QPointF(1, 1), surface->mapToGlobal(QPoint(1, 1)));
+        SnowEnterEvent event(QPointF(1, 1), QPointF(1, 1), surface->mapToGlobal(QPoint(1, 1)));
         QApplication::sendEvent(surface, &event);
     };
     leave(toolbar);
@@ -684,7 +684,7 @@ class FloatingTranslator final : public QTranslator {
 void reveal(FloatingToolbarController& controller) {
     auto* icon = window("floatingToolbarIconWindow");
     require(icon && icon->isVisible(), "icon visible before hover");
-    QEnterEvent event(QPointF(20, 20), QPointF(20, 20), QPointF(icon->mapToGlobal(QPoint(20, 20))));
+    SnowEnterEvent event(QPointF(20, 20), QPointF(20, 20), QPointF(icon->mapToGlobal(QPoint(20, 20))));
     QApplication::sendEvent(icon, &event);
     timer(controller, "floatingToolbarRevealTimer");
 }

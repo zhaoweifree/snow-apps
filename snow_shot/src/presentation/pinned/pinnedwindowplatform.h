@@ -3,7 +3,7 @@
 
 #include "pinnedplacementgeometry.h"
 #include <QObject>
-#include <QKeyCombination>
+#include "snow_shot/compat/qt_compat.h"
 #include <QPointer>
 #include <QRectF>
 #include <QScreen>

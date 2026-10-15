@@ -6,7 +6,7 @@
 #endif
 #include <dwmapi.h>
 #include <qt_windows.h>
-#include <QtGui/qscreen_platform.h>
+#include "snow_shot/platform/windows/monitorgeometry.h"
 #endif
 
 #include <cstdlib>
@@ -57,10 +57,10 @@ bool focusedFullscreenWindowMatches(const QScreen* screen) {
         return false;
     }
 
-    if (screen) {
-        const auto* native = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
-        if (!native || native->handle() != monitor)
-            return false;
+    if (screen != nullptr &&
+        static_cast<HMONITOR>(snow_shot::platform::windows::nativeMonitorHandle(screen)) !=
+            monitor) {
+        return false;
     }
     const RECT& bounds = monitorInfo.rcMonitor;
     return coordinatesMatch(frame.left, bounds.left) && coordinatesMatch(frame.top, bounds.top) &&

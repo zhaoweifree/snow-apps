@@ -60,7 +60,7 @@ class MainWindow : public QMainWindow {
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 #ifdef Q_OS_WIN
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
 #endif
 
   private:

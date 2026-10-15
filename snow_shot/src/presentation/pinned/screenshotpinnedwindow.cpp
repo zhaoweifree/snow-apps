@@ -99,7 +99,7 @@
 #include <QDir>
 #include <QEvent>
 #include <QCursor>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QFrame>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -1028,7 +1028,7 @@ class PinnedOpacityEditor final : public QWidget {
   protected:
     bool event(QEvent* event) override {
         const bool result = QWidget::event(event);
-        if (event->type() == QEvent::DevicePixelRatioChange) {
+        if (event->type() == snowDevicePixelRatioChange) {
             refreshIcon();
         } else if (event->type() == QEvent::LanguageChange) {
             retranslateScreenshotToolPalette(this);
@@ -1767,7 +1767,7 @@ bool ScreenshotPinnedWindow::prewarm(QScreen* screen) {
         return false;
     }
     if (screen != nullptr) {
-        setScreen(screen);
+        snowSetWidgetScreen(this, screen);
     }
     ensurePolished();
     if (layout() != nullptr) {
@@ -2163,7 +2163,7 @@ bool ScreenshotPinnedWindow::event(QEvent* event) {
         m_windowActive = event->type() == QEvent::WindowActivate;
     }
     const bool scaleMayHaveChanged =
-        event != nullptr && event->type() == QEvent::DevicePixelRatioChange;
+        event != nullptr && event->type() == snowDevicePixelRatioChange;
     const bool assignedScreenMayHaveChanged =
         event != nullptr && event->type() == QEvent::ScreenChangeInternal;
     const bool nativeGeometryMayHaveSettled =
@@ -2370,7 +2370,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
     // the screen before winId() so every native operation uses the final HWND.
     m_auxiliaryWindowInteractionActive = false;
     m_forwardingNativeExposeEvent = false;
-    setScreen(config.screen);
+    snowSetWidgetScreen(this, config.screen);
     m_canvasSourceRect = contentCanvasRect;
     m_backgroundCanvasRect = m_canvasSourceRect;
     m_resultSurfaceCanvasRect = surfaceCanvasRect;
@@ -2836,7 +2836,7 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
             const QPoint physicalPosition =
                 (mouse->spontaneous() ? physicalCursorPosition() : std::nullopt)
                     .value_or(nativePositionForWindowPosition(
-                                  mapFromGlobal(mouse->globalPosition().toPoint()))
+                                  mapFromGlobal(snowGlobalPos(mouse).toPoint()))
                                   .toPoint());
             if (event->type() == QEvent::MouseButtonPress && mouse->button() == Qt::LeftButton) {
                 m_clickThroughDragOrigin = physicalPosition;
@@ -2877,12 +2877,12 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
         event->type() == QEvent::Wheel) {
         const QPointF position = event->type() == QEvent::Wheel
                                      ? static_cast<QWheelEvent*>(event)->position()
-                                     : static_cast<QMouseEvent*>(event)->position();
+                                     : snowPos(static_cast<QMouseEvent*>(event));
         if (!contentViewRect().contains(windowPositionForEvent(watched, position))) {
             if (event->type() != QEvent::Wheel) {
                 auto* mouse = static_cast<QMouseEvent*>(event);
                 if (mouse->button() == Qt::RightButton)
-                    showContextMenu(mouse->globalPosition().toPoint());
+                    showContextMenu(snowGlobalPos(mouse).toPoint());
             }
             event->accept();
             return true;
@@ -2905,7 +2905,7 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick) {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
         if (mouseEvent->button() == Qt::MiddleButton &&
-            handleMiddleClick(windowPositionForEvent(watched, mouseEvent->position()).toPoint())) {
+            handleMiddleClick(windowPositionForEvent(watched, snowPos(mouseEvent)).toPoint())) {
             mouseEvent->accept();
             return true;
         }
@@ -2914,7 +2914,7 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
         if (mouseEvent->button() == Qt::LeftButton &&
             !mouseEvent->modifiers().testFlag(Qt::AltModifier) &&
-            handleDoubleClick(windowPositionForEvent(watched, mouseEvent->position()).toPoint())) {
+            handleDoubleClick(windowPositionForEvent(watched, snowPos(mouseEvent)).toPoint())) {
             mouseEvent->accept();
             return true;
         }
@@ -2923,7 +2923,7 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
         if (event->type() == QEvent::MouseMove) {
             auto* mouseEvent = static_cast<QMouseEvent*>(event);
             const QPoint position =
-                windowPositionForEvent(watched, mouseEvent->position()).toPoint();
+                windowPositionForEvent(watched, snowPos(mouseEvent)).toPoint();
             updateWindowDragCursor(position, mouseEvent->modifiers());
             if (watched == m_recognitionContent &&
                 windowMoveEnabledForPointer(position, mouseEvent->modifiers())) {
@@ -2940,7 +2940,7 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
             auto* mouseEvent = static_cast<QMouseEvent*>(event);
             if (mouseEvent->button() == Qt::LeftButton &&
                 windowMoveEnabledForPointer(
-                    windowPositionForEvent(watched, mouseEvent->position()).toPoint(),
+                    windowPositionForEvent(watched, snowPos(mouseEvent)).toPoint(),
                     mouseEvent->modifiers())) {
                 if (startWindowMove()) {
                     mouseEvent->accept();
@@ -2970,14 +2970,14 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
         if (mouseEvent->button() == Qt::LeftButton) {
             m_displayOcrPresentation->beginTextSelection(
-                canvasPositionForViewPosition(mouseEvent->position()));
+                canvasPositionForViewPosition(snowPos(mouseEvent)));
             m_screenshotRenderer->updateOcrSelection();
             mouseEvent->accept();
             return true;
         }
     } else if (event->type() == QEvent::MouseMove) {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
-        const QPointF canvasPosition = canvasPositionForViewPosition(mouseEvent->position());
+        const QPointF canvasPosition = canvasPositionForViewPosition(snowPos(mouseEvent));
         if (m_displayOcrPresentation->textSelectionActive()) {
             m_displayOcrPresentation->updateTextSelection(
                 m_displayOcrPresentation->textPositionAt(canvasPosition, true));
@@ -2992,7 +2992,7 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
     } else if (event->type() == QEvent::MouseButtonRelease) {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
         if (mouseEvent->button() == Qt::LeftButton) {
-            const QPointF canvasPosition = canvasPositionForViewPosition(mouseEvent->position());
+            const QPointF canvasPosition = canvasPositionForViewPosition(snowPos(mouseEvent));
             m_displayOcrPresentation->updateTextSelection(
                 m_displayOcrPresentation->textPositionAt(canvasPosition, true));
             m_displayOcrPresentation->finishTextSelection();
@@ -3189,12 +3189,12 @@ void ScreenshotPinnedWindow::mousePressEvent(QMouseEvent* event) {
     if (handleLockedPointer(this, event))
         return;
     if (event != nullptr && event->button() == Qt::MiddleButton &&
-        handleMiddleClick(event->position().toPoint())) {
+        handleMiddleClick(snowPos(event).toPoint())) {
         event->accept();
         return;
     }
     if (event != nullptr && event->button() == Qt::LeftButton &&
-        windowMoveEnabledForPointer(event->position().toPoint(), event->modifiers()) &&
+        windowMoveEnabledForPointer(snowPos(event).toPoint(), event->modifiers()) &&
         startWindowMove()) {
         event->accept();
         return;
@@ -3209,12 +3209,12 @@ void ScreenshotPinnedWindow::mouseDoubleClickEvent(QMouseEvent* event) {
         return;
     }
     if (event != nullptr && event->button() == Qt::MiddleButton &&
-        handleMiddleClick(event->position().toPoint())) {
+        handleMiddleClick(snowPos(event).toPoint())) {
         event->accept();
         return;
     }
     if (event != nullptr && event->button() == Qt::LeftButton &&
-        handleDoubleClick(event->position().toPoint())) {
+        handleDoubleClick(snowPos(event).toPoint())) {
         event->accept();
         return;
     }
@@ -7668,7 +7668,7 @@ bool ScreenshotPinnedWindow::handleScaleWheel(QObject* watched, QWheelEvent* eve
         return true;
     }
 
-    const QPointF windowPosition = windowPositionForEvent(watched, event->position());
+    const QPointF windowPosition = windowPositionForEvent(watched, snowPos(event));
     const QPointF nativeCursor = nativePositionForWindowPosition(windowPosition);
     applyWheelScaleSteps(steps, nativeCursor);
     return true;
@@ -8053,7 +8053,7 @@ bool ScreenshotPinnedWindow::updateClickThroughExitButtonGeometry() {
             controlHandle->transientParent() == windowHandle() && control->pos() == position) {
             return true;
         }
-        control->setScreen(screen);
+        snowSetWidgetScreen(control, screen);
         // Qt's layered backing store republishes the native position from its
         // logical geometry on every paint. A separate SetWindowPos correction
         // would fight that rounding at fractional DPI (for example, 150%).

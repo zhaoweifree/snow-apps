@@ -231,7 +231,7 @@ void projectLinkSurfacesMatchStandardButtons() {
                     target->setEnabled(state != 3);
                     target->setDown(state == 2);
                     if (state == 1) {
-                        QEnterEvent enter(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2));
+                        SnowEnterEvent enter(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2));
                         QCoreApplication::sendEvent(target, &enter);
                     } else {
                         QEvent leave(QEvent::Leave);

@@ -285,7 +285,7 @@ void GlobalMouseManager::cancelGesture(quint64 id) {
         m_impl->frameTimer.stop();
         QMutexLocker lock(&m_impl->mutex);
         m_impl->pacing = false;
-        m_impl->pending.removeIf([id](const auto& event) { return event.id == id; });
+        snow::compat::removeIf(m_impl->pending, [id](const auto& event) { return event.id == id; });
     }
     m_impl->backend->cancel(id);
 }

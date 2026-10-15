@@ -35,8 +35,7 @@
 #include <QUrl>
 #include <QVariant>
 #include <QScopeGuard>
-#include <QStringDecoder>
-
+#include "snow_shot/compat/qt_compat.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -546,9 +545,12 @@ readFileContent(const ScreenshotClipboardLocalImage& localImage, qreal devicePix
         if (allocate && !allocate(retained + encoded.size() * 3))
             return std::nullopt;
         const bool html = localImage.suffix != QLatin1String("txt");
-        const auto encoding = html ? QStringDecoder::encodingForHtml(encoded)
-                                   : QStringDecoder::encodingForData(encoded);
-        QStringDecoder decoder(encoding.value_or(QStringDecoder::Utf8));
+        // Qt6 spelled this as QStringDecoder::encodingForHtml()/encodingForData()
+        // followed by `.value_or(QStringDecoder::Utf8)`. Qt5 has no QStringDecoder,
+        // so the version-neutral snowTextDecoder() shim in
+        // snow_shot/compat/qt_compat.h does the same sniffing via QTextCodec and
+        // pins the same UTF-8 fallback. See compat/qt_compat.h section 11.
+        SnowStringDecoder decoder = snowTextDecoder(encoded, html);
         ScreenshotClipboardContentSnapshot textSnapshot;
         (html ? textSnapshot.html : textSnapshot.text) = decoder.decode(encoded);
         if (decoder.hasError())

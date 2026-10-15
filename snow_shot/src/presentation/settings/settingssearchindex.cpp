@@ -107,7 +107,7 @@ void indexField(QHash<QString, QVector<int>>* postings,
         // separated word. This makes trigram candidates complete for
         // QString::contains(), including matches that cross punctuation.
         for (int offset = 0; offset + 3 <= field.size(); ++offset) {
-            addPosting(trigramPostings, field.sliced(offset, 3), index);
+            addPosting(trigramPostings, field.mid(offset, 3), index);
         }
     }
 }
@@ -289,7 +289,7 @@ QVector<SettingsSearchEntry> SettingsSearchIndex::search(const QString& query) c
                 QVector<int> trigramCandidates;
                 bool hasTrigramCandidates = false;
                 for (int offset = 0; offset + 3 <= token.size(); ++offset) {
-                    const auto trigramFound = m_trigramPostings.constFind(token.sliced(offset, 3));
+                    const auto trigramFound = m_trigramPostings.constFind(token.mid(offset, 3));
                     if (trigramFound == m_trigramPostings.cend()) {
                         hasTrigramCandidates = false;
                         break;

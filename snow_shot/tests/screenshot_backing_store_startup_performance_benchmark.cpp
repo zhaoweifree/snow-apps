@@ -311,7 +311,7 @@ QJsonObject runSample(ObservedApplication& app, SnowCanvasRuntime& runtime, Over
     if (!recreated)
         overlay = std::make_unique<ScreenshotOverlayWindow>(events, new SnowCanvasWidget(runtime));
     sample.overlay = overlay.get();
-    overlay->setScreen(QGuiApplication::primaryScreen());
+    snowSetWidgetScreen(overlay, QGuiApplication::primaryScreen());
     const qreal dpr = overlay->devicePixelRatioF();
     const QSize logicalSize(qRound(physicalSize.width() / dpr),
                             qRound(physicalSize.height() / dpr));

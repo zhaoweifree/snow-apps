@@ -137,7 +137,7 @@ class ScreenshotRegionTypeControl final : public QWidget {
     bool eventFilter(QObject* watched, QEvent* event) override {
         if (m_floating && m_requestedVisible && event != nullptr &&
             event->type() == QEvent::MouseMove) {
-            refreshVisibility(static_cast<QMouseEvent*>(event)->globalPosition());
+            refreshVisibility(snowGlobalPos(static_cast<QMouseEvent*>(event)));
         }
         return QWidget::eventFilter(watched, event);
     }

@@ -3,7 +3,7 @@
 #include "widgets/button.h"
 
 #include <QApplication>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QPointer>
 #include <QTest>
 
@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
             owner.activateWindow();
             require(QTest::qWaitForWindowExposed(&owner), "button owner is exposed");
             const QPoint local = button.rect().center();
-            QEnterEvent enter(local, local, button.mapToGlobal(local));
+            SnowEnterEvent enter(local, local, button.mapToGlobal(local));
             QApplication::sendEvent(&button, &enter);
             require(creations == 0 && !menu, "hover must not open native menus");
 

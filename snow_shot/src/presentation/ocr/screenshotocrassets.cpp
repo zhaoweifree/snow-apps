@@ -184,7 +184,7 @@ QByteArray sha256File(const QString& path, QString* error) {
         }
         if (count == 0)
             break;
-        hash.addData(QByteArrayView(buffer, count));
+        hash.addData(buffer, static_cast<int>(count));
     }
     return hash.result();
 }

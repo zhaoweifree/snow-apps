@@ -1545,7 +1545,7 @@ void ScreenshotSelectionExportUiServices::trackSourceWindow(
         auto it = m_sourceWindows.find(key);
         if (it == m_sourceWindows.end())
             return;
-        it->removeIf([window](const auto& candidate) { return !candidate || candidate == window; });
+        snow::compat::removeIf(*(it), [window](const auto& candidate) { return !candidate || candidate == window; });
         if (it->isEmpty())
             m_sourceWindows.erase(it);
     };

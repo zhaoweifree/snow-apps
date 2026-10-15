@@ -870,7 +870,7 @@ int drawTemplateIndex(const QString& key) {
         return -1;
     }
     bool ok = false;
-    const int index = key.sliced(prefix.size()).toInt(&ok);
+    const int index = key.mid(prefix.size()).toInt(&ok);
     return ok ? index : -1;
 }
 
@@ -937,12 +937,12 @@ class DrawTemplateOptionActionDelegate final : public QAbstractItemDelegate {
             return false;
         }
         auto* mouse = static_cast<QMouseEvent*>(event);
-        const QModelIndex index = m_view->indexAt(mouse->position().toPoint());
+        const QModelIndex index = m_view->indexAt(snowPos(mouse).toPoint());
         const QString key = index.data(Qt::UserRole).toString();
         const QRect action(m_view->visualRect(index).right() - 31, m_view->visualRect(index).top(),
                            32, m_view->visualRect(index).height());
         const bool overAction = index.isValid() && drawTemplateIndex(key) >= 0 &&
-                                action.contains(mouse->position().toPoint());
+                                action.contains(snowPos(mouse).toPoint());
         const QString nextHovered = overAction ? key : QString();
         if (m_hovered != nextHovered) {
             m_hovered = nextHovered;
@@ -4296,7 +4296,7 @@ bool ScreenshotToolPalette::eventFilter(QObject* watched, QEvent* event) {
                     button == m_scrollingMoveHorizontalButton
                         ? ScreenshotScrollingRecognitionMode::Horizontal
                         : ScreenshotScrollingRecognitionMode::Vertical,
-                    mouse->globalPosition().toPoint());
+                    snowGlobalPos(mouse).toPoint());
                 return true;
             }
         }
@@ -4306,13 +4306,13 @@ bool ScreenshotToolPalette::eventFilter(QObject* watched, QEvent* event) {
                 if (!(mouse->buttons() & Qt::LeftButton))
                     finishScrollingSelectionMove();
                 else
-                    emit scrollingSelectionMoveUpdated(mouse->globalPosition().toPoint());
+                    emit scrollingSelectionMoveUpdated(snowGlobalPos(mouse).toPoint());
                 return true;
             }
             if (event->type() == QEvent::MouseButtonRelease &&
                 static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton) {
                 emit scrollingSelectionMoveUpdated(
-                    static_cast<QMouseEvent*>(event)->globalPosition().toPoint());
+                    snowGlobalPos(static_cast<QMouseEvent*>(event)).toPoint());
                 finishScrollingSelectionMove();
                 return true;
             }
@@ -4371,7 +4371,7 @@ bool ScreenshotToolPalette::eventFilter(QObject* watched, QEvent* event) {
             if (mouse->button() == Qt::LeftButton) {
                 const bool pressed = event->type() == QEvent::MouseButtonPress;
                 const bool activate = !pressed && watchedButton->isDown() &&
-                                      watchedButton->rect().contains(mouse->position().toPoint());
+                                      watchedButton->rect().contains(snowPos(mouse).toPoint());
                 watchedButton->setDown(pressed);
                 if (activate) {
                     activateToolFromToolbar(Tool::TextTranslation);

@@ -77,12 +77,12 @@ class ScreenRecordingAreaWindow final : public QWidget {
     void moveEvent(QMoveEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
-    void enterEvent(QEnterEvent* event) override;
+    void enterEvent(SnowEnterEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
     void paintEvent(QPaintEvent* event) override;
     void showEvent(QShowEvent* event) override;
 

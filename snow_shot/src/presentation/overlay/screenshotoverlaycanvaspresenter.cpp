@@ -99,7 +99,7 @@ void applyDisplayModelsToDisplaySession(
         canvas->setViewportCamera(viewport.canvasCenter.x(), viewport.canvasCenter.y(),
                                   viewport.canvasToLogicalScale);
         if (display.screen != nullptr && overlay->screen() != display.screen) {
-            overlay->setScreen(display.screen);
+            snowSetWidgetScreen(overlay, display.screen);
         }
         overlay->setCaptureGeometry(viewport.logicalRect);
         if (applyCapturedImage) {

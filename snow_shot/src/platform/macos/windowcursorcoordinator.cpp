@@ -215,7 +215,7 @@ bool WindowCursorCoordinator::eventFilter(QObject* watched, QEvent* event) {
     case QEvent::WindowDeactivate:
     case QEvent::ApplicationActivate:
     case QEvent::ApplicationStateChange:
-    case QEvent::DevicePixelRatioChange:
+    case snowDevicePixelRatioChange:
     case QEvent::ScreenChangeInternal:
     case QEvent::Expose:
         invalidate();

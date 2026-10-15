@@ -48,7 +48,7 @@ class Surface final : public QWidget {
     std::function<void()> entered;
 
   protected:
-    bool nativeEvent(const QByteArray& type, void* message, qintptr* result) override {
+    bool nativeEvent(const QByteArray& type, void* message, snowNativeEventResult* result) override {
         if (chrome && snow_shot::platform::windows::handleNativeWindowEvent(
                           findChild<QWidget*>(QStringLiteral("title")), message, result))
             return true;
@@ -58,7 +58,7 @@ class Surface final : public QWidget {
         QPainter painter(this);
         painter.fillRect(rect(), Qt::white);
     }
-    void enterEvent(QEnterEvent* event) override {
+    void enterEvent(SnowEnterEvent* event) override {
         QWidget::enterEvent(event);
         if (entered) {
             QTimer::singleShot(0, this, entered);

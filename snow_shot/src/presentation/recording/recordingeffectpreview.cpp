@@ -384,7 +384,7 @@ bool RecordingEffectPreview::eventFilter(QObject* watched, QEvent* event) {
         case QEvent::Resize:
             updateReadout();
             break;
-        case QEvent::DevicePixelRatioChange:
+        case snowDevicePixelRatioChange:
         case QEvent::ScreenChangeInternal:
             m_configurationDirty = true;
             m_failed = false;

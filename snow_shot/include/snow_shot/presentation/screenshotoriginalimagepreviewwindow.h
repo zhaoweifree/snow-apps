@@ -73,7 +73,7 @@ class ScreenshotOriginalImagePreviewWindow final : public QWidget {
     void resizeEvent(QResizeEvent* event) override;
     bool event(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
 
   private:
     friend class ScreenshotOriginalImagePreviewWindowTestAccess;

@@ -314,7 +314,7 @@ void ScreenshotAutoFilterController::finish(quint64 session, quint64 generation,
                                region.bounds.height() * bounds.height() / pixels.height())
                             .intersected(bounds);
     }
-    regions.removeIf([](const auto& region) { return region.bounds.isEmpty(); });
+    snow::compat::removeIf(regions, [](const auto& region) { return region.bounds.isEmpty(); });
     if (target->setAutoFilterRegions(SnowCanvasAutoFilterRecord{bounds, regions}) && active()) {
         m_flashRegions = std::move(regions);
         m_flashUntil = arrived + 300;

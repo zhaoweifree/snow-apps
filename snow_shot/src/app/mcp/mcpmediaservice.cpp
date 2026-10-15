@@ -940,7 +940,7 @@ void McpMediaService::disconnected(quint64 connection) {
         } else
             ++it;
     }
-    s.replayOrder.removeIf([&](const QString& key) { return key.startsWith(prefix); });
+    snow::compat::removeIf(s.replayOrder, [&](const QString& key) { return key.startsWith(prefix); });
 }
 void McpMediaService::shutdown() {
     if (!m_impl || m_impl->stopped)

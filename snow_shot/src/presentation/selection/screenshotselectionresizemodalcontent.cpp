@@ -162,11 +162,11 @@ class PresetOptionActionDelegate final : public QAbstractItemDelegate {
         }
 
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
-        const QModelIndex index = m_view->indexAt(mouseEvent->position().toPoint());
+        const QModelIndex index = m_view->indexAt(snowPos(mouseEvent).toPoint());
         const QString key = index.data(Qt::UserRole).toString();
         const bool overAction =
             index.isValid() && isPresetKey(key) &&
-            presetActionRect(m_view->visualRect(index)).contains(mouseEvent->position().toPoint());
+            presetActionRect(m_view->visualRect(index)).contains(snowPos(mouseEvent).toPoint());
         setHoveredActionKey(overAction ? key : QString());
 
         if (event->type() == QEvent::MouseMove) {

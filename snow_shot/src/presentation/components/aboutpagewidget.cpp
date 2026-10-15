@@ -1097,7 +1097,7 @@ void AboutPageWidget::changeEvent(QEvent* event) {
     QWidget::changeEvent(event);
     if (m_ui && event->type() == QEvent::LanguageChange) {
         retranslateUi();
-    } else if (m_ui && event->type() == QEvent::DevicePixelRatioChange) {
+    } else if (m_ui && event->type() == snowDevicePixelRatioChange) {
         applyTheme(m_ui->scheme);
     }
 }

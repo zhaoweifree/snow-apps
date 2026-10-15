@@ -157,7 +157,7 @@ class ScreenshotOverlayWindow final : public QWidget {
     bool event(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 

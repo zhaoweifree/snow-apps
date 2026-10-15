@@ -103,7 +103,7 @@ bool ActionRow::event(QEvent* event) {
     const bool handled = AdButton::event(event);
     const auto type = event->type();
     if (type == QEvent::Enter || type == QEvent::Leave || type == QEvent::MouseButtonPress ||
-        type == QEvent::MouseButtonRelease || type == QEvent::DevicePixelRatioChange) {
+        type == QEvent::MouseButtonRelease || type == snowDevicePixelRatioChange) {
         syncTitle();
         update();
     }

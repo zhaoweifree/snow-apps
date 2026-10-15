@@ -2,7 +2,7 @@
 #define SNOW_SHOT_PRESENTATION_SCREENSHOTPINNEDWINDOWNATIVE_H
 
 #include <QRect>
-#include <QKeyCombination>
+#include "snow_shot/compat/qt_compat.h"
 #include <QList>
 #include <QWidget>
 #include <Qt>

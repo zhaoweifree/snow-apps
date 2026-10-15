@@ -12,7 +12,7 @@
 inline QStringList screenshotDropFilePaths(const QMimeData* mime) {
     auto paths = ScreenshotClipboardContentReader::localFilePaths(mime);
     const auto extensions = ScreenshotClipboardContentReader::supportedFileExtensions();
-    paths.removeIf([&extensions](const QString& path) {
+    snow::compat::removeIf(paths, [&extensions](const QString& path) {
         return !extensions.contains(QFileInfo(path).suffix(), Qt::CaseInsensitive);
     });
     return paths;
@@ -42,7 +42,7 @@ decodeScreenshotDropContent(ScreenshotClipboardContentSnapshot snapshot,
     if (content->isFormattedText()) {
         QCryptographicHash hash(QCryptographicHash::Sha256);
         hash.addData(content->originalContent.html.toUtf8());
-        hash.addData(QByteArrayView("\0", 1));
+        hash.addData("\0", static_cast<int>(1));
         hash.addData(content->originalContent.text.toUtf8());
         if (!content->sourceIdentity.isValid())
             content->sourceIdentity.key =
@@ -58,8 +58,8 @@ decodeScreenshotDropContent(ScreenshotClipboardContentSnapshot snapshot,
         for (int row = 0; row < pixels.height(); ++row) {
             if (cancelled && cancelled())
                 return std::nullopt;
-            hash.addData(QByteArrayView(reinterpret_cast<const char*>(pixels.constScanLine(row)),
-                                        static_cast<qsizetype>(pixels.width()) * 4));
+            hash.addData(reinterpret_cast<const char*>(pixels.constScanLine(row)),
+                         static_cast<int>(pixels.width()) * 4);
         }
         content->sourceIdentity.key =
             QStringLiteral("drop-image:") + QString::fromLatin1(hash.result().toHex());

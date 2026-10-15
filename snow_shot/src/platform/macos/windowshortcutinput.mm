@@ -36,7 +36,7 @@ class WindowShortcutInputFilter final : public QObject, public QAbstractNativeEv
             application->removeNativeEventFilter(this);
     }
 
-    bool nativeEventFilter(const QByteArray& eventType, void* message, qintptr*) override {
+    bool nativeEventFilter(const QByteArray& eventType, void* message, snowNativeEventResult*) override {
         if (eventType != QByteArrayLiteral("mac_generic_NSEvent") || message == nullptr)
             return false;
         NSEvent* native = static_cast<NSEvent*>(message);

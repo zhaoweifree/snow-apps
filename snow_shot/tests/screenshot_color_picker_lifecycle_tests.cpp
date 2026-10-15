@@ -37,7 +37,7 @@
 #include <QBackingStore>
 #include <QCursor>
 #include <QDir>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QHoverEvent>
 #include <QListView>
 #include <QMouseEvent>
@@ -1058,7 +1058,7 @@ void toolbarHoverKeepsScreenshotGuidesResponsive() {
         require(style && style->isVisible(), "the drawing style panel must be visible");
         const QPoint styleLocal = style->rect().center();
         const QPoint styleGlobal = style->mapToGlobal(styleLocal);
-        QEnterEvent enter(styleLocal, style->window()->mapFromGlobal(styleGlobal), styleGlobal);
+        SnowEnterEvent enter(styleLocal, style->window()->mapFromGlobal(styleGlobal), styleGlobal);
         QApplication::sendEvent(style, &enter);
         requireGuideAt(style, styleLocal);
 
@@ -1187,7 +1187,7 @@ void toolbarPopoversSuppressPickerAcrossWindowBoundaries() {
                 "crossing the canvas gap must be able to reveal the screenshot picker");
 
         const QPoint popupPoint = surface->mapToGlobal(surface->rect().center());
-        QEnterEvent enter(surface->mapFromGlobal(popupPoint), surface->mapFromGlobal(popupPoint),
+        SnowEnterEvent enter(surface->mapFromGlobal(popupPoint), surface->mapFromGlobal(popupPoint),
                           popupPoint);
         QApplication::sendEvent(surface, &enter);
         require(!coordinator.colorPicker()->isVisible(),
@@ -1241,7 +1241,7 @@ void toolbarPopoversSuppressPickerAcrossWindowBoundaries() {
         const auto enterWidget = [&](QWidget* receiver) {
             const QPoint local = receiver->rect().center();
             const QPoint global = receiver->mapToGlobal(local);
-            QEnterEvent event(local, receiver->window()->mapFromGlobal(global), global);
+            SnowEnterEvent event(local, receiver->window()->mapFromGlobal(global), global);
             QApplication::sendEvent(receiver, &event);
             require(!coordinator.colorPicker()->isVisible(),
                     "entering owned screenshot UI must hide the picker without a canvas move");
@@ -1425,9 +1425,9 @@ void pickerLifetimeFollowsExplicitSessionOperations() {
     if (QGuiApplication::platformName() == QStringLiteral("windows")) {
         const auto screens = QGuiApplication::screens();
         require(!screens.isEmpty(), "native smoke test requires an available display");
-        first.setScreen(screens.first());
+        snowSetWidgetScreen(&first, screens.first());
         first.setGeometry(screens.first()->geometry());
-        second.setScreen(screens.last());
+        snowSetWidgetScreen(&second, screens.last());
         second.setGeometry(screens.last()->geometry());
         std::cout << "Native picker smoke test: " << screens.size() << " display(s) available\n";
     }

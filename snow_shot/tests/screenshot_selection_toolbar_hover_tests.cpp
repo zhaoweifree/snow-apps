@@ -8,7 +8,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QEventLoop>
 #include <QHideEvent>
@@ -152,7 +152,7 @@ void sendEnter(QWidget* widget) {
     require(widget != nullptr, "enter-event target should exist");
     const QPointF localPosition(widget->rect().center());
     const QPointF globalPosition(widget->mapToGlobal(localPosition.toPoint()));
-    QEnterEvent event(localPosition, localPosition, globalPosition);
+    SnowEnterEvent event(localPosition, localPosition, globalPosition);
     QCoreApplication::sendEvent(widget, &event);
 }
 

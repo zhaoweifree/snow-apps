@@ -44,7 +44,7 @@ inline QJsonArray publicModels(const CustomAiModels& models) {
 #endif
 
 inline QJsonValue settingsJson(const QVariant& value) {
-    if (value.metaType() == QMetaType::fromType<CloudUploadSettings>()) {
+    if (snowMetaTypeOf(value) == snowMetaType<CloudUploadSettings>()) {
         auto settings = value.value<CloudUploadSettings>();
         for (auto& profile : settings.configurations) {
             profile.accessKeyId.clear();
@@ -53,27 +53,27 @@ inline QJsonValue settingsJson(const QVariant& value) {
         }
         return cloudUploadSettingsToJson(settings);
     }
-    if (value.metaType() == QMetaType::fromType<QColor>())
+    if (snowMetaTypeOf(value) == snowMetaType<QColor>())
         return storage::colorToRgbaString(value.value<QColor>());
-    if (value.metaType() == QMetaType::fromType<QVector<QColor>>()) {
+    if (snowMetaTypeOf(value) == snowMetaType<QVector<QColor>>()) {
         QJsonArray colors;
         for (const auto& color : value.value<QVector<QColor>>())
             colors.append(storage::colorToRgbaString(color));
         return colors;
     }
 #if SNOW_SHOT_ENABLE_API_CONFIGURATION
-    if (value.metaType() == QMetaType::fromType<CustomAiModels>())
+    if (snowMetaTypeOf(value) == snowMetaType<CustomAiModels>())
         return publicModels(value.value<CustomAiModels>());
 #endif
-    if (value.metaType() == QMetaType::fromType<shortcuts::ShortcutBindingList>())
+    if (snowMetaTypeOf(value) == snowMetaType<shortcuts::ShortcutBindingList>())
         return shortcuts::shortcutBindingsToJson(value.value<shortcuts::ShortcutBindingList>());
-    if (value.metaType() == QMetaType::fromType<settings::SettingsGlobalMouseCombination>()) {
+    if (snowMetaTypeOf(value) == snowMetaType<settings::SettingsGlobalMouseCombination>()) {
         const auto chord = value.value<settings::SettingsGlobalMouseCombination>();
         return QJsonObject{
             {QStringLiteral("activation_keys"), QJsonArray::fromStringList(chord.activationKeys)},
             {QStringLiteral("mouse_button"), chord.mouseButton}};
     }
-    if (value.metaType() == QMetaType::fromType<storage::ScreenshotToolbarLayout>()) {
+    if (snowMetaTypeOf(value) == snowMetaType<storage::ScreenshotToolbarLayout>()) {
         const auto layout = value.value<storage::ScreenshotToolbarLayout>();
         QJsonArray positions;
         for (const auto& position : layout.positions)

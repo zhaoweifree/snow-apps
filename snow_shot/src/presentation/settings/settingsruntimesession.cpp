@@ -36,7 +36,7 @@ SettingsCustomRenderer toolbarRenderer(storage::ScreenshotToolbarLayoutKind kind
 
 QStringList stringListValue(const QVariant& value) {
     QStringList result;
-    if (value.metaType() == QMetaType::fromType<QStringList>()) {
+    if (snowMetaTypeOf(value) == snowMetaType<QStringList>()) {
         return value.toStringList();
     }
     for (const QVariant& item : value.toList()) {

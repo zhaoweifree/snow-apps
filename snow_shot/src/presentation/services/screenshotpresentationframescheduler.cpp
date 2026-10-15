@@ -1,7 +1,6 @@
 #include "snow_shot/presentation/screenshotpresentationframescheduler.h"
 
-#include <QChronoTimer>
-
+#include "snow_shot/compat/qt_compat.h"
 #ifdef Q_OS_WIN
 #include <QWinEventNotifier>
 #include <qt_windows.h>
@@ -18,7 +17,7 @@ struct ScreenshotPresentationFrameScheduler::Impl {
         timer.setObjectName(QStringLiteral("screenshotPresentationFrameTimer"));
         timer.setTimerType(Qt::PreciseTimer);
         timer.setSingleShot(true);
-        QObject::connect(&timer, &QChronoTimer::timeout, &timer, [this] { handleWakeup(); });
+        QObject::connect(&timer, &SnowChronoTimer::timeout, &timer, [this] { handleWakeup(); });
 #ifdef Q_OS_WIN
         if (backend == Backend::QtTimer) {
             return;
@@ -141,7 +140,7 @@ struct ScreenshotPresentationFrameScheduler::Impl {
     std::function<void()> wakeup;
     qint64 deadlineNs = 0;
     bool armed = false;
-    QChronoTimer timer;
+    SnowChronoTimer timer;
 #ifdef Q_OS_WIN
     HANDLE timerHandle = nullptr;
     std::unique_ptr<QWinEventNotifier> notifier;

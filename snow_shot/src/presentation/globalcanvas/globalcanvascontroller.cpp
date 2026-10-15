@@ -332,7 +332,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
         }
         if (watched == drawing.get() && sampleTarget) {
             if (event->type() == QEvent::MouseMove) {
-                updateColorSamplingPreview(static_cast<QMouseEvent*>(event)->position());
+                updateColorSamplingPreview(snowPos(static_cast<QMouseEvent*>(event)));
                 return true;
             }
             if (event->type() == QEvent::Leave) {
@@ -343,7 +343,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
             if (event->type() == QEvent::MouseButtonPress) {
                 auto* mouse = static_cast<QMouseEvent*>(event);
                 QPointer<adqt::widgets::AdColorPicker> target = sampleTarget;
-                const QImage preview = colorSamplingPreview(mouse->position());
+                const QImage preview = colorSamplingPreview(snowPos(mouse));
                 samplingMouseReleasePending = true;
                 cancelColorSampling();
                 if (mouse->button() == Qt::LeftButton && target && !preview.isNull()) {
@@ -461,7 +461,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
             if (mouse->button() == Qt::MiddleButton && mouse->buttons() == Qt::MiddleButton) {
                 drawing->resetEditingStatePreservingTool();
                 drawing->setFocus(Qt::MouseFocusReason);
-                panPosition = mouse->position();
+                panPosition = snowPos(mouse);
                 panning = true;
                 drawing->setCursorForLayer(SnowCanvasCursorLayer::Host, Qt::ClosedHandCursor);
                 drawing->grabMouse();
@@ -475,15 +475,15 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
                 finishPan();
                 return false;
             }
-            panBy(mouse->position() - panPosition);
-            panPosition = mouse->position();
+            panBy(snowPos(mouse) - panPosition);
+            panPosition = snowPos(mouse);
             mouse->accept();
             return true;
         }
         if (panning && event->type() == QEvent::MouseButtonRelease &&
             static_cast<QMouseEvent*>(event)->button() == Qt::MiddleButton) {
             auto* mouse = static_cast<QMouseEvent*>(event);
-            panBy(mouse->position() - panPosition);
+            panBy(snowPos(mouse) - panPosition);
             finishPan();
             mouse->accept();
             return true;

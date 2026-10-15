@@ -223,7 +223,7 @@ bool ScreenshotToolbarPanel::event(QEvent* event) {
     case QEvent::Hide:
         break;
     case QEvent::Resize:
-    case QEvent::DevicePixelRatioChange:
+    case snowDevicePixelRatioChange:
         if (!m_skinAttached) {
             return QFrame::event(event);
         }
@@ -248,9 +248,9 @@ bool ScreenshotToolbarPanel::event(QEvent* event) {
         }
     } else if (m_skinAttached && m_skinController &&
                (event->type() == QEvent::Resize ||
-                event->type() == QEvent::DevicePixelRatioChange)) {
+                event->type() == snowDevicePixelRatioChange)) {
         m_skinController->setViewport(this, size(), devicePixelRatioF(),
-                                      event->type() == QEvent::DevicePixelRatioChange);
+                                      event->type() == snowDevicePixelRatioChange);
     }
     return handled;
 }

@@ -366,20 +366,20 @@ void translationsAndAppearance(const PermissionGuideApplication& app) {
         flush();
         require(label->text() == english, "language change restores English");
     }
-    widget.setColorScheme(Qt::ColorScheme::Dark);
+    widget.setColorScheme(SnowColorSchemeDark);
     flush();
     require(widget.grab().toImage().pixelColor(20, 5).lightness() < 128,
             "system dark appearance is applied");
-    widget.setColorScheme(Qt::ColorScheme::Light);
+    widget.setColorScheme(SnowColorSchemeLight);
     flush();
     require(widget.grab().toImage().pixelColor(20, 5).lightness() > 128,
             "system light appearance is applied");
 }
 void render(const PermissionGuideApplication& app) {
-    for (const auto scheme : {Qt::ColorScheme::Light, Qt::ColorScheme::Dark}) {
+    for (const auto scheme : {SnowColorSchemeLight, SnowColorSchemeDark}) {
         QGuiApplication::styleHints()->setColorScheme(scheme);
         const QString appearance =
-            scheme == Qt::ColorScheme::Dark ? QStringLiteral("dark") : QStringLiteral("light");
+            scheme == SnowColorSchemeDark ? QStringLiteral("dark") : QStringLiteral("light");
         for (const auto& locale :
              {QStringLiteral("en_US"), QStringLiteral("zh_CN"), QStringLiteral("zh_TW")}) {
             QTranslator translator;

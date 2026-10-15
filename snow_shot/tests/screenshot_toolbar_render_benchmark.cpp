@@ -53,7 +53,7 @@
 
 #if defined(Q_OS_WIN) || defined(_WIN32)
 #include <dwmapi.h>
-#include <QtGui/qscreen_platform.h>
+#include "snow_shot/platform/windows/monitorgeometry.h"
 #include <qt_windows.h>
 #endif
 
@@ -415,12 +415,11 @@ void movePhysicalCursor(const QPoint& position) {
 }
 
 QRect nativeScreenPhysicalBounds(QScreen* screen) {
-    auto* nativeScreen =
-        screen != nullptr ? screen->nativeInterface<QNativeInterface::QWindowsScreen>() : nullptr;
+    const HMONITOR nativeScreen =
+        static_cast<HMONITOR>(snow_shot::platform::windows::nativeMonitorHandle(screen));
     MONITORINFO info{};
     info.cbSize = sizeof(info);
-    if (nativeScreen == nullptr || nativeScreen->handle() == nullptr ||
-        GetMonitorInfo(nativeScreen->handle(), &info) == FALSE) {
+    if (nativeScreen == nullptr || GetMonitorInfo(nativeScreen, &info) == FALSE) {
         return {};
     }
     return QRect(info.rcMonitor.left, info.rcMonitor.top,
@@ -735,9 +734,8 @@ void smoothlyDragToolbarToScreen(Fixture& fixture, QScreen* destination) {
     waitWithEvents(10);
     fixture.toolbar->cancelDrag();
 #if defined(Q_OS_WIN) || defined(_WIN32)
-    auto* nativeDestination = destination->nativeInterface<QNativeInterface::QWindowsScreen>();
     const HMONITOR destinationMonitor =
-        nativeDestination != nullptr ? nativeDestination->handle() : nullptr;
+        static_cast<HMONITOR>(snow_shot::platform::windows::nativeMonitorHandle(destination));
     const bool reachedDestination =
         toolbarHwnd != nullptr &&
         MonitorFromWindow(toolbarHwnd, MONITOR_DEFAULTTONULL) == destinationMonitor;

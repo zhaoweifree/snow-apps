@@ -20,7 +20,7 @@
 #include <utility>
 
 #include <QCoreApplication>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFontMetrics>
 #include <QGuiApplication>
@@ -128,7 +128,7 @@ class ScreenshotShortcutHintsWidget final : public QWidget {
     bool eventFilter(QObject* watched, QEvent* event) override {
         if (event != nullptr && event->type() == QEvent::MouseMove) {
             const auto* mouseEvent = static_cast<QMouseEvent*>(event);
-            refreshVisibility(mouseEvent->globalPosition());
+            refreshVisibility(snowGlobalPos(mouseEvent));
         }
         return QWidget::eventFilter(watched, event);
     }
@@ -376,8 +376,8 @@ bool ScreenshotOverlayUiHost::eventFilter(QObject* watched, QEvent* event) {
             if (trackGuides) {
                 const QPointF globalPosition =
                     event->type() == QEvent::MouseMove
-                        ? static_cast<QMouseEvent*>(event)->globalPosition()
-                        : static_cast<QEnterEvent*>(event)->globalPosition();
+                        ? snowGlobalPos(static_cast<QMouseEvent*>(event))
+                        : snowGlobalPos(static_cast<SnowEnterEvent*>(event));
                 // Match the canvas renderer's pixel alignment, including fractional DPRs
                 // and negative display origins, instead of rounding into an adjacent pixel.
                 position = QPoint(qFloor(globalPosition.x()), qFloor(globalPosition.y()));

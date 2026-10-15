@@ -260,7 +260,7 @@ class ScreenshotQrPopover final : public QWidget {
     QRect lastAvailable;
 
   protected:
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override {
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override {
         adqt::widgets::detail::constrainTopLevelToolStackingToOwner(this, message);
         return QWidget::nativeEvent(eventType, message, result);
     }
@@ -510,8 +510,8 @@ void ScreenshotQrController::refreshMarkers() {
     if (!visible)
         dismissPopover();
     // Only rebuild when results/canvas membership changes, never on pointer motion.
-    m_canvases.removeIf([](const auto& canvas) { return !canvas; });
-    m_markers.removeIf([](const auto& marker) { return !marker; });
+    snow::compat::removeIf(m_canvases, [](const auto& canvas) { return !canvas; });
+    snow::compat::removeIf(m_markers, [](const auto& marker) { return !marker; });
     if (m_markers.size() != m_canvases.size() * m_detections.size()) {
         dismissPopover();
         clearMarkers();

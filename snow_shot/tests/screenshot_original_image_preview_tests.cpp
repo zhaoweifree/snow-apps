@@ -23,7 +23,7 @@
 #include <stdexcept>
 
 #if defined(Q_OS_WIN) || defined(_WIN32)
-#include <QtGui/qscreen_platform.h>
+#include "snow_shot/platform/windows/monitorgeometry.h"
 #include <qt_windows.h>
 #endif
 
@@ -275,7 +275,7 @@ void movementReusesTheRasterAndContentChangesInvalidateIt() {
     settle();
     require(ScreenshotOriginalImagePreviewWindowTestAccess::generation(preview) == firstGeneration,
             "hide and restore must reuse the existing viewport raster");
-    QEvent backingChange(QEvent::DevicePixelRatioChange);
+    QEvent backingChange(snowDevicePixelRatioChange);
     QApplication::sendEvent(&preview, &backingChange);
     preview.hide();
     settle();
@@ -325,7 +325,7 @@ void formulaStateSurvivesQueuedBackingRefreshes() {
                 preview.accessibleDescription() == state.status,
             "formula errors must retain an opaque themed background and dim the prior image");
     for (const QEvent::Type eventType :
-         {QEvent::DevicePixelRatioChange, QEvent::ScreenChangeInternal, QEvent::WinIdChange}) {
+         {snowDevicePixelRatioChange, QEvent::ScreenChangeInternal, QEvent::WinIdChange}) {
         QEvent backingChange(eventType);
         QApplication::sendEvent(&preview, &backingChange);
         settle();
@@ -367,7 +367,7 @@ void formulaPlaceholdersRetainNullImagesAndExactSmallExtents() {
                 preview.accessibleDescription() == state.status,
             "formula loading must remain visible without a rendered source image");
     for (const QEvent::Type eventType :
-         {QEvent::DevicePixelRatioChange, QEvent::ScreenChangeInternal}) {
+         {snowDevicePixelRatioChange, QEvent::ScreenChangeInternal}) {
         QEvent backingChange(eventType);
         QApplication::sendEvent(&preview, &backingChange);
         settle();
@@ -852,7 +852,7 @@ void mixedDpiPresentationUsesTheDestinationRasterLimit() {
     QScreen* const lowDpi = mixedDpiScreen(QStringLiteral("external"), 1);
     QScreen* const highDpi = mixedDpiScreen(QStringLiteral("retina"), 2);
     QWidget owner;
-    owner.setScreen(lowDpi);
+    snowSetWidgetScreen(&owner, lowDpi);
     owner.setGeometry(lowDpi->geometry().x() + 1000, 100, 100, 80);
     owner.show();
     ScreenshotOriginalImagePreviewWindow preview(&owner);
@@ -895,7 +895,7 @@ void mixedDpiRejectedPresentationPreservesTheWindowAndCache() {
     QScreen* const lowDpi = mixedDpiScreen(QStringLiteral("external"), 1);
     QScreen* const highDpi = mixedDpiScreen(QStringLiteral("retina"), 2);
     QWidget owner;
-    owner.setScreen(lowDpi);
+    snowSetWidgetScreen(&owner, lowDpi);
     owner.setGeometry(lowDpi->geometry().x() + 1000, 100, 100, 80);
     owner.show();
     ScreenshotOriginalImagePreviewWindow preview(&owner);
@@ -956,7 +956,7 @@ void mixedDpiWheelZoomPreparesOneRasterForTheDestination() {
     QScreen* const lowDpi = mixedDpiScreen(QStringLiteral("external"), 1);
     QScreen* const highDpi = mixedDpiScreen(QStringLiteral("retina"), 2);
     QWidget owner;
-    owner.setScreen(highDpi);
+    snowSetWidgetScreen(&owner, highDpi);
     owner.setGeometry(50, 50, 100, 80);
     owner.show();
     ScreenshotOriginalImagePreviewWindow preview(&owner);
@@ -1008,7 +1008,7 @@ void mixedDpiImagePresentationReusesTheDestinationRaster() {
     QScreen* const lowDpi = mixedDpiScreen(QStringLiteral("external"), 1);
     QScreen* const highDpi = mixedDpiScreen(QStringLiteral("retina"), 2);
     QWidget owner;
-    owner.setScreen(highDpi);
+    snowSetWidgetScreen(&owner, highDpi);
     owner.setGeometry(300, 180, 100, 80);
     owner.show();
     ScreenshotOriginalImagePreviewWindow preview(&owner);
@@ -1150,7 +1150,7 @@ void draggedPlacementSurvivesContentAndBackingRefreshes() {
             "ordinary content refreshes must retain manual placement, zoom and cached pixels");
     QEvent screenChange(QEvent::ScreenChangeInternal);
     QApplication::sendEvent(&preview, &screenChange);
-    QEvent backingChange(QEvent::DevicePixelRatioChange);
+    QEvent backingChange(snowDevicePixelRatioChange);
     QApplication::sendEvent(&preview, &backingChange);
     settle();
     require(preview.geometry() == adjustedGeometry && Access::generation(preview) == generation &&
@@ -1293,7 +1293,7 @@ void passiveWindowKeepsOwnershipAndClearsInvalidState() {
     auto sibling = std::make_unique<QWidget>(owner.get(), Qt::Tool | Qt::FramelessWindowHint);
     state.aboveSibling = sibling.get();
     require(preview->present(state), "retaining the optional toolbar sibling failed");
-    QEvent siblingBackingChange(QEvent::DevicePixelRatioChange);
+    QEvent siblingBackingChange(snowDevicePixelRatioChange);
     QApplication::sendEvent(preview, &siblingBackingChange);
     settle();
     require(ScreenshotOriginalImagePreviewWindowTestAccess::aboveSibling(*preview) == sibling.get(),
@@ -1315,7 +1315,7 @@ void passiveWindowKeepsOwnershipAndClearsInvalidState() {
             "finite coordinates whose combined extent overflows must be rejected");
     state = stateFor(owner.get());
     require(preview->present(state), "reopening after invalid state failed");
-    QEvent backingChange(QEvent::DevicePixelRatioChange);
+    QEvent backingChange(snowDevicePixelRatioChange);
     QApplication::sendEvent(preview, &backingChange);
     preview->clear();
     settle();
@@ -1431,7 +1431,7 @@ void nativeWindowMatchesOddResultExtentsAfterRepaints() {
     require(screen != nullptr, "native geometry tests require a monitor");
     QWidget owner(nullptr, Qt::Tool | Qt::FramelessWindowHint);
     owner.setAttribute(Qt::WA_ShowWithoutActivating);
-    owner.setScreen(screen);
+    snowSetWidgetScreen(&owner, screen);
     owner.setGeometry(QRect(screen->geometry().topLeft() + QPoint(100, 100), QSize(421, 239)));
     owner.show();
     settle();
@@ -1445,10 +1445,10 @@ void nativeWindowMatchesOddResultExtentsAfterRepaints() {
     }
     ScreenshotOriginalImagePreviewWindow preview(&owner);
     for (const QSize size : {QSize(421, 239), QSize(503, 277), QSize(97, 25)}) {
-        const auto native = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
+        const auto native = snow_shot::platform::windows::nativeMonitorHandle(screen);
         MONITORINFO info{};
         info.cbSize = sizeof(info);
-        require(native && GetMonitorInfoW(native->handle(), &info) != FALSE,
+        require(native && GetMonitorInfoW(static_cast<HMONITOR>(native), &info) != FALSE,
                 "native monitor geometry unavailable");
         const HWND hwnd = reinterpret_cast<HWND>(owner.winId());
         require(SetWindowPos(hwnd, nullptr, info.rcWork.left + 101, info.rcWork.top + 113,
@@ -1546,10 +1546,10 @@ void nativeWindowMatchesOddResultExtentsAfterRepaints() {
     const quint64 crossMonitorGeneration =
         ScreenshotOriginalImagePreviewWindowTestAccess::generation(preview);
     for (QScreen* destination : QGuiApplication::screens()) {
-        const auto native = destination->nativeInterface<QNativeInterface::QWindowsScreen>();
+        const auto native = snow_shot::platform::windows::nativeMonitorHandle(destination);
         MONITORINFO info{};
         info.cbSize = sizeof(info);
-        if (!native || GetMonitorInfoW(native->handle(), &info) == FALSE)
+        if (!native || GetMonitorInfoW(static_cast<HMONITOR>(native), &info) == FALSE)
             continue;
         state.resultRect.moveTopLeft(QPoint(info.rcWork.left + 150, info.rcWork.top + 100));
         require(preview.present(state), "cross-monitor preview placement failed");
@@ -1570,10 +1570,10 @@ void nativeWindowMatchesOddResultExtentsAfterRepaints() {
                 "placement must use the result monitor's physical work area");
     }
     for (QScreen* destination : QGuiApplication::screens()) {
-        const auto native = destination->nativeInterface<QNativeInterface::QWindowsScreen>();
+        const auto native = snow_shot::platform::windows::nativeMonitorHandle(destination);
         MONITORINFO info{};
         info.cbSize = sizeof(info);
-        if (!native || GetMonitorInfoW(native->handle(), &info) == FALSE)
+        if (!native || GetMonitorInfoW(static_cast<HMONITOR>(native), &info) == FALSE)
             continue;
         const QRect work(info.rcWork.left, info.rcWork.top, info.rcWork.right - info.rcWork.left,
                          info.rcWork.bottom - info.rcWork.top);
@@ -1606,10 +1606,10 @@ void nativeZoomHintSurvivesRepaintsWithoutChangingCachedPixels() {
     using Access = ScreenshotOriginalImagePreviewWindowTestAccess;
     QScreen* screen = QGuiApplication::primaryScreen();
     require(screen != nullptr, "native zoom hint fixture requires a monitor");
-    const auto* native = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
+    const auto native = snow_shot::platform::windows::nativeMonitorHandle(screen);
     MONITORINFO info{};
     info.cbSize = sizeof(info);
-    require(native && GetMonitorInfoW(native->handle(), &info) != FALSE,
+    require(native && GetMonitorInfoW(static_cast<HMONITOR>(native), &info) != FALSE,
             "native zoom hint monitor geometry unavailable");
     const QRect work(info.rcWork.left, info.rcWork.top, info.rcWork.right - info.rcWork.left,
                      info.rcWork.bottom - info.rcWork.top);
@@ -1648,7 +1648,7 @@ void nativeZoomHintSurvivesRepaintsWithoutChangingCachedPixels() {
         preview.repaint();
         QEvent update(QEvent::UpdateRequest);
         QApplication::sendEvent(&preview, &update);
-        QEvent backingChange(QEvent::DevicePixelRatioChange);
+        QEvent backingChange(snowDevicePixelRatioChange);
         QApplication::sendEvent(&preview, &backingChange);
         settle();
         const QImage displayed = displayedImage();
@@ -1717,14 +1717,14 @@ void nativeFormulaPlaceholderPreservesOddPhysicalExtents() {
             "native formula placeholders require Windows physical geometry");
     QScreen* screen = QGuiApplication::primaryScreen();
     require(screen != nullptr, "native formula placeholders require a monitor");
-    const auto* native = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
+    const auto native = snow_shot::platform::windows::nativeMonitorHandle(screen);
     MONITORINFO info{};
     info.cbSize = sizeof(info);
-    require(native && GetMonitorInfoW(native->handle(), &info) != FALSE,
+    require(native && GetMonitorInfoW(static_cast<HMONITOR>(native), &info) != FALSE,
             "native formula placeholder work area is available");
     QWidget owner(nullptr, Qt::Tool | Qt::FramelessWindowHint);
     owner.setAttribute(Qt::WA_ShowWithoutActivating);
-    owner.setScreen(screen);
+    snowSetWidgetScreen(&owner, screen);
     owner.setGeometry(
         QRect(screen->availableGeometry().topLeft() + QPoint(500, 113), QSize(200, 120)));
     owner.show();
@@ -1745,7 +1745,7 @@ void nativeFormulaPlaceholderPreservesOddPhysicalExtents() {
         const quint64 generation =
             ScreenshotOriginalImagePreviewWindowTestAccess::generation(preview);
         for (int pass = 0; pass < 4; ++pass) {
-            QEvent backingChange(QEvent::DevicePixelRatioChange);
+            QEvent backingChange(snowDevicePixelRatioChange);
             QApplication::sendEvent(&preview, &backingChange);
             preview.repaint();
             settle();
@@ -1771,7 +1771,7 @@ void nativeDraggingPreservesOddPhysicalExtentsAcrossMonitors() {
     require(primary != nullptr, "native drag tests require a monitor");
     QWidget owner(nullptr, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus);
     owner.setAttribute(Qt::WA_ShowWithoutActivating);
-    owner.setScreen(primary);
+    snowSetWidgetScreen(&owner, primary);
     owner.setGeometry(
         QRect(primary->availableGeometry().topLeft() + QPoint(101, 113), QSize(180, 100)));
     owner.show();
@@ -1797,10 +1797,10 @@ void nativeDraggingPreservesOddPhysicalExtentsAcrossMonitors() {
                 "starting a physical preview drag failed");
         const HWND foreground = GetForegroundWindow();
         for (QScreen* destination : QGuiApplication::screens()) {
-            const auto native = destination->nativeInterface<QNativeInterface::QWindowsScreen>();
+            const auto native = snow_shot::platform::windows::nativeMonitorHandle(destination);
             MONITORINFO info{};
             info.cbSize = sizeof(info);
-            require(native && GetMonitorInfoW(native->handle(), &info) != FALSE,
+            require(native && GetMonitorInfoW(static_cast<HMONITOR>(native), &info) != FALSE,
                     "native drag destination geometry unavailable");
             const QPoint requested(info.rcWork.left + 113, info.rcWork.top + 127);
             ScreenshotOriginalImagePreviewWindowTestAccess::moveDrag(preview, requested + offset);
@@ -1811,11 +1811,11 @@ void nativeDraggingPreservesOddPhysicalExtentsAcrossMonitors() {
             require(qAbs(dragged.x() - requested.x()) <= gridTolerance &&
                         qAbs(dragged.y() - requested.y()) <= gridTolerance &&
                         MonitorFromWindow(reinterpret_cast<HWND>(preview.internalWinId()),
-                                          MONITOR_DEFAULTTONEAREST) == native->handle(),
+                                          MONITOR_DEFAULTTONEAREST) == static_cast<HMONITOR>(native),
                     "physical dragging must move the preview itself onto its destination grid");
             for (int pass = 0; pass < 4; ++pass) {
                 require(preview.present(state), "refreshing the native dragged preview failed");
-                QEvent backingChange(QEvent::DevicePixelRatioChange);
+                QEvent backingChange(snowDevicePixelRatioChange);
                 QApplication::sendEvent(&preview, &backingChange);
                 preview.repaint();
                 settle();
@@ -1841,7 +1841,7 @@ void nativeDraggingPreservesOddPhysicalExtentsAcrossMonitors() {
         require(preview.cursor().shape() == Qt::OpenHandCursor,
                 "ending a native drag must restore the open hand cursor");
         const QRect released = ScreenshotOriginalImagePreviewWindow::nativeClientRect(&preview);
-        QEvent backingChange(QEvent::DevicePixelRatioChange);
+        QEvent backingChange(snowDevicePixelRatioChange);
         QApplication::sendEvent(&preview, &backingChange);
         preview.repaint();
         settle();
@@ -1913,7 +1913,7 @@ void macPreviewPreservesLogicalGeometryAndAlienChildren() {
         state.pinned = pinned;
         for (QScreen* destination : QGuiApplication::screens()) {
             for (const QSize size : {QSize(421, 239), QSize(503, 277), QSize(97, 25)}) {
-                owner.setScreen(destination);
+                snowSetWidgetScreen(&owner, destination);
                 owner.setGeometry(
                     QRect(destination->availableGeometry().topLeft() + QPoint(101, 113), size));
                 canvas.setGeometry(owner.rect());
@@ -2006,7 +2006,7 @@ void macOversizedPreviewUsesTheBestAvailableDirection() {
     owner.show();
     settleMacNative();
     for (QScreen* destination : QGuiApplication::screens()) {
-        owner.setScreen(destination);
+        snowSetWidgetScreen(&owner, destination);
         owner.move(destination->availableGeometry().topLeft() + QPoint(11, 13));
         settleMacNative();
         const QRect ownerRect = ScreenshotOriginalImagePreviewWindow::nativeClientRect(&owner);
@@ -2113,7 +2113,7 @@ void macSiblingStackingPreservesActivationAndVisibility() {
                 "Cocoa preview stacking must preserve activation, key window, geometry and input");
         const quint64 generation =
             ScreenshotOriginalImagePreviewWindowTestAccess::generation(preview);
-        QEvent backingChange(QEvent::DevicePixelRatioChange);
+        QEvent backingChange(snowDevicePixelRatioChange);
         QApplication::sendEvent(&preview, &backingChange);
         preview.hide();
         settleMacNative();

@@ -714,12 +714,12 @@ void ScreenshotScrollingThumbnailWidget::mousePressEvent(QMouseEvent* event) {
         QWidget::mousePressEvent(event);
         return;
     }
-    const int position = previewPosition(event->position());
+    const int position = previewPosition(snowPos(event));
     const int headDistance = std::abs(position - handlePosition(m_trim->top));
     const int tailDistance = std::abs(position - handlePosition(m_trim->bottom));
     if (isTrimHandleAtPosition(position)) {
         m_dragHandle = headDistance <= tailDistance ? DragHandle::Head : DragHandle::Tail;
-        m_hoverPosition = event->position();
+        m_hoverPosition = snowPos(event);
         setCursor(horizontal(m_mode) ? Qt::SizeHorCursor : Qt::SizeVerCursor);
         grabMouse();
         updateHover();
@@ -734,14 +734,14 @@ void ScreenshotScrollingThumbnailWidget::mouseMoveEvent(QMouseEvent* event) {
         QWidget::mouseMoveEvent(event);
         return;
     }
-    const int position = previewPosition(event->position());
+    const int position = previewPosition(snowPos(event));
     if (m_dragHandle != DragHandle::None && !event->buttons().testFlag(Qt::LeftButton)) {
         cancelDrag();
     }
     updateCursorForPosition(position);
     if (m_dragHandle == DragHandle::None) {
         if (event->buttons() == Qt::NoButton) {
-            m_hoverPosition = event->position();
+            m_hoverPosition = snowPos(event);
             updateHover();
         } else {
             clearHover();
@@ -749,19 +749,19 @@ void ScreenshotScrollingThumbnailWidget::mouseMoveEvent(QMouseEvent* event) {
         QWidget::mouseMoveEvent(event);
         return;
     }
-    m_hoverPosition = event->position();
+    m_hoverPosition = snowPos(event);
     updateTrimFromPosition(position);
     event->accept();
 }
 
 void ScreenshotScrollingThumbnailWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (event != nullptr && event->button() == Qt::LeftButton && m_dragHandle != DragHandle::None) {
-        const int position = previewPosition(event->position());
+        const int position = previewPosition(snowPos(event));
         updateTrimFromPosition(position);
         m_dragHandle = DragHandle::None;
         releaseMouse();
         updateCursorForPosition(position);
-        m_hoverPosition = event->position();
+        m_hoverPosition = snowPos(event);
         updateHover();
         event->accept();
         return;

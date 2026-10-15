@@ -3,7 +3,7 @@
 
 #include "snow_shot/shortcuts/shortcutbinding.h"
 
-#include <QKeyCombination>
+#include "snow_shot/compat/qt_compat.h"
 #include <QList>
 #include <QObject>
 #include <QString>

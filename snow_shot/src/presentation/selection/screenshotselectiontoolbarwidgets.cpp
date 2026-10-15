@@ -5,7 +5,7 @@
 
 #include "snow_shot/presentation/components/icons/iconrenderutils.h"
 
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QFontMetrics>
 #include <QHideEvent>
 #include <QPaintEvent>
@@ -126,7 +126,7 @@ void SelectionToolbarPanel::synchronizePointerHover() {
         adqt::widgets::detail::pointerRegionContains(this, rect(), position));
 }
 
-void SelectionToolbarPanel::enterEvent(QEnterEvent* event) {
+void SelectionToolbarPanel::enterEvent(SnowEnterEvent* event) {
     QFrame::enterEvent(event);
     setPointerHovered(true);
 }
