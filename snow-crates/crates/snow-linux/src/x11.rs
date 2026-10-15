@@ -6,10 +6,14 @@
 use x11rb::connection::Connection;
 use x11rb::protocol::randr;
 use x11rb::protocol::xfixes;
-use x11rb::protocol::xproto::{ConnectionExt as _, Screen, Window};
+use x11rb::protocol::xproto::{
+    self, ConnectionExt as _, ImageFormat, ImageOrder, Screen, Visualtype, Window,
+};
 use x11rb::rust_connection::RustConnection;
 
+use crate::capture::ImageLayout;
 use crate::error::{LinuxError, LinuxResult};
+use crate::geometry::Rect;
 
 /// Cached presence of the X extensions this backend depends on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -107,6 +111,142 @@ impl X11Session {
 
     pub fn xfixes_available(&self) -> bool {
         self.extension.xfixes
+    }
+
+    /// The root window's geometry: everything a core `GetImage` can read.
+    pub fn root_rect(&self) -> Rect {
+        let screen = self.screen();
+        Rect::new(
+            0,
+            0,
+            u32::from(screen.width_in_pixels),
+            u32::from(screen.height_in_pixels),
+        )
+    }
+
+    /// Packed pixel layout of the screen's root visual at `depth`.
+    ///
+    /// Built from the server's own declarations rather than from a hard-coded
+    /// 32-bit `BGRX`: the colour masks come from the visual, and the bits per
+    /// pixel and scanline padding come from the setup's pixmap format for that
+    /// depth -- the visual type carries no bits-per-pixel field, because one
+    /// depth can be served at more than one pixel width. The server is free to
+    /// run a 16-bit or big-endian root, and guessing produces a picture with the
+    /// channels in the wrong places.
+    ///
+    /// `depth` is the depth the reply reported, which is what the returned
+    /// bytes actually are.
+    pub fn root_visual_layout(
+        &self,
+        width: u32,
+        height: u32,
+        depth: u8,
+        data_len: usize,
+    ) -> LinuxResult<ImageLayout> {
+        let setup = self.conn.setup();
+        let format = setup
+            .pixmap_formats
+            .iter()
+            .find(|format| format.depth == depth)
+            .ok_or_else(|| {
+                LinuxError::other("the server declares no pixmap format for the reply's depth")
+            })?;
+        let visual = self.root_visual()?;
+
+        let bits_per_pixel = format.bits_per_pixel;
+        // The reply itself carries no stride, so the server's declared padding
+        // is the fallback for a reply too short to infer a stride from.
+        let stride = crate::capture::reply_stride(width, height, data_len, bits_per_pixel)
+            .unwrap_or_else(|| {
+                crate::capture::scanline_bytes(width, bits_per_pixel, format.scanline_pad)
+            });
+
+        ImageLayout::new(
+            width,
+            height,
+            bits_per_pixel,
+            stride,
+            setup.image_byte_order == ImageOrder::LSB_FIRST,
+            visual.red_mask,
+            visual.green_mask,
+            visual.blue_mask,
+        )
+    }
+
+    fn root_visual(&self) -> LinuxResult<&Visualtype> {
+        let screen = self.screen();
+        screen
+            .allowed_depths
+            .iter()
+            .flat_map(|depth| depth.visuals.iter())
+            .find(|visual| visual.visual_id == screen.root_visual)
+            .ok_or_else(|| {
+                LinuxError::other("the root visual is missing from the screen's depth list")
+            })
+    }
+
+    /// Read `rect` out of the root window.
+    ///
+    /// `rect` is clamped to the root window first: the protocol answers a
+    /// rectangle that is not fully inside the drawable with `BadMatch`, and a
+    /// partially off-screen screenshot is a normal request rather than an
+    /// error. The returned [`RawImage::rect`] is the area actually read, so the
+    /// caller can tell that clamping happened.
+    pub fn capture_image(&self, rect: Rect) -> LinuxResult<RawImage> {
+        let effective = rect
+            .intersect(&self.root_rect())
+            .ok_or_else(|| LinuxError::other("the capture rectangle is outside the root window"))?;
+
+        let x = i16::try_from(effective.x)
+            .map_err(|_| LinuxError::other("the capture rectangle's x is out of range"))?;
+        let y = i16::try_from(effective.y)
+            .map_err(|_| LinuxError::other("the capture rectangle's y is out of range"))?;
+        let width = u16::try_from(effective.width)
+            .map_err(|_| LinuxError::other("the capture rectangle is wider than 65535 pixels"))?;
+        let height = u16::try_from(effective.height)
+            .map_err(|_| LinuxError::other("the capture rectangle is taller than 65535 pixels"))?;
+
+        // `AllPlanes`: copy every colour plane, not a subset.
+        let reply = xproto::get_image(
+            &self.conn,
+            ImageFormat::Z_PIXMAP,
+            self.root(),
+            x,
+            y,
+            width,
+            height,
+            u32::MAX,
+        )
+        .map_err(|err| LinuxError::backend("requesting a root window image", err))?
+        .reply()
+        .map_err(|err| LinuxError::reply("requesting a root window image", err))?;
+
+        let layout =
+            self.root_visual_layout(effective.width, effective.height, reply.depth, reply.data.len())?;
+        Ok(RawImage {
+            rect: effective,
+            layout,
+            data: reply.data,
+        })
+    }
+}
+
+/// A `GetImage` reply together with the layout needed to unpack it.
+pub struct RawImage {
+    /// The area actually read, after clamping to the root window.
+    pub rect: Rect,
+    pub layout: ImageLayout,
+    pub data: Vec<u8>,
+}
+
+impl RawImage {
+    /// Decode into packed 8-bit pixels.
+    pub fn decode_into(
+        &self,
+        destination: &mut [u8],
+        order: crate::capture::OutputOrder,
+    ) -> LinuxResult<()> {
+        self.layout.decode_into(&self.data, destination, order)
     }
 }
 
