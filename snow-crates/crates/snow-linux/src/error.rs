@@ -29,6 +29,15 @@ pub enum LinuxError {
 
     #[error("{0}")]
     Other(String),
+
+    /// The server's packed pixel layout cannot be decoded exactly.
+    ///
+    /// Distinct from [`LinuxError::Other`] because no retry will change it: a
+    /// depth-8 `PseudoColor` root or a discontiguous colour mask is a property
+    /// of the X server's configuration, so callers should report a capture that
+    /// this backend cannot serve rather than a transient failure.
+    #[error("the X server's pixel layout is not supported: {reason}")]
+    UnsupportedPixelLayout { reason: &'static str },
 }
 
 #[cfg(target_os = "linux")]
@@ -53,7 +62,7 @@ impl Classify for LinuxError {
         match self {
             // An unreachable session is an environment problem, not a fault:
             // retrying in-process will never fix it.
-            Self::SessionMissing => ErrorClass::InvalidConfig,
+            Self::SessionMissing | Self::UnsupportedPixelLayout { .. } => ErrorClass::InvalidConfig,
             Self::Other(_) => ErrorClass::Transient,
             #[cfg(target_os = "linux")]
             Self::Backend { .. } | Self::Reply { .. } => ErrorClass::Transient,
