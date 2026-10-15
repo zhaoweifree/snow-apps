@@ -53,6 +53,7 @@ fn parse_capture_backend(value: u8) -> Result<CaptureBackendKind, String> {
         2 => Ok(CaptureBackendKind::WindowsGraphicsCapture),
         3 => Ok(CaptureBackendKind::Gdi),
         4 => Ok(CaptureBackendKind::ScreenCaptureKit),
+        5 => Ok(CaptureBackendKind::X11),
         _ => Err(format!("invalid capture backend: {value}")),
     }
 }
