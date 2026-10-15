@@ -100,7 +100,7 @@ function(snow_shot_assert_mini_build_contract root)
             string(REGEX MATCHALL "[A-Za-z0-9_.:+-]+" _references "${_expressions}")
             foreach(_reference IN LISTS _references)
                 # ':' is also a generator-expression separator. Keep namespace
-                # aliases such as Qt6::Core intact while unwrapping expressions.
+                # aliases such as Qt::Core intact while unwrapping expressions.
                 string(REGEX REPLACE "(^|[^:]):([^:])" "\\1;\\2" _references_in_item "${_reference}")
                 foreach(_dependency IN LISTS _references_in_item)
                     if(TARGET "${_dependency}")

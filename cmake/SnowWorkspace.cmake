@@ -33,6 +33,16 @@ function(snow_workspace_configure_paths)
             include(SnowWindowsArchitecture)
             snow_configure_windows_architecture()
             set(_snow_default_triplet "${SNOW_WINDOWS_ARCHITECTURE}-windows")
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            # UOS / Deepin port. Linux builds use distribution packages rather
+            # than a manifest install, but the triplet name still has to be a
+            # Linux one: it feeds SNOW_VCPKG_INSTALLED_DIR / SNOW_FFMPEG_ROOT,
+            # and "x64-windows" would point those at a Windows tree.
+            if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+                set(_snow_default_triplet "arm64-linux")
+            else()
+                set(_snow_default_triplet "x64-linux")
+            endif()
         else()
             set(_snow_default_triplet "x64-windows")
         endif()
@@ -89,9 +99,9 @@ function(snow_workspace_configure_options)
         "Link the PNG dependency into the static Snow Image target." FORCE)
     set(SNOW_IMAGE_LINK_JPEG_DEPENDENCIES ON CACHE BOOL
         "Link JPEG dependencies into the static Snow Image target." FORCE)
-    if(TARGET Qt6::Gui)
-        get_target_property(_snow_workspace_qt_gui_type Qt6::Gui TYPE)
-        get_target_property(_snow_workspace_qt_gui_features Qt6::Gui QT_ENABLED_PRIVATE_FEATURES)
+    if(TARGET Qt::Gui)
+        get_target_property(_snow_workspace_qt_gui_type Qt::Gui TYPE)
+        get_target_property(_snow_workspace_qt_gui_features Qt::Gui QT_ENABLED_PRIVATE_FEATURES)
         if(_snow_workspace_qt_gui_type STREQUAL "STATIC_LIBRARY")
             if(NOT "system_png" IN_LIST _snow_workspace_qt_gui_features)
                 set(SNOW_IMAGE_LINK_PNG_DEPENDENCIES OFF CACHE BOOL
@@ -106,8 +116,8 @@ function(snow_workspace_configure_options)
 
     # Static Qt can use either CRT linkage. Its static_runtime feature is the
     # authority, independent of the kit's directory name or library linkage.
-    if(MSVC AND TARGET Qt6::Core)
-        get_target_property(_snow_workspace_qt_core_features Qt6::Core QT_ENABLED_PUBLIC_FEATURES)
+    if(MSVC AND TARGET Qt::Core)
+        get_target_property(_snow_workspace_qt_core_features Qt::Core QT_ENABLED_PUBLIC_FEATURES)
         if("static_runtime" IN_LIST _snow_workspace_qt_core_features)
             set(_snow_workspace_crt "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         else()
@@ -118,7 +128,7 @@ function(snow_workspace_configure_options)
     endif()
 
     if(SNOW_APPS_RELEASE_STATIC AND MSVC)
-        if(TARGET Qt6::Core AND NOT "static_runtime" IN_LIST _snow_workspace_qt_core_features)
+        if(TARGET Qt::Core AND NOT "static_runtime" IN_LIST _snow_workspace_qt_core_features)
             message(FATAL_ERROR
                 "SNOW_APPS_RELEASE_STATIC requires a Qt kit built with the static MSVC runtime")
         endif()

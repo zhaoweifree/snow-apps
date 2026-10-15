@@ -89,7 +89,7 @@ function(_snow_mini_share_resources target)
         set_property(TARGET ${target} PROPERTY SOURCES "${_sources}")
         add_library(${target}_shared_resources OBJECT ${_resources})
         set_target_properties(${target}_shared_resources PROPERTIES AUTOMOC OFF AUTORCC OFF)
-        target_link_libraries(${target}_shared_resources PRIVATE Qt6::Core)
+        target_link_libraries(${target}_shared_resources PRIVATE Qt::Core)
         target_link_libraries(${target} PRIVATE ${target}_shared_resources)
     endif()
 endfunction()
@@ -310,13 +310,13 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_executable(snow-shot-mini-edition-tests tests/mini_edition_tests.cpp)
     target_include_directories(snow-shot-mini-edition-tests PRIVATE include)
     target_link_libraries(snow-shot-mini-edition-tests PRIVATE
-        snow_shot_settings_search_mini snow_shot_storage_mini snow_shot_edition_mini Qt6::Core)
+        snow_shot_settings_search_mini snow_shot_storage_mini snow_shot_edition_mini Qt::Core)
     add_executable(snow-shot-mini-settings-reset-tests tests/mini_settings_reset_tests.cpp
         src/presentation/services/screenshotclipboardservice.cpp)
     target_include_directories(snow-shot-mini-settings-reset-tests PRIVATE include)
     target_link_libraries(snow-shot-mini-settings-reset-tests PRIVATE
         snow_shot_settings_mini snow_shot_edition_mini snow_shot_image_codec
-        snow_shot_clipboard_placement Qt6::Widgets)
+        snow_shot_clipboard_placement Qt::Widgets)
     if(APPLE)
         target_link_libraries(snow-shot-mini-settings-reset-tests PRIVATE snow_shot_macos_clipboard)
     endif()
@@ -333,7 +333,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-mini-local-shortcut-reset-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
 
     get_target_property(_cloud_test_sources snow-shot-cloud-upload-tests SOURCES)
     list(FILTER _cloud_test_sources EXCLUDE REGEX "/qrc_[^/]+\\.cpp$")
@@ -345,7 +345,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-mini-cloud-upload-tests COMMAND snow-shot-mini-cloud-upload-tests -platform offscreen)
     set_tests_properties(snow-shot-mini-cloud-upload-tests PROPERTIES LABELS "unit" TIMEOUT 90
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
 
     # The Mini regression also restores legacy pins and exercises palette
     # controls, so use the complete pinned-window fixture rather than only the
@@ -365,7 +365,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         add_executable(snow-shot-${_edition}-mcp-edition-tests tests/mcp_edition_tests.cpp)
         target_include_directories(snow-shot-${_edition}-mcp-edition-tests PRIVATE include)
         target_link_libraries(snow-shot-${_edition}-mcp-edition-tests PRIVATE
-            snow_shot_edition_${_edition} Qt6::Core)
+            snow_shot_edition_${_edition} Qt::Core)
     endforeach()
     get_target_property(_branding_sources snow-shot-about-page-tests SOURCES)
     list(REMOVE_ITEM _branding_sources tests/about_page_tests.cpp)
@@ -385,7 +385,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             SNOW_SHOT_TEST_TRANSLATIONS_DIR="${_branding_qm_directory}")
         target_link_libraries(snow-shot-${_edition}-branding-tests PRIVATE
             snow_shot_edition_${_edition} snow_shot_settings${_suffix}
-            snow_shot_updates${_suffix} snow_shot_image_codec snow_shot_clipboard_placement Qt6::Widgets)
+            snow_shot_updates${_suffix} snow_shot_image_codec snow_shot_clipboard_placement Qt::Widgets)
         if(APPLE)
             target_link_libraries(snow-shot-${_edition}-branding-tests PRIVATE
                 snow_shot_macos_clipboard "-framework AppKit")
@@ -405,7 +405,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             snow-shot-full-branding-tests snow-shot-mini-branding-tests)
         add_test(NAME ${_test} COMMAND ${_test})
         set_tests_properties(${_test} PROPERTIES LABELS unit TIMEOUT 60
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
     endforeach()
     snow_shot_offscreen_qpa_environment(_mini_qpa_environment)
     set_tests_properties(snow-shot-mini-recognition-tests

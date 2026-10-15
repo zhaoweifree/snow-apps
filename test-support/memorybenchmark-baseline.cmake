@@ -25,7 +25,7 @@ if(PROJECT_NAME STREQUAL "snow_shot")
             SNOW_SHOT_BENCHMARK_MANAGED_READER=0)
         target_link_libraries(snow-shot-memory-performance-benchmark-baseline PRIVATE
             adqt::widgets snow_shot_image_codec snow_shot_diagnostics
-            snow_shot_clipboard_placement Qt6::Widgets)
+            snow_shot_clipboard_placement Qt::Widgets)
         if(WIN32)
             target_link_libraries(snow-shot-memory-performance-benchmark-baseline PRIVATE
                 user32 psapi)
@@ -72,7 +72,7 @@ elseif(PROJECT_NAME STREQUAL "snow_draw_engine_qt")
         "${SNOW_MEMORY_BENCHMARK_SOURCE_ROOT}/snow_draw_engine_qt/tests/snow_canvas_image_memory_benchmark.cpp")
     target_compile_definitions(snow-canvas-image-memory-benchmark-baseline
         PRIVATE SNOW_MEMORY_BENCHMARK_BASELINE=1)
-    target_link_libraries(snow-canvas-image-memory-benchmark-baseline PRIVATE Qt6::Gui)
+    target_link_libraries(snow-canvas-image-memory-benchmark-baseline PRIVATE Qt::Gui)
     set(_snow_memory_comparison_target snow-canvas-image-memory-benchmark-baseline)
     set(_snow_memory_comparison_standard 17)
 else()

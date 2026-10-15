@@ -192,10 +192,10 @@ endif()
 if(NOT SNOW_SHOT_QT_STATIC)
     include("${CMAKE_CURRENT_LIST_DIR}/SnowQt.cmake")
     snow_qt_bin_directory(_snow_qt_bin)
-    if(NOT TARGET Qt6::QOffscreenIntegrationPlugin)
+    if(NOT TARGET ${SNOW_QT_NS}::QOffscreenIntegrationPlugin)
         message(FATAL_ERROR "The selected Qt kit does not provide the offscreen platform plugin")
     endif()
-    install(FILES "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
+    install(FILES "$<TARGET_FILE:${SNOW_QT_NS}::QOffscreenIntegrationPlugin>"
         DESTINATION "snow_shot.app/Contents/PlugIns/platforms" COMPONENT SnowShot)
     find_program(SNOW_MACDEPLOYQT NAMES macdeployqt HINTS "${_snow_qt_bin}"
         NO_DEFAULT_PATH REQUIRED)

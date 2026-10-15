@@ -7,7 +7,7 @@ add_executable(snow_image_viewer_tests viewer_tests.cpp)
 target_link_libraries(snow_image_viewer_tests
     PRIVATE
         snow_image_viewer_lib
-        Qt6::Test
+        Qt::Test
 )
 target_compile_features(snow_image_viewer_tests PRIVATE cxx_std_20)
 
@@ -44,7 +44,7 @@ snow_shot_offscreen_qpa_environment(SNOW_IMAGE_VIEWER_EDITOR_LIFECYCLE_ENVIRONME
 add_executable(snow_image_viewer_image_notification_lifetime_tests
     image_notification_lifetime_tests.cpp ../resources/resources.qrc)
 target_link_libraries(snow_image_viewer_image_notification_lifetime_tests
-    PRIVATE snow_image_viewer_lib Qt6::Test)
+    PRIVATE snow_image_viewer_lib Qt::Test)
 target_compile_features(snow_image_viewer_image_notification_lifetime_tests PRIVATE cxx_std_20)
 if(MSVC)
     target_compile_options(snow_image_viewer_image_notification_lifetime_tests PRIVATE
@@ -61,12 +61,12 @@ set_tests_properties(snow_image_viewer_image_notification_lifetime_tests PROPERT
     LABELS "unit" TIMEOUT 30)
 if(WIN32)
     set_tests_properties(snow_image_viewer_image_notification_lifetime_tests PROPERTIES
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
 endif()
 add_executable(snow_image_viewer_pipeline_notification_lifetime_tests
     pipeline_notification_lifetime_tests.cpp)
 target_link_libraries(snow_image_viewer_pipeline_notification_lifetime_tests
-    PRIVATE snow_image_viewer_lib Qt6::Test)
+    PRIVATE snow_image_viewer_lib Qt::Test)
 target_compile_features(snow_image_viewer_pipeline_notification_lifetime_tests PRIVATE cxx_std_20)
 add_dependencies(snow_image_viewer_pipeline_notification_lifetime_tests snow_image_edit_worker)
 add_custom_command(TARGET snow_image_viewer_pipeline_notification_lifetime_tests POST_BUILD
@@ -88,7 +88,7 @@ set_tests_properties(snow_image_viewer_pipeline_notification_lifetime_tests PROP
     LABELS "unit" TIMEOUT 60)
 if(WIN32)
     set_tests_properties(snow_image_viewer_pipeline_notification_lifetime_tests PROPERTIES
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
 endif()
 add_test(NAME snow_image_viewer_editor_lifecycle_tests
     COMMAND snow_image_viewer_editor_lifecycle_tests)
@@ -103,7 +103,7 @@ set_tests_properties(snow_image_viewer_editor_lifecycle_tests
 if(WIN32)
     set_tests_properties(snow_image_viewer_editor_lifecycle_tests
         snow_image_viewer_editor_reopen_tests PROPERTIES
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
     )
 endif()
 
@@ -127,9 +127,9 @@ add_test(
 if(WIN32)
     set_tests_properties(snow_image_viewer_generated_icon_pack_tests PROPERTIES
         ENVIRONMENT
-            "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"
+            "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
     )
 else()
     set_tests_properties(snow_image_viewer_generated_icon_pack_tests PROPERTIES
@@ -156,7 +156,7 @@ if(WIN32)
         ../resources/resources.qrc
     )
     target_link_libraries(snow_image_viewer_rhi_tests
-        PRIVATE snow_image_viewer_lib Qt6::Test
+        PRIVATE snow_image_viewer_lib Qt::Test
     )
     target_compile_features(snow_image_viewer_rhi_tests PRIVATE cxx_std_20)
     if(MSVC)

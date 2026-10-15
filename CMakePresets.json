@@ -441,6 +441,133 @@
         "VCPKG_MANIFEST_FEATURES": "snow-shot",
         "SNOW_APPS_BUILD_IMAGE_VIEWER": "OFF"
       }
+    },
+    {
+      "name": "windows-qt5-base",
+      "displayName": "Windows Qt 5.15 (Ninja, vcpkg-free)",
+      "description": "Qt6 -> Qt5 downgrade route. Deliberately does NOT inherit windows-msvc-base, and deliberately sets no toolchainFile: that preset pins the Qt 6 kit through the vcpkg toolchain, which is the exact opposite of what this route needs. Without the toolchainFile the vcpkg manifest step never runs, so this route can be configured and compiled before the third-party dependency channel is available. Must be invoked from a vcvars64-injected environment (see .workbuddy/qt5-port/run-qt5-preset.sh): Ninja gets cl.exe from PATH, not from a toolset field.",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_PREFIX_PATH": "C:/Qt/5.15.2/msvc2019_64",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_CXX_SCAN_FOR_MODULES": "OFF",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "SNOW_QT_MAJOR": "5",
+        "SNOW_APPS_API_BASE_URL": "http://localhost:8080",
+        "SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION": "ON",
+        "SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION": "OFF",
+        "SNOW_APPS_ENABLE_CLANG_TIDY": "OFF",
+        "SNOW_APPS_QT_STATIC": "OFF",
+        "SNOW_APPS_RELEASE_STATIC": "OFF",
+        "SNOW_APPS_PACKAGE_SNOW_SHOT": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-qt5-smoke",
+      "displayName": "Windows Qt 5.15 smoke (ant_design_qt + snow_image)",
+      "description": "Compile/link gate for the Qt5 route up to the point where no third-party dependency is needed. This is the configuration every mechanical rewriting round in docs-qt5-downgrade-plan.md was regressed against. STRICT_COMPILE stays OFF on purpose: Qt5 itself is warning-heavy under /W4 and strict mode would drown the real Qt6-only errors.",
+      "inherits": "windows-qt5-base",
+      "cacheVariables": {
+        "SNOW_APPS_BUILD_ANT_DESIGN_QT": "ON",
+        "SNOW_APPS_BUILD_SNOW_IMAGE": "ON",
+        "SNOW_APPS_BUILD_DRAW_ENGINE": "OFF",
+        "SNOW_APPS_BUILD_DRAW_ENGINE_DEMO": "OFF",
+        "SNOW_APPS_BUILD_IMAGE_VIEWER": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT_MINI": "OFF",
+        "SNOW_APPS_BUILD_TESTS": "OFF",
+        "SNOW_APPS_BUILD_BENCHMARKS": "OFF",
+        "SNOW_APPS_STRICT_COMPILE": "OFF",
+        "SNOW_IMAGE_PROFILE": "redistributable",
+        "SNOW_IMAGE_DEFAULT_LINKAGE": "static",
+        "SNOW_IMAGE_BUILD_STATIC": "ON",
+        "SNOW_IMAGE_BUILD_SHARED": "ON",
+        "SNOW_IMAGE_BUILD_TESTS": "OFF",
+        "SNOW_IMAGE_STRICT_COMPILE": "OFF"
+      }
+    },
+    {
+      "name": "linux-base",
+      "displayName": "Linux / UOS Qt 5.15 base (Ninja, system packages)",
+      "description": "UOS / Deepin / generic Linux port baseline. Like windows-qt5-base this preset deliberately sets NO toolchainFile, so the vcpkg manifest step never runs: Linux builds against distribution packages (qtbase5-dev, libopencv-dev, libheif-dev, libjxl-dev, libpipewire-0.3-dev ...) as listed in docs-uos-linux-port.md §9.1. Qt5 is found through CMake's default multiarch search path (/usr/lib/<triplet>/cmake/Qt5); if UOS ships Qt5 under a custom prefix, pass -DCMAKE_PREFIX_PATH=<prefix> on the configure command. SNOW_APPS_BUILD_IMAGE_VIEWER stays OFF until docs-uos-linux-port.md §6.1 is decided (Qt5 private QRhi vs QOpenGLWidget rewrite). SNOW_APPS_STRICT_COMPILE stays OFF for the port window: new platform code plus Qt5 headers under -Werror would bury the real errors, tighten it once the Linux targets are green.",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_CXX_SCAN_FOR_MODULES": "OFF",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "SNOW_QT_MAJOR": "5",
+        "SNOW_APPS_API_BASE_URL": "http://localhost:8080",
+        "SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION": "ON",
+        "SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION": "OFF",
+        "SNOW_APPS_ENABLE_CLANG_TIDY": "OFF",
+        "SNOW_APPS_QT_STATIC": "OFF",
+        "SNOW_APPS_RELEASE_STATIC": "OFF",
+        "SNOW_APPS_PACKAGE_SNOW_SHOT": "OFF",
+        "SNOW_APPS_BUILD_IMAGE_VIEWER": "OFF",
+        "SNOW_APPS_BUILD_DRAW_ENGINE_DEMO": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT_MINI": "OFF",
+        "SNOW_APPS_STRICT_COMPILE": "OFF",
+        "SNOW_IMAGE_STRICT_COMPILE": "OFF",
+        "VCPKG_MANIFEST_INSTALL": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "snow-shot-linux-x64-debug",
+      "displayName": "Snow Shot Linux x86_64 Debug (UOS 20 / Deepin 23)",
+      "description": "Native x86_64 UOS build. First target of the port: get ant_design_qt + snow_image + snow_draw_engine_qt green, then snow_shot. Tests are ON because the port needs the snow_image suite as its baseline gate.",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "SNOW_APPS_BUILD_TESTS": "ON",
+        "SNOW_IMAGE_PROFILE": "full"
+      }
+    },
+    {
+      "name": "snow-shot-linux-x64-release",
+      "displayName": "Snow Shot Linux x86_64 Release (UOS 20 / Deepin 23)",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SNOW_APPS_BUILD_TESTS": "OFF",
+        "SNOW_IMAGE_PROFILE": "full"
+      }
+    },
+    {
+      "name": "snow-shot-linux-arm64-debug",
+      "displayName": "Snow Shot Linux arm64 Debug (Phytium / Kunpeng / Kirin 990)",
+      "description": "Native aarch64 UOS build. Must run on the arm64 machine itself: per docs-uos-linux-port.md §7.3 an emulated or cross build is not accepted as the final verification for PipeWire / portal / GPU paths. There is no host-processor preset condition in CMake, so this preset simply fails to configure on an x86_64 host for lack of an aarch64 Qt5.",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "SNOW_APPS_BUILD_TESTS": "ON",
+        "SNOW_IMAGE_PROFILE": "full"
+      }
+    },
+    {
+      "name": "snow-shot-linux-arm64-release",
+      "displayName": "Snow Shot Linux arm64 Release (Phytium / Kunpeng / Kirin 990)",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SNOW_APPS_BUILD_TESTS": "OFF",
+        "SNOW_IMAGE_PROFILE": "full"
+      }
     }
   ],
   "buildPresets": [
@@ -580,6 +707,30 @@
         "snow_shot",
         "snow_shot_mini"
       ]
+    },
+    {
+      "name": "build-windows-qt5-smoke",
+      "configurePreset": "windows-qt5-smoke"
+    },
+    {
+      "name": "build-snow-shot-linux-x64-debug",
+      "configurePreset": "snow-shot-linux-x64-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "build-snow-shot-linux-x64-release",
+      "configurePreset": "snow-shot-linux-x64-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "build-snow-shot-linux-arm64-debug",
+      "configurePreset": "snow-shot-linux-arm64-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "build-snow-shot-linux-arm64-release",
+      "configurePreset": "snow-shot-linux-arm64-release",
+      "configuration": "Release"
     }
   ],
   "testPresets": [

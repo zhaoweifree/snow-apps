@@ -292,10 +292,17 @@ function(snow_image_configure_target target_name linkage)
         # gzip helpers require the zlib API directly.
         list(REMOVE_ITEM _snow_image_target_libraries PNG::PNG)
     endif()
-    if(linkage STREQUAL "STATIC" AND NOT SNOW_IMAGE_LINK_JPEG_DEPENDENCIES)
+    if(linkage STREQUAL "STATIC" AND NOT SNOW_IMAGE_LINK_JPEG_DEPENDENCIES
+       AND SNOW_QT_MAJOR STREQUAL "6")
         # The bundled Qt library and its headers must be selected together.
         # Compiling with vcpkg's libjpeg-62 headers and resolving those symbols
         # to Qt's libjpeg-80 fails at jpeg_create_compress (the structs differ).
+        #
+        # Qt5 route: this whole block is Qt6-only. Qt 5.15 does not export a
+        # Qt5::BundledLibjpeg target (verified against the local 5.15.2 kit), and
+        # Qt5Gui statically embeds its bundled libjpeg without publishing jpeg_*
+        # symbols, so linking vcpkg's libjpeg-turbo alongside it creates no
+        # duplicate-definition conflict. Hence the vcpkg linkage is kept as-is.
         include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/SnowQt.cmake")
         snow_find_qt(COMPONENTS Core BundledLibjpeg)
         find_path(_snow_image_qt_jpeg_include NAMES jpeglib.h
@@ -305,7 +312,7 @@ function(snow_image_configure_target target_name linkage)
             "${_snow_image_qt_jpeg_include}")
         list(FILTER _snow_image_target_libraries EXCLUDE
             REGEX "TARGET_EXISTS:libjpeg-turbo::jpeg>")
-        list(PREPEND _snow_image_target_libraries Qt6::BundledLibjpeg)
+        list(PREPEND _snow_image_target_libraries ${SNOW_QT_NS}::BundledLibjpeg)
     endif()
     target_link_libraries(${target_name} PRIVATE ${_snow_image_target_libraries})
     unset(_snow_image_target_libraries)

@@ -6,7 +6,7 @@
 # ctest and CI runners observe plain command-line output.
 #
 #   snow_test_cli_guard_qt     - Qt message handler plus native layers
-#                                (links Qt6::Core)
+#                                (links Qt::Core)
 #   snow_test_cli_guard_native - native Windows/MSVC layers only, for test
 #                                executables that do not link Qt
 #
@@ -45,7 +45,7 @@ function(snow_add_qt_test_cli_guard)
     target_include_directories(snow_test_cli_guard_qt PRIVATE
         "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/test-support"
     )
-    target_link_libraries(snow_test_cli_guard_qt PUBLIC Qt6::Core)
+    target_link_libraries(snow_test_cli_guard_qt PUBLIC Qt::Core)
     set_target_properties(snow_test_cli_guard_qt PROPERTIES
         AUTOMOC OFF
         AUTORCC OFF

@@ -44,9 +44,9 @@ add_library(snow_shot_updates STATIC
     # This file is an extraction-only inventory for stable translated Rust error messages.
     src/update/updateerrors.cpp)
 target_include_directories(snow_shot_updates PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(snow_shot_updates PUBLIC Qt6::Core)
+target_link_libraries(snow_shot_updates PUBLIC Qt::Core)
 if(APPLE)
-    target_link_libraries(snow_shot_updates PRIVATE Qt6::Network)
+    target_link_libraries(snow_shot_updates PRIVATE Qt::Network)
     target_compile_definitions(snow_shot_updates PRIVATE SNOW_SHOT_VERSION="${SNOW_SHOT_VERSION}")
 endif()
 target_link_libraries(snow_shot_settings PUBLIC snow_shot_updates)
@@ -74,14 +74,14 @@ if(SNOW_SHOT_BUILD_UPDATE_TESTS)
     enable_testing()
     if(APPLE)
         add_executable(snow-shot-update-adapter-tests tests/macos_update_tests.cpp)
-        target_link_libraries(snow-shot-update-adapter-tests PRIVATE Qt6::Network)
+        target_link_libraries(snow-shot-update-adapter-tests PRIVATE Qt::Network)
     else()
         # The macOS version-check service uses portable Qt networking. Exercise it on Windows
         # as well, without linking the Windows helper adapter into the same executable.
         add_executable(snow-shot-macos-update-tests tests/macos_update_tests.cpp
             src/update/macosupdateservice.cpp include/snow_shot/update/updateservice.h)
         target_include_directories(snow-shot-macos-update-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-        target_link_libraries(snow-shot-macos-update-tests PRIVATE Qt6::Core Qt6::Network)
+        target_link_libraries(snow-shot-macos-update-tests PRIVATE Qt::Core Qt::Network)
         target_compile_definitions(snow-shot-macos-update-tests PRIVATE SNOW_SHOT_VERSION="${SNOW_SHOT_VERSION}")
         add_test(NAME snow-shot-macos-update-tests COMMAND snow-shot-macos-update-tests)
         set_tests_properties(snow-shot-macos-update-tests PROPERTIES LABELS "unit" TIMEOUT 30)
@@ -90,11 +90,11 @@ if(SNOW_SHOT_BUILD_UPDATE_TESTS)
             src/app/singleinstancecoordinator.cpp
             include/snow_shot/app/singleinstancecoordinator.h)
         target_link_libraries(snow-shot-startup-update-tests PRIVATE
-            snow_shot_updates Qt6::Core Qt6::Network)
+            snow_shot_updates Qt::Core Qt::Network)
         add_test(NAME snow-shot-startup-update-tests COMMAND snow-shot-startup-update-tests)
         set_tests_properties(snow-shot-startup-update-tests PROPERTIES LABELS "unit" TIMEOUT 30)
     endif()
-    target_link_libraries(snow-shot-update-adapter-tests PRIVATE snow_shot_updates Qt6::Core)
+    target_link_libraries(snow-shot-update-adapter-tests PRIVATE snow_shot_updates Qt::Core)
     add_test(NAME snow-shot-update-adapter-tests COMMAND snow-shot-update-adapter-tests)
     # This process fixture launches a helper for each operation and policy case.
     # Leave headroom for debug process startup while each assertion keeps its own deadline.

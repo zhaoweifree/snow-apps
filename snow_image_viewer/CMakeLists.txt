@@ -106,7 +106,7 @@ if(WIN32)
     )
     target_link_libraries(
         snow_image_viewer_windows_runtime
-        PRIVATE Qt6::Widgets Qt6::Concurrent snow_image::snow_image
+        PRIVATE Qt::Widgets Qt::Concurrent snow_image::snow_image
     )
     target_compile_definitions(
         snow_image_viewer_windows_runtime PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN
@@ -146,14 +146,14 @@ target_include_directories(snow_image_viewer_lib PUBLIC "${CMAKE_CURRENT_SOURCE_
 target_link_libraries(
     snow_image_viewer_lib
     PUBLIC
-        Qt6::Widgets
-        Qt6::Concurrent
+        Qt::Widgets
+        Qt::Concurrent
         adqt::widgets
         adqt::icons
         snow_image::snow_image
         Vulkan::Headers
     PRIVATE
-        Qt6::GuiPrivate
+        ${SNOW_QT_NS}::GuiPrivate
 )
 
 add_executable(snow_image_viewer WIN32
@@ -184,7 +184,7 @@ if(MSVC)
 endif()
 
 if(WIN32)
-    get_target_property(SNOW_IMAGE_VIEWER_QT_CORE_TYPE Qt6::Core TYPE)
+    get_target_property(SNOW_IMAGE_VIEWER_QT_CORE_TYPE Qt::Core TYPE)
     if(SNOW_IMAGE_VIEWER_QT_CORE_TYPE STREQUAL "SHARED_LIBRARY")
         find_program(SNOW_IMAGE_VIEWER_WINDEPLOYQT
             NAMES windeployqt

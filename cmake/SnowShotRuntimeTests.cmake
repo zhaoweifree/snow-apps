@@ -58,9 +58,9 @@ function(snow_shot_add_ocr_runtime_tests)
     target_link_libraries(snow-shot-ocr-recognition-service-tests PRIVATE
         snow_shot_diagnostics
         snow_draw_engine_qt_canvas
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Network
+        Qt::Core
+        Qt::Gui
+        Qt::Network
         MINIZIP::minizip-ng
     )
     if(WIN32)
@@ -84,17 +84,17 @@ function(snow_shot_add_ocr_runtime_tests)
     set_tests_properties(snow-shot-ocr-cpu-recognition-service-tests PROPERTIES
         TIMEOUT 120
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
     )
     set_tests_properties(snow-shot-ocr-directml-recognition-service-tests PROPERTIES
         TIMEOUT 120
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
     )
     add_test(NAME snow-shot-ocr-storage-relocation-tests
         COMMAND snow-shot-ocr-recognition-service-tests --storage-relocation-only)
     set_tests_properties(snow-shot-ocr-storage-relocation-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
     add_test(NAME snow-shot-ocr-process-lifecycle-tests
         COMMAND snow-shot-ocr-recognition-service-tests --process-lifecycle)
     add_executable(snow-shot-ocr-assets-tests
@@ -102,13 +102,13 @@ function(snow_shot_add_ocr_runtime_tests)
         include/snow_shot/presentation/screenshotocrassets.h
         src/presentation/ocr/screenshotocrassets.cpp)
     target_include_directories(snow-shot-ocr-assets-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    target_link_libraries(snow-shot-ocr-assets-tests PRIVATE Qt6::Core Qt6::Network MINIZIP::minizip-ng)
+    target_link_libraries(snow-shot-ocr-assets-tests PRIVATE Qt::Core Qt::Network MINIZIP::minizip-ng)
     if(APPLE)
         target_link_libraries(snow-shot-ocr-assets-tests PRIVATE snow_shot_rust_ffi_selector)
     endif()
     add_test(NAME snow-shot-ocr-assets-tests COMMAND snow-shot-ocr-assets-tests)
     set_tests_properties(snow-shot-ocr-assets-tests PROPERTIES TIMEOUT 60 LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
     if(WIN32 AND SNOW_WINDOWS_ARCHITECTURE STREQUAL "x64")
         add_executable(snow-shot-ocr-assets-arm64-contract-tests
             tests/screenshot_ocr_assets_arm64_tests.cpp
@@ -117,12 +117,12 @@ function(snow_shot_add_ocr_runtime_tests)
         target_include_directories(snow-shot-ocr-assets-arm64-contract-tests PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/include")
         target_link_libraries(snow-shot-ocr-assets-arm64-contract-tests PRIVATE
-            Qt6::Core Qt6::Network MINIZIP::minizip-ng)
+            Qt::Core Qt::Network MINIZIP::minizip-ng)
         add_test(NAME snow-shot-ocr-assets-arm64-contract-tests
             COMMAND snow-shot-ocr-assets-arm64-contract-tests)
         set_tests_properties(snow-shot-ocr-assets-arm64-contract-tests PROPERTIES
             TIMEOUT 60 LABELS "unit;windows"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
     endif()
     add_test(NAME snow-shot-ocr-managed-runtime-tests
         COMMAND snow-shot-ocr-recognition-service-tests --managed-runtime-only)
@@ -131,13 +131,13 @@ function(snow_shot_add_ocr_runtime_tests)
     set_tests_properties(snow-shot-ocr-managed-runtime-tests
         snow-shot-ocr-managed-directml-runtime-tests PROPERTIES
         TIMEOUT 60 LABELS "unit;windows"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
     if(APPLE)
         set_tests_properties(snow-shot-ocr-managed-runtime-tests PROPERTIES LABELS "unit")
         set_tests_properties(snow-shot-ocr-directml-recognition-service-tests PROPERTIES LABELS "unit;windows")
     endif()
     set_tests_properties(snow-shot-ocr-process-lifecycle-tests PROPERTIES TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
     add_dependencies(snow-shot-ocr-recognition-service-tests snow_ocr_process)
     if(NOT SNOW_SHOT_BUILD_TESTS)
         snow_add_qt_test_cli_guard()
