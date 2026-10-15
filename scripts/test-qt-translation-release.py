@@ -26,11 +26,18 @@ class QtTranslationRelease(unittest.TestCase):
         for language in ('zh_CN', 'zh_TW'):
             (self.translations / f'qtbase_{language}.qm').touch()
 
-    def configure(self, success=True, custom_translation_path=False):
-        location = (f'set(QT_INTERNAL_ABSOLUTE_TRANSLATIONS_DIR "{self.translations.as_posix()}")'
-                    if custom_translation_path else
-                    f'set(QT6_INSTALL_PREFIX "{self.translations.parent.as_posix()}")\n'
-                    'set(QT6_INSTALL_TRANSLATIONS translations)')
+    def configure(self, success=True, custom_translation_path=False, qt_major=6):
+        if qt_major == 5:
+            # Qt 5.15 exposes neither QT_INTERNAL_ABSOLUTE_TRANSLATIONS_DIR nor
+            # QT6_INSTALL_*; the explicit override is the documented way to point
+            # the resolver at a kit.
+            location = (f'set(SNOW_QT_MAJOR 5)\n'
+                        f'set(SNOW_QT5_TRANSLATIONS_DIR "{self.translations.as_posix()}")')
+        else:
+            location = (f'set(QT_INTERNAL_ABSOLUTE_TRANSLATIONS_DIR "{self.translations.as_posix()}")'
+                        if custom_translation_path else
+                        f'set(QT6_INSTALL_PREFIX "{self.translations.parent.as_posix()}")\n'
+                        'set(QT6_INSTALL_TRANSLATIONS translations)')
         (self.source / 'CMakeLists.txt').write_text(f'''
 cmake_minimum_required(VERSION 3.25)
 project(SnowQtTranslationRelease NONE)
@@ -99,6 +106,25 @@ endforeach()
 
     def test_qt_custom_translation_install_path_is_supported(self):
         self.configure(custom_translation_path=True)
+
+    def test_qt5_kit_names_for_the_simplified_catalog_are_accepted(self):
+        # The official Qt 5.15.2 kit ships qtbase_zh_TW.qm plus the aggregate
+        # qt_zh_CN.qm and **no** qtbase_zh_CN.qm. Requiring the Qt6 spelling there
+        # aborted `snow_shot`'s configuration on the Qt5 route, so the Qt5 branch
+        # accepts whichever Chinese catalog the kit itself provides.
+        (self.translations / 'qtbase_zh_CN.qm').unlink()
+        (self.translations / 'qt_zh_CN.qm').touch()
+        output = self.configure(qt_major=5)
+        self.assertNotIn('Warning', output)
+        self.assertNotIn('Qt5 kit is missing', output)
+
+    def test_qt5_kit_without_any_simplified_catalog_is_rejected(self):
+        (self.translations / 'qtbase_zh_CN.qm').unlink()
+        self.assertIn('zh_CN', self.configure(success=False, qt_major=5))
+
+    def test_qt5_kit_still_requires_a_traditional_catalog(self):
+        (self.translations / 'qtbase_zh_TW.qm').unlink()
+        self.assertIn('zh_TW', self.configure(success=False, qt_major=5))
 
 
 @unittest.skipUnless(os.environ.get('SNOW_TEST_QT_TRANSLATION_KIT'),
