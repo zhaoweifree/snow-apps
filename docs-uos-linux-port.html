@@ -1,0 +1,1879 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SnipPin 移植到统信 UOS 实施方案</title>
+<style>
+:root{
+  --bg:#ffffff; --bg-soft:#f6f8fa; --bg-code:#f3f5f7;
+  --fg:#1f2328; --fg-soft:#57606a; --border:#d8dee4; --border-soft:#eaeef2;
+  --accent:#0b64c9; --accent-soft:#e8f1fc;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);
+  font-size:15px;line-height:1.72;-webkit-font-smoothing:antialiased}
+.layout{display:flex;max-width:1500px;margin:0 auto}
+nav.toc{position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;
+  width:290px;flex:0 0 290px;padding:28px 20px 60px;border-right:1px solid var(--border-soft);
+  background:var(--bg-soft);font-size:13px}
+nav.toc h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-soft);
+  margin:0 0 12px;font-weight:700}
+nav.toc ul{list-style:none;margin:0;padding:0}
+nav.toc li{margin:3px 0}
+nav.toc a{color:var(--fg-soft);text-decoration:none;display:block;padding:3px 8px;border-radius:5px;
+  border-left:2px solid transparent}
+nav.toc a:hover{background:var(--accent-soft);color:var(--accent);border-left-color:var(--accent)}
+nav.toc ul ul{padding-left:12px}
+nav.toc ul ul a{font-size:12.5px;opacity:.9}
+main{flex:1 1 auto;min-width:0;padding:40px 56px 120px;max-width:1080px}
+.hero{border-bottom:1px solid var(--border-soft);padding-bottom:22px;margin-bottom:14px}
+.hero .badge{display:inline-block;font-size:12px;font-weight:600;color:var(--accent);
+  background:var(--accent-soft);border:1px solid #cfe3fa;border-radius:999px;padding:3px 12px;margin-bottom:12px}
+.hero h1{font-size:30px;line-height:1.3;margin:0 0 10px;font-weight:700;letter-spacing:-.01em}
+.hero p{margin:0;color:var(--fg-soft);font-size:14px}
+h1,h2,h3,h4{line-height:1.35;font-weight:700;letter-spacing:-.005em}
+h2{font-size:23px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border-soft)}
+h3{font-size:18px;margin:30px 0 10px;color:#111}
+h4{font-size:15.5px;margin:22px 0 8px;color:#111}
+p{margin:12px 0}
+a{color:var(--accent)}
+strong{font-weight:650}
+hr{border:0;border-top:1px solid var(--border-soft);margin:38px 0}
+blockquote{margin:16px 0;padding:12px 18px;background:var(--bg-soft);
+  border-left:3px solid var(--accent);border-radius:0 6px 6px 0;color:#333}
+blockquote p{margin:6px 0}
+code{font-family:var(--mono);font-size:12.6px;background:var(--bg-code);
+  padding:2px 5px;border-radius:4px;border:1px solid var(--border-soft);word-break:break-word}
+pre{background:var(--bg-code);border:1px solid var(--border-soft);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;margin:16px 0;line-height:1.6}
+pre code{background:none;border:0;padding:0;font-size:12.5px;display:block;white-space:pre}
+table{border-collapse:collapse;width:100%;margin:18px 0;font-size:13.6px;
+  border:1px solid var(--border);border-radius:8px;overflow:hidden;display:table}
+thead{background:var(--bg-soft)}
+th{text-align:left;font-weight:650;padding:9px 12px;border-bottom:1px solid var(--border);
+  border-right:1px solid var(--border-soft);white-space:nowrap}
+th:last-child{border-right:0}
+td{padding:8px 12px;border-bottom:1px solid var(--border-soft);
+  border-right:1px solid var(--border-soft);vertical-align:top}
+td:last-child{border-right:0}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#fafbfc}
+ul,ol{margin:12px 0;padding-left:26px}
+li{margin:5px 0}
+li>ol,li>ul{margin:5px 0}
+del{color:var(--fg-soft)}
+@media (max-width:1080px){
+  nav.toc{display:none}
+  main{padding:26px 20px 90px}
+  table{font-size:12.8px}
+  th,td{padding:7px 9px;white-space:normal}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+<h2>目录</h2>
+<ul>
+<li><a href="#0-结论摘要与可行性判定">0. 结论摘要与可行性判定</a>
+<ul>
+<li><a href="#0-1-一句话结论">0.1 一句话结论</a></li>
+<li><a href="#0-2-可行性分级">0.2 可行性分级</a></li>
+<li><a href="#0-3-必须向决策方澄清的前置问题">0.3 必须向决策方澄清的前置问题</a></li>
+<li><a href="#0-4-决策记录-已确认">0.4 决策记录（已确认）</a></li>
+</ul>
+</li>
+<li><a href="#1-工程整体架构">1. 工程整体架构</a>
+<ul>
+<li><a href="#1-1-顶层构成">1.1 顶层构成</a></li>
+<li><a href="#1-2-依赖分层-自下而上">1.2 依赖分层（自下而上）</a></li>
+<li><a href="#1-3-构建与打包链路">1.3 构建与打包链路</a></li>
+</ul>
+</li>
+<li><a href="#2-跨平台兼容性问题清单">2. 跨平台兼容性问题清单</a>
+<ul>
+<li><a href="#2-1-linux-现状-几乎为零">2.1 Linux 现状：几乎为零</a></li>
+<li><a href="#2-2-windows-专属代码-必须替换">2.2 Windows 专属代码（必须替换）</a></li>
+<li><a href="#2-3-macos-专属代码-移植时可整目录排除">2.3 macOS 专属代码（移植时可整目录排除）</a></li>
+<li><a href="#2-4-硬件-架构差异">2.4 硬件 / 架构差异</a></li>
+<li><a href="#2-5-qt-6-专有特性-本方案的最大阻塞">2.5 Qt 6 专有特性（本方案的最大阻塞）</a></li>
+</ul>
+</li>
+<li><a href="#3-qt5-降级专项方案">3. Qt5 降级专项方案</a>
+<ul>
+<li><a href="#3-1-qt-模块可用性对照">3.1 Qt 模块可用性对照</a></li>
+<li><a href="#3-2-cmake-改写表">3.2 CMake 改写表</a></li>
+<li><a href="#3-3-i18n-构建管线">3.3 i18n 构建管线</a></li>
+<li><a href="#3-4-rhi-重写-查看器">3.4 RHI 重写（查看器）</a></li>
+<li><a href="#3-5-兼容层设计-推荐落地形态">3.5 兼容层设计（推荐落地形态）</a></li>
+</ul>
+</li>
+<li><a href="#4-需要修改-新增的模块清单">4. 需要修改 / 新增的模块清单</a>
+<ul>
+<li><a href="#4-1-c-侧">4.1 C++ 侧</a></li>
+<li><a href="#4-2-rust-侧">4.2 Rust 侧</a></li>
+</ul>
+</li>
+<li><a href="#5-依赖库替换-调整">5. 依赖库替换 / 调整</a>
+<ul>
+<li><a href="#5-1-vcpkg-uos-系统包-自建">5.1 vcpkg → UOS 系统包 / 自建</a></li>
+<li><a href="#5-2-需新增的-rust-依赖">5.2 需新增的 Rust 依赖</a></li>
+</ul>
+</li>
+<li><a href="#6-系统调用-硬件差异适配对照表">6. 系统调用 / 硬件差异适配对照表</a>
+</li>
+<li><a href="#7-arm64-amd64-双架构方案">7. arm64 / amd64 双架构方案</a>
+<ul>
+<li><a href="#7-1-架构支持矩阵">7.1 架构支持矩阵</a></li>
+<li><a href="#7-2-simd-补强优先级">7.2 SIMD 补强优先级</a></li>
+<li><a href="#7-3-交叉编译工具链">7.3 交叉编译工具链</a></li>
+</ul>
+</li>
+<li><a href="#8-分步骤实施计划">8. 分步骤实施计划</a>
+</li>
+<li><a href="#9-编译构建建议">9. 编译构建建议</a>
+<ul>
+<li><a href="#9-1-依赖安装-uos-20-deepin-23-通用">9.1 依赖安装（UOS 20 / Deepin 23 通用）</a></li>
+<li><a href="#9-2-cmake-preset-已落地-不再是草案">9.2 CMake preset（已落地，不再是草案）</a></li>
+<li><a href="#9-3-需改动的-cmakelists-关键点">9.3 需改动的 CMakeLists 关键点</a></li>
+<li><a href="#9-4-rust-构建">9.4 Rust 构建</a></li>
+<li><a href="#9-5-打包">9.5 打包</a></li>
+</ul>
+</li>
+<li><a href="#10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</a>
+</li>
+<li><a href="#11-未决问题与建议">11. 未决问题与建议</a>
+</li>
+<li><a href="#附录-a-appimage-打包路线与-保留-qt6-可行性">附录 A：AppImage 打包路线与「保留 Qt6」可行性</a>
+<ul>
+<li><a href="#a-1-直接回答">A.1 直接回答</a></li>
+<li><a href="#a-2-appimage-能打包什么-不能打包什么">A.2 AppImage 能打包什么 / 不能打包什么</a></li>
+<li><a href="#a-3-核心约束-glibc-基线-决定性因素">A.3 核心约束：glibc 基线（决定性因素）</a></li>
+<li><a href="#a-4-三条可行路线对比">A.4 三条可行路线对比</a></li>
+<li><a href="#a-5-对本工程工作量的连锁影响">A.5 对本工程工作量的连锁影响</a></li>
+<li><a href="#a-6-appimage-落地注意事项-与本工程相关">A.6 AppImage 落地注意事项（与本工程相关）</a></li>
+<li><a href="#a-7-合规提醒-重要">A.7 合规提醒（重要）</a></li>
+<li><a href="#a-8-基线验证方法-动手前必做">A.8 基线验证方法（动手前必做）</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+<main>
+<div class="hero">
+<span class="badge">统信 UOS · arm64 + amd64</span>
+<h1>SnipPin 移植到统信 UOS 实施方案</h1>
+</div>
+<blockquote>
+<p>目标平台：统信 UOS（Deepin 系，Debian 衍生），<strong>arm64 + amd64 双架构</strong>
+硬约束：<strong>必须兼容 Qt 5 及以下</strong>
+<strong>决策已定（见 §0.4）</strong>：维持 Qt5 路线，但改造形态改为「<strong>一套源码，Qt 5.15 / Qt 6.12 双版本皆可编译</strong>」，
+并<strong>保留 Windows 分支</strong>用于本地验证；具体执行见 <strong><a href="docs-qt5-downgrade-plan.md"><code>docs-qt5-downgrade-plan.md</code></a></strong>
+基线版本：<code>SNOW_SHOT_VERSION = 1.2.8</code>（根 <code>CMakeLists.txt:18</code>）
+文档定位：与 <code>docs-macos-build.md</code>、<code>docs-windows-arm64-build.md</code> 同级的移植设计文档</p>
+</blockquote>
+<hr>
+<h2 id="0-结论摘要与可行性判定">0. 结论摘要与可行性判定</h2>
+<h3 id="0-1-一句话结论">0.1 一句话结论</h3>
+<p>工程具备<strong>清晰的三平台抽象骨架</strong>（Windows / macOS 两条腿已实现），但 <strong>Linux 支线几乎为零</strong>；
+真正的移植难点不在 Linux，而在于<strong>硬性 Qt6 → Qt5 降级</strong>——现有代码不是"停留在 Qt5 老 API"，
+而是<strong>全面拥抱 Qt 6 专有 API</strong>，且 <code>snow_image_viewer</code> 直接依赖 Qt 6 才公开的 RHI 渲染抽象。</p>
+<h3 id="0-2-可行性分级">0.2 可行性分级</h3>
+<table>
+<thead>
+<tr>
+<th>模块</th>
+<th>Linux 可移植性</th>
+<th>Qt5 可降级性</th>
+<th>综合判定</th>
+<th>主要阻塞</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snow_draw_engine_qt</code>（Rust 部分）</td>
+<td>高（纯 Rust，无平台 crate）</td>
+<td>—</td>
+<td><strong>可直接复用</strong></td>
+<td>仅需 aarch64 性能补强</td>
+</tr>
+<tr>
+<td><code>snow_image</code></td>
+<td>高</td>
+<td>中</td>
+<td><strong>小改</strong></td>
+<td><code>_M_X64</code> 内联汇编/SSE → NEON</td>
+</tr>
+<tr>
+<td><code>snow_memory</code></td>
+<td>高（<code>mmap</code> 已实现）</td>
+<td>—</td>
+<td><strong>可直接复用</strong></td>
+<td><code>pages.rs:123-137</code> 已就绪</td>
+</tr>
+<tr>
+<td><code>ant_design_qt</code></td>
+<td>中</td>
+<td>中高</td>
+<td><strong>中改</strong></td>
+<td>4 个 <code>.mm</code>、<code>enterEvent</code>、<code>position()</code></td>
+</tr>
+<tr>
+<td><code>snow_shot</code>（主程序）</td>
+<td>低（平台层全缺）</td>
+<td>中</td>
+<td><strong>大改</strong></td>
+<td>需从零实现全部 Linux 平台后端</td>
+</tr>
+<tr>
+<td><code>snow_image_viewer</code></td>
+<td>低</td>
+<td><strong>极低</strong></td>
+<td><strong>重写或裁剪</strong></td>
+<td><code>QRhi*</code> 为 Qt6 专有公开 API</td>
+</tr>
+<tr>
+<td>Rust <code>snow-capture</code> / <code>snow-cursor</code> / 音频 / 输入</td>
+<td>低（全为 <code>UnsupportedBackend</code>）</td>
+<td>—</td>
+<td><strong>从零实现</strong></td>
+<td>PipeWire / portal / evdev 全缺</td>
+</tr>
+<tr>
+<td>Rust OCR（<code>snow-ocr-process</code>）</td>
+<td>中</td>
+<td>—</td>
+<td><strong>中改</strong></td>
+<td>默认 <code>directml-provider</code> 为 Windows 专有</td>
+</tr>
+</tbody>
+</table>
+<h3 id="0-3-必须向决策方澄清的前置问题">0.3 必须向决策方澄清的前置问题</h3>
+<ol>
+<li><strong>Qt5 的下限版本</strong>：建议锁定 <strong>Qt 5.15 LTS</strong>。UOS 20 出厂为 Qt 5.11，<code>deepin-shared-libs</code> 另提供
+   Qt 5.15.10 GLES 供 UOS v20 amd64/aarch64 使用；Deepin 23 基线为 Qt 5.15 + 6.x。
+   若被迫降至 5.12/5.11，<code>QStringDecoder</code> / <code>QLatin1StringView</code> / <code>QByteArrayView</code> / <code>qsizetype</code> /
+   <code>QColorSpace</code> / <code>QImageReader::allocationLimit</code> 等将再增一大层替换工作。</li>
+<li><strong><code>snow_image_viewer</code> 是否在移植范围内</strong>：它是唯一使用 <code>QRhi</code> 的模块，Qt5 下无公开等价 API。
+   建议 <strong>Linux 首版不交付查看器</strong>，或将其渲染后端重写为 <code>QOpenGLWidget</code>。</li>
+<li>~~<strong>Qt5 约束的来源</strong>~~ → <strong>已定，见 §0.4。</strong></li>
+</ol>
+<h3 id="0-4-决策记录-已确认">0.4 决策记录（已确认）</h3>
+<p><strong>决策 1：维持 Qt5 路线。</strong> 不做 AppImage + Qt6 的绕行（该路线作为备选保留在附录 A，已否决）。</p>
+<p><strong>决策 2：保留 Windows 分支，先本机验证再上 UOS。</strong> 即先在 Windows 用 Qt5 打通编译与冒烟测试，
+确认降级本身没引入回归，再进 UOS 做平台后端适配。</p>
+<p><strong>决策 3（由决策 2 推导出的改造形态）：不删除 Qt6 支持，改为双版本兼容。</strong>
+依据是 Qt 官方的 versionless 机制——<code>Qt::Core</code> 这类无版本前缀的目标<strong>在 Qt 5.15 与 Qt 6 中同时存在</strong>，
+因此 <code>Qt6::X</code> → <code>Qt::X</code> 是一次双向生效的官方重命名，而非单向降级。
+这带来两个直接收益：现有 Qt6 构建全程保持可用（可作二分对照基线，快速区分"降级引入的 bug"与"原有 bug"），
+且回滚成本极低。</p>
+<p><strong>降级工作量实测</strong>（当前 <code>main</code> 快照 grep 统计）：需改造 <strong>112 个 C++ 文件</strong> + <strong>882 行 CMake</strong>，
+占非测试 C++ 文件总量的 8.6%。完整清单、兼容层代码、阶段计划与 Windows 环境前置
+全部落在 <strong><a href="docs-qt5-downgrade-plan.md"><code>docs-qt5-downgrade-plan.md</code></a></strong>。</p>
+<blockquote>
+<p>⚠️ <strong>新增前置阻塞</strong>：经实测，本机<strong>未安装 Qt / CMake / MSVC / Ninja / Rust / vcpkg，且仓库从未在本机构建过</strong>。
+因此 Windows 验证前必须先完成环境 bootstrap（约 10–12 GB 下载、数小时），这是不可绕过的门槛。</p>
+</blockquote>
+<hr>
+<h2 id="1-工程整体架构">1. 工程整体架构</h2>
+<h3 id="1-1-顶层构成">1.1 顶层构成</h3>
+<pre><code>snow-apps/                             (cmake_minimum_required 4.2, project snow_apps 0.2.0)
+├── CMakeLists.txt                     顶层编排：模块开关、IPO/LTO、CPack(NSIS)
+├── CMakePresets.json                  16 个 configure preset：windows-msvc-* / macos-*
+├── vcpkg.json                         清单依赖：snow-shot / full-codecs / image-viewer features
+├── vcpkg-configuration.json           builtin registry, baseline 4497409a
+│
+├── snow_shot/           (GPL-3.0)     主程序：截图/贴图/OCR/录屏；1084 个 C++ 文件
+├── ant_design_qt/       (Apache-2.0)  Qt Widgets 组件库；369 个 C++ 文件 + 4 个 .mm
+├── snow_draw_engine_qt/ (Apache-2.0)  绘图引擎：C++ 薄壳 + 9 个 Rust crate
+├── snow_image/          (GPL-3.0)     图像编解码库（PNG/JPEG/GIF/HEIF/JXL/WEBP/AVIF...）
+├── snow_image_viewer/   (GPL-3.0)     看图器：QRhi 渲染（Qt6 专有）
+├── snow_memory/                       显式 OS 页所有权的大缓冲
+├── snow-crates/         (Apache-2.0)  Rust workspace，29 个 crate
+├── snow_rust_ffi/       (Apache-2.0)  汇总 C ABI staticlib，供 CMake 链接
+└── cmake/ scripts/                    共享 CMake 模块、vcpkg overlay、PowerShell/sh 入口
+</code></pre>
+<h3 id="1-2-依赖分层-自下而上">1.2 依赖分层（自下而上）</h3>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>组件</th>
+<th>平台耦合</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L0 内存/基础</td>
+<td><code>snow-memory</code>、<code>snow-core</code>、<code>snow-media</code>、<code>snow-diagnostics</code></td>
+<td>低（Linux <code>mmap</code> 已有）</td>
+</tr>
+<tr>
+<td>L1 图像</td>
+<td><code>snow_image</code>、<code>snow-stitch-images</code>、<code>visual-region-detector</code>、<code>snow_draw_engine_qt</code>(Rust)</td>
+<td>低-中（SIMD 为 x86）</td>
+</tr>
+<tr>
+<td>L2 平台后端</td>
+<td><code>snow-capture</code>、<code>snow-cursor</code>、<code>snow-audio-recorder</code>、<code>snow-ui-selector</code>、<code>snow-selected-text</code>、<code>snow-recording-effects</code></td>
+<td><strong>极高</strong>（Win/macOS only）</td>
+</tr>
+<tr>
+<td>L3 录制/导出</td>
+<td><code>snow-recording-runtime</code>、<code>snow-recording-export</code>、<code>snow-screen-recorder</code>、<code>snow-pipeline</code></td>
+<td>高（GPU 路径 Windows only）</td>
+</tr>
+<tr>
+<td>L4 OCR</td>
+<td><code>rapid-ocr-rs</code>、<code>snow-ocr-process</code>、onnxruntime</td>
+<td>中（DirectML Windows only）</td>
+</tr>
+<tr>
+<td>L5 C ABI</td>
+<td><code>snow-*-c</code> × 8 → <code>snow-shot-rust-ffi</code>(staticlib)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>L6 C++ UI</td>
+<td><code>ant_design_qt</code> → <code>snow_shot</code></td>
+<td>高（平台层、.mm、Win32）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="1-3-构建与打包链路">1.3 构建与打包链路</h3>
+<ul>
+<li><strong>Qt 供给</strong>：<strong>不使用 aqtinstall / vcpkg</strong>。由 <code>scripts/qt-toolchain.json</code> 单一真源锁定 <code>6.12.0</code>，
+  <code>cmake/SnowQt.cmake:29</code> 执行 <code>find_package(Qt6 &lt;ver&gt; EXACT REQUIRED)</code>，版本不符即 <code>FATAL_ERROR</code>；
+  <code>SnowQt.cmake:39</code> 注入 <code>QT_DISABLE_DEPRECATED_UP_TO=0x060c00</code>（Qt 6.5+ 专有宏）。
+  静态 Qt 由 <code>scripts/build-static-qt.sh:143-160</code> 从官方 tarball 自建，子模块仅
+  <code>qtbase,qtsvg,qttools,qttranslations</code>，并 <code>-skip qtdeclarative</code>。</li>
+<li><strong>原生依赖</strong>：vcpkg manifest 模式，triplet 仅 <code>{x64,arm64}-{windows,osx}-*</code>（<strong>无 Linux triplet</strong>）。</li>
+<li><strong>Rust 集成</strong>：<code>cmake/RustStaticLibrary.cmake</code> 生成 <code>cargo build --locked --package ... --target ...</code> 自定义目标，
+  产物以 <code>STATIC IMPORTED</code> 挂到 CMake；<code>snow_rust_ffi</code> 单库聚合全部 C ABI。</li>
+<li><strong>打包</strong>：Windows <code>NSIS</code>（根 <code>CMakeLists.txt:426-485</code>），macOS <code>DragNDrop</code>
+  （<code>cmake/SnowShotMacOSPackage.cmake</code>）。<strong>无 Linux/deb/AppImage 配置。</strong></li>
+</ul>
+<hr>
+<h2 id="2-跨平台兼容性问题清单">2. 跨平台兼容性问题清单</h2>
+<h3 id="2-1-linux-现状-几乎为零">2.1 Linux 现状：几乎为零</h3>
+<p>全仓库源码级 <code>Q_OS_LINUX</code> 仅 <strong>2 处</strong>（<code>snow_image_viewer/src/ui/viewer_window.cpp:94,126</code>）。
+X11 / Wayland / PipeWire / portal / D-Bus / PulseAudio / ALSA / EGL 在应用代码中 <strong>0 处</strong>。
+缺平台实现时当前行为是「静默降级为桩」：</p>
+<pre><code class="language-cpp">// snow_shot/src/platform/globalmousebackend.cpp:35-37
+#else
+    return std::make_unique&lt;UnsupportedGlobalMouseBackend&gt;();   // 权限状态 Unavailable
+#endif
+</code></pre>
+<pre><code class="language-rust">// snow-crates/crates/snow-capture/src/platform/mod.rs:17-22
+#[cfg(not(any(target_os = &quot;windows&quot;, target_os = &quot;macos&quot;)))]
+fn unsupported_error() -&gt; CaptureError {
+    CaptureError::platform(anyhow::anyhow!(&quot;screen capture is only supported on Windows&quot;))
+}
+</code></pre>
+<blockquote>
+<p>风险：若不改造，Linux 版会<strong>编译通过但核心功能全部失效</strong>（截不到屏、录不了音、抓不到光标）。
+这与用户对"误导性误报"的敏感点直接冲突（不允许出现"工具已安装但无法获取屏幕"这类误导提示），
+因此在接口层必须显式上报 <code>Unsupported</code>，而非伪造成功。</p>
+</blockquote>
+<h3 id="2-2-windows-专属代码-必须替换">2.2 Windows 专属代码（必须替换）</h3>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>代表位置</th>
+<th>Linux 对应</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DXGI Desktop Duplication / WGC</td>
+<td><code>snow-capture/src/platform/windows/{duplication.rs,wgc.rs,duplication_gpu.rs}</code></td>
+<td>PipeWire / X11 XShm</td>
+</tr>
+<tr>
+<td>D3D11 / GPU tonemap</td>
+<td><code>snow-crates/crates/snow-d3d11/*</code>；<code>snow-capture/.../gpu_tonemap.rs</code>（≈180 处）</td>
+<td>Vulkan/EGL 或纯 CPU</td>
+</tr>
+<tr>
+<td>GDI 回退</td>
+<td><code>snow-capture/src/platform/windows/gdi.rs</code></td>
+<td>X11 XGetImage</td>
+</tr>
+<tr>
+<td>WASAPI 音频</td>
+<td><code>snow-audio-recorder/src/platform/windows/*</code></td>
+<td>PulseAudio / PipeWire</td>
+</tr>
+<tr>
+<td>UIA/MSAA 元素拾取</td>
+<td><code>snow-ui-selector/src/windows/*</code>、<code>snow-selected-text/src/platform/windows/*</code></td>
+<td>AT-SPI2 (D-Bus)</td>
+</tr>
+<tr>
+<td>全局键鼠钩子</td>
+<td><code>snow-recording-effects/src/{keyboard_hook.rs:124, mouse_hook.rs:90}</code></td>
+<td>XRecord / XInput2 / evdev</td>
+</tr>
+<tr>
+<td>Win32 窗口层</td>
+<td><code>snow_shot/src/platform/windows/*</code>（30 文件）：<code>windowchrome.cpp:255</code> <code>SetWindowDisplayAffinity</code>、<code>pinnedwindownative.cpp</code> <code>WS_EX_*</code></td>
+<td>X11 属性 / 无对应</td>
+</tr>
+<tr>
+<td>注册表自启动</td>
+<td><code>platform/windows/autostartregistration.cpp:14</code></td>
+<td><code>~/.config/autostart/*.desktop</code></td>
+</tr>
+<tr>
+<td>ShellExecute 提权</td>
+<td><code>platform/windows/administratorlaunch.cpp:25-31</code></td>
+<td><code>pkexec</code> / polkit</td>
+</tr>
+<tr>
+<td>资源管理器右键菜单</td>
+<td><code>platform/windows/shellcontextmenuregistration.cpp:20-21</code></td>
+<td><code>~/.local/share/applications/*.desktop</code></td>
+</tr>
+<tr>
+<td>命名管道</td>
+<td><code>app/main.cpp:379</code>、<code>app/mcp/screenshotmcpserver.cpp:31</code></td>
+<td>QLocalServer abstract socket</td>
+</tr>
+<tr>
+<td>crashpad</td>
+<td><code>diagnostics/crashcollector.cpp</code>、<code>app/main.cpp:440-453</code></td>
+<td>移除 / Breakpad-Linux</td>
+</tr>
+<tr>
+<td>DirectML</td>
+<td><code>rapid-ocr-rs/src/runtime/{provider.rs,session.rs}</code></td>
+<td>CPU EP / OpenVINO / CUDA(amd64)</td>
+</tr>
+<tr>
+<td>WIC/D3D11 打印</td>
+<td><code>platform/windows/nativeprintdocument.cpp</code>、<code>snow_image_viewer/src/platform/windows_print.cpp</code></td>
+<td>CUPS / QPrinter</td>
+</tr>
+<tr>
+<td><code>winres</code> 无条件 build-dep</td>
+<td><code>snow-ocr-process/build.rs:35-36</code></td>
+<td>需 target-gate</td>
+</tr>
+</tbody>
+</table>
+<h3 id="2-3-macos-专属代码-移植时可整目录排除">2.3 macOS 专属代码（移植时可整目录排除）</h3>
+<ul>
+<li>19 个 <code>.mm</code>：<code>snow_shot/src/platform/macos/*</code>（<code>NSWindow</code>/<code>CGEvent</code>/<code>NSPasteboard</code>/<code>AVFoundation</code>...）；</li>
+<li>4 个 <code>.mm</code>：<code>ant_design_qt/.../widgets/{context_menu_mac,modal_mac,detail/*_mac}.mm</code>；</li>
+<li>整 crate <code>snow-crates/crates/snow-macos/</code>（22 文件，依赖 16 个 <code>objc2-*</code>）；</li>
+<li><code>snow-capture/src/platform/macos.rs</code>、<code>snow-audio-recorder/src/platform/macos.rs</code> 等。</li>
+</ul>
+<blockquote>
+<p>这些在 Linux 构建中可以 <code>if(APPLE)</code> 排除，但 <strong><code>snow_shot/CMakeLists.txt:1-8</code> 目前在 <code>APPLE</code> 下
+全局启用 <code>LANGUAGE OBJCXX</code></strong>，需确保 Linux 分支不触发。</p>
+</blockquote>
+<h3 id="2-4-硬件-架构差异">2.4 硬件 / 架构差异</h3>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>现状</th>
+<th>arm64 影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SIMD 内核</td>
+<td>全部 AVX2/SSE（<code>snow-capture/src/convert/simd_x86.rs</code> ≈600 处；<code>snow-stitch-images/{orb,region,estimator}.rs</code>；<code>rapid-ocr-rs/src/det/{pre,post}process.rs</code>；<code>snow-recording-export/src/{resize,editing}.rs</code>；C++ 侧 <code>snow_canvas_filter_avx2.cpp</code> ≈188 处 <code>_mm256_*</code>、<code>snow_image/src/raster.cpp:135,168</code>）</td>
+<td><strong>均有标量回退可编译，但性能显著下降</strong>，需补 NEON</td>
+</tr>
+<tr>
+<td>已有 NEON 范式</td>
+<td><code>snow-media/src/convert.rs:46-76</code></td>
+<td>可作为移植模板</td>
+</tr>
+<tr>
+<td>CMake SIMD</td>
+<td><code>cmake/SnowSimd.cmake:7-23</code>（MSVC <code>/arch:AVX2</code>、GCC/Clang <code>-mavx2</code>）</td>
+<td>需加 aarch64 分支（<code>-march=armv8-a+simd</code>）</td>
+</tr>
+<tr>
+<td>内存大页</td>
+<td><code>snow-memory/src/pages.rs:30-44</code> <code>VirtualAlloc</code>+<code>MEM_LARGE_PAGES</code></td>
+<td>Linux 需 <code>mmap(MAP_HUGETLB)</code>，现有分支未用大页</td>
+</tr>
+<tr>
+<td>指针宽度</td>
+<td>已强制 64 位单架构（根 <code>CMakeLists.txt:55-86</code>）</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="2-5-qt-6-专有特性-本方案的最大阻塞">2.5 Qt 6 专有特性（<strong>本方案的最大阻塞</strong>）</h3>
+<blockquote>
+<p>全仓库<strong>没有一处 <code>#if QT_VERSION_CHECK</code> 兼容分支</strong>，即无法"一套代码双版本编译"，必须新增兼容层或分叉。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>代表 API / 文件</th>
+<th>Qt5 替代</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>RHI 渲染</strong></td>
+<td><code>snow_image_viewer/src/render/rhi_image_window.{h:23-48,222,cpp}</code>（<code>QRhi*</code>/<code>QVulkanInstance</code>/<code>QOffscreenSurface</code>）</td>
+<td><strong>Qt5 无公开 RHI</strong> → <code>QOpenGLWidget</code> 重写</td>
+</tr>
+<tr>
+<td>键序列</td>
+<td><code>QKeyCombination</code>：<code>shortcutbinding.h:4</code>、<code>shortcutbinding.cpp:375,432,623,650</code>、<code>windowshortcutmanager.cpp:46-47,508-596</code> 等 15+ 文件</td>
+<td>Qt5 <code>QKeySequence</code> 用 <code>int</code></td>
+</tr>
+<tr>
+<td>原生接口</td>
+<td><code>QNativeInterface::QWindowsScreen/QCocoaScreen</code>：<code>monitorgeometry.cpp:18</code>、<code>focusedfullscreenwindow.cpp:61</code>、<code>screenshotgeometry.cpp:373,873</code></td>
+<td>Qt5 <code>QPlatformNativeInterface</code></td>
+</tr>
+<tr>
+<td>进入事件</td>
+<td><code>enterEvent(QEnterEvent*)</code>：<code>titlebarwidget.cpp:20,97,154</code>、<code>tag.h:13,220</code> 等</td>
+<td>Qt5 <code>enterEvent(QEvent*)</code></td>
+</tr>
+<tr>
+<td>指针事件</td>
+<td><code>QMouseEvent::position()/globalPosition()</code>：<code>screenshotoverlaywindow.cpp:1100-1220</code>、<code>screenshotpinnedwindow.cpp</code> 等 15+ 文件</td>
+<td><code>localPos()/globalPos()</code></td>
+</tr>
+<tr>
+<td>字符串视图</td>
+<td><code>QStringView</code>（11 文件）、<code>QLatin1StringView</code>(<code>configurationarchive.cpp:132,403-408</code>)、<code>QByteArrayView</code>(<code>worker_protocol.cpp:61,137</code>)</td>
+<td><code>QString</code>/<code>QLatin1String</code>/<code>QByteArray</code></td>
+</tr>
+<tr>
+<td>编解码</td>
+<td><code>QStringDecoder</code>（<code>screenshotclipboardcontent.cpp:38,549-551</code>）</td>
+<td><code>QTextCodec</code></td>
+</tr>
+<tr>
+<td>元类型</td>
+<td><code>QMetaType::fromType</code> / <code>QVariant::metaType()</code>：<code>mcpsettingsadapter_p.h:47-76</code>、<code>image.cpp:443</code>、<code>select_option_utils.cpp:18,37</code></td>
+<td><code>QVariant::type()</code> / <code>QMetaType::Type</code></td>
+</tr>
+<tr>
+<td>容器</td>
+<td><code>QList::removeIf</code>：<code>settingsadapters.cpp:112</code>、<code>configurationschema.cpp:37-2273</code></td>
+<td>手写 <code>std::remove_if</code>+<code>erase</code></td>
+</tr>
+<tr>
+<td>协程</td>
+<td><code>QPromise</code>（<code>mcpasyncwork_p.h:8,25</code>，Qt6 移入 QtCore）</td>
+<td>Qt5 在 QtConcurrent 中</td>
+</tr>
+<tr>
+<td>色彩</td>
+<td><code>QImage::convertedToColorSpace</code>、<code>QColorSpace::Primaries::*</code>：<code>snowimageqtcodec.cpp:264-312</code></td>
+<td>Qt5.14 部分可用，命名不同</td>
+</tr>
+<tr>
+<td>图像限制</td>
+<td><code>QImageReader::allocationLimit()/setAllocationLimit()</code>：<code>snowimageqtcodec.cpp:598,619</code></td>
+<td>Qt5 无此静态 API</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="3-qt5-降级专项方案">3. Qt5 降级专项方案</h2>
+<h3 id="3-1-qt-模块可用性对照">3.1 Qt 模块可用性对照</h3>
+<table>
+<thead>
+<tr>
+<th>现用 Qt6 模块</th>
+<th>Qt5 对应</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Core / Gui / Widgets / Network / Svg / Test</td>
+<td><code>Qt5::*</code></td>
+<td>直接可用</td>
+</tr>
+<tr>
+<td>Concurrent</td>
+<td><code>Qt5::Concurrent</code></td>
+<td>可用（注意 <code>QPromise</code> 位置）</td>
+</tr>
+<tr>
+<td>LinguistTools</td>
+<td><code>Qt5::LinguistTools</code></td>
+<td>可用，但构建期 API 不同（见 3.3）</td>
+</tr>
+<tr>
+<td>GuiPrivate</td>
+<td><code>Qt5::GuiPrivate</code></td>
+<td>可用但私有 ABI，需逐点核对</td>
+</tr>
+<tr>
+<td><strong>未使用</strong>：Quick / Qml / Multimedia / DBus / Sql / PrintSupport / OpenGL(Widgets)</td>
+<td>—</td>
+<td>无需处理</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>有利面：<strong>无 QML / Qt Quick、无 <code>.pro</code>、无 <code>.ui</code></strong>，<code>CMAKE_AUTOMOC/AUTORCC</code> 已启用。
+这消除了 Qt5↔Qt6 差异中最大的两块（QML 引擎与 qmake）。</p>
+</blockquote>
+<h3 id="3-2-cmake-改写表">3.2 CMake 改写表</h3>
+<table>
+<thead>
+<tr>
+<th>Qt6 专有</th>
+<th>出现位置</th>
+<th>Qt5 改写</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>find_package(Qt6 EXACT)</code></td>
+<td><code>cmake/SnowQt.cmake:29</code></td>
+<td><code>find_package(Qt5 5.15 EXACT)</code></td>
+</tr>
+<tr>
+<td><code>QT_DISABLE_DEPRECATED_UP_TO</code></td>
+<td><code>cmake/SnowQt.cmake:39</code></td>
+<td><code>QT_DISABLE_DEPRECATED_BEFORE</code></td>
+</tr>
+<tr>
+<td><code>Qt6::qtpaths</code></td>
+<td><code>SnowQt.cmake:61</code></td>
+<td><code>Qt5::qmake</code> / <code>Qt5Core_VERSION</code></td>
+</tr>
+<tr>
+<td><code>qt_standard_project_setup()</code></td>
+<td><code>snow_draw_engine_qt/CMakeLists.txt:36</code></td>
+<td>手工设 <code>CMAKE_AUTOMOC</code> 等</td>
+</tr>
+<tr>
+<td><code>qt_add_library()</code></td>
+<td><code>snow_draw_engine_qt/CMakeLists.txt:64</code></td>
+<td><code>add_library()</code></td>
+</tr>
+<tr>
+<td><code>qt_add_executable()</code></td>
+<td><code>snow_shot/CMakeLists.txt:1596</code>、<code>SnowShotMini.cmake:113</code></td>
+<td><code>add_executable()</code></td>
+</tr>
+<tr>
+<td><code>qt_add_resources(PREFIX/BASE/FILES)</code></td>
+<td><code>snow_shot/CMakeLists.txt:1153,1664,1685</code>、<code>SnowShotTranslations.cmake:78</code></td>
+<td><code>qt5_add_resources(&lt;qrc&gt;)</code></td>
+</tr>
+<tr>
+<td><code>qt_add_translations/lupdate/lrelease</code></td>
+<td><code>ant_design_qt/CMakeLists.txt:153</code>、<code>SnowShotTranslations.cmake:96</code>、<code>SnowShotTranslationRelease.cmake:18-31</code></td>
+<td>直接调 <code>lupdate</code>/<code>lrelease</code>，手工实现合并</td>
+</tr>
+<tr>
+<td><code>qt_import_plugins()</code></td>
+<td><code>SnowQtOffscreenTest.cmake:31</code>、<code>snow_shot/CMakeLists.txt:1792,2975</code></td>
+<td><code>Q_IMPORT_PLUGIN(...)</code> 宏</td>
+</tr>
+<tr>
+<td><code>qt_generate_deploy_app_script()</code> / <code>qt_finalize_executable()</code></td>
+<td><code>SnowShotMini.cmake:276,283</code></td>
+<td>Linux 无对应（用 CPack/手工）</td>
+</tr>
+<tr>
+<td>静态插件名 <code>Qt6::QSvgPlugin</code> 等</td>
+<td><code>snow_shot/CMakeLists.txt:153-172</code></td>
+<td>Qt5 静态插件需 <code>Q_IMPORT_PLUGIN</code> + 手工链接</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-3-i18n-构建管线">3.3 i18n 构建管线</h3>
+<p>运行时（<code>QTranslator</code> + <code>.qm</code> 资源）Qt5/6 一致，<strong>可原样保留</strong>。构建期需改写：
+<code>MERGE_QT_TRANSLATIONS</code> / <code>QT_TRANSLATION_CATALOGS</code> / <code>QT_INTERNAL_ABSOLUTE_TRANSLATIONS_DIR</code>
+（Qt6 专有）→ 改为脚本显式调用 <code>lrelease</code>；Qt 自带翻译文件名由 <code>qtbase_*.qm</code> 改为 <code>qt_*.qm</code>
+（<code>SnowShotTranslationRelease.cmake:8-14</code>）。<code>lrelease -fail-on-unfinished</code> 策略保留。</p>
+<h3 id="3-4-rhi-重写-查看器">3.4 RHI 重写（查看器）</h3>
+<p><code>rhi_image_window.{h,cpp}</code> 使用 <code>QRhiBuffer/QRhiGraphicsPipeline/QRhiSwapChain/QVulkanInstance</code>。
+Qt5 仅有私有 RHI，<strong>公开 API 无法编译</strong>。三条路径：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>成本</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A. QOpenGLWidget 重写</strong>（推荐）</td>
+<td>中</td>
+<td>复用现有 GLSL 着色器（<code>snow_image_viewer/resources/shaders/*.frag|vert</code>），改写为 GL 3.3 Core</td>
+</tr>
+<tr>
+<td>B. QPainter/QImage 软渲染</td>
+<td>低</td>
+<td>舍弃 GPU 加速，仅保证功能</td>
+</tr>
+<tr>
+<td>C. Linux 首版不交付查看器</td>
+<td>最低</td>
+<td>从 preset 关闭 <code>SNOW_APPS_BUILD_IMAGE_VIEWER</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-5-兼容层设计-推荐落地形态">3.5 兼容层设计（推荐落地形态）</h3>
+<p>新增 <code>snow_shot/include/snow_shot/compat/qt5compat.h</code>（+ 同名 <code>.cpp</code> 可选），集中收敛差异：</p>
+<pre><code class="language-cpp">// 设计示意（非最终代码）
+#pragma once
+#include &lt;QtGlobal&gt;
+#if QT_VERSION &gt;= QT_VERSION_CHECK(6, 0, 0)
+#  include &lt;QKeyCombination&gt;
+#  include &lt;QStringDecoder&gt;
+#  define SNOW_HAS_QT6 1
+#else
+#  define SNOW_HAS_QT6 0
+#endif
+
+namespace snow_shot::compat {
+#if SNOW_HAS_QT6
+inline int keySequenceKey(const QKeySequence&amp; s) { return s[0].toCombined(); }   // 占位
+#else
+inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
+#endif
+} // namespace
+</code></pre>
+<p>约定：<strong>所有平台差异集中在 <code>compat/</code>，业务代码只调用 <code>compat::</code> 前缀 API</strong>，避免把
+<code>#if QT_VERSION</code> 散落到 1000+ 文件。</p>
+<hr>
+<h2 id="4-需要修改-新增的模块清单">4. 需要修改 / 新增的模块清单</h2>
+<h3 id="4-1-c-侧">4.1 C++ 侧</h3>
+<table>
+<thead>
+<tr>
+<th>动作</th>
+<th>路径</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow_shot/src/platform/linux/</code></td>
+<td>对应 <code>windows/</code> 全部能力：全局快捷键、全局鼠标、物理光标、全屏窗口检测、窗口捕获排除、窗口 chrome、托盘、单实例、自启动、提权、剪贴板、系统通知、滚动注入</td>
+</tr>
+<tr>
+<td><strong>修改</strong></td>
+<td><code>snow_shot/src/platform/focusedfullscreenwindow.cpp:39</code>、<code>globalmousebackend.cpp:5-38</code>、<code>physicalcursor.cpp:13-97</code></td>
+<td>增加 <code>Q_OS_LINUX</code> 分支</td>
+</tr>
+<tr>
+<td><strong>修改</strong></td>
+<td><code>snow_shot/src/presentation/{globalcanvas/globalcanvasplatform.cpp, pinned/pinnedwindowplatform.cpp}</code></td>
+<td>Win/Mac 分发 + 桩，需 Linux 实现</td>
+</tr>
+<tr>
+<td><strong>重构</strong></td>
+<td><code>snow_shot/include/snow_shot/platform/screenshotnative.h:3</code></td>
+<td><strong>无条件 include <code>windows/scrollinput.h</code></strong>，须拆出平台中立接口</td>
+</tr>
+<tr>
+<td><strong>修改</strong></td>
+<td><code>ant_design_qt/.../widgets/{context_menu,modal}.cpp</code> + <code>detail/*</code></td>
+<td>Win32/<code>.mm</code> 分发，需 X11 对应</td>
+</tr>
+<tr>
+<td><strong>重写/裁剪</strong></td>
+<td><code>snow_image_viewer/src/render/rhi_image_window.*</code></td>
+<td>见 3.4</td>
+</tr>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow_shot/resources/linux/*.desktop</code>、图标</td>
+<td>应用入口、右键菜单</td>
+</tr>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>cmake/SnowShotLinuxPackage.cmake</code></td>
+<td>CPack DEB/AppImage</td>
+</tr>
+</tbody>
+</table>
+<h3 id="4-2-rust-侧">4.2 Rust 侧</h3>
+<table>
+<thead>
+<tr>
+<th>动作</th>
+<th>路径</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow-crates/crates/snow-linux/</code></td>
+<td>替代 <code>snow-macos</code> 的平台 crate：X11/Wayland 屏幕、音频、光标、输入。<strong>已建</strong>：<code>geometry</code>/<code>pixels</code>/<code>session</code>（纯逻辑，任何平台可单测）+ <code>x11</code>/<code>display</code>/<code>cursor</code>（X11，<code>x11rb</code> 纯 Rust 实现）。待补：PipeWire/Wayland capture、PulseAudio、evdev/XRecord 输入钩子</td>
+</tr>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow-crates/crates/snow-capture/src/platform/linux.rs</code></td>
+<td>PipeWire + XDG portal（Wayland）/ XShm（X11）后端</td>
+</tr>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow-crates/crates/snow-audio-recorder/src/platform/linux.rs</code></td>
+<td>PulseAudio / PipeWire</td>
+</tr>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow-crates/crates/snow-cursor/src/platform/linux.rs</code></td>
+<td>XFixes <code>GetCursorImage</code> + 核心 <code>QueryPointer</code>。<strong>已完成</strong>（含 image 缓存的瞬时失败保护，与 Windows 后端同策略）</td>
+</tr>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow-crates/crates/snow-ui-selector/src/linux/</code>、<code>snow-selected-text/src/platform/linux/</code></td>
+<td>AT-SPI2（D-Bus）+ PRIMARY selection。<strong>注意</strong>：<code>snow-ui-selector-c</code> 依赖 <code>ElementRegionService</code>，在 Linux provider 落地前该 crate 无法编译（见 9.4.2 B 类）</td>
+</tr>
+<tr>
+<td><strong>修改</strong></td>
+<td><code>snow-recording-effects/src/{keyboard_hook,mouse_hook,keyboard_rasterizer}.rs</code> 的 <code>#[cfg(not(any(windows,macos)))]</code> 空实现</td>
+<td>evdev / XRecord</td>
+</tr>
+<tr>
+<td><strong>修改</strong></td>
+<td><code>snow-recording-runtime/src/{capture_policy.rs:18-90,direct_capture.rs:4-90}</code></td>
+<td>放开 Windows-only 门控，接入 CPU 合成路径</td>
+</tr>
+<tr>
+<td><strong>修改</strong></td>
+<td><code>rapid-ocr-rs/src/model_store.rs:94-102</code></td>
+<td><code>LOCALAPPDATA</code> → XDG (<code>$XDG_DATA_HOME</code>)</td>
+</tr>
+<tr>
+<td><strong>修改</strong></td>
+<td><code>snow-ocr-process/build.rs:35-36</code></td>
+<td><code>winres</code> 改为 <code>[target.'cfg(windows)'.build-dependencies]</code></td>
+</tr>
+<tr>
+<td><strong>重写/排除</strong></td>
+<td><code>snow_shot/rust/snow-shot-updater</code>、<code>snow-shot-mcp</code></td>
+<td>纯 Windows crate（注册表/服务/<code>LoadLibrary</code>）</td>
+</tr>
+<tr>
+<td><strong>修改</strong></td>
+<td><code>rust-toolchain.toml</code></td>
+<td><code>targets</code> 增加 <code>x86_64-unknown-linux-gnu</code>、<code>aarch64-unknown-linux-gnu</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="5-依赖库替换-调整">5. 依赖库替换 / 调整</h2>
+<h3 id="5-1-vcpkg-uos-系统包-自建">5.1 vcpkg → UOS 系统包 / 自建</h3>
+<table>
+<thead>
+<tr>
+<th>依赖</th>
+<th>现状</th>
+<th>Linux 方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Qt</td>
+<td>源码自建 6.12.0</td>
+<td><strong>系统 Qt 5.15</strong>（deepin-shared-libs Qt5.15.10 / apt <code>qtbase5-dev</code>）</td>
+</tr>
+<tr>
+<td>FFmpeg</td>
+<td>vcpkg overlay port 9.0</td>
+<td>UOS 源 <code>libavcodec-dev</code> 等，或自建（Deepin23 自带 6.1.1）</td>
+</tr>
+<tr>
+<td>OpenCV</td>
+<td>vcpkg <code>opencv4</code>(contrib/dnn/fs/intrinsics)</td>
+<td><code>libopencv-dev</code></td>
+</tr>
+<tr>
+<td>onnxruntime</td>
+<td>vcpkg overlay + DirectML</td>
+<td>官方预编译 <code>libonnxruntime.so</code>（CPU EP）或 OpenVINO</td>
+</tr>
+<tr>
+<td>libpng/libjpeg-turbo/libwebp/giflib</td>
+<td>vcpkg</td>
+<td>UOS 源同名 <code>-dev</code></td>
+</tr>
+<tr>
+<td>libheif / libjxl / openexr / lunasvg</td>
+<td>vcpkg</td>
+<td>UOS 源或自建（注意 aom/hevc 特性）</td>
+</tr>
+<tr>
+<td>tinyxml2 / minizip-ng / flatbuffers / abseil</td>
+<td>vcpkg</td>
+<td>UOS 源</td>
+</tr>
+<tr>
+<td><strong>crashpad</strong></td>
+<td><code>platform: windows \| osx</code></td>
+<td>Linux <strong>移除</strong>，或替换为 Breakpad/Breakpad-Linux</td>
+</tr>
+<tr>
+<td><strong>DirectML</strong></td>
+<td><code>ort/directml</code></td>
+<td><strong>移除</strong>（Windows 专有）</td>
+</tr>
+<tr>
+<td><strong>Vulkan</strong></td>
+<td><code>vulkan-headers</code>(image-viewer)</td>
+<td><code>libvulkan-dev</code>（若走 RHI→GL 则不需要）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="5-2-需新增的-rust-依赖">5.2 需新增的 Rust 依赖</h3>
+<table>
+<thead>
+<tr>
+<th>用途</th>
+<th>crate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>屏幕采集（Wayland）</td>
+<td><code>pipewire-rs</code>（<code>libspa</code>）、<code>ashpd</code> 或 <code>zbus</code>（xdg-desktop-portal ScreenCast）</td>
+</tr>
+<tr>
+<td>屏幕采集（X11）</td>
+<td><code>x11rb</code> 或 <code>xcb</code>、<code>xfixes</code>、<code>xrecord</code></td>
+</tr>
+<tr>
+<td>音频</td>
+<td><code>libpulse-binding</code> / <code>pipewire-rs</code></td>
+</tr>
+<tr>
+<td>输入钩子</td>
+<td><code>evdev</code>、<code>input-linux</code>、或 <code>x11rb</code> XRecord</td>
+</tr>
+<tr>
+<td>底层系统</td>
+<td><code>nix</code>、<code>libc</code></td>
+</tr>
+<tr>
+<td>可访问性</td>
+<td><code>atspi</code> / <code>zbus</code>（AT-SPI2 over D-Bus）</td>
+</tr>
+<tr>
+<td>硬件编码（amd64）</td>
+<td>FFmpeg <code>h264_vaapi</code>/<code>h264_nvenc</code> 经由 <code>ffmpeg-next</code> 绑定</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>目前上述依赖<strong>一个都没有</strong>（<code>Cargo.lock</code> 中无 <code>nix</code>/<code>wayland</code>/<code>x11rb</code>/<code>pipewire</code>/<code>zbus</code>）。</p>
+</blockquote>
+<hr>
+<h2 id="6-系统调用-硬件差异适配对照表">6. 系统调用 / 硬件差异适配对照表</h2>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>Windows 实现</th>
+<th>macOS 实现</th>
+<th><strong>Linux 目标实现</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>屏幕采集</td>
+<td>DXGI Duplication / WGC</td>
+<td>ScreenCaptureKit</td>
+<td><strong>PipeWire</strong>（Wayland） / <strong>X11 XShm</strong></td>
+</tr>
+<tr>
+<td>窗口采集</td>
+<td>WGC per-window</td>
+<td>SCK per-window</td>
+<td>PipeWire <code>restore_token</code> / X11 Composite</td>
+</tr>
+<tr>
+<td>防截屏排除</td>
+<td><code>SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)</code></td>
+<td><code>NSWindowSharingNone</code></td>
+<td><strong>无等价</strong>，X11 用 shape/<code>XComposite</code> 近似；建议降级说明</td>
+</tr>
+<tr>
+<td>全局快捷键</td>
+<td><code>RegisterHotKey</code></td>
+<td>Carbon/CGEventTap</td>
+<td><strong>X11 <code>XGrabKey</code></strong> / Wayland <code>GlobalShortcuts</code> portal</td>
+</tr>
+<tr>
+<td>全局鼠标</td>
+<td><code>WH_MOUSE_LL</code></td>
+<td><code>CGEventTap</code></td>
+<td><strong>XInput2 raw events</strong> / evdev</td>
+</tr>
+<tr>
+<td>物理光标位置</td>
+<td><code>GetPhysicalCursorPos</code></td>
+<td><code>CGEventGetLocation</code></td>
+<td><strong>XQueryPointer</strong> / XFixes</td>
+</tr>
+<tr>
+<td>音频采集</td>
+<td>WASAPI</td>
+<td>CoreAudio</td>
+<td><strong>PulseAudio</strong> / PipeWire</td>
+</tr>
+<tr>
+<td>自启动</td>
+<td>注册表 Run 键</td>
+<td>SMAppService</td>
+<td><strong><code>~/.config/autostart/*.desktop</code></strong></td>
+</tr>
+<tr>
+<td>提权</td>
+<td><code>ShellExecute(runas)</code></td>
+<td>Authorization Services</td>
+<td><strong><code>pkexec</code></strong>（polkit）</td>
+</tr>
+<tr>
+<td>剪贴板图像</td>
+<td>DIB / CF_DIBV5</td>
+<td><code>NSPasteboard</code></td>
+<td><strong>X11 <code>image/png</code> 选择</strong> / Wayland <code>wl_data_device</code></td>
+</tr>
+<tr>
+<td>托盘</td>
+<td><code>Shell_NotifyIcon</code></td>
+<td>NSStatusItem</td>
+<td><strong>StatusNotifierItem</strong>（D-Bus）</td>
+</tr>
+<tr>
+<td>系统通知</td>
+<td>Windows Toast</td>
+<td>UNUserNotification</td>
+<td><strong><code>org.freedesktop.Notifications</code></strong></td>
+</tr>
+<tr>
+<td>单实例</td>
+<td>命名管道</td>
+<td>命名端口</td>
+<td><strong>QLocalServer abstract socket</strong>（Qt 抽象，改名字即可）</td>
+</tr>
+<tr>
+<td>内存大页</td>
+<td><code>VirtualAlloc(MEM_LARGE_PAGES)</code></td>
+<td>无</td>
+<td><strong><code>mmap(MAP_HUGETLB)</code></strong></td>
+</tr>
+<tr>
+<td>进程 QoS</td>
+<td><code>SetProcessInformation</code></td>
+<td><code>pthread_set_qos_class_self_np</code></td>
+<td><strong>无等价</strong>（返回 0，<code>snow-core/src/qos.rs:92-134</code> 已有分支）</td>
+</tr>
+<tr>
+<td>打印</td>
+<td>WIC + D3D11</td>
+<td>NSPrintOperation</td>
+<td><strong>CUPS / <code>QPrinter</code></strong></td>
+</tr>
+<tr>
+<td>崩溃捕获</td>
+<td>crashpad</td>
+<td>crashpad</td>
+<td>移除或 Breakpad</td>
+</tr>
+<tr>
+<td>滚动注入</td>
+<td><code>WS_EX_TRANSPARENT</code> + wheel</td>
+<td>CGEvent</td>
+<td><strong>XTest</strong> / <code>libei</code>（Wayland）</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="7-arm64-amd64-双架构方案">7. arm64 / amd64 双架构方案</h2>
+<h3 id="7-1-架构支持矩阵">7.1 架构支持矩阵</h3>
+<table>
+<thead>
+<tr>
+<th>架构</th>
+<th>UOS 典型终端</th>
+<th>构建方式</th>
+<th>Rust target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>amd64 (x86_64)</td>
+<td>主流 PC</td>
+<td>原生</td>
+<td><code>x86_64-unknown-linux-gnu</code></td>
+</tr>
+<tr>
+<td>arm64 (aarch64)</td>
+<td>飞腾/鲲鹏/麒麟 990</td>
+<td>原生优先，交叉为备</td>
+<td><code>aarch64-unknown-linux-gnu</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>cmake/RustStaticLibrary.cmake:120-125</code> <strong>已内置</strong> Linux 架构解析，无需改动即可识别上表。</p>
+<h3 id="7-2-simd-补强优先级">7.2 SIMD 补强优先级</h3>
+<table>
+<thead>
+<tr>
+<th>优先级</th>
+<th>位置</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P0</td>
+<td><code>snow-capture/src/convert/simd_x86.rs</code> ↔ 新增 <code>simd_neon.rs</code></td>
+<td>像素格式转换热路径，影响采集帧率</td>
+</tr>
+<tr>
+<td>P1</td>
+<td><code>snow_image/src/raster.cpp:135,168</code>、<code>snow_canvas_filter_avx2.cpp</code></td>
+<td>绘制/滤镜</td>
+</tr>
+<tr>
+<td>P1</td>
+<td><code>snow-stitch-images/src/{orb,region,estimator}.rs</code></td>
+<td>滚动拼接（可先容忍标量）</td>
+</tr>
+<tr>
+<td>P2</td>
+<td><code>snow-recording-export/src/{resize,editing}.rs</code></td>
+<td>录制缩放</td>
+</tr>
+<tr>
+<td>P2</td>
+<td><code>rapid-ocr-rs/src/det/{pre,post}process.rs</code></td>
+<td>OCR 后处理</td>
+</tr>
+</tbody>
+</table>
+<p><code>cmake/SnowSimd.cmake</code> 需新增 aarch64 分支（Neon 默认开启，<code>-march=armv8-a+simd</code>）。</p>
+<h3 id="7-3-交叉编译工具链">7.3 交叉编译工具链</h3>
+<pre><code class="language-bash"># arm64 交叉（在 amd64 上构建 arm64 包）
+sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+# Rust: rustup target add aarch64-unknown-linux-gnu
+# .cargo/config.toml:
+# [target.aarch64-unknown-linux-gnu]
+# linker = &quot;aarch64-linux-gnu-gcc&quot;
+</code></pre>
+<blockquote>
+<p>注意：ARM64 交叉构建<strong>必须在真机（飞腾/鲲鹏）做终验</strong>，尤其是 PipeWire/portal/GPU 路径。</p>
+</blockquote>
+<hr>
+<h2 id="8-分步骤实施计划">8. 分步骤实施计划</h2>
+<table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>目标</th>
+<th>关键产出</th>
+<th>验收标准</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P0 预研基线</strong></td>
+<td>验证 Qt5.15 能否编译纯逻辑模块</td>
+<td>在 UOS 上构建 <code>snow_image</code> + <code>snow_draw_engine_qt</code> + <code>ant_design_qt</code>（暂关平台功能）</td>
+<td>三库链接通过；<code>snow_image</code> 单元测试在 x86_64+arm64 通过</td>
+</tr>
+<tr>
+<td><strong>P1 Qt5 兼容层</strong></td>
+<td>建立 <code>compat/</code> + CMake 双版本开关</td>
+<td><code>snow_shot/include/snow_shot/compat/qt5compat.h</code>；<code>SnowQt.cmake</code> 增加 <code>SNOW_QT_MAJOR</code> 分支</td>
+<td>一个不含平台代码的目标可在 Qt5/Qt6 下分别编译</td>
+</tr>
+<tr>
+<td><strong>P2 构建系统 Linux 化</strong></td>
+<td>preset / 依赖 / 工具链</td>
+<td><code>CMakePresets.json</code> 增 <code>linux-*</code>；<code>cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake</code>；<code>rust-toolchain.toml</code> 补 target</td>
+<td><code>cmake --preset linux-x64-debug</code> 配置成功</td>
+</tr>
+<tr>
+<td><strong>P3 Rust 平台后端</strong> <em>(进行中)</em></td>
+<td>补齐 L2/L3 平台能力</td>
+<td><code>snow-linux</code> crate；capture(X11→PipeWire)、cursor、audio、input hooks</td>
+<td><code>cargo test -p snow-capture</code> 在 UOS 通过；能截到主屏</td>
+</tr>
+<tr>
+<td><strong>P4 C++ 平台层</strong></td>
+<td>主程序平台层</td>
+<td><code>snow_shot/src/platform/linux/*</code>；3 个 dispatcher 增分支；<code>screenshotnative.h</code> 重构</td>
+<td>截图→标注→贴图闭环在 X11 会话可用</td>
+</tr>
+<tr>
+<td><strong>P5 双架构 + SIMD</strong></td>
+<td>arm64 可用可跑</td>
+<td>NEON 内核；<code>SnowSimd.cmake</code> aarch64 分支</td>
+<td>飞腾真机截屏成功，帧率 ≥ 目标准</td>
+</tr>
+<tr>
+<td><strong>P6 打包与系统集成</strong></td>
+<td>可交付安装包</td>
+<td><code>cmake/SnowShotLinuxPackage.cmake</code>；<code>.desktop</code>；deb + AppImage</td>
+<td>双架构 deb 在 UOS 20/Deepin 23 安装并可启动</td>
+</tr>
+<tr>
+<td><strong>P7 硬化与 CI</strong></td>
+<td>稳定与回归</td>
+<td>Wayland 会话适配；CI 增 Linux job</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过</td>
+</tr>
+</tbody>
+</table>
+<p><strong>建议节奏</strong>：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
+<strong>先打通 X11 路径</strong>（技术成熟、调试简单），<strong>再补 Wayland/PipeWire</strong>（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。</p>
+<hr>
+<h2 id="9-编译构建建议">9. 编译构建建议</h2>
+<h3 id="9-1-依赖安装-uos-20-deepin-23-通用">9.1 依赖安装（UOS 20 / Deepin 23 通用）</h3>
+<pre><code class="language-bash">sudo apt update
+sudo apt install -y build-essential cmake ninja-build pkg-config git
+# Qt5 开发环境
+sudo apt install -y qtbase5-dev qt5-qmake qttools5-dev-tools libqt5svg5-dev
+# 图形/输入/媒体
+sudo apt install -y libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
+    libfontconfig1-dev libfreetype6-dev libharfbuzz-dev \
+    libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev libxrecord1-dev \
+    libpipewire-0.3-dev libpulse-dev libasound2-dev libdbus-1-dev libegl1-mesa-dev
+# 图像/编解码
+sudo apt install -y libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
+    libheif-dev libjxl-dev zlib1g-dev libtinyxml2-dev
+# 可选：OCR
+sudo apt install -y libopencv-dev
+</code></pre>
+<h3 id="9-2-cmake-preset-已落地-不再是草案">9.2 CMake preset（已落地，不再是草案）</h3>
+<p>以下预设已写入仓库根 <code>CMakePresets.json</code>（对应上面 §8 的 <strong>P2</strong>，可直接用）：</p>
+<table>
+<thead>
+<tr>
+<th>预设</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>linux-base</code>（hidden）</td>
+<td>所有 Linux 预设的公共父级：Ninja、<code>SNOW_QT_MAJOR=5</code>、无 <code>toolchainFile</code>、<code>VCPKG_MANIFEST_INSTALL=OFF</code>、<code>SNOW_APPS_BUILD_IMAGE_VIEWER=OFF</code>、移植期 <code>SNOW_APPS_STRICT_COMPILE=OFF</code></td>
+</tr>
+<tr>
+<td><code>snow-shot-linux-x64-debug</code> / <code>-release</code></td>
+<td>UOS 20 / Deepin 23 x86_64 原生构建</td>
+</tr>
+<tr>
+<td><code>snow-shot-linux-arm64-debug</code> / <code>-release</code></td>
+<td>飞腾 / 鲲鹏 / 麒麟 990 原生构建</td>
+</tr>
+<tr>
+<td><code>build-snow-shot-linux-{x64,arm64}-{debug,release}</code></td>
+<td>对应的 build preset</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash"># 在 UOS 机器上
+bash scripts/uos-preflight.sh --probe          # 先跑前置探测（§6.1 的决策点）
+cmake --preset snow-shot-linux-x64-debug
+cmake --build --preset build-snow-shot-linux-x64-debug          # 或 --target snow_image
+ctest --preset test-...                                         # 测试目标见下
+</code></pre>
+<p>设计上有三处和常规 preset 不同，都是为了不把 Windows/macOS 主线的假设带进 Linux：</p>
+<ol>
+<li><strong>不设 <code>toolchainFile</code></strong>（与 <code>windows-qt5-base</code> 同思路）。不挂 vcpkg 工具链 ⇒ manifest 步骤
+   根本不运行 ⇒ Linux 用发行版包（§9.1），Windows 用 vcpkg，两边互不干扰。</li>
+<li><strong>不写死 <code>CMAKE_PREFIX_PATH</code></strong>。Debian 系（含 UOS）把 Qt5 的 CMake 包放在
+   <code>/usr/lib/&lt;triplet&gt;/cmake/Qt5</code>，本来就在 CMake 默认搜索路径里；若 UOS 装在自定义前缀，
+   再显式 <code>-DCMAKE_PREFIX_PATH=&lt;prefix&gt;</code>。</li>
+<li><strong><code>SNOW_APPS_BUILD_IMAGE_VIEWER=OFF</code></strong>，直到 §6.1 的甲/乙路线拍板（见
+   <code>docs-qt5-downgrade-plan.md</code> §6.1，探测脚本 <code>scripts/uos-preflight.sh</code>）。</li>
+</ol>
+<p><code>SNOW_APPS_STRICT_COMPILE=OFF</code> 是<strong>移植期</strong>设定：新平台代码加上 Qt5 自带头的告警会在 <code>-Werror</code>
+下把真正的错误淹掉。Linux 目标全绿后应逐目录打开，最终与 Windows 侧对齐。</p>
+<h4>9.2.1 源码侧的配套改动（P2 一并完成）</h4>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+<th>为什么必需</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rust-toolchain.toml</code></td>
+<td><code>targets</code> 增加 <code>x86_64-unknown-linux-gnu</code>、<code>aarch64-unknown-linux-gnu</code></td>
+<td>让<strong>任何 Windows 机器</strong>都能对 Linux 目标做静态验证：<code>cargo check --target x86_64-unknown-linux-gnu</code> 只需要 std 不需要链接器，等于把跨平台语法/cfg/API 检查前移到写代码的当下</td>
+</tr>
+<tr>
+<td><code>cmake/SnowWorkspace.cmake</code></td>
+<td>补 <code>Linux</code> 分支，默认 triplet <code>x64-linux</code> / <code>arm64-linux</code></td>
+<td>原来非 Windows/非 macOS 一律落到 <code>x64-windows</code>，会把 <code>SNOW_VCPKG_INSTALLED_DIR</code> / <code>SNOW_FFMPEG_ROOT</code> 指到 Windows 树</td>
+</tr>
+<tr>
+<td><code>snow_shot/CMakeLists.txt</code></td>
+<td><code>OpenCV_DIR</code> 的强制赋值加 <code>if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)</code> 守卫</td>
+<td>原来无条件指向 <code>vcpkg_installed/.../share/opencv4</code>，在 Linux 上会让 <code>find_package(OpenCV CONFIG REQUIRED)</code> 直接失败</td>
+</tr>
+<tr>
+<td><code>cmake/vcpkg-overlay-triplets/x64-linux.cmake</code>、<code>arm64-linux.cmake</code></td>
+<td>新增</td>
+<td>为「Linux 上仍需 vcpkg 补几个发行版没有的库」这条可选路线准备；<code>arm64</code> 那份显式带 <code>-march=armv8-a+simd</code></td>
+</tr>
+<tr>
+<td><code>scripts/uos-preflight.sh</code></td>
+<td>新增（§6.1 的可执行形式）</td>
+<td>见下</td>
+</tr>
+</tbody>
+</table>
+<p><code>cmake/SnowDiagnostics.cmake</code> 首行是 <code>if(WIN32 OR APPLE)</code>，<code>snow_shot/CMakeLists.txt</code> 里 DirectML
+的相关段落也都在 <code>if(WIN32)</code> 内，因此 Linux 天然不会去找 crashpad / DirectML —— 这两处<strong>无需改动</strong>，
+写在这里是为了避免下次重新排查一遍。</p>
+<h3 id="9-3-需改动的-cmakelists-关键点">9.3 需改动的 CMakeLists 关键点</h3>
+<ol>
+<li><code>cmake/SnowQt.cmake</code>：<code>SNOW_QT_MAJOR</code> 分支；<code>find_package(Qt${major})</code>；Qt5 无 <code>EXACT</code> 语义时放宽为 <code>&gt;=5.15</code>。</li>
+<li>根 <code>CMakeLists.txt:55-86</code>：现有 macOS 专用校验需补 Linux 分支；<code>_snow_mini_default</code> 对 Linux 置 OFF。</li>
+<li><code>snow_shot/CMakeLists.txt:1-8</code>：<code>OBJCXX</code> 仅在 <code>APPLE</code> 生效（确认 Linux 不触发）。</li>
+<li><code>snow_shot/CMakeLists.txt:404-451</code>：OCR 目标移除 <code>directml-provider</code>，Linux 用 <code>dynamic-onnx-runtime</code>。</li>
+<li><code>cmake/SnowDiagnostics.cmake</code>：Linux 下跳过 crashpad。</li>
+<li><code>cmake/SnowSimd.cmake</code>：新增 aarch64 分支。</li>
+</ol>
+<h3 id="9-4-rust-构建">9.4 Rust 构建</h3>
+<pre><code class="language-bash">cd snow-crates
+cargo build -p snow-capture -p snow-cursor --target x86_64-unknown-linux-gnu
+cargo build -p snow-capture -p snow-cursor --target aarch64-unknown-linux-gnu
+cargo test  -p snow-capture      # 按 AGENTS.md：只跑相关 crate 测试
+</code></pre>
+<blockquote>
+<p>注意 <code>.cargo/config.toml</code> 的 <strong><code>-Dwarnings</code></strong>：Linux 新平台代码的任何 warning 都会直接 build failure，
+移植期建议临时对该目录放开或严格清零。</p>
+</blockquote>
+<h4>9.4.1 在 Windows 上预先检查 Linux 目标（已实测，不必等 UOS 机器）</h4>
+<p><code>rust-toolchain.toml</code> 已声明 <code>x86_64-unknown-linux-gnu</code> 与 <code>aarch64-unknown-linux-gnu</code>，
+<code>cargo check</code> 只需要目标 std、不需要链接器，所以 Windows 工作站可以直接做跨目标检查：</p>
+<pre><code class="language-bash">cargo check -p snow-cursor -p snow-memory --target x86_64-unknown-linux-gnu
+cargo check --workspace --target aarch64-unknown-linux-gnu \
+    --config 'build.rustflags=[&quot;-Awarnings&quot;]'      # 先看结构错误，别被 -Dwarnings 淹没
+</code></pre>
+<p>实测边界（2026-10-15，Windows + rustc 1.97.1）：</p>
+<table>
+<thead>
+<tr>
+<th>范围</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>纯 Rust crate（<code>snow-core</code> / <code>snow-media</code> / <code>snow-memory</code> / <code>snow-cursor</code>）</td>
+<td>✅ 23.8s 全绿，可直接当 Linux/arm64 的语法 + cfg + 类型门禁</td>
+</tr>
+<tr>
+<td>依赖树里含 <strong>C 源码</strong> 的 crate</td>
+<td>❌ 卡在 <code>cc-rs</code>：<code>failed to find tool "x86_64-linux-gnu-gcc"</code>（实测触发者是 <code>ring</code>，由 rustls 链条引入）。这类 crate 必须上 UOS 或装交叉 C 工具链才能验</td>
+</tr>
+<tr>
+<td>整个 workspace 一把梭</td>
+<td>不适用，会被上一条挡住</td>
+</tr>
+</tbody>
+</table>
+<p>用法建议：新写 Linux 平台代码时先对<strong>目标 crate</strong> 跑跨目标 <code>cargo check</code>（秒级反馈），
+再在 UOS 上跑真正的 <code>cargo build</code> / <code>cargo test</code>。这样能把"Linux 语法/cfg 错误"和
+"Linux 环境缺失"两类问题分开，后者在真机上一眼可见，前者在真机上代价高得多。</p>
+<p>由于"整个 workspace 一把梭"会被 <code>ring</code> 挡住，跨目标体检改成<strong>逐个 crate</strong> 跑：</p>
+<pre><code class="language-bash">bash scripts/linux-cross-check.sh                                  # x86_64
+SNOW_CHECK_TARGETS=&quot;x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu&quot; \
+    bash scripts/linux-cross-check.sh                              # 双架构
+SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名字含 capture 的
+</code></pre>
+<p>报告写入 <code>.workbuddy/qt5-port/logs/linux-cross-check.txt</code>，每个 crate 一份明细日志。
+逐 crate 跑的价值第一次就兑现了：它把 <code>snow-capture</code> 一个<strong>既有的</strong> Linux 阻塞点
+揪了出来（<code>MonitorId::raw_handle</code> 在非 Win/mac 下是 dead code，撞 <code>-Dwarnings</code>），
+这个问题在 Windows 与 macOS 构建里完全不可见。</p>
+<blockquote>
+<p><strong>已知的跨目标不可验边界</strong>：依赖树含 C 源码的 crate（<code>ring</code> ← rustls 链）需要
+<code>x86_64-linux-gnu-gcc</code>。要彻底解锁整个 workspace 的 Linux 类型检查，可以在
+Windows 上装 Zig 并设 <code>CC_x86_64_unknown_linux_gnu="zig cc -target x86_64-linux-gnu"</code>
+（<code>AR_*</code>/<code>CXX_*</code> 同理）。FFmpeg 绑定（<code>ffmpeg-next</code> 走 <code>pkg-config</code>）即使有 C 编译器
+也仍需真机，除非手工给 <code>FFMPEG_*</code> 环境变量。</p>
+</blockquote>
+<h4>9.4.2 逐 crate 体检现状（2026-10-15 实测，x86_64 + aarch64）</h4>
+<p>30 个 workspace 成员 × 2 架构 = 60 次检查，<strong>46 通过（每架构 23/30）</strong>，9.4.1 的脚本已固化为
+<code>bash scripts/linux-cross-check.sh</code>。缺口分两类，性质完全不同：</p>
+<p><strong>(A) 需要交叉 C 编译器 —— 不是我们的代码问题（每架构 6 个）</strong></p>
+<table>
+<thead>
+<tr>
+<th>crate</th>
+<th>卡住的 C 依赖</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rapid-ocr-rs</code></td>
+<td><code>ring</code></td>
+<td>rustls 链引入</td>
+</tr>
+<tr>
+<td><code>snow-ocr-process</code></td>
+<td><code>clipper-sys</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>snow-recording-c</code> / <code>snow-recording-export</code></td>
+<td><code>zstd-sys</code> / <code>ffmpeg-sys-next</code></td>
+<td>视 crate 并行调度，先撞哪个不定</td>
+</tr>
+<tr>
+<td><code>snow-recording-runtime</code> / <code>snow-screen-recorder</code></td>
+<td><code>ffmpeg-sys-next</code></td>
+<td>FFmpeg 绑定还需真机上的 <code>pkg-config</code></td>
+</tr>
+</tbody>
+</table>
+<p>这一类的失败<strong>与 Linux 移植无关</strong>：同一份代码在 UOS 真机上只要有 <code>gcc</code> + <code>libav*-dev</code> 就能过。</p>
+<p><strong>(B) 真实缺口 —— 必须在 P3 里补（每架构 1 个）</strong></p>
+<table>
+<thead>
+<tr>
+<th>crate</th>
+<th>报错</th>
+<th>根因</th>
+<th>处置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snow-ui-selector-c</code></td>
+<td><code>E0432 unresolved import snow_ui_selector::ElementRegionService</code></td>
+<td>该类型只在 <code>#[cfg(windows)]</code> / <code>#[cfg(target_os="macos")]</code> 下导出；<code>snow-ui-selector</code> 尚无 Linux provider</td>
+<td><strong>不放假桩</strong>。AT-SPI2 provider 落地前，此 crate 就是 Win/macOS-only；塞一个"返回空元素集"的 Linux 实现会让 C 层以为无障碍"可用但没结果"，比编译失败更危险</td>
+</tr>
+</tbody>
+</table>
+<p><strong>(C) 顺手修掉的两个既有 Linux 阻塞（本来编译不过，与本次改动无关）</strong></p>
+<table>
+<thead>
+<tr>
+<th>位置</th>
+<th>问题</th>
+<th>修法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snow-capture/src/monitor.rs</code></td>
+<td><code>MonitorId::raw_handle()</code> 只被 Win/mac 后端读 ⇒ Linux 下 dead code ⇒ 撞 <code>-Dwarnings</code></td>
+<td><code>#[cfg_attr(not(any(windows, macos)), allow(dead_code))]</code></td>
+</tr>
+<tr>
+<td><code>snow-ui-selector/src/{lib.rs,query.rs}</code></td>
+<td><code>ElementRect::new</code> 与 <code>QueryControl</code> 的字段同样只在 Win/mac 被消费</td>
+<td>同上，平台范围内 <code>allow(dead_code)</code></td>
+</tr>
+</tbody>
+</table>
+<p>这类问题在 Windows 与 macOS 构建里<strong>完全不可见</strong>，正是 9.4.1 那套跨目标检查第一次跑就抓出来的。</p>
+<blockquote>
+<p>检查报告：<code>.workbuddy/qt5-port/logs/linux-cross-check.txt</code>；逐 crate 明细
+<code>.workbuddy/qt5-port/logs/linux-check-&lt;target&gt;-&lt;crate&gt;.log</code>。
+复跑：<code>bash scripts/linux-cross-check.sh</code>（加 <code>SNOW_CHECK_TARGETS</code> 可扩到 arm64）。</p>
+</blockquote>
+<h3 id="9-5-打包">9.5 打包</h3>
+<pre><code class="language-cmake"># cmake/SnowShotLinuxPackage.cmake（新增）
+set(CPACK_GENERATOR &quot;DEB;External&quot;)
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE &quot;amd64&quot;)   # 或 arm64
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    &quot;libqt5widgets5, libqt5svg5, libqt5network5, libpipewire-0.3-0, libpulse0&quot;)
+</code></pre>
+<p>产出：<code>snow-shot_&lt;ver&gt;_amd64.deb</code>、<code>snow-shot_&lt;ver&gt;_arm64.deb</code>，附 <code>.desktop</code> 与图标。</p>
+<hr>
+<h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
+<table>
+<thead>
+<tr>
+<th>编号</th>
+<th>工作项</th>
+<th>规模</th>
+<th>风险</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W1</td>
+<td>Qt5 兼容层 + CMake 双版本</td>
+<td>大</td>
+<td>高</td>
+<td><strong>P0</strong></td>
+</tr>
+<tr>
+<td>W2</td>
+<td><code>snow_image_viewer</code> RHI 重写/裁剪</td>
+<td>大</td>
+<td>高</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>W3</td>
+<td>Rust 屏幕采集（X11 / PipeWire）</td>
+<td>大</td>
+<td>高</td>
+<td><strong>P0</strong></td>
+</tr>
+<tr>
+<td>W4</td>
+<td>C++ <code>platform/linux/*</code></td>
+<td>大</td>
+<td>中高</td>
+<td><strong>P0</strong></td>
+</tr>
+<tr>
+<td>W5</td>
+<td>音频 / 输入钩子 / AT-SPI</td>
+<td>中</td>
+<td>中</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>W6</td>
+<td>NEON SIMD 补强</td>
+<td>中</td>
+<td>中</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>W7</td>
+<td>打包（deb/AppImage/.desktop）</td>
+<td>小</td>
+<td>低</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>W8</td>
+<td>全局快捷键 + portal 适配</td>
+<td>中</td>
+<td>中高</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>W9</td>
+<td>onnxruntime CPU EP 接入</td>
+<td>小</td>
+<td>低</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>W10</td>
+<td>crashpad 移除/替换</td>
+<td>小</td>
+<td>中</td>
+<td>P2</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="11-未决问题与建议">11. 未决问题与建议</h2>
+<ol>
+<li><strong>Qt5 下限</strong>：建议 <strong>5.15 LTS</strong>。若必须 5.12 或更低，W1 规模再增约 30%–50%。</li>
+<li><strong>查看器取舍</strong>：建议 Linux 首版不交付 <code>snow_image_viewer</code>，把 RHI 重写排到 P5 之后。</li>
+<li><strong>防截屏排除能力</strong>：Linux 无系统级等价 API，需在 UI 明确降级说明（避免误导性提示）。</li>
+<li><strong>crashpad</strong>：Linux 下建议直接移除，避免引入不稳定第三方崩溃链路；或后续评估 Breakpad。</li>
+<li><strong>Wayland vs X11</strong>：UOS 20 默认 X11 可先行；Deepin 23 / UOS 后续版本 Wayland 占比上升，
+   建议从一开始就把采集/输入抽象成 <code>LinuxBackend</code> 接口下的 <code>x11</code> / <code>wayland</code> 两个实现，避免二次重构。</li>
+<li><strong>真机验证</strong>：arm64（飞腾/鲲鹏/麒麟 990）必须真机终验，交叉编译不可替代。</li>
+</ol>
+<hr>
+<h2 id="附录-a-appimage-打包路线与-保留-qt6-可行性">附录 A：AppImage 打包路线与「保留 Qt6」可行性</h2>
+<h3 id="a-1-直接回答">A.1 直接回答</h3>
+<p><strong>技术上可行，但约束只是换了地方。</strong></p>
+<p>AppImage 把应用<strong>连同 Qt 一起</strong>打进单个可执行文件，运行时由 <code>AppRun</code> 设置 <code>LD_LIBRARY_PATH</code> /
+<code>QT_PLUGIN_PATH</code>，因此<strong>不依赖宿主系统的 Qt 版本</strong>——这也意味着<strong>不再需要把代码降级到 Qt5</strong>：
+<code>QKeyCombination</code>、<code>QNativeInterface</code>，乃至 <code>snow_image_viewer</code> 的 <code>QRhi</code> 都可以原样保留。</p>
+<p>但它同时引入一个<strong>比 Qt5 更硬的约束：glibc 基线</strong>。AppImage <strong>无法打包 glibc</strong>
+（glibc 不可重定位，官方亦明确不支持声明最低 glibc 要求），宿主的 glibc 必须 ≥ 构建基线。</p>
+<blockquote>
+<p>结论：<strong>能否在 UOS 上保留 Qt6，不取决于 AppImage，而取决于「目标机 glibc 版本」与「本工程 Qt 6.12 的构建基线」的相对关系。</strong></p>
+</blockquote>
+<h3 id="a-2-appimage-能打包什么-不能打包什么">A.2 AppImage 能打包什么 / 不能打包什么</h3>
+<table>
+<thead>
+<tr>
+<th>能打进 AppImage</th>
+<th>必须由宿主提供（打不进）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Qt6 全套库 + 平台插件（<code>libqxcb.so</code> / <code>libqwayland-*.so</code>）</td>
+<td><strong>glibc</strong>（不可重定位）</td>
+</tr>
+<tr>
+<td><code>libstdc++</code> / <code>libgcc_s</code></td>
+<td><strong>GPU 驱动</strong>：<code>libGL</code> / <code>libEGL</code> / <code>libdrm</code>（必须用宿主的）</td>
+</tr>
+<tr>
+<td>FFmpeg / OpenCV / onnxruntime / 图像编解码库</td>
+<td><strong>xdg-desktop-portal</strong>（Wayland 采集入口）</td>
+</tr>
+<tr>
+<td>自研 Rust 静态库、<code>.qm</code> 翻译、字体</td>
+<td><strong>PipeWire / PulseAudio 守护进程</strong></td>
+</tr>
+<tr>
+<td>应用本体与资源</td>
+<td>D-Bus session bus、AT-SPI、polkit、CUPS、X11/Wayland 合成器</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ 关键推论：<strong>AppImage 解决不了本方案的主要工作量（L2 平台后端）。</strong>
+屏幕采集（portal + PipeWire）、音频、全局输入钩子、UI 元素拾取全部依赖宿主服务与内核接口，
+打包行为对此毫无帮助——<strong>第 8 章的 P3 / P4 工作量一项都省不掉。</strong></p>
+</blockquote>
+<h3 id="a-3-核心约束-glibc-基线-决定性因素">A.3 核心约束：glibc 基线（决定性因素）</h3>
+<p>Qt 官方数据（<a href="https://doc-snapshots.qt.io/qt6-dev//linux.html">Qt for Linux</a>）：</p>
+<table>
+<thead>
+<tr>
+<th>Qt 版本</th>
+<th>官方预编译包最低 glibc</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Qt 6.8+</td>
+<td>glibc <strong>2.28</strong></td>
+</tr>
+<tr>
+<td>Qt 6.10+</td>
+<td>glibc <strong>2.34</strong></td>
+</tr>
+<tr>
+<td>Qt 6.11+</td>
+<td>官方在线安装包基于 Ubuntu 24.04（glibc <strong>2.39</strong>）</td>
+</tr>
+</tbody>
+</table>
+<p>目标系统基线（已核实）：</p>
+<table>
+<thead>
+<tr>
+<th>目标系统</th>
+<th>基础发行版</th>
+<th>glibc</th>
+<th>内核</th>
+<th>Qt 6.12 预编译包</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>UOS 20（V20 1070）</strong></td>
+<td>Debian 10 buster</td>
+<td><strong>2.28</strong></td>
+<td>4.19</td>
+<td><strong>✗ 不可用</strong></td>
+<td>会报 <code>GLIBC_2.34 not found</code></td>
+</tr>
+<tr>
+<td>Deepin 20</td>
+<td>Debian 10</td>
+<td>2.28</td>
+<td>4.19</td>
+<td><strong>✗ 不可用</strong></td>
+<td>同上</td>
+</tr>
+<tr>
+<td>Deepin 23</td>
+<td>自研</td>
+<td>2.38</td>
+<td>6.6</td>
+<td>✓ 可用</td>
+<td></td>
+</tr>
+<tr>
+<td>UOS 25</td>
+<td>较新</td>
+<td>需实测</td>
+<td>较新</td>
+<td>大概率可用</td>
+<td>以实机 <code>ldd --version</code> 为准</td>
+</tr>
+</tbody>
+</table>
+<p><strong>本工程锁定 Qt 6.12.0</strong>，其官方预编译基线为 glibc ≥ 2.34（实测构建于 2.39），
+而 <strong>UOS 20 只有 glibc 2.28</strong> → 预编译 Qt6 AppImage 在 UOS 20 上<strong>直接跑不起来</strong>。</p>
+<blockquote>
+<p>注意：Qt 官方称"<strong>从源码构建则不受 glibc 版本限制</strong>"——但真实限制会转移到<em>构建主机</em>：
+在 glibc 2.38 / 2.39 的机器上编出的 Qt 会引用高版本符号，同样跑不了 2.28。
+必须<strong>在 glibc ≤ 2.28 的环境内构建</strong>（UOS 20 / Debian 10 容器，或使用老 sysroot）。</p>
+</blockquote>
+<h3 id="a-4-三条可行路线对比">A.4 三条可行路线对比</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>路线 A：AppImage + Qt6 预编译</th>
+<th>路线 B：AppImage + Qt6 自建于 2.28 环境</th>
+<th>路线 C：维持 Qt5 路线（原方案）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>覆盖 UOS 20（glibc 2.28）</td>
+<td>✗</td>
+<td>✓（需实测验证）</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>覆盖 Deepin 23 / UOS 25</td>
+<td>✓</td>
+<td>✓</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>是否保留 Qt6</td>
+<td>✓</td>
+<td>✓</td>
+<td>✗（须降级）</td>
+</tr>
+<tr>
+<td>关键难点</td>
+<td>无（但 UOS 20 用不了）</td>
+<td>Qt 6.12 需 CMake ≥ 3.22 + 较新编译器，而 Debian 10 仅 GCC 8.3 → 需"老 glibc + 新编译器"组合（老 sysroot / 容器）</td>
+<td>Qt5 兼容层 + RHI 重写</td>
+</tr>
+<tr>
+<td>主要风险</td>
+<td>glibc 不达标</td>
+<td>构建链复杂；符号版本需实测</td>
+<td>代码改写量大</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>路线 B 的隐藏地雷</strong>：在 glibc ≥ 2.38 且 GCC 14 下构建会引入 <code>__isoc23_*</code> 符号
+（如 <code>__isoc23_strtol</code>），该符号在旧 glibc 上不存在。必须<strong>使用旧版 glibc 头文件</strong>编译，
+而不是只换一个旧 linker。</p>
+</blockquote>
+<h3 id="a-5-对本工程工作量的连锁影响">A.5 对本工程工作量的连锁影响</h3>
+<p>若最终选择「AppImage + Qt6」，原方案中两大战线<strong>整体消失</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>原方案工作项</th>
+<th>AppImage + Qt6 后</th>
+<th>变化</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W1 Qt5 兼容层 + CMake 双版本（P1）</td>
+<td><strong>取消</strong></td>
+<td>↓↓↓</td>
+</tr>
+<tr>
+<td>W2 <code>snow_image_viewer</code> RHI 重写</td>
+<td><strong>取消</strong>（Qt6 下 <code>QRhi</code> 原生可用）</td>
+<td>↓↓↓</td>
+</tr>
+<tr>
+<td>第 3 章全部 Qt6→Qt5 API 改写清单</td>
+<td><strong>取消</strong></td>
+<td>↓↓↓</td>
+</tr>
+<tr>
+<td>W3 Rust 平台后端（采集 / 光标 / 音频 / 输入）</td>
+<td>保留</td>
+<td>—</td>
+</tr>
+<tr>
+<td>W4 C++ <code>platform/linux/*</code></td>
+<td>保留</td>
+<td>—</td>
+</tr>
+<tr>
+<td>W5 / W6 / W8 / W9 / W10</td>
+<td>保留</td>
+<td>—</td>
+</tr>
+<tr>
+<td>AppImage 打包 + glibc 基线控制</td>
+<td><strong>新增</strong></td>
+<td>↑</td>
+</tr>
+</tbody>
+</table>
+<p><strong>净效果</strong>：工程总量显著下降，但<strong>前置条件变为"目标机 glibc ≥ 构建基线"</strong>，
+且<strong>信创合规风险上升</strong>（见 A.7）。</p>
+<h3 id="a-6-appimage-落地注意事项-与本工程相关">A.6 AppImage 落地注意事项（与本工程相关）</h3>
+<ol>
+<li><strong>FUSE2 依赖</strong>：AppImage 需要 <code>libfuse2</code>（<strong>不是</strong> fuse3）。UOS 可能未预装，
+   需 <code>sudo apt install libfuse2</code>；否则用 <code>--appimage-extract-and-run</code> 兜底（体验下降，需解压约 1GB）。</li>
+<li><strong>切勿打包 <code>libGL</code> / <code>libEGL</code> / <code>libdrm</code></strong>：<code>linuxdeploy</code> 默认排除这些是正确行为——
+   打包会导致 GPU 驱动失配、渲染异常。</li>
+<li><strong>Qt 平台插件链必须完整</strong>：<code>platforms/libqxcb.so</code> 依赖一长串 <code>libxcb-*</code>、<code>libxkbcommon</code>
+   与 <code>xcbglintegrations/*</code>，建议用 <code>linuxdeploy-plugin-qt</code> 自动收集，并逐个 <code>ldd</code> 核对。</li>
+<li><strong>Wayland 会话</strong>：需同时打包 <code>libqwayland-*.so</code> 与 <code>libwayland-client</code>；
+   但<strong>采集仍须走宿主 portal</strong>，打包无济于事。</li>
+<li><strong>桌面集成缺口</strong>：AppImage 不会自动创建菜单项、托盘、开机自启。本工程的"开机自启"会写
+   <code>~/.config/autostart/*.desktop</code> 并指向 AppImage <strong>绝对路径</strong>——用户一旦移动文件即失效，
+   需在 UI 中显式提示（避免"设了自启却没生效"的误导）。</li>
+<li><strong>单实例</strong>：<code>QLocalServer</code>（<code>snow_shot/src/app/singleinstancecoordinator.cpp</code>）在 AppImage 下正常，无需改动。</li>
+<li><strong>提权</strong>：<code>pkexec</code> 走宿主 polkit，正常工作。</li>
+<li><strong>更新</strong>：AppImage 不受系统包管理器管理，需自建更新通道（<code>AppImageUpdate</code> / zsync 或应用内自更新）。</li>
+<li><strong>arm64</strong>：需 aarch64 版 <code>appimagetool</code> 与 arm64 <code>libfuse2</code>；同样准备 <code>--appimage-extract-and-run</code> 兜底。</li>
+<li><strong>静态 Qt 变体</strong>：本工程已支持 <code>SNOW_APPS_QT_STATIC</code>。<code>snow_shot</code> 为 <strong>GPL-3.0</strong>，
+    静态链接 Qt 在许可上成立，且能规避插件路径问题——可作为路线 B 的简化形态。</li>
+</ol>
+<h3 id="a-7-合规提醒-重要">A.7 合规提醒（重要）</h3>
+<p>在<strong>信创采购 / 等保 / 国产化适配认证</strong>场景中，AppImage 通常<strong>不被认可</strong>：
+它不在信创软件目录内，且认证审查一般要求使用<strong>系统提供的基础库</strong>而非自带副本。
+若本项目的 Qt5 约束来自认证要求，则 <strong>AppImage 打包 Qt6 极可能通不过评审</strong>，
+必须维持 Qt5 路线（折中方案：采用 <code>deepin-shared-libs</code> 提供的 Qt 5.15.10）。</p>
+<h3 id="a-8-基线验证方法-动手前必做">A.8 基线验证方法（动手前必做）</h3>
+<pre><code class="language-bash"># 1) 确认目标机 glibc
+ldd --version | head -1
+
+# 2) 解包后检查打包库引用的最高 GLIBC 符号版本（必须 &lt;= 目标机）
+./SnowShot.AppImage --appimage-extract
+readelf -V squashfs-root/usr/lib/libQt6Core.so.6 \
+  | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -3
+# 期望 &lt;= GLIBC_2.28（UOS 20）
+
+# 3) 复查全部打包 .so
+find squashfs-root -name '*.so*' -exec sh -c \
+  'readelf -V &quot;$1&quot; 2&gt;/dev/null | grep -o &quot;GLIBC_[0-9.]*&quot;' _ {} \; | sort -Vu | tail -3
+
+# 4) 确认未引入 __isoc23_* 符号
+nm -D squashfs-root/usr/lib/libQt6Core.so.6 | grep isoc23 || echo &quot;OK: no __isoc23&quot;
+</code></pre>
+<hr>
+<p><em>本文档基于对 <code>snow-apps</code> 仓库（<code>SNOW_SHOT_VERSION 1.2.8</code>）的静态分析编写，所有文件路径与行号均对应当前快照。</em></p>
+</main>
+</div>
+</body>
+</html>
