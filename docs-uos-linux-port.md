@@ -27,7 +27,8 @@
 | `ant_design_qt` | 中 | 中高 | **中改** | 4 个 `.mm`、`enterEvent`、`position()` |
 | `snow_shot`（主程序） | 低（平台层全缺） | 中 | **大改** | 需从零实现全部 Linux 平台后端 |
 | `snow_image_viewer` | 低 | **极低** | **重写或裁剪** | `QRhi*` 为 Qt6 专有公开 API |
-| Rust `snow-capture` / `snow-cursor` / 音频 / 输入 | 低（全为 `UnsupportedBackend`） | — | **从零实现** | PipeWire / portal / evdev 全缺 |
+| Rust `snow-capture` / `snow-cursor` | 低 | — | **已完成 X11 部分** | 采集与光标走 X11（见 9.4.3）；PipeWire / portal 仍缺 |
+| Rust 音频 / 输入钩子 | 低（全为 `UnsupportedBackend`） | — | **从零实现** | PulseAudio / PipeWire、evdev 全缺 |
 | Rust OCR（`snow-ocr-process`） | 中 | — | **中改** | 默认 `directml-provider` 为 Windows 专有 |
 
 ### 0.3 必须向决策方澄清的前置问题
@@ -144,7 +145,7 @@ fn unsupported_error() -> CaptureError {
 |---|---|---|
 | DXGI Desktop Duplication / WGC | `snow-capture/src/platform/windows/{duplication.rs,wgc.rs,duplication_gpu.rs}` | PipeWire / X11 XShm |
 | D3D11 / GPU tonemap | `snow-crates/crates/snow-d3d11/*`；`snow-capture/.../gpu_tonemap.rs`（≈180 处） | Vulkan/EGL 或纯 CPU |
-| GDI 回退 | `snow-capture/src/platform/windows/gdi.rs` | X11 XGetImage |
+| GDI 回退 | `snow-capture/src/platform/windows/gdi.rs` | X11 `GetImage` —— **已落地**：`snow-linux/src/x11.rs` + `snow-capture/src/platform/linux.rs`（见 9.4.3） |
 | WASAPI 音频 | `snow-audio-recorder/src/platform/windows/*` | PulseAudio / PipeWire |
 | UIA/MSAA 元素拾取 | `snow-ui-selector/src/windows/*`、`snow-selected-text/src/platform/windows/*` | AT-SPI2 (D-Bus) |
 | 全局键鼠钩子 | `snow-recording-effects/src/{keyboard_hook.rs:124, mouse_hook.rs:90}` | XRecord / XInput2 / evdev |
@@ -298,7 +299,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 | 动作 | 路径 | 说明 |
 |---|---|---|
 | **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入。**已建**：`geometry`/`pixels`/`session`（纯逻辑，任何平台可单测）+ `x11`/`display`/`cursor`（X11，`x11rb` 纯 Rust 实现）。待补：PipeWire/Wayland capture、PulseAudio、evdev/XRecord 输入钩子 |
-| **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | PipeWire + XDG portal（Wayland）/ XShm（X11）后端 |
+| **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集。待补：PipeWire + XDG portal（Wayland）、X11 Damage 脏矩形、XShm 零拷贝 |
 | **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | PulseAudio / PipeWire |
 | **新增** | `snow-crates/crates/snow-cursor/src/platform/linux.rs` | XFixes `GetCursorImage` + 核心 `QueryPointer`。**已完成**（含 image 缓存的瞬时失败保护，与 Windows 后端同策略） |
 | **新增** | `snow-crates/crates/snow-ui-selector/src/linux/`、`snow-selected-text/src/platform/linux/` | AT-SPI2（D-Bus）+ PRIMARY selection。**注意**：`snow-ui-selector-c` 依赖 `ElementRegionService`，在 Linux provider 落地前该 crate 无法编译（见 9.4.2 B 类） |
@@ -414,7 +415,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏 |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1+2）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑 |
 | **P4 C++ 平台层** | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用 |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
@@ -590,6 +591,42 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 > 检查报告：`.workbuddy/qt5-port/logs/linux-cross-check.txt`；逐 crate 明细
 > `.workbuddy/qt5-port/logs/linux-check-<target>-<crate>.log`。
 > 复跑：`bash scripts/linux-cross-check.sh`（加 `SNOW_CHECK_TARGETS` 可扩到 arm64）。
+
+#### 9.4.3 P3 slice 2：X11 采集后端落地（2026-10-15）
+
+`platform/mod.rs` 里的 `UnsupportedBackend` 在 Linux 上已有真实现：`platform/linux.rs`
+（`LinuxBackend` + `X11Capturer`）经 `snow-linux` 的 X11 会话读根窗口 `GetImage`。
+
+**分层照 8.1 的铁律切**：协议与像素全在 `snow-linux`，`snow-capture` 只做类型翻译。
+
+| 层 | 位置 | 平台 | 内容 |
+|---|---|---|---|
+| 协议 | `snow-linux/src/x11.rs` | linux | `capture_image(Rect)`：裁剪到根窗口 → `GetImage(ZPixmap, AllPlanes)` → 根 visual + 该深度的 pixmap format |
+| 解码 | `snow-linux/src/capture.rs` | **全平台** | `ImageLayout` / `ChannelMask` / `decode_into`：掩码驱动的通用解码 + 原生 BGRX 快路径；14 个单测**在 Windows 上跑** |
+| 接线 | `snow-capture/src/platform/linux.rs` | linux | `CaptureBackend`（枚举 / 主屏 / 布局 / inspect）+ `MonitorCapturer`（`capture`、`set_output_pixel_format`） |
+
+三个必须写下来的判断（都是跨目标类型检查逼出来的）：
+
+1. **`bits_per_pixel` 不在 visual 里**。X11 的 `Visualtype` 只有 `red_mask/green_mask/blue_mask`；
+   每个深度的位宽与扫描线填充在 `Setup.pixmap_formats`。所以位宽按**回复的 `depth`** 去查
+   `pixmap_formats`，而不是从 visual 猜 32 —— 猜错就是整幅画面通道错位。
+   同理 `GetImage` 回复**没有** `bytes_per_line` 字段：优先用回复长度反推（`reply_stride`），
+   退路才是按 `Format.scanline_pad` 现算（`scanline_bytes`）。
+2. **X11 像素没有 alpha**。32bpp 的第 4 字节是填充（常见 0，也可能残留脏数据），
+   解码一律写成不透明的 `0xff` —— 直接透传会得到带洞的截图。
+3. **根窗口读不到指针，也读不到别的窗口**。指针由 X 合成在根窗口"之上"而非"之中"，
+   所以 `create_target_capturer` 保持默认（不提供原生采集器），光标交给会话的通用路径
+   （`attach_cursor_to_frame` → `snow_cursor` 的 X11 采样器）来画；窗口目标直接
+   `BackendUnavailable` —— 读别的窗口像素需要 Composite 重定向，这是硬缺口而非待办。
+
+`CaptureBackendKind` 新增 `X11` 变体（`as_str() == "x11"`），C ABI 里是 `5`
+（`snow_capture.h` 同步）。穷尽 match 的更新点：Windows 侧两个 `create_*_by_kind`
+（**显式拒绝而非替换**）、三个 benchmark example、`snow-capture-c` / `snow-recording-c`
+的 `capture_backend_value`。
+
+**已知的性能缺口（P5 处理）**：整条路径是同步服务器往返 + 服务端拷贝，**没有脏矩形**，
+`is_duplicate` 恒为 false。Windows 侧靠 DXGI 脏矩形跳过编码的优化在这里没有对应物；
+X11 的等价物是 Damage 扩展，属后续 slice。
 
 ### 9.5 打包
 
