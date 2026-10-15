@@ -1,8 +1,7 @@
 #include "platform/windows_print.h"
 
 #include <QColorSpace>
-#include <QPromise>
-
+#include "snow_shot/compat/qt_compat.h"
 #if defined(Q_OS_WIN)
 #include <qt_windows.h>
 
@@ -36,7 +35,7 @@ namespace {
 using PrintResult = WindowsPrintController::Result;
 
 QFuture<PrintResult> readyPrintResult(PrintResult result) {
-    QPromise<PrintResult> promise;
+    SnowPromise<PrintResult> promise;
     promise.start();
     QFuture<PrintResult> future = promise.future();
     promise.addResult(std::move(result));
@@ -523,7 +522,7 @@ class PrintSession final {
     PrintSession(QString documentTitle,
                  winrt::Windows::Graphics::Printing::IPrintDocumentSource documentSource)
         : title(std::move(documentTitle)), source(std::move(documentSource)),
-          promise_(std::make_shared<QPromise<PrintResult>>()) {
+          promise_(std::make_shared<SnowPromise<PrintResult>>()) {
         promise_->start();
         future_ = promise_->future();
     }
@@ -533,7 +532,7 @@ class PrintSession final {
     }
 
     void finish(PrintResult result) {
-        std::shared_ptr<QPromise<PrintResult>> promise;
+        std::shared_ptr<SnowPromise<PrintResult>> promise;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (finished_) {
@@ -550,7 +549,7 @@ class PrintSession final {
     const winrt::Windows::Graphics::Printing::IPrintDocumentSource source;
 
   private:
-    std::shared_ptr<QPromise<PrintResult>> promise_;
+    std::shared_ptr<SnowPromise<PrintResult>> promise_;
     QFuture<PrintResult> future_;
     std::mutex mutex_;
     bool finished_ = false;

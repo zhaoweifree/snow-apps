@@ -76,8 +76,10 @@ void cacheHitsPreserveLruWithoutAllocating() {
     int namespaceToken = 0;
     Key first{};
     first.canvasNamespace = &namespaceToken;
-    first.baseFont.setVariableAxis(QFont::Tag("wght"), 650.0f);
-    first.baseFont.setFeature(QFont::Tag("tnum"), 1);
+    // Qt5 exposes no font-variation / OpenType-feature API, so both shims are
+    // no-ops there and this font stays default (see qt_compat.h section 6).
+    SNOW_FONT_SET_VARIABLE_AXIS(first.baseFont, "wght", 650.0f);
+    SNOW_FONT_SET_FEATURE(first.baseFont, "tnum", 1);
     Key second = first;
     second.tile = QPoint(1, 0);
     QImage image(16, 16, QImage::Format_ARGB32_Premultiplied);

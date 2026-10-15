@@ -37,7 +37,7 @@ struct KeyHash {
         // QFont hashing allocates for variable axes in Qt. Use allocation-free
         // bucket attributes; full font equality still distinguishes axes,
         // features, spacing and decorations without weakening cache identity.
-        return qHashMulti(result, key.baseFont.families(), key.baseFont.styleName(),
+        return snowHashMulti(result, key.baseFont.families(), key.baseFont.styleName(),
                           key.baseFont.pixelSize(), key.baseFont.pointSizeF(),
                           key.baseFont.weight(), key.baseFont.style(), key.baseFont.stretch(),
                           key.baseFont.hintingPreference(),

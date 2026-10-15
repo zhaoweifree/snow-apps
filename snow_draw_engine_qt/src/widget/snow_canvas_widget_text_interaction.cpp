@@ -889,13 +889,13 @@ bool SnowCanvasWidgetTextInteraction::handleEditorMousePress(
     if (event == nullptr || !m_session.isActive() || event->button() != Qt::LeftButton) {
         return false;
     }
-    if (!editorContains(displayCache, event->position())) {
+    if (!editorContains(displayCache, snowPos(event))) {
         return false;
     }
 
     m_widget.setFocus(Qt::MouseFocusReason);
     m_selectionDragging = true;
-    setCursorFromViewPosition(displayCache, baseFont, event->position(),
+    setCursorFromViewPosition(displayCache, baseFont, snowPos(event),
                               (event->modifiers() & Qt::ShiftModifier) != 0);
     event->accept();
     return true;
@@ -912,7 +912,7 @@ bool SnowCanvasWidgetTextInteraction::handleEditorMouseMove(
             return false;
         }
 
-        if (editorContains(displayCache, event->position())) {
+        if (editorContains(displayCache, snowPos(event))) {
             m_cursorController.setCursor(SnowCanvasCursorLayer::CanvasTool,
                                          QCursor(Qt::IBeamCursor));
             event->accept();
@@ -921,7 +921,7 @@ bool SnowCanvasWidgetTextInteraction::handleEditorMouseMove(
         return false;
     }
 
-    setCursorFromViewPosition(displayCache, baseFont, event->position(), true);
+    setCursorFromViewPosition(displayCache, baseFont, snowPos(event), true);
     event->accept();
     return true;
 }

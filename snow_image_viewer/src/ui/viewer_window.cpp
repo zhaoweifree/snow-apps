@@ -2061,7 +2061,7 @@ bool ViewerWindow::event(QEvent* event) {
     return handled;
 }
 
-bool ViewerWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
+bool ViewerWindow::nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) {
 #if defined(Q_OS_WIN)
     Q_UNUSED(eventType)
     if (message) {

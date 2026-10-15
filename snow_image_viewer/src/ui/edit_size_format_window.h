@@ -48,7 +48,7 @@ class EditSizeFormatWindow final : public QWidget {
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
 
   private:
     QWidget* makeSection(const QString& title, QWidget* parent);

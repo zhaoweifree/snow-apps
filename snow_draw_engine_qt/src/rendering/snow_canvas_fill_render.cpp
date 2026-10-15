@@ -29,8 +29,8 @@ struct HatchTextureKey {
     }
 };
 
-size_t qHash(const HatchTextureKey& key, size_t seed = 0) {
-    return qHashMulti(seed, key.rgba, key.lineWidthBits);
+SnowHashSeed qHash(const HatchTextureKey& key, SnowHashSeed seed = 0) {
+    return snowHashMulti(seed, key.rgba, key.lineWidthBits);
 }
 
 struct HatchTexture {

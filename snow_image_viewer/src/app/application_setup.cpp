@@ -15,7 +15,7 @@ namespace snow::image_viewer {
 namespace {
 
 adqt::theme::ThemeScheme initialThemeScheme() {
-    return QApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark
+    return snowColorScheme(QApplication::styleHints()) == SnowColorSchemeDark
                ? adqt::theme::ThemeScheme::Dark
                : adqt::theme::ThemeScheme::Light;
 }

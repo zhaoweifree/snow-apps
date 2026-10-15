@@ -768,7 +768,7 @@ bool EditSizeFormatWindow::eventFilter(QObject* watched, QEvent* event) {
     if (event && event->type() == QEvent::MouseButtonPress) {
         const auto* mouseEvent = static_cast<QMouseEvent*>(event);
         if (mouseEvent->button() == Qt::LeftButton &&
-            isNativeDragAreaAt(mouseEvent->globalPosition().toPoint())) {
+            isNativeDragAreaAt(snowGlobalPos(mouseEvent).toPoint())) {
             startNativeWindowDrag();
             return true;
         }

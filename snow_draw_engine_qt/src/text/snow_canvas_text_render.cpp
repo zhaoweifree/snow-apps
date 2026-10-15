@@ -63,7 +63,7 @@ struct LayoutKey {
 
 struct LayoutKeyHash {
     std::size_t operator()(const LayoutKey& key) const {
-        return qHashMulti(0, key.text, key.font, key.scale, key.zoom, key.width, key.height,
+        return snowHashMulti(0, key.text, key.font, key.scale, key.zoom, key.width, key.height,
                           key.inkReserve, static_cast<int>(key.horizontalAlignment),
                           static_cast<int>(key.verticalAlignment), static_cast<int>(key.phase),
                           key.color, key.strokeWidth, key.devicePixelRatio, key.logicalDpiX,

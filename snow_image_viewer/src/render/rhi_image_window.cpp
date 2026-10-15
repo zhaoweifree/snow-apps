@@ -1609,15 +1609,15 @@ void RhiImageWindow::resizeEvent(QResizeEvent* event) {
 void RhiImageWindow::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && hasImage()) {
         pointerWithinWindow_ = true;
-        if (isComparisonHandleHit(event->position())) {
+        if (isComparisonHandleHit(snowPos(event))) {
             comparisonHandlePressed_ = true;
             comparisonHandleHovered_ = true;
-            comparisonDragOffsetX_ = comparisonRatio_ * width() - event->position().x();
+            comparisonDragOffsetX_ = comparisonRatio_ * width() - snowPos(event).x();
             setCursor(Qt::SplitHCursor);
             event->accept();
             return;
         }
-        updateNavigationHover(event->position());
+        updateNavigationHover(snowPos(event));
         if (navigationHovered_ != NavigationDirection::None) {
             navigationPressed_ = navigationHovered_;
             requestRender();
@@ -1629,7 +1629,7 @@ void RhiImageWindow::mousePressEvent(QMouseEvent* event) {
             return;
         }
         dragging_ = true;
-        lastPointerPosition_ = event->position();
+        lastPointerPosition_ = snowPos(event);
         setCursor(Qt::ClosedHandCursor);
     }
     QWindow::mousePressEvent(event);
@@ -1639,12 +1639,12 @@ void RhiImageWindow::mouseMoveEvent(QMouseEvent* event) {
     pointerWithinWindow_ = true;
     if (comparisonHandlePressed_) {
         setCursor(Qt::SplitHCursor);
-        setComparisonRatio((event->position().x() + comparisonDragOffsetX_) / std::max(1, width()));
+        setComparisonRatio((snowPos(event).x() + comparisonDragOffsetX_) / std::max(1, width()));
         event->accept();
         return;
     }
     if (comparisonActive_) {
-        const bool hovered = isComparisonHandleHit(event->position());
+        const bool hovered = isComparisonHandleHit(snowPos(event));
         if (hovered != comparisonHandleHovered_) {
             comparisonHandleHovered_ = hovered;
         }
@@ -1655,14 +1655,14 @@ void RhiImageWindow::mouseMoveEvent(QMouseEvent* event) {
                 unsetCursor();
         }
     }
-    updateNavigationHover(event->position());
+    updateNavigationHover(snowPos(event));
     if (navigationPressed_ != NavigationDirection::None) {
         QWindow::mouseMoveEvent(event);
         return;
     }
     if (dragging_) {
-        const QPointF delta = event->position() - lastPointerPosition_;
-        lastPointerPosition_ = event->position();
+        const QPointF delta = snowPos(event) - lastPointerPosition_;
+        lastPointerPosition_ = snowPos(event);
         viewTransform_.panBy(delta);
         updateTileSelection();
         requestRender();
@@ -1674,7 +1674,7 @@ void RhiImageWindow::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && comparisonHandlePressed_) {
         comparisonHandlePressed_ = false;
         comparisonDragOffsetX_ = 0.0;
-        comparisonHandleHovered_ = isComparisonHandleHit(event->position());
+        comparisonHandleHovered_ = isComparisonHandleHit(snowPos(event));
         if (!comparisonHandleHovered_)
             unsetCursor();
         event->accept();
@@ -1683,7 +1683,7 @@ void RhiImageWindow::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && navigationPressed_ != NavigationDirection::None) {
         const NavigationDirection activated = navigationPressed_;
         navigationPressed_ = NavigationDirection::None;
-        updateNavigationHover(event->position());
+        updateNavigationHover(snowPos(event));
         requestRender();
         event->accept();
         if (navigationHovered_ == activated) {
@@ -1705,7 +1705,7 @@ void RhiImageWindow::mouseReleaseEvent(QMouseEvent* event) {
 void RhiImageWindow::wheelEvent(QWheelEvent* event) {
     if (hasImage() && !event->angleDelta().isNull()) {
         const qreal steps = static_cast<qreal>(event->angleDelta().y()) / 120.0;
-        zoomBy(std::pow(1.2, steps), event->position());
+        zoomBy(std::pow(1.2, steps), snowPos(event));
         event->accept();
         return;
     }

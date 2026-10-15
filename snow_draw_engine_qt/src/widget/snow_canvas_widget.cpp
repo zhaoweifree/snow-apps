@@ -38,7 +38,7 @@
 #include <QApplication>
 #include <QCursor>
 #include <QContextMenuEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QGraphicsDropShadowEffect>
@@ -544,7 +544,7 @@ struct SnowCanvasWidget::Impl : public snow_canvas_runtime::Client {
     void updateMiddleClickTracking(const QPointF& position);
     bool finishMiddleClickTracking();
     void cancelMiddleClickTracking();
-    bool handleEnter(QEnterEvent* event);
+    bool handleEnter(SnowEnterEvent* event);
     bool handleLeave(QEvent* event);
     bool handleWheel(QWheelEvent* event);
     enum class FontWheelTarget { Text, SerialNumber };
@@ -3137,12 +3137,12 @@ bool SnowCanvasWidget::event(QEvent* event) {
     if (!lifetime) {
         return handled;
     }
-    if (m_impl && event->type() == QEvent::DevicePixelRatioChange) {
+    if (m_impl && event->type() == snowDevicePixelRatioChange) {
         m_impl->refreshCursorDevicePixelRatio();
     }
     if (m_impl && m_impl->hasViewport() &&
         (event->type() == QEvent::FontChange || event->type() == QEvent::ApplicationFontChange ||
-         event->type() == QEvent::DevicePixelRatioChange ||
+         event->type() == snowDevicePixelRatioChange ||
          event->type() == QEvent::ScreenChangeInternal)) {
         m_impl->refreshArrowTextMetrics();
     }
@@ -3162,13 +3162,13 @@ bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event) {
     clearTextStylePopupInteraction();
     const bool rightQuickSelectionEligible =
         event->button() == Qt::RightButton &&
-        hasQuickSelectionTargetAt(event->position(), Qt::RightButton);
+        hasQuickSelectionTargetAt(snowPos(event), Qt::RightButton);
 
     const bool textEditorActive = textInteraction.isActive();
     const bool pointerInsideTextEditor =
-        textInteraction.editorContains(displayState.displayCache(), event->position());
+        textInteraction.editorContains(displayState.displayCache(), snowPos(event));
     const auto selectionTarget = snow_canvas_widget_selection_hit_testing::selectionInteractionAt(
-        displayState.displayCache(), event->position());
+        displayState.displayCache(), snowPos(event));
     using snow_canvas_widget_selection_hit_testing::SelectionInteractionTarget;
     const bool pointerOverSelectionInteraction =
         selectionTarget != SelectionInteractionTarget::None &&
@@ -3178,7 +3178,7 @@ bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event) {
                                                                    event->modifiers()) &&
         selectionTarget != SelectionInteractionTarget::Handle &&
         hitsSelectedText(runtimeBinding.engine(), runtimeBinding.viewportHandle(),
-                         widget.canvasToViewTransform().inverted().map(event->position()));
+                         widget.canvasToViewTransform().inverted().map(snowPos(event)));
     const snow_canvas_widget_pointer_flow::PressPlan plan =
         snow_canvas_widget_pointer_flow::planPress(snow_canvas_widget_pointer_flow::PressRequest{
             true,
@@ -3222,15 +3222,15 @@ bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event) {
     }
 
     if (plan.shouldBeginText) {
-        if (plan.allowCreateText && (beginSpeechBubbleText(event->position(), false) ||
-                                     beginArrowText(event->position(), false))) {
+        if (plan.allowCreateText && (beginSpeechBubbleText(snowPos(event), false) ||
+                                     beginArrowText(snowPos(event), false))) {
             event->accept();
             return true;
         }
         if (!lifetime) {
             return false;
         }
-        if (beginText(event->position(), false)) {
+        if (beginText(snowPos(event), false)) {
             event->accept();
             return true;
         }
@@ -3239,7 +3239,7 @@ bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event) {
         }
     }
     if (plan.shouldBeginSelectedText && !pointerOverSelectionInteraction &&
-        beginSelectedText(event->position(), canvasTool() == SnowCanvasTool::SerialNumber)) {
+        beginSelectedText(snowPos(event), canvasTool() == SnowCanvasTool::SerialNumber)) {
         event->accept();
         return true;
     }
@@ -3273,7 +3273,7 @@ bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event) {
         SnowCanvasWidgetTextInteraction::BeginResult draft =
             textInteraction.beginRequestedNewTextDraft(
                 runtimeBinding.engine(), runtimeBinding.viewportHandle(),
-                displayState.displayCache(), event->position(), textStyle);
+                displayState.displayCache(), snowPos(event), textStyle);
         if (!syncChangedViewports(draft.firstChangedViewports.get())) {
             return false;
         }
@@ -3293,7 +3293,7 @@ void SnowCanvasWidget::mousePressEvent(QMouseEvent* event) {
         }
     }
     if (event != nullptr && event->button() == Qt::MiddleButton) {
-        m_impl->beginMiddleClickTracking(event->position());
+        m_impl->beginMiddleClickTracking(snowPos(event));
     }
     const bool handled = m_impl->handleMousePress(event);
     if (!lifetime) {
@@ -3371,7 +3371,7 @@ bool SnowCanvasWidget::Impl::handleMouseDoubleClick(QMouseEvent* event) {
         return false;
     }
     if (event->button() == Qt::RightButton &&
-        hasQuickSelectionTargetAt(event->position(), Qt::RightButton)) {
+        hasQuickSelectionTargetAt(snowPos(event), Qt::RightButton)) {
         return handleMousePress(event);
     }
     if (textInteraction.isActive()) {
@@ -3387,8 +3387,8 @@ bool SnowCanvasWidget::Impl::handleMouseDoubleClick(QMouseEvent* event) {
         return false;
     }
     if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier &&
-        (beginSpeechBubbleText(event->position(), false) ||
-         beginArrowText(event->position(), false))) {
+        (beginSpeechBubbleText(snowPos(event), false) ||
+         beginArrowText(snowPos(event), false))) {
         event->accept();
         return true;
     }
@@ -3490,7 +3490,7 @@ void SnowCanvasWidget::Impl::flushLiveStrokeMoves() {
 void SnowCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
     const QPointer<SnowCanvasWidget> lifetime(this);
     if (event != nullptr) {
-        m_impl->updateMiddleClickTracking(event->position());
+        m_impl->updateMiddleClickTracking(snowPos(event));
     }
     if (m_impl->handleMouseMove(event) || !lifetime) {
         return;
@@ -3581,17 +3581,17 @@ void SnowCanvasWidget::Impl::cancelMiddleClickTracking() {
     middleClickPressPosition.reset();
 }
 
-bool SnowCanvasWidget::Impl::handleEnter(QEnterEvent* event) {
+bool SnowCanvasWidget::Impl::handleEnter(SnowEnterEvent* event) {
     if (event == nullptr || !interactionEnabled()) {
         return false;
     }
     return dispatchInput(event,
                          snow_canvas_input::makePointerInput(
-                             event->position(), Qt::NoButton, QGuiApplication::mouseButtons(),
+                             snowPos(event), Qt::NoButton, QGuiApplication::mouseButtons(),
                              QGuiApplication::keyboardModifiers(), SNOW_POINTER_EVENT_ENTER));
 }
 
-void SnowCanvasWidget::enterEvent(QEnterEvent* event) {
+void SnowCanvasWidget::enterEvent(SnowEnterEvent* event) {
     const QPointer<SnowCanvasWidget> lifetime(this);
     if (m_impl->handleEnter(event) || !lifetime) {
         return;
