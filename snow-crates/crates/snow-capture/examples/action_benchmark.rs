@@ -301,13 +301,9 @@ fn memory_deltas_mb(base: ProcessMemorySample, sample: ProcessMemorySample) -> (
 }
 
 fn backend_name(kind: CaptureBackendKind) -> &'static str {
-    match kind {
-        CaptureBackendKind::Auto => "auto",
-        CaptureBackendKind::DxgiDuplication => "dxgi",
-        CaptureBackendKind::WindowsGraphicsCapture => "wgc",
-        CaptureBackendKind::Gdi => "gdi",
-        CaptureBackendKind::ScreenCaptureKit => "sck",
-    }
+    // Single source of truth: the enum owns the spelling, so a new backend
+    // cannot end up named one way in benchmarks and another way in reports.
+    kind.as_str()
 }
 
 fn parse_backend(token: &str) -> Option<CaptureBackendKind> {
@@ -318,6 +314,7 @@ fn parse_backend(token: &str) -> Option<CaptureBackendKind> {
         }
         "gdi" => Some(CaptureBackendKind::Gdi),
         "sck" => Some(CaptureBackendKind::ScreenCaptureKit),
+        "x11" | "xorg" => Some(CaptureBackendKind::X11),
         "auto" => Some(CaptureBackendKind::Auto),
         _ => None,
     }

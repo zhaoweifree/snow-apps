@@ -181,7 +181,11 @@ fn primary_stages(kind: CaptureBackendKind) -> &'static [&'static str] {
             "gdi.dirty_scan",
             "gdi.convert",
         ],
-        CaptureBackendKind::Auto | CaptureBackendKind::ScreenCaptureKit => &[],
+        // The X11 backend records no stage breakdown: its whole capture is one
+        // synchronous server round trip, so there is nothing to split out.
+        CaptureBackendKind::Auto
+        | CaptureBackendKind::ScreenCaptureKit
+        | CaptureBackendKind::X11 => &[],
     }
 }
 
@@ -197,6 +201,7 @@ fn parse_backend(token: &str) -> Option<CaptureBackendKind> {
         }
         "gdi" => Some(CaptureBackendKind::Gdi),
         "sck" => Some(CaptureBackendKind::ScreenCaptureKit),
+        "x11" | "xorg" => Some(CaptureBackendKind::X11),
         _ => None,
     }
 }
