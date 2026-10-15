@@ -600,6 +600,9 @@ fn create_monitor_by_kind(
         CaptureBackendKind::ScreenCaptureKit => Err(CaptureError::BackendUnavailable(
             "ScreenCaptureKit requires macOS".into(),
         )),
+        CaptureBackendKind::X11 => Err(CaptureError::BackendUnavailable(
+            "the X11 backend requires Linux".into(),
+        )),
         CaptureBackendKind::Auto => Err(auto_kind_error()),
         CaptureBackendKind::DxgiDuplication => Ok(Box::new(
             duplication::WindowsMonitorCapturer::new(monitor, resolver.clone())?,
@@ -622,6 +625,9 @@ fn create_window_by_kind(
     match kind {
         CaptureBackendKind::ScreenCaptureKit => Err(CaptureError::BackendUnavailable(
             "ScreenCaptureKit requires macOS".into(),
+        )),
+        CaptureBackendKind::X11 => Err(CaptureError::BackendUnavailable(
+            "the X11 backend requires Linux".into(),
         )),
         CaptureBackendKind::Auto => Err(auto_kind_error()),
         CaptureBackendKind::DxgiDuplication => Ok(Box::new(

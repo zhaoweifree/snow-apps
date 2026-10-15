@@ -55,6 +55,14 @@ pub enum CaptureBackendKind {
     Gdi,
 
     ScreenCaptureKit,
+
+    /// X11 core `GetImage` on the root window.
+    ///
+    /// Synchronous, server-side read-back with no GPU path and no damage
+    /// tracking: a full-screen read costs a round trip plus the copy the server
+    /// makes into the reply. It is the backend every X server supports, which
+    /// is what makes it the one the UOS port can rely on.
+    X11,
 }
 
 impl CaptureBackendKind {
@@ -65,6 +73,7 @@ impl CaptureBackendKind {
             Self::WindowsGraphicsCapture => "wgc",
             Self::Gdi => "gdi",
             Self::ScreenCaptureKit => "sck",
+            Self::X11 => "x11",
         }
     }
 }
@@ -100,7 +109,12 @@ impl Default for AutoBackendPolicy {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+// X11 is the only backend the Linux build has, so unlike the Windows priority
+// list there is nothing to fall back to and nothing to order.
+#[cfg(target_os = "linux")]
+pub const DEFAULT_AUTO_BACKEND_PRIORITY: [CaptureBackendKind; 1] = [CaptureBackendKind::X11];
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub const DEFAULT_AUTO_BACKEND_PRIORITY: [CaptureBackendKind; 3] = [
     CaptureBackendKind::DxgiDuplication,
     CaptureBackendKind::WindowsGraphicsCapture,
