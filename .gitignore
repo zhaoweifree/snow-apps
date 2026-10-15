@@ -1,9 +1,14 @@
 # Local agent state
 /.agents/
 /.codex/
+/.workbuddy/
 /scripts/publish-snow-shot-release.local.ps1
 .zcode
 output
+
+# Windows reserved device name, created by a stray `> nul` redirect. It cannot be
+# deleted through the shell on Windows, so it is ignored instead.
+/nul
 
 # Rust build output
 **/target/
