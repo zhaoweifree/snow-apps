@@ -55,6 +55,27 @@ impl Rect {
     pub const fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
+
+    /// Intersection with `other`, or `None` when they do not overlap.
+    ///
+    /// Used to bring a requested capture rectangle inside the root window: the
+    /// X protocol rejects a `GetImage` whose rectangle is not fully contained
+    /// in the drawable, and clamping is what a screenshot caller wants anyway.
+    pub fn intersect(&self, other: &Self) -> Option<Self> {
+        let left = self.x.max(other.x);
+        let top = self.y.max(other.y);
+        let right = self.right().min(other.right());
+        let bottom = self.bottom().min(other.bottom());
+        if right <= left || bottom <= top {
+            return None;
+        }
+        Some(Self {
+            x: left,
+            y: top,
+            width: u32::try_from(right - left).ok()?,
+            height: u32::try_from(bottom - top).ok()?,
+        })
+    }
 }
 
 /// Union of every rectangle in `rects`; `None` for an empty slice.
@@ -118,5 +139,28 @@ mod tests {
         assert_eq!(huge.right(), i32::MAX);
         assert!(huge.contains(i32::MAX - 1, 0));
         assert!(!huge.contains(i32::MAX, 0));
+    }
+
+    #[test]
+    fn intersect_clamps_a_region_to_the_screen() {
+        let screen = Rect::new(0, 0, 1920, 1080);
+        assert_eq!(
+            screen.intersect(&Rect::new(-100, -100, 200, 200)),
+            Some(Rect::new(0, 0, 100, 100))
+        );
+        assert_eq!(
+            screen.intersect(&Rect::new(1900, 1000, 200, 200)),
+            Some(Rect::new(1900, 1000, 20, 80))
+        );
+        assert_eq!(screen.intersect(&screen), Some(screen));
+    }
+
+    #[test]
+    fn intersect_reports_no_overlap_instead_of_an_empty_rect() {
+        let screen = Rect::new(0, 0, 1920, 1080);
+        assert_eq!(screen.intersect(&Rect::new(5000, 5000, 10, 10)), None);
+        // Touching edges share no pixel, so half-open arithmetic yields None.
+        assert_eq!(screen.intersect(&Rect::new(1920, 0, 100, 100)), None);
+        assert_eq!(screen.intersect(&Rect::new(0, 0, 0, 100)), None);
     }
 }
