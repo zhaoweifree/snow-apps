@@ -91,7 +91,7 @@ struct Fixture final : OverlayPopupControllerDelegate {
 
   void enter(QWidget& receiver) {
     const QPoint local(5, 5);
-    QEnterEvent event(local, receiver.mapTo(&window, local), receiver.mapToGlobal(local));
+    SnowEnterEvent event(local, receiver.mapTo(&window, local), receiver.mapToGlobal(local));
     QApplication::sendEvent(&receiver, &event);
   }
   void move(QWidget& receiver) {
@@ -539,7 +539,7 @@ void ordinaryControlUsesQtState() {
     control.render(&image);
   };
   const QPoint local(5, 5);
-  QEnterEvent enter(local, control.mapTo(&host, local), control.mapToGlobal(local));
+  SnowEnterEvent enter(local, control.mapTo(&host, local), control.mapToGlobal(local));
   QApplication::sendEvent(&control, &enter);
   paint();
   require(observed, "control style must read Qt hover state");
@@ -580,7 +580,7 @@ void compositeBoundaryOwnsClearVisibility() {
   QWidget* clear = select.findChild<QWidget*>(QStringLiteral("adselect-clear"));
   require(clear, "select must expose its clear accessory");
   const QPoint local(5, 5);
-  QEnterEvent enter(local, select.mapTo(&host, local), select.mapToGlobal(local));
+  SnowEnterEvent enter(local, select.mapTo(&host, local), select.mapToGlobal(local));
   QApplication::sendEvent(&select, &enter);
   require(clear->isVisible(), "shell entry must show the clear accessory");
   select.hide();

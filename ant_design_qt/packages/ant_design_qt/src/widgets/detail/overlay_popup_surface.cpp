@@ -122,7 +122,7 @@ bool OverlayPopupSurface::containsInteractiveGlobalPos(const QPoint& pos) const 
   return isVisible() && containsInteractiveLocalPos(mapFromGlobal(pos));
 }
 
-bool OverlayPopupSurface::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
+bool OverlayPopupSurface::nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) {
   constrainTopLevelToolStackingToOwner(this, message);
 #if defined(Q_OS_WIN) || defined(_WIN32)
   auto* nativeMessage = static_cast<MSG*>(message);

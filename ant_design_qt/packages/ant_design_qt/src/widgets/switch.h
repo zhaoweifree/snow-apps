@@ -14,7 +14,6 @@
 #include "icon_core.h"
 
 class QPainter;
-class QEnterEvent;
 class QEvent;
 class QFocusEvent;
 class QHideEvent;
@@ -141,7 +140,7 @@ class AdSwitch final : public QAbstractButton {
   bool hitButton(const QPoint& pos) const override;
   void paintEvent(QPaintEvent* event) override;
   void nextCheckState() override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
   void mouseMoveEvent(QMouseEvent* event) override;

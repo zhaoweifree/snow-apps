@@ -865,8 +865,8 @@ bool operator==(const ThemeMotion& lhs, const ThemeMotion& rhs) {
 bool operator==(const ThemeConfig& lhs, const ThemeConfig& rhs) {
   // Equal effective fonts can carry different overrides. Clearing a family must
   // still trigger a refresh when QFont() currently resolves to that same family.
-  return lhs.appFont.resolveMask() == rhs.appFont.resolveMask() &&
-         lhs.codeFont.resolveMask() == rhs.codeFont.resolveMask() && lhs.scheme == rhs.scheme &&
+  return snowFontResolveMask(lhs.appFont) == snowFontResolveMask(rhs.appFont) &&
+         snowFontResolveMask(lhs.codeFont) == snowFontResolveMask(rhs.codeFont) && lhs.scheme == rhs.scheme &&
          lhs.density ==
              rhs.density
 #define ADQT_EQ_CONFIG_ACCENT(name) ADQT_EQ_FIELD(name)

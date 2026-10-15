@@ -14,7 +14,6 @@
 #include "icon_core.h"
 #include "input_style.h"
 
-class QEnterEvent;
 class QFont;
 class QPaintEvent;
 class QWidget;
@@ -55,7 +54,7 @@ class InputIconButton final : public QToolButton {
 
  protected:
   bool event(QEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void changeEvent(QEvent* event) override;
   void paintEvent(QPaintEvent* event) override;

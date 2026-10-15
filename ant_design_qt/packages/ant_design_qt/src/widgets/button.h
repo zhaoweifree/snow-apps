@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QColor>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QHideEvent>
 #include <QMoveEvent>
 #include <QPushButton>
@@ -190,7 +190,7 @@ class AdButton : public QPushButton, public AdControlScaleParticipant {
   void paintEvent(QPaintEvent* event) override;
 
   void changeEvent(QEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
   void mouseReleaseEvent(QMouseEvent* event) override;

@@ -96,7 +96,7 @@ void destructionPreservesSharedActionsAndSubmenus() {
   delete menu;
   require(action && !action->icon().isNull(),
           "menu cleanup must preserve externally owned actions");
-  require(action->associatedObjects().isEmpty(),
+  require(snowAssociatedObjects(action).isEmpty(),
           "a shared action must detach from a destroyed menu");
   require(sharedSubmenu.actions().size() == 1 && !childIcon.expired(),
           "menu cleanup must preserve externally owned submenu contents");

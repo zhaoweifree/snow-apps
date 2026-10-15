@@ -515,8 +515,7 @@ class RendererIconEngine final : public QIconEngine {
     request.state = state;
     return QPixmap::fromImage(renderImage(impl_, ref_, request, palette_));
   }
-  QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State state,
-                       qreal scale) override {
+  QPixmap scaledPixmapAt(const QSize& size, QIcon::Mode mode, QIcon::State state, qreal scale) {
     IconRenderRequest request;
     request.logicalSize = size;
     request.devicePixelRatio = scale;
@@ -524,6 +523,30 @@ class RendererIconEngine final : public QIconEngine {
     request.state = state;
     return QPixmap::fromImage(renderImage(impl_, ref_, request, palette_));
   }
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  QPixmap scaledPixmap(const QSize& size, QIcon::Mode mode, QIcon::State state,
+                       qreal scale) override {
+    return scaledPixmapAt(size, mode, state, scale);
+  }
+#else
+  // Qt 5.15: QIconEngine::scaledPixmap() is NOT virtual. It is a plain member
+  // that dispatches through virtual_hook(ScaledPixmapHook) carrying a
+  // ScaledPixmapArgument - see Qt 5.15.2 QtGui/qiconengine.h, where the
+  // declaration is annotated "### Qt6 make virtual". Overriding virtual_hook is
+  // therefore the only way to keep this engine's device-pixel-ratio path alive
+  // on Qt5; merely dropping `override` would compile but permanently fall back
+  // to the base implementation.
+  void virtual_hook(int id, void* data) override {
+    if (id == QIconEngine::ScaledPixmapHook && data != nullptr) {
+      auto* argument = static_cast<ScaledPixmapArgument*>(data);
+      argument->pixmap =
+          scaledPixmapAt(argument->size, argument->mode, argument->state, argument->scale);
+      return;
+    }
+    QIconEngine::virtual_hook(id, data);
+  }
+#endif
   void paint(QPainter* painter, const QRect& rect, QIcon::Mode mode, QIcon::State state) override {
     if (!painter || rect.isEmpty()) return;
     IconRenderRequest request;

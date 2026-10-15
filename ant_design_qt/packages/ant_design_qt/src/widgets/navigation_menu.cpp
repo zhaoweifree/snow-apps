@@ -417,7 +417,7 @@ QColor compositeOnto(const QColor& foreground, const QColor& background) {
     return opaque;
   }
 
-  const float alpha = std::clamp(foreground.alphaF(), 0.0F, 1.0F);
+  const float alpha = std::clamp(snowAlphaF(foreground), 0.0F, 1.0F);
   QColor mixed;
   mixed.setRedF(foreground.redF() * alpha + background.redF() * (1.0F - alpha));
   mixed.setGreenF(foreground.greenF() * alpha + background.greenF() * (1.0F - alpha));
@@ -687,7 +687,7 @@ class AdMenuTreeView final : public QTreeView {
       }
     }
   }
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     QTreeView::enterEvent(event);
     if (enterHandler) {
       enterHandler();
@@ -768,7 +768,7 @@ class AdMenuBarProxyModel final : public QAbstractProxyModel {
       connections_.append(
           QObject::connect(sourceModel, &QAbstractItemModel::dataChanged, this,
                            [this](const QModelIndex& topLeft, const QModelIndex& bottomRight,
-                                  const QList<int>& roles) {
+                                  const SnowRoleList& roles) {
                              if (!topLeft.isValid() || !bottomRight.isValid()) {
                                beginResetModel();
                                endResetModel();
@@ -868,7 +868,7 @@ class AdMenuBarView final : public QListView {
   }
 
  protected:
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     QListView::enterEvent(event);
     if (enterHandler) {
       enterHandler();
@@ -1378,7 +1378,7 @@ void AdNavigationMenu::Private::syncModelConnections() {
     q->update();
   };
   const auto refreshData = [this, refreshStructure](const QModelIndex&, const QModelIndex&,
-                                                    const QList<int>& roles) {
+                                                    const SnowRoleList& roles) {
     const bool unknownRoles = roles.isEmpty();
     const bool requiresStructureRefresh = unknownRoles ||
                                           roles.contains(AdNavigationMenu::StableIdRole) ||

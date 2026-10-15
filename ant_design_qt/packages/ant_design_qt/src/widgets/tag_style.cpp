@@ -105,17 +105,19 @@ QColor customLightBackground(const QColor& color) {
     return color;
   }
 
-  float hue = 0.0f;
-  float saturation = 0.0f;
-  float lightness = 0.0f;
-  float alpha = 1.0f;
-  color.getHslF(&hue, &saturation, &lightness, &alpha);
+  // Qt6 QColor::getHslF() takes float*, Qt5 takes qreal*; snowGetHslF() always
+  // writes qreal so this call site needs no version branch.
+  qreal hue = 0.0;
+  qreal saturation = 0.0;
+  qreal lightness = 0.0;
+  qreal alpha = 1.0;
+  snowGetHslF(color, &hue, &saturation, &lightness, &alpha);
   if (hue < 0.0f) {
     hue = 0.0f;
   }
 
   QColor resolved;
-  resolved.setHslF(hue, saturation, 0.95f, 1.0f);
+  resolved.setHslF(static_cast<float>(hue), static_cast<float>(saturation), 0.95F, 1.0F);
   return resolved;
 }
 

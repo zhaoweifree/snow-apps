@@ -35,8 +35,8 @@ QColor compositeOverBackground(const QColor& foreground, const QColor& backgroun
     return foreground;
   }
 
-  const float fgAlpha = std::clamp(foreground.alphaF(), 0.0F, 1.0F);
-  const float bgAlpha = std::clamp(background.alphaF(), 0.0F, 1.0F);
+  const float fgAlpha = std::clamp(snowAlphaF(foreground), 0.0F, 1.0F);
+  const float bgAlpha = std::clamp(snowAlphaF(background), 0.0F, 1.0F);
   const float outAlpha = fgAlpha + bgAlpha * (1.0F - fgAlpha);
   if (outAlpha <= 0.0F) {
     return QColor(0, 0, 0, 0);

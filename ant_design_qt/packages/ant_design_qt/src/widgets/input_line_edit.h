@@ -6,7 +6,6 @@
 #include "icon_core.h"
 #include "input_policies.h"
 
-class QEnterEvent;
 class QLabel;
 class QMouseEvent;
 class QMoveEvent;
@@ -170,7 +169,7 @@ class AdLineEdit : public QLineEdit {
   void moveEvent(QMoveEvent* event) override;
   void showEvent(QShowEvent* event) override;
   void hideEvent(QHideEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void focusInEvent(QFocusEvent* event) override;
   void focusOutEvent(QFocusEvent* event) override;

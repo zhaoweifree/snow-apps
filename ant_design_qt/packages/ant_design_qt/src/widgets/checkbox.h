@@ -7,7 +7,6 @@
 #include <functional>
 #include <optional>
 
-class QEnterEvent;
 class QCursor;
 class QEvent;
 class QFocusEvent;
@@ -105,7 +104,7 @@ class AdCheckbox final : public QCheckBox {
   void paintEvent(QPaintEvent* event) override;
   void nextCheckState() override;
   bool hitButton(const QPoint& pos) const override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
   void mouseReleaseEvent(QMouseEvent* event) override;

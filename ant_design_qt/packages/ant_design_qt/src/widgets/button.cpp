@@ -102,7 +102,7 @@ Qt::WindowFlags busyIndicatorWindowFlags(const AdButton* button) {
 }
 
 QPoint mouseEventPos(const QMouseEvent* event) {
-  return event ? event->position().toPoint() : QPoint();
+  return event ? snowPos(event).toPoint() : QPoint();
 }
 
 bool hasVisibleColor(const QColor& color) { return color.isValid() && color.alpha() > 0; }
@@ -167,7 +167,7 @@ QColor compositeOn(const QColor& foreground, const QColor& background) {
   if (!foreground.isValid()) {
     return background;
   }
-  const float fgAlpha = std::clamp(foreground.alphaF(), 0.0F, 1.0F);
+  const float fgAlpha = std::clamp(snowAlphaF(foreground), 0.0F, 1.0F);
   QColor mixed;
   mixed.setRedF(foreground.redF() * fgAlpha + background.redF() * (1.0F - fgAlpha));
   mixed.setGreenF(foreground.greenF() * fgAlpha + background.greenF() * (1.0F - fgAlpha));
@@ -279,7 +279,7 @@ void drawCenteredPixmap(QPainter& painter, const QRectF& iconRect, const QPixmap
 
   const QRectF iconRectF(iconRect);
   const QPointF iconCenter = iconRectF.center();
-  const QSizeF drawSize = pixmap.deviceIndependentSize();
+  const QSizeF drawSize = snowDeviceIndependentSize(pixmap);
 
   if (std::abs(rotationDegrees) > 0.001) {
     painter.save();
@@ -535,7 +535,7 @@ class BusyIndicatorSurface final : public QWidget {
 
     const auto placement = PopupWidgetRect{button_, indicatorRect}.onScreen();
     if (placement.screen && screen() != placement.screen) {
-      setScreen(placement.screen);
+      snowSetWidgetScreen(this, placement.screen);
     }
     const QRect globalRect = placement.rect;
     if (geometry() != globalRect) {
@@ -556,7 +556,7 @@ class BusyIndicatorSurface final : public QWidget {
   }
 
  protected:
-  bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override {
+  bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override {
     constrainTopLevelToolStackingToOwner(this, message);
     return QWidget::nativeEvent(eventType, message, result);
   }
@@ -1152,7 +1152,7 @@ void AdButton::changeEvent(QEvent* event) {
   }
 }
 
-void AdButton::enterEvent(QEnterEvent* event) {
+void AdButton::enterEvent(SnowEnterEvent* event) {
   QPushButton::enterEvent(event);
   updateCursorForRole();
   bumpSegmentZOrder();

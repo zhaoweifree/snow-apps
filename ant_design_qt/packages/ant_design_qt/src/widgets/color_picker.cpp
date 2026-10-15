@@ -278,7 +278,7 @@ class ColorSaturationPanel final : public QWidget {
     }
     setFocus(Qt::MouseFocusReason);
     dragging_ = true;
-    updateFromPoint(event->position(), false);
+    updateFromPoint(snowPos(event), false);
   }
 
   void mouseMoveEvent(QMouseEvent* event) override {
@@ -286,7 +286,7 @@ class ColorSaturationPanel final : public QWidget {
     if (!event || !dragging_ || !isEnabled()) {
       return;
     }
-    updateFromPoint(event->position(), false);
+    updateFromPoint(snowPos(event), false);
   }
 
   void mouseReleaseEvent(QMouseEvent* event) override {
@@ -299,7 +299,7 @@ class ColorSaturationPanel final : public QWidget {
     if (!wasDragging) {
       return;
     }
-    updateFromPoint(event->position(), true);
+    updateFromPoint(snowPos(event), true);
   }
 
   void keyPressEvent(QKeyEvent* event) override {
@@ -1571,7 +1571,7 @@ class PresetColorButton final : public QAbstractButton {
     return QAbstractButton::event(event);
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     update();
     QAbstractButton::enterEvent(event);
   }
@@ -1779,7 +1779,7 @@ class ColorPickerClearButton final : public QAbstractButton {
     return QAbstractButton::event(event);
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     update();
     QAbstractButton::enterEvent(event);
   }
@@ -4893,7 +4893,7 @@ void AdColorPicker::refreshStyle(bool preserveCurrentTriggerWidth) {
   const QColor brightCheckmarkColor(0, 0, 0, 115);
 
   auto compositeOn = [](const QColor& foreground, const QColor& background) {
-    const float alpha = std::clamp(foreground.alphaF(), 0.0F, 1.0F);
+    const float alpha = std::clamp(snowAlphaF(foreground), 0.0F, 1.0F);
     if (alpha >= 0.999F) {
       return foreground;
     }

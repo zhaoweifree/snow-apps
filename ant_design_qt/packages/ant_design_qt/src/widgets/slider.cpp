@@ -9,7 +9,7 @@
 
 #include <QAccessible>
 #include <QAccessibleWidget>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -2534,7 +2534,7 @@ bool AdMultiSlider::event(QEvent* event) {
   return QWidget::event(event);
 }
 
-void AdMultiSlider::enterEvent(QEnterEvent* event) {
+void AdMultiSlider::enterEvent(SnowEnterEvent* event) {
   invalidateLayoutCache();
   requestTooltipSync();
   update();
@@ -2573,7 +2573,7 @@ void AdMultiSlider::mousePressEvent(QMouseEvent* event) {
   pressedHandleIndex_ = -1;
 
   const LayoutInfo layout = buildLayout();
-  const int hitIndex = hitTestHandle(event->position().toPoint(), layout);
+  const int hitIndex = hitTestHandle(snowPos(event).toPoint(), layout);
   if (hitIndex >= 0) {
     dragMode_ = DragMode::Handle;
     setDragHandleIndex(hitIndex);
@@ -2582,7 +2582,7 @@ void AdMultiSlider::mousePressEvent(QMouseEvent* event) {
     if (!guard) return;
     setFocusHandleIndex(hitIndex);
     if (!guard) return;
-    dragStartPos_ = event->position().toPoint();
+    dragStartPos_ = snowPos(event).toPoint();
     dragStartValues_ = handles_;
     dragging_ = true;
     pressedHandleIndex_ = hitIndex;
@@ -2608,11 +2608,11 @@ void AdMultiSlider::mousePressEvent(QMouseEvent* event) {
       trackRect = QRectF(layout.crossCenter - trackHalf, std::min(p1, p2), trackHalf * 2.0,
                          std::abs(p2 - p1));
     }
-    if (trackRect.adjusted(-2, -2, 2, 2).contains(event->position())) {
+    if (trackRect.adjusted(-2, -2, 2, 2).contains(snowPos(event))) {
       dragMode_ = DragMode::Track;
       setDragHandleIndex(-1);
       if (!guard) return;
-      dragStartPos_ = event->position().toPoint();
+      dragStartPos_ = snowPos(event).toPoint();
       dragStartValues_ = handles_;
       dragging_ = true;
       pressedHandleIndex_ = sliderHandleIndex();
@@ -2627,7 +2627,7 @@ void AdMultiSlider::mousePressEvent(QMouseEvent* event) {
     }
   }
 
-  const int railHandleIndex = handleRailAction(event->position().toPoint(), layout, tracking_);
+  const int railHandleIndex = handleRailAction(snowPos(event).toPoint(), layout, tracking_);
   if (!guard) return;
   if (railHandleIndex >= 0) {
     dragMode_ = DragMode::Handle;
@@ -2637,7 +2637,7 @@ void AdMultiSlider::mousePressEvent(QMouseEvent* event) {
     if (!guard) return;
     setFocusHandleIndex(railHandleIndex);
     if (!guard) return;
-    dragStartPos_ = event->position().toPoint();
+    dragStartPos_ = snowPos(event).toPoint();
     dragStartValues_ = handles_;
     dragging_ = true;
     pressedHandleIndex_ = railHandleIndex;
@@ -2659,7 +2659,7 @@ void AdMultiSlider::mouseMoveEvent(QMouseEvent* event) {
   }
 
   const LayoutInfo layout = buildLayout();
-  const int hitIndex = hitTestHandle(event->position().toPoint(), layout);
+  const int hitIndex = hitTestHandle(snowPos(event).toPoint(), layout);
   if (hoverHandleIndex_ != hitIndex && dragMode_ == DragMode::None) {
     setHoverHandleIndex(hitIndex);
     if (!guard) return;
@@ -2674,7 +2674,7 @@ void AdMultiSlider::mouseMoveEvent(QMouseEvent* event) {
   if (dragMode_ == DragMode::Handle && dragHandleIndex_ >= 0 &&
       dragHandleIndex_ < handles_.size()) {
     if (mode_ == Mode::Range && editableHandles_) {
-      const qreal mainAxisCoord = layout.axis.coordinate(event->position().toPoint());
+      const qreal mainAxisCoord = layout.axis.coordinate(snowPos(event).toPoint());
       const qreal axisMin = layout.axis.handleStart;
       const qreal axisMax = layout.axis.handleEnd;
       const bool outOfAxisBounds = mainAxisCoord < (axisMin - kEditableHandleDeleteThresholdPx) ||
@@ -2701,7 +2701,7 @@ void AdMultiSlider::mouseMoveEvent(QMouseEvent* event) {
     if (dragHandleIndex_ >= next.size()) {
       return;
     }
-    const double nextValue = valueFromHandlePosition(event->position().toPoint(), layout);
+    const double nextValue = valueFromHandlePosition(snowPos(event).toPoint(), layout);
     next[dragHandleIndex_] = nextValue;
     setHandlesInternal(next, tracking_, true, tracking_, true);
     if (!guard) return;
@@ -2718,7 +2718,7 @@ void AdMultiSlider::mouseMoveEvent(QMouseEvent* event) {
 
   if (dragMode_ == DragMode::Track && !dragStartValues_.isEmpty()) {
     const qreal pixelDelta =
-        layout.axis.valueDirectedDelta(dragStartPos_, event->position().toPoint());
+        layout.axis.valueDirectedDelta(dragStartPos_, snowPos(event).toPoint());
     const double valueDelta =
         clampTrackDelta((pixelDelta / layout.axis.handleLength()) * (maximum_ - minimum_));
     QList<double> next = dragStartValues_;
@@ -2762,7 +2762,7 @@ void AdMultiSlider::mouseReleaseEvent(QMouseEvent* event) {
 
   dragChanged_ = false;
   pressedHandleIndex_ = -1;
-  if (!rect().contains(event->position().toPoint())) {
+  if (!rect().contains(snowPos(event).toPoint())) {
     setHoverHandleIndex(-1);
     if (!guard) return;
   }

@@ -21,7 +21,6 @@
 #include <optional>
 
 class QAbstractItemModel;
-class QEnterEvent;
 class QEvent;
 class QFocusEvent;
 class QKeyEvent;
@@ -443,7 +442,7 @@ class AdImage final : public QWidget {
   void paintEvent(QPaintEvent* event) override;
   void changeEvent(QEvent* event) override;
   bool event(QEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void mouseReleaseEvent(QMouseEvent* event) override;
   void keyPressEvent(QKeyEvent* event) override;

@@ -10,7 +10,7 @@
 #include <QApplication>
 #include <QCursor>
 #include <QDir>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QFile>
 #include <QMouseEvent>
 #include <QPushButton>
@@ -65,7 +65,7 @@ void verifyGeometryAndOwnership(QScreen* screen) {
   owner.setGeometry(400, 400, 100, 100);
   owner.show();
   QWidget window(&owner, Qt::Tool | Qt::FramelessWindowHint);
-  window.setScreen(screen);
+  snowSetWidgetScreen(&window, screen);
   window.setGeometry(-80, 200, 700, 100);
   QWidget panel(&window);
   panel.setGeometry(0, 0, 600, 100);
@@ -74,7 +74,7 @@ void verifyGeometryAndOwnership(QScreen* screen) {
   window.show();
   // Qt selects a screen while creating the platform window. Set the source
   // screen afterward to exercise both DPR directions at the same seam.
-  window.setScreen(screen);
+  snowSetWidgetScreen(&window, screen);
   QCoreApplication::processEvents();
   require(qFuzzyCompare(window.devicePixelRatioF(), screen->devicePixelRatio()),
           "fixture must retain the requested source window scale");
@@ -100,7 +100,7 @@ void verifyGeometryAndOwnership(QScreen* screen) {
   require(placement.screen, "placement must retain its selected screen");
   // A real window on the selected screen must see the same physical anchor size.
   QWidget destination(nullptr, Qt::Tool | Qt::FramelessWindowHint);
-  destination.setScreen(placement.screen);
+  snowSetWidgetScreen(&destination, placement.screen);
   destination.setGeometry(
       QRect(placement.screen->geometry().topLeft() + QPoint(200, 100), QSize(300, 100)));
   destination.show();
@@ -115,12 +115,12 @@ void verifyGeometryAndOwnership(QScreen* screen) {
 
   // Nested owners stay open, and an in-scope press outside both closes the chain.
   QWidget surface(&window, Qt::Tool | Qt::FramelessWindowHint);
-  surface.setScreen(screen);
+  snowSetWidgetScreen(&surface, screen);
   surface.setGeometry(-80, 350, 400, 100);
   QWidget nestedAnchor(&surface);
   nestedAnchor.setGeometry(20, 10, 140, 40);
   surface.show();
-  surface.setScreen(screen);
+  snowSetWidgetScreen(&surface, screen);
   QCoreApplication::processEvents();
   TestPopupOwner parent(&trigger, &window, &surface);
   TestPopupOwner child(&nestedAnchor, &window, nullptr);
@@ -154,7 +154,7 @@ void verifyGeometryAndOwnership(QScreen* screen) {
   for (const QRect iconRect : {QRect(40, 10, 16, 16), QRect(120, 10, 16, 16)}) {
     const auto icon = PopupWidgetRect{&panel, iconRect}.onScreen();
     QWidget overlay(nullptr, Qt::Tool | Qt::FramelessWindowHint);
-    overlay.setScreen(icon.screen);
+    snowSetWidgetScreen(&overlay, icon.screen);
     overlay.setGeometry(icon.rect);
     overlay.show();
     QCoreApplication::processEvents();
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
   }
 
   QWidget window(nullptr, Qt::Tool | Qt::FramelessWindowHint);
-  window.setScreen(primary);
+  snowSetWidgetScreen(&window, primary);
   window.setGeometry(-80, 1053, 1242, 142);
   QWidget host(&window);
   host.setGeometry(0, 0, 1242, 142);
@@ -317,7 +317,7 @@ int main(int argc, char** argv) {
     const QPoint center = trigger->rect().center();
     const QPoint global = trigger->mapToGlobal(center);
     QCursor::setPos(global);
-    QEnterEvent enter(center, trigger->mapTo(&window, center), global);
+    SnowEnterEvent enter(center, trigger->mapTo(&window, center), global);
     QApplication::sendEvent(trigger, &enter);
     require(QTest::qWaitFor([&]() { return popup->isVisible(); }, 1000),
             "hover must open main and sub-tool popovers across a display scale boundary");
@@ -335,7 +335,7 @@ int main(int argc, char** argv) {
   tooltip.setHoverOpenDelayMs(10);
   const QPoint tipPoint(8, 8);
   QCursor::setPos(mainTrigger.mapToGlobal(tipPoint));
-  QEnterEvent tipEnter(tipPoint, mainTrigger.mapTo(&window, tipPoint),
+  SnowEnterEvent tipEnter(tipPoint, mainTrigger.mapTo(&window, tipPoint),
                        mainTrigger.mapToGlobal(tipPoint));
   QApplication::sendEvent(&mainTrigger, &tipEnter);
   require(QTest::qWaitFor([&] { return tooltip.isVisible(); }, 1000),
@@ -371,7 +371,7 @@ int main(int argc, char** argv) {
   const QPoint center = mainTrigger.rect().center();
   const QPoint global = mainTrigger.mapToGlobal(center);
   QCursor::setPos(global);
-  QEnterEvent enter(center, mainTrigger.mapTo(&window, center), global);
+  SnowEnterEvent enter(center, mainTrigger.mapTo(&window, center), global);
   QApplication::sendEvent(&mainTrigger, &enter);
   QTest::qWait(40);
   require(!mainPopup.isVisible(), "a locally clipped trigger must remain closed");

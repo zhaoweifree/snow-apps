@@ -669,7 +669,7 @@ void CarouselTest::renderedStatesMatchAntDesignStructure() {
 
     const QImage image = showcase.grab().toImage().convertToFormat(QImage::Format_ARGB32);
     QVERIFY(!image.isNull());
-    QCOMPARE(image.deviceIndependentSize().toSize(), showcase.size());
+    QCOMPARE(snowDeviceIndependentSize(image).toSize(), showcase.size());
     QSet<QRgb> sampledColors;
     int saturatedSurfacePixels = 0;
     for (int y = 0; y < image.height(); y += 8) {

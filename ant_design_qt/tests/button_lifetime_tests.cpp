@@ -6,7 +6,7 @@
 #include <QApplication>
 #include <QFontMetrics>
 #include <QCursor>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QHBoxLayout>
 #include <QImage>
 #include <QKeyEvent>
@@ -162,7 +162,7 @@ void retainedPopoverButtonsForgetHover() {
   const QImage idle = first->grab().toImage();
   auto enter = [](AdButton* button) {
     const QPointF local = button->rect().center();
-    QEnterEvent event(local, local, button->mapToGlobal(local.toPoint()));
+    SnowEnterEvent event(local, local, button->mapToGlobal(local.toPoint()));
     QApplication::sendEvent(button, &event);
   };
   // Deliver Enter without Leave: hiding a popup during activation does not

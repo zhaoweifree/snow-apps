@@ -11,7 +11,7 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QDropEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -783,7 +783,7 @@ void AdTextEdit::hideEvent(QHideEvent* event) {
   updateInteractionFocusOverlay();
 }
 
-void AdTextEdit::enterEvent(QEnterEvent* event) {
+void AdTextEdit::enterEvent(SnowEnterEvent* event) {
   if (!refreshVisualState(false)) {
     return;
   }

@@ -46,7 +46,8 @@ QRect PopupWidgetRect::mappedTo(const QWidget* target) const {
   // Map one reference point, then scale offsets in the destination window's
   // coordinates. Mapping corners independently can choose different screens.
   const QPointF center = QRectF(rect).center();
-  const QPointF mappedCenter = target->mapFromGlobal(widget->mapToGlobal(center));
+  // Qt5 QWidget::mapToGlobal() only accepts QPoint; Qt6 added a QPointF overload.
+  const QPointF mappedCenter = target->mapFromGlobal(widget->mapToGlobal(center.toPoint()));
   const qreal scale = widget->devicePixelRatioF() / target->devicePixelRatioF();
   const QSizeF size = QSizeF(rect.size()) * scale;
   return QRectF(mappedCenter - QPointF(size.width(), size.height()) / 2, size).toAlignedRect();
@@ -57,7 +58,7 @@ PopupScreenRect PopupWidgetRect::onScreen() const {
     return {};
   }
   const QPointF center = QRectF(rect).center();
-  const QPointF globalCenter = widget->mapToGlobal(center);
+  const QPointF globalCenter = widget->mapToGlobal(center.toPoint());
   QScreen* screen = popupScreenForGlobalPos(widget, globalCenter.toPoint());
   if (!screen) {
     return {};

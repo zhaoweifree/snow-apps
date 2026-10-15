@@ -10,7 +10,11 @@ namespace adqt::widgets {
 
 AdCheckboxGroup::AdCheckboxGroup(QObject* parent) : QButtonGroup(parent) {
   setExclusive(false);
-  connect(this, &QButtonGroup::buttonToggled, this, [this](QAbstractButton*, bool) {
+  // Qt5 declares two buttonToggled overloads (QAbstractButton*/int) so the
+  // pointer-to-member is ambiguous there; Qt6 resolved that by naming the int
+  // overload idToggled. Spelling the signature works on both versions.
+  connect(this, qOverload<QAbstractButton*, bool>(&QButtonGroup::buttonToggled), this,
+          [this](QAbstractButton*, bool) {
     if (!syncing_) {
       emitValuesIfChanged();
     }

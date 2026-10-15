@@ -56,7 +56,10 @@ bool operator==(const PresetPaletteKey& lhs, const PresetPaletteKey& rhs) {
   return lhs.base == rhs.base && lhs.background == rhs.background && lhs.darkTheme == rhs.darkTheme;
 }
 
-std::size_t qHash(const PresetPaletteKey& key, std::size_t seed) {
+// Qt6 hashes with std::size_t, Qt5 with uint, and Qt5's generic fallback
+// re-dispatches through a one-argument qHash(t) - so the seed must be
+// defaulted there. See section 6b of qt_compat.h.
+SnowHashSeed qHash(const PresetPaletteKey& key, SnowHashSeed seed = 0) {
   seed = ::qHash(key.base, seed);
   seed = ::qHash(key.background, seed);
   seed = ::qHash(key.darkTheme, seed);
@@ -79,7 +82,7 @@ QColor withAlpha(const QColor& color, double alpha) {
 }
 
 QColor compositeOn(const QColor& foreground, const QColor& background) {
-  const float alpha = std::clamp(foreground.alphaF(), 0.0F, 1.0F);
+  const float alpha = std::clamp(snowAlphaF(foreground), 0.0F, 1.0F);
   QColor mixed;
   mixed.setRedF(foreground.redF() * alpha + background.redF() * (1.0F - alpha));
   mixed.setGreenF(foreground.greenF() * alpha + background.greenF() * (1.0F - alpha));

@@ -31,7 +31,7 @@ QColor compositeOn(const QColor& foreground, const QColor& background) {
     return opaque;
   }
 
-  const float alpha = std::clamp(foreground.alphaF(), 0.0F, 1.0F);
+  const float alpha = std::clamp(snowAlphaF(foreground), 0.0F, 1.0F);
   if (alpha >= 0.999F) {
     return foreground;
   }

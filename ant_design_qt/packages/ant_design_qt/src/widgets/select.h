@@ -35,7 +35,6 @@ class QListView;
 class QModelIndex;
 class QMoveEvent;
 class QPaintEvent;
-class QEnterEvent;
 class QPainter;
 class QToolButton;
 class QVBoxLayout;
@@ -415,7 +414,7 @@ class AdSelect final : public QWidget,
   bool eventFilter(QObject* watched, QEvent* event) override;
   void paintEvent(QPaintEvent* event) override;
   bool event(QEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
   void keyPressEvent(QKeyEvent* event) override;

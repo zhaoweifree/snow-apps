@@ -1,7 +1,7 @@
 #include "input_internal.h"
 #include "detail/pointer_region.h"
 
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QPainter>
 #include <QScrollBar>
 #include <QTimer>
@@ -54,7 +54,7 @@ bool InputIconButton::event(QEvent* event) {
   return QToolButton::event(event);
 }
 
-void InputIconButton::enterEvent(QEnterEvent* event) {
+void InputIconButton::enterEvent(SnowEnterEvent* event) {
   update();
   QToolButton::enterEvent(event);
 }
@@ -89,7 +89,7 @@ void InputIconButton::paintEvent(QPaintEvent* event) {
     return;
   }
 
-  const QSize pixmapSize = pixmap.deviceIndependentSize().toSize();
+  const QSize pixmapSize = snowDeviceIndependentSize(pixmap).toSize();
   int x = (width() - pixmapSize.width()) / 2;
   if (contentAlignment_ & Qt::AlignLeft) {
     x = 0;
@@ -122,7 +122,7 @@ bool iconRefsEqual(const adqt::icons::IconRef& lhs, const adqt::icons::IconRef& 
 }
 
 QPoint mouseEventPos(const QMouseEvent* event) {
-  return event ? event->position().toPoint() : QPoint();
+  return event ? snowPos(event).toPoint() : QPoint();
 }
 
 bool isLeftMouseActivationEvent(const QEvent* event) {
@@ -191,7 +191,7 @@ QColor compositeOn(const QColor& foreground, const QColor& background) {
     return opaque;
   }
 
-  const float fgAlpha = std::clamp(foreground.alphaF(), 0.0F, 1.0F);
+  const float fgAlpha = std::clamp(snowAlphaF(foreground), 0.0F, 1.0F);
   QColor mixed;
   mixed.setRedF(foreground.redF() * fgAlpha + background.redF() * (1.0F - fgAlpha));
   mixed.setGreenF(foreground.greenF() * fgAlpha + background.greenF() * (1.0F - fgAlpha));

@@ -12,7 +12,7 @@
 
 #include <QAccessible>
 #include <QAccessibleWidget>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -82,7 +82,7 @@ Qt::Alignment defaultTextAlignmentForLayout(AdInputNumber::StepButtonLayout mode
 }
 
 QPoint mouseEventPos(const QMouseEvent* event) {
-  return event ? event->position().toPoint() : QPoint();
+  return event ? snowPos(event).toPoint() : QPoint();
 }
 
 bool isLeftMouseActivationEvent(const QEvent* event) {
@@ -526,7 +526,7 @@ class StepControlButton final : public QToolButton {
     return QToolButton::event(event);
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     update();
     QToolButton::enterEvent(event);
   }
@@ -627,7 +627,7 @@ class StepControlButton final : public QToolButton {
       const QSize logicalSize = iconSize().isValid() ? iconSize() : QSize(12, 12);
       const QPixmap pixmap = currentIcon.pixmap(logicalSize, mode, QIcon::Off);
       if (!pixmap.isNull()) {
-        const QSize pixmapSize = pixmap.deviceIndependentSize().toSize();
+        const QSize pixmapSize = snowDeviceIndependentSize(pixmap).toSize();
         const QPoint topLeft((width() - pixmapSize.width()) / 2,
                              (height() - pixmapSize.height()) / 2);
         painter.drawPixmap(topLeft, pixmap);
@@ -2640,7 +2640,7 @@ bool AdInputNumber::event(QEvent* event) {
   return QAbstractSpinBox::event(event);
 }
 
-void AdInputNumber::enterEvent(QEnterEvent* event) {
+void AdInputNumber::enterEvent(SnowEnterEvent* event) {
   bumpJoinedZOrder();
   refreshVisualState(false);
   QAbstractSpinBox::enterEvent(event);

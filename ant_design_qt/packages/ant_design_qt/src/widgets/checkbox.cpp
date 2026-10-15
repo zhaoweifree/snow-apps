@@ -7,7 +7,7 @@
 #include "interaction_overlay_manager.h"
 #include "theme/theme.h"
 
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -147,7 +147,13 @@ AdCheckbox::AdCheckbox(QWidget* parent) : QCheckBox(parent) {
     updateInteractionFocusOverlay();
     update();
   });
-  connect(this, &QCheckBox::checkStateChanged, this, [this]() {
+  // Qt6 renamed QCheckBox::stateChanged(int) to checkStateChanged(Qt::CheckState).
+  // The lambda ignores the state argument in both spellings.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  connect(this, &QCheckBox::checkStateChanged, this, [this](Qt::CheckState) {
+#else
+  connect(this, &QCheckBox::stateChanged, this, [this](int) {
+#endif
     const bool effective = isIndeterminate();
     if (reportedIndeterminate_ != effective) {
       reportedIndeterminate_ = effective;
@@ -446,7 +452,7 @@ bool AdCheckbox::hitButton(const QPoint& pos) const {
   return !interactionBlocked() && QCheckBox::hitButton(pos);
 }
 
-void AdCheckbox::enterEvent(QEnterEvent* event) {
+void AdCheckbox::enterEvent(SnowEnterEvent* event) {
   QCheckBox::enterEvent(event);
   update();
 }
@@ -490,7 +496,7 @@ void AdCheckbox::mouseReleaseEvent(QMouseEvent* event) {
     return;
   }
   const bool wave =
-      event->button() == Qt::LeftButton && pressed_ && hitButton(event->position().toPoint());
+      event->button() == Qt::LeftButton && pressed_ && hitButton(snowPos(event).toPoint());
   pressed_ = false;
   QCheckBox::mouseReleaseEvent(event);
   if (!lifetime) return;

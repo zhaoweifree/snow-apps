@@ -10,7 +10,7 @@
 #include "theme/theme_color_utils.h"
 
 #include <QDynamicPropertyChangeEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -874,7 +874,7 @@ void AdLineEdit::hideEvent(QHideEvent* event) {
   updateInteractionFocusOverlay(resolvedStyle());
 }
 
-void AdLineEdit::enterEvent(QEnterEvent* event) {
+void AdLineEdit::enterEvent(SnowEnterEvent* event) {
   updateJoinedZOrder();
   refreshVisualState(false);
   QLineEdit::enterEvent(event);

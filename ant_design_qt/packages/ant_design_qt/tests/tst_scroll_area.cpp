@@ -1,6 +1,6 @@
 #include "widgets/scroll_area.h"
 
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QScrollBar>
 #include <QTest>
 #include <QVBoxLayout>
@@ -108,7 +108,7 @@ void ScrollAreaTest::embeddedHorizontalScrollBarKeepsAStableExtent() {
   QVERIFY(bar.isEmbedded());
   QVERIFY(!bar.isExpanded());
 
-  QEnterEvent enter(QPointF(1.0, 1.0), QPointF(1.0, 1.0), QPointF(1.0, 1.0));
+  SnowEnterEvent enter(QPointF(1.0, 1.0), QPointF(1.0, 1.0), QPointF(1.0, 1.0));
   QCoreApplication::sendEvent(&bar, &enter);
   QCOMPARE(bar.geometry(), geometry);
   QVERIFY(!bar.isExpanded());

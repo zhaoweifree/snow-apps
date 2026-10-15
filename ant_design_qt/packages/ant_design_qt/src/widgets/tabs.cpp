@@ -203,7 +203,7 @@ class TabScrollArea final : public QScrollArea {
       delta = QPoint(delta.x() * (rightToLeft ? -1 : 1), 0);
     }
     // Let QScrollBar apply native wheel steps and accumulate high-resolution deltas.
-    QWheelEvent forwarded(event->position(), event->globalPosition(), QPoint(), delta,
+    QWheelEvent forwarded(snowPos(event), snowGlobalPos(event), QPoint(), delta,
                           event->buttons(), event->modifiers(), event->phase(), event->inverted(),
                           event->source());
     QCoreApplication::sendEvent(bar, &forwarded);
@@ -360,9 +360,9 @@ class TabOverflowList final : public QListWidget {
   }
 
   void mousePressEvent(QMouseEvent* event) override {
-    const QModelIndex index = indexAt(event->position().toPoint());
+    const QModelIndex index = indexAt(snowPos(event).toPoint());
     if (event->button() == Qt::LeftButton &&
-        closeRect(visualRect(index), index).contains(event->position().toPoint())) {
+        closeRect(visualRect(index), index).contains(snowPos(event).toPoint())) {
       closePressed_ = index.data(KeyRole).toString();
       event->accept();
       return;
@@ -373,9 +373,9 @@ class TabOverflowList final : public QListWidget {
   void mouseReleaseEvent(QMouseEvent* event) override {
     if (!closePressed_.isEmpty()) {
       const QString key = std::exchange(closePressed_, QString());
-      const QModelIndex index = indexAt(event->position().toPoint());
+      const QModelIndex index = indexAt(snowPos(event).toPoint());
       if (event->button() == Qt::LeftButton && key == index.data(KeyRole).toString() &&
-          closeRect(visualRect(index), index).contains(event->position().toPoint()) && close) {
+          closeRect(visualRect(index), index).contains(snowPos(event).toPoint()) && close) {
         const auto callback = close;
         callback(key);
       }
@@ -639,7 +639,7 @@ class TabButton final : public QAbstractButton {
 
   void mouseMoveEvent(QMouseEvent* event) override {
     const bool wasCloseHovered = closeHovered_;
-    closeHovered_ = closable_ && closeButtonRect().contains(event->position().toPoint());
+    closeHovered_ = closable_ && closeButtonRect().contains(snowPos(event).toPoint());
     if (wasCloseHovered != closeHovered_) {
       update();
     }
@@ -654,7 +654,7 @@ class TabButton final : public QAbstractButton {
 
   void mousePressEvent(QMouseEvent* event) override {
     if (event->button() == Qt::LeftButton && closable_ &&
-        closeButtonRect().contains(event->position().toPoint())) {
+        closeButtonRect().contains(snowPos(event).toPoint())) {
       closePressed_ = true;
       event->accept();
       update();
@@ -666,7 +666,7 @@ class TabButton final : public QAbstractButton {
   void mouseReleaseEvent(QMouseEvent* event) override {
     if (closePressed_) {
       const bool requestClose = event->button() == Qt::LeftButton && closable_ &&
-                                closeButtonRect().contains(event->position().toPoint());
+                                closeButtonRect().contains(snowPos(event).toPoint());
       closePressed_ = false;
       event->accept();
       update();

@@ -116,17 +116,17 @@ adqt::icons::IconRef defaultIconForType(AdMessage::Type type) {
   return {};
 }
 
-QAccessible::AnnouncementPoliteness announcementPoliteness(AdMessage::Type type) {
+SnowAnnouncementPoliteness announcementPoliteness(AdMessage::Type type) {
   return type == AdMessage::Type::Warning || type == AdMessage::Type::Error
-             ? QAccessible::AnnouncementPoliteness::Assertive
-             : QAccessible::AnnouncementPoliteness::Polite;
+             ? SnowAnnouncementPoliteness::Assertive
+             : SnowAnnouncementPoliteness::Polite;
 }
 
 void announceMessage(QWidget* widget, const QString& content, AdMessage::Type type) {
   if (!widget || content.trimmed().isEmpty()) {
     return;
   }
-  QAccessibleAnnouncementEvent event(widget, content.trimmed());
+  SnowAccessibleAnnouncementEvent event(widget, content.trimmed());
   event.setPoliteness(announcementPoliteness(type));
   QAccessible::updateAccessibility(&event);
 }
@@ -493,7 +493,7 @@ class MessageNoticeWidget final : public QWidget {
     return QWidget::event(event);
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     QWidget::enterEvent(event);
 
     refreshSemantics();
@@ -518,7 +518,7 @@ class MessageNoticeWidget final : public QWidget {
 
   void mouseReleaseEvent(QMouseEvent* event) override {
     if (event && event->button() == Qt::LeftButton &&
-        visualRect().contains(event->position().toPoint()) && !closing_) {
+        visualRect().contains(snowPos(event).toPoint()) && !closing_) {
       dispatchClick();
     }
     QWidget::mouseReleaseEvent(event);

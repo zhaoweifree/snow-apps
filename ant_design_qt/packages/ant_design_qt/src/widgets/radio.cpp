@@ -7,7 +7,7 @@
 #include "radio_style.h"
 #include "theme/theme.h"
 
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -132,7 +132,7 @@ QPoint mouseEventPos(const QMouseEvent* event) {
   if (!event) {
     return QPoint();
   }
-  return event->position().toPoint();
+  return snowPos(event).toPoint();
 }
 
 qreal snapToDevicePixelSize(qreal value, qreal dpr) {
@@ -1064,7 +1064,7 @@ void AdRadio::paintDefaultVariant(QPainter* painter) const {
   }
 }
 
-void AdRadio::enterEvent(QEnterEvent* event) {
+void AdRadio::enterEvent(SnowEnterEvent* event) {
   bumpGroupZOrder();
   update();
   QRadioButton::enterEvent(event);

@@ -6,7 +6,7 @@
 #include "tag_style.h"
 #include "theme/theme.h"
 
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -152,7 +152,7 @@ QPoint mouseEventPos(const QMouseEvent* event) {
   if (!event) {
     return QPoint();
   }
-  return event->position().toPoint();
+  return snowPos(event).toPoint();
 }
 
 int closeButtonBoxSize(const detail::TagVisualStyle& style) {
@@ -547,7 +547,7 @@ bool AdTag::event(QEvent* event) {
   return QAbstractButton::event(event);
 }
 
-void AdTag::enterEvent(QEnterEvent* event) {
+void AdTag::enterEvent(SnowEnterEvent* event) {
   update();
   QAbstractButton::enterEvent(event);
 }

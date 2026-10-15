@@ -463,11 +463,15 @@ QVariant variantFromCanonicalString(const QString& text, bool exactMode) {
 }
 
 QString positiveSignToken(const QLocale& locale) {
-  return locale.positiveSign().isEmpty() ? QStringLiteral("+") : locale.positiveSign();
+  // Qt6 QLocale::positiveSign() returns QString, Qt5 returns QChar; constructing a
+  // QString explicitly is valid (and lossless) on both.
+  const QString sign = locale.positiveSign();
+  return sign.isEmpty() ? QStringLiteral("+") : sign;
 }
 
 QString negativeSignToken(const QLocale& locale) {
-  return locale.negativeSign().isEmpty() ? QStringLiteral("-") : locale.negativeSign();
+  const QString sign = locale.negativeSign();
+  return sign.isEmpty() ? QStringLiteral("-") : sign;
 }
 
 QString decimalPointToken(const QLocale& locale) { return QString(locale.decimalPoint()); }

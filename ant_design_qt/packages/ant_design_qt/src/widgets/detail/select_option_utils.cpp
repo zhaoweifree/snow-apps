@@ -15,7 +15,7 @@ QVariant normalizeSelectValue(const QVariant& value) {
     return QVariant();
   }
 
-  if (value.typeId() == QMetaType::QString) {
+  if (value.userType() == QMetaType::QString) {
     const QString text = value.toString().trimmed();
     // Equal empty strings must share a key: QDataStream distinguishes null from empty.
     return text.isEmpty() ? QStringLiteral("") : text;
@@ -34,7 +34,7 @@ QString selectValueKey(const QVariant& value) {
   QDataStream stream(&payload, QIODevice::WriteOnly);
   stream << normalized;
   return QStringLiteral("%1:%2")
-      .arg(normalized.typeId())
+      .arg(normalized.userType())
       .arg(QString::fromLatin1(payload.toBase64()));
 }
 

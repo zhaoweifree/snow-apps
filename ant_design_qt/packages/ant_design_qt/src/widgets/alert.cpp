@@ -8,7 +8,7 @@
 #include <QAccessibleWidget>
 #include <QAbstractAnimation>
 #include <QCloseEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QGraphicsOpacityEffect>
@@ -145,24 +145,24 @@ QString resolvedAccessibleDescription(const AdAlert* alert) {
   });
 }
 
-QAccessible::AnnouncementPoliteness announcementPolitenessForSeverity(AdAlert::Severity severity) {
+SnowAnnouncementPoliteness announcementPolitenessForSeverity(AdAlert::Severity severity) {
   switch (severity) {
     case AdAlert::Severity::Success:
     case AdAlert::Severity::Info:
-      return QAccessible::AnnouncementPoliteness::Polite;
+      return SnowAnnouncementPoliteness::Polite;
     case AdAlert::Severity::Warning:
     case AdAlert::Severity::Error:
-      return QAccessible::AnnouncementPoliteness::Assertive;
+      return SnowAnnouncementPoliteness::Assertive;
   }
-  return QAccessible::AnnouncementPoliteness::Polite;
+  return SnowAnnouncementPoliteness::Polite;
 }
 
 void notifyAccessibilityAnnouncement(QWidget* widget, const QString& message,
-                                     QAccessible::AnnouncementPoliteness politeness) {
+                                     SnowAnnouncementPoliteness politeness) {
   if (!widget || message.trimmed().isEmpty()) {
     return;
   }
-  QAccessibleAnnouncementEvent event(widget, message.trimmed());
+  SnowAccessibleAnnouncementEvent event(widget, message.trimmed());
   event.setPoliteness(politeness);
   QAccessible::updateAccessibility(&event);
 }
@@ -218,7 +218,7 @@ class AlertCloseButton final : public QToolButton {
     }
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     QToolButton::enterEvent(event);
     update();
   }

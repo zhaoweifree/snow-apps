@@ -62,7 +62,7 @@ QPalette buildPalette(const AdTheme& theme, const QPalette& basePalette) {
     palette.setColor(group, QPalette::Mid, bgLayout.darker(108));
     palette.setColor(group, QPalette::Dark, bgLayout.darker(116));
     palette.setColor(group, QPalette::Shadow, bgLayout.darker(140));
-    palette.setColor(group, QPalette::Accent, primary);
+    palette.setColor(group, snowAccentRole, primary);
   }
 
   palette.setColor(QPalette::Disabled, QPalette::Window, bgLayout);
@@ -87,7 +87,7 @@ QPalette buildPalette(const AdTheme& theme, const QPalette& basePalette) {
   palette.setColor(QPalette::Disabled, QPalette::Mid, bgLayout.darker(106));
   palette.setColor(QPalette::Disabled, QPalette::Dark, bgLayout.darker(112));
   palette.setColor(QPalette::Disabled, QPalette::Shadow, bgLayout.darker(130));
-  palette.setColor(QPalette::Disabled, QPalette::Accent, primaryDisabled);
+  palette.setColor(QPalette::Disabled, snowAccentRole, primaryDisabled);
 
   return palette;
 }

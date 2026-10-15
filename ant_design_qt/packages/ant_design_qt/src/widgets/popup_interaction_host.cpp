@@ -33,18 +33,21 @@ QPoint mouseEventGlobalPos(const QMouseEvent* event) {
   if (!event) {
     return QPoint();
   }
-  return event->globalPosition().toPoint();
+  return snowGlobalPos(event).toPoint();
 }
 
 std::optional<QPoint> touchEventGlobalPos(const QTouchEvent* event) {
   if (!event) {
     return std::nullopt;
   }
-  const QList<QEventPoint>& points = event->points();
-  if (points.isEmpty()) {
+  // Qt6 QTouchEvent::points() returns QList<QEventPoint>, Qt5 touchPoints()
+  // returns QList<QTouchEvent::TouchPoint> - different types, so go through the
+  // compatibility helper which exposes only the first point's global position.
+  const std::optional<QPointF> globalPos = snowFirstTouchGlobalPos(event);
+  if (!globalPos.has_value()) {
     return std::nullopt;
   }
-  return points.constFirst().globalPosition().toPoint();
+  return globalPos->toPoint();
 }
 
 std::optional<QPoint> popupInteractionGlobalPos(const QEvent* event) {

@@ -86,7 +86,7 @@ class OverlayPopupSurface final : public QWidget, public TopLevelToolResourceRel
   void aboutToDestroy();
 
  protected:
-  bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+  bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override;
   void resizeEvent(QResizeEvent* event) override;
   void paintEvent(QPaintEvent* event) override;
   void showEvent(QShowEvent* event) override;

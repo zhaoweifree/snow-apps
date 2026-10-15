@@ -13,7 +13,7 @@
 #include <QAbstractButton>
 #include <QByteArray>
 #include <QCursor>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -500,7 +500,7 @@ class ModalOverlayWidget final : public QWidget {
     return QWidget::eventFilter(watched, event);
   }
 
-  bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override {
+  bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override {
     Q_UNUSED(eventType)
 #if defined(Q_OS_WIN) || defined(_WIN32)
     if (handleWindowModeNativeEvent(message, result)) {
@@ -616,7 +616,7 @@ class ModalOverlayWidget final : public QWidget {
         (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease)) {
       auto* mouseEvent = static_cast<QMouseEvent*>(event);
       if (event->type() == QEvent::MouseMove && mouseEvent->buttons().testFlag(Qt::LeftButton)) {
-        move(mouseEvent->globalPosition().toPoint() - *windowDragOffset_);
+        move(snowGlobalPos(mouseEvent).toPoint() - *windowDragOffset_);
       } else if (!mouseEvent->buttons().testFlag(Qt::LeftButton)) {
         windowDragOffset_.reset();
         if (QWidget::mouseGrabber() == this) {
@@ -640,7 +640,7 @@ class ModalOverlayWidget final : public QWidget {
       return false;
     }
 
-    const QPoint globalPos = mouseEvent->globalPosition().toPoint();
+    const QPoint globalPos = snowGlobalPos(mouseEvent).toPoint();
     if (!isWindowModeDragAreaAt(globalPos)) {
       return false;
     }
@@ -658,7 +658,9 @@ class ModalOverlayWidget final : public QWidget {
   }
 
 #if defined(Q_OS_WIN) || defined(_WIN32)
-  bool handleWindowModeNativeEvent(void* message, qintptr* result) const {
+  // Must match QWidget::nativeEvent()'s parameter type: snowNativeEventResult* on Qt6, long*
+  // on Qt5 (see snowNativeEventResult in qt_compat.h).
+  bool handleWindowModeNativeEvent(void* message, snowNativeEventResult* result) const {
     if (!windowModeChromeEnabled_ || message == nullptr || result == nullptr) {
       return false;
     }
@@ -750,7 +752,7 @@ class ModalIconButton final : public QToolButton {
     return QToolButton::event(event);
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     update();
     QToolButton::enterEvent(event);
   }
@@ -802,7 +804,7 @@ class ModalIconButton final : public QToolButton {
       const QSize logicalSize = iconSize().isValid() ? iconSize() : QSize(16, 16);
       const QPixmap pixmap = currentIcon.pixmap(logicalSize, mode, QIcon::Off);
       if (!pixmap.isNull()) {
-        const QSize pixmapSize = pixmap.deviceIndependentSize().toSize();
+        const QSize pixmapSize = snowDeviceIndependentSize(pixmap).toSize();
         const QPoint topLeft((width() - pixmapSize.width()) / 2,
                              (height() - pixmapSize.height()) / 2);
         painter.drawPixmap(topLeft, pixmap);
@@ -1750,7 +1752,7 @@ bool AdModal::eventFilter(QObject* watched, QEvent* event) {
       open_) {
     auto* mouseEvent = static_cast<QMouseEvent*>(event);
     if (mouseEvent->button() == Qt::LeftButton && panel_) {
-      const QPoint localPos = mouseEvent->position().toPoint();
+      const QPoint localPos = snowPos(mouseEvent).toPoint();
       if (!panel_->geometry().contains(localPos) && maskVisible_ && closeOnMaskClick_) {
         requestReject(CloseReason::Mask);
         return true;

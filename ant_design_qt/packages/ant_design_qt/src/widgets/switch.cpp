@@ -13,7 +13,7 @@
 #include <QAccessibleWidget>
 #include <QApplication>
 #include <QCursor>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFontMetrics>
@@ -989,7 +989,7 @@ void AdSwitch::nextCheckState() {
   QAbstractButton::nextCheckState();
 }
 
-void AdSwitch::enterEvent(QEnterEvent* event) {
+void AdSwitch::enterEvent(SnowEnterEvent* event) {
   invalidateResolvedTokensCache();
   invalidateAppearanceCache(false);
   refreshFocusOverlay();
@@ -1026,10 +1026,10 @@ void AdSwitch::mousePressEvent(QMouseEvent* event) {
   if (event && event->button() == Qt::LeftButton) {
     const detail::SwitchAppearance appearance = resolvedAppearance();
     const SwitchLayout layout = d_->layoutFor(*this, appearance, rect());
-    d_->dragPending = layout.indicatorRect.contains(event->position());
+    d_->dragPending = layout.indicatorRect.contains(snowPos(event));
     d_->dragActive = false;
     d_->dragThumbPosition = visualThumbPosition();
-    d_->dragPressPosition = event->position().toPoint();
+    d_->dragPressPosition = snowPos(event).toPoint();
     setPressedState(true);
     update();
   }
@@ -1045,7 +1045,7 @@ void AdSwitch::mouseMoveEvent(QMouseEvent* event) {
   }
 
   if (event && d_->dragPending) {
-    const QPoint current = event->position().toPoint();
+    const QPoint current = snowPos(event).toPoint();
     const QPoint delta = current - d_->dragPressPosition;
     if (!d_->dragActive) {
       const int dragDistance = QApplication::startDragDistance();
@@ -1058,7 +1058,7 @@ void AdSwitch::mouseMoveEvent(QMouseEvent* event) {
       const detail::SwitchAppearance appearance = resolvedAppearance();
       const SwitchLayout layout = d_->layoutFor(*this, appearance, rect());
       d_->dragThumbPosition = dragThumbPositionForPoint(*this, appearance, layout.indicatorRect,
-                                                        event->position(), devicePixelRatioF());
+                                                        snowPos(event), devicePixelRatioF());
       update();
       event->accept();
       return;
@@ -1082,7 +1082,7 @@ void AdSwitch::mouseReleaseEvent(QMouseEvent* event) {
   }
 
   const bool triggerWave = event && event->button() == Qt::LeftButton && d_->pressed &&
-                           rect().contains(event->position().toPoint());
+                           rect().contains(snowPos(event).toPoint());
   const bool wasDragActive = d_->dragActive;
   const qreal releaseThumbPosition = d_->dragThumbPosition;
   setPressedState(false);

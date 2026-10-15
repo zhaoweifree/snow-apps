@@ -10,7 +10,7 @@
 #include <QByteArray>
 #include <QCloseEvent>
 #include <QColorSpace>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFile>
 #include <QFileInfo>
@@ -440,7 +440,7 @@ AdImageItem readItemFromModel(const QAbstractItemModel* model, int row) {
   const QVariant sourceValue = model->data(index, AdImageItemRoles::SourceRole);
   if (sourceValue.canConvert<QUrl>()) {
     item.source = sourceValue.toUrl();
-  } else if (sourceValue.metaType().id() == QMetaType::QString) {
+  } else if (snowMetaTypeOf(sourceValue).id() == QMetaType::QString) {
     item.source = QUrl(sourceValue.toString());
   }
 
@@ -794,7 +794,7 @@ class ImagePreviewDialog final : public QWidget {
       return QToolButton::event(event);
     }
 
-    void enterEvent(QEnterEvent* event) override {
+    void enterEvent(SnowEnterEvent* event) override {
       update();
       QToolButton::enterEvent(event);
     }
@@ -1038,7 +1038,7 @@ class ImagePreviewDialog final : public QWidget {
 
     void mousePressEvent(QMouseEvent* event) override {
       if (event && event->button() == Qt::LeftButton) {
-        if (!containsImagePoint(event->position())) {
+        if (!containsImagePoint(snowPos(event))) {
           if (backgroundClickRequested) {
             backgroundClickRequested();
           }
@@ -1048,7 +1048,7 @@ class ImagePreviewDialog final : public QWidget {
 
         if (canPan()) {
           dragging_ = true;
-          dragAnchor_ = event->position();
+          dragAnchor_ = snowPos(event);
           dragOriginOffset_ = panOffset_;
           updateCursor();
           event->accept();
@@ -1069,7 +1069,7 @@ class ImagePreviewDialog final : public QWidget {
       }
 
       if (dragging_) {
-        panOffset_ = dragOriginOffset_ + (event->position() - dragAnchor_);
+        panOffset_ = dragOriginOffset_ + (snowPos(event) - dragAnchor_);
         clampPanOffset();
         update();
         event->accept();
@@ -1100,7 +1100,7 @@ class ImagePreviewDialog final : public QWidget {
 
     void wheelEvent(QWheelEvent* event) override {
       if (event && wheelZoomRequested && event->angleDelta().y() != 0) {
-        wheelZoomRequested(event->angleDelta().y(), event->position());
+        wheelZoomRequested(event->angleDelta().y(), snowPos(event));
         event->accept();
         return;
       }
@@ -2391,7 +2391,7 @@ void AdImageViewer::setModel(QAbstractItemModel* value) {
                          [this](const QModelIndex&, int, int) { handleModelReset(); }));
     modelConnections_.append(QObject::connect(
         model_, &QAbstractItemModel::dataChanged, this,
-        [this](const QModelIndex&, const QModelIndex&, const QList<int>&) { handleModelReset(); }));
+        [this](const QModelIndex&, const QModelIndex&, const SnowRoleList&) { handleModelReset(); }));
     modelConnections_.append(QObject::connect(model_, &QAbstractItemModel::layoutChanged, this,
                                               [this]() { handleModelReset(); }));
     modelConnections_.append(QObject::connect(model_, &QObject::destroyed, this, [this]() {
@@ -3126,7 +3126,7 @@ void AdImage::changeEvent(QEvent* event) {
       }
       update();
       break;
-    case QEvent::DevicePixelRatioChange:
+    case snowDevicePixelRatioChange:
       if (decodePolicy_ == DecodePolicy::FitWidget) {
         mainLoadPending_ = mainImageNeedsLargerDecode();
         update();
@@ -3142,7 +3142,7 @@ bool AdImage::event(QEvent* event) {
   return QWidget::event(event);
 }
 
-void AdImage::enterEvent(QEnterEvent* event) {
+void AdImage::enterEvent(SnowEnterEvent* event) {
   QWidget::enterEvent(event);
 
   update();
@@ -3159,7 +3159,7 @@ void AdImage::mouseReleaseEvent(QMouseEvent* event) {
   if (!event || event->button() != Qt::LeftButton) {
     return;
   }
-  if (!rect().contains(event->position().toPoint())) {
+  if (!rect().contains(snowPos(event).toPoint())) {
     return;
   }
   activatePreviewFromUser();

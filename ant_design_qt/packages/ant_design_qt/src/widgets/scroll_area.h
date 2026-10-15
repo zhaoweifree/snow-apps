@@ -6,7 +6,6 @@
 #include <QScrollArea>
 #include <QScrollBar>
 
-class QEnterEvent;
 class QHideEvent;
 
 namespace adqt::widgets {
@@ -74,7 +73,7 @@ class AdScrollBar final : public QScrollBar {
 
  protected:
   void changeEvent(QEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void hideEvent(QHideEvent* event) override;
 

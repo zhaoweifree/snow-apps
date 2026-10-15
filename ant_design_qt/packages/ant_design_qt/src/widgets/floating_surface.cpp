@@ -105,7 +105,7 @@ ShadowTile cachedShadowTile(Cache& cache, qreal radius, qreal blur, const QPoint
 void drawNineSlice(QPainter& painter, const QRectF& target, const QMargins& targetMargins,
                    const ShadowTile& tile) {
   if (tile.pixmap.isNull() || target.isEmpty()) return;
-  const qreal side = tile.pixmap.deviceIndependentSize().width();
+  const qreal side = snowDeviceIndependentSize(tile.pixmap).width();
   const qreal sourceSlice = std::min<qreal>(tile.slice, side / 2.0);
   const qreal sourceCenter =
       std::max<qreal>(1.0 / tile.pixmap.devicePixelRatio(), side - sourceSlice * 2.0);

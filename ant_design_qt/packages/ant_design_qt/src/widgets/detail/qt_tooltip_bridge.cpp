@@ -220,7 +220,7 @@ class QtTooltipBridge final : public QObject {
     if (event->type() == QEvent::MouseMove && widget) {
       const auto* mouseEvent = static_cast<QMouseEvent*>(event);
       if (tooltip_ && tooltip_->isVisible() && widget == activeTarget_ && !activeRect_.isNull() &&
-          !activeRect_.contains(mouseEvent->position().toPoint())) {
+          !activeRect_.contains(snowPos(mouseEvent).toPoint())) {
         // QTipLabel tests the receiver of the mouse event, rather than the
         // widget currently found below the cursor.
         scheduleHide();
@@ -230,8 +230,8 @@ class QtTooltipBridge final : public QObject {
            widget->window()->objectName() != QStringLiteral("adtooltip-surface"))) {
         QWidget* hoverWidget =
             QWidget::mouseGrabber()
-                ? QApplication::widgetAt(mouseEvent->globalPosition().toPoint())
-                : pointerTargetWithin(widget, mouseEvent->globalPosition().toPoint());
+                ? QApplication::widgetAt(snowGlobalPos(mouseEvent).toPoint())
+                : pointerTargetWithin(widget, snowGlobalPos(mouseEvent).toPoint());
         if (hoverWidget) trackHoverCandidate(hoverWidget, mouseEvent);
       }
     }
@@ -402,7 +402,7 @@ class QtTooltipBridge final : public QObject {
       return;
     }
 
-    const QPoint localPosition = widget->mapFromGlobal(event->globalPosition().toPoint());
+    const QPoint localPosition = widget->mapFromGlobal(snowGlobalPos(event).toPoint());
     const ResolvedTooltipContent content = resolveTooltipContent(widget, localPosition);
     if (content.text.isEmpty()) {
       abandonHoverCandidate();

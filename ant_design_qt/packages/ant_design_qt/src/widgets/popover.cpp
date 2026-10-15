@@ -464,7 +464,7 @@ void AdPopover::preparePopup() {
       retainNativeSurfaceOnHide_) {
     if (QWidget* anchor = effectiveAnchorWidget();
         anchor && anchor->screen() && popupSurface_->screen() != anchor->screen()) {
-      popupSurface_->setScreen(anchor->screen());
+      snowSetWidgetScreen(popupSurface_, anchor->screen());
     }
     detail::syncTopLevelToolTransientParent(popupSurface_, popupScopeWindow());
   }

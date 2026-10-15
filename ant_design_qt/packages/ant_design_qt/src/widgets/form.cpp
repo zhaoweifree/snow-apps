@@ -970,7 +970,7 @@ void AdForm::rebuildRootLayout() {
     auto* flow = new detail::FlowLayout(this, 0, 0, 0);
     flow->setItemEndSpacingProvider([inlineItemGap](const QLayoutItem* layoutItem) {
       const auto* item =
-          layoutItem ? qobject_cast<const AdFormItem*>(layoutItem->widget()) : nullptr;
+          layoutItem ? qobject_cast<const AdFormItem*>(snowLayoutItemWidget(layoutItem)) : nullptr;
       if (!item || item->itemLayout() != AdFormItem::ItemLayout::Inherit) {
         return 0;
       }
@@ -997,7 +997,7 @@ void AdForm::refreshItems() {
     const int inlineItemGap = resolveStyleFor(this, controlSize_).metrics.inlineItemGap;
     flow->setItemEndSpacingProvider([inlineItemGap](const QLayoutItem* layoutItem) {
       const auto* item =
-          layoutItem ? qobject_cast<const AdFormItem*>(layoutItem->widget()) : nullptr;
+          layoutItem ? qobject_cast<const AdFormItem*>(snowLayoutItemWidget(layoutItem)) : nullptr;
       return item && item->itemLayout() == AdFormItem::ItemLayout::Inherit ? inlineItemGap : 0;
     });
   }

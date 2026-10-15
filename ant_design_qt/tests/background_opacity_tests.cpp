@@ -17,7 +17,7 @@
 #include <QEventLoop>
 #include <QImage>
 #include <QFocusEvent>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QToolButton>
 #include <QPainter>
 #include <QStandardItemModel>
@@ -540,7 +540,7 @@ void nestedControlFillsDoNotCompound() {
     }
 
     const QPoint local(80, 16);
-    QEnterEvent enter(local, local, select.mapToGlobal(local));
+    SnowEnterEvent enter(local, local, select.mapToGlobal(local));
     QApplication::sendEvent(&select, &enter);
     auto* clear = select.findChild<QToolButton*>(QStringLiteral("adselect-clear"));
     require(clear && clear->isVisible(), "hovering a populated select must show the clear action");

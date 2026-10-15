@@ -9,7 +9,7 @@
 
 #include <QAbstractButton>
 #include <QBoxLayout>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFontMetrics>
 #include <QIntValidator>
@@ -215,7 +215,7 @@ class PaginationButton final : public QAbstractButton {
     update();
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     QAbstractButton::enterEvent(event);
     update();
   }
@@ -907,7 +907,7 @@ void AdPagination::rebuild() {
         type == ItemType::Page
             ? QStringLiteral("paginationPage%1").arg(targetPage)
             : QStringLiteral("paginationNavigation%1").arg(static_cast<int>(type)));
-    button->setAccessibleIdentifier(button->objectName());
+    snowSetAccessibleIdentifier(button, button->objectName());
     if (type == ItemType::JumpPrevious || type == ItemType::JumpNext) {
       const int distance = std::abs(targetPage - d_->currentPage);
       button->setAccessibleName(type == ItemType::JumpPrevious
@@ -1019,7 +1019,7 @@ void AdPagination::rebuild() {
   for (int index = usedButtonCount; index < d_->buttons.size(); ++index) {
     PaginationButton* button = d_->buttons.at(index);
     button->setObjectName(QString());
-    button->setAccessibleIdentifier(QString());
+    snowSetAccessibleIdentifier(button, QString());
     button->setAccessibleName(QString());
     button->setAccessibleDescription(QString());
     button->setToolTip(QString());

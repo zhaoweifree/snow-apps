@@ -10,7 +10,6 @@
 
 #include "icon_core.h"
 
-class QEnterEvent;
 class QEvent;
 class QFocusEvent;
 class QHideEvent;
@@ -217,7 +216,7 @@ class AdTag final : public QAbstractButton {
  protected:
   void paintEvent(QPaintEvent* event) override;
   bool event(QEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void mouseMoveEvent(QMouseEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;

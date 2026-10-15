@@ -11,7 +11,6 @@
 
 #include "control_scale.h"
 
-class QEnterEvent;
 class QEvent;
 class QFocusEvent;
 class QFontMetrics;
@@ -154,7 +153,7 @@ class AdRadio final : public QRadioButton, public AdControlScaleParticipant {
  protected:
   bool event(QEvent* event) override;
   void paintEvent(QPaintEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
   void mouseReleaseEvent(QMouseEvent* event) override;

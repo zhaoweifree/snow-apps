@@ -393,7 +393,7 @@ bool AdDpiStableWindowController::eventFilter(QObject* watched, QEvent* event) {
       }
     }
 #if !defined(Q_OS_WIN) && !defined(_WIN32)
-    if (event->type() == QEvent::DevicePixelRatioChange) {
+    if (event->type() == snowDevicePixelRatioChange) {
       queueScaleCommit();
     }
 #endif

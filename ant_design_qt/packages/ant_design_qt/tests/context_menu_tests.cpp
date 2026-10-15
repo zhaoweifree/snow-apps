@@ -522,7 +522,7 @@ void ContextMenuTests::cachedVisualsFollowThemeFontAndOwnerChanges() {
   QCOMPARE(menu.actionGeometry(menu.actions().first()).height(), 48);
   menu.setColorScheme(AdContextMenu::ColorScheme::Light);
   QVERIFY(compareWithFresh());
-  for (auto type : {QEvent::LanguageChange, QEvent::DevicePixelRatioChange}) {
+  for (auto type : {QEvent::LanguageChange, snowDevicePixelRatioChange}) {
     QEvent event(type);
     QCoreApplication::sendEvent(&menu, &event);
     QVERIFY(compareWithFresh());

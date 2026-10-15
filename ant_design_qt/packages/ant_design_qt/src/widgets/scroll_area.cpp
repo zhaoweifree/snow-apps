@@ -4,7 +4,7 @@
 #include "theme/theme_manager.h"
 
 #include <QColor>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFrame>
 #include <QHideEvent>
@@ -169,7 +169,7 @@ void AdScrollBar::changeEvent(QEvent* event) {
   }
 }
 
-void AdScrollBar::enterEvent(QEnterEvent* event) {
+void AdScrollBar::enterEvent(SnowEnterEvent* event) {
   QScrollBar::enterEvent(event);
   if (!embedded_ && hoverExpansionEnabled_) {
     setExpanded(true);

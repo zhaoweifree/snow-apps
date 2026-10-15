@@ -10,7 +10,7 @@
 
 #include <QApplication>
 #include <QColor>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QFont>

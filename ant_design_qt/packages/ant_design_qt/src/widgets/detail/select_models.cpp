@@ -117,9 +117,9 @@ void SelectCompositeModel::reconnectSourceModel(QPointer<QAbstractItemModel>* sl
         *slot, &QAbstractItemModel::rowsMoved, this,
         [this](const QModelIndex&, int, int, const QModelIndex&, int) { resetFromSourceChange(); });
     connect(*slot,
-            qOverload<const QModelIndex&, const QModelIndex&, const QList<int>&>(
+            qOverload<const QModelIndex&, const QModelIndex&, const SnowRoleList&>(
                 &QAbstractItemModel::dataChanged),
-            this, [this](const QModelIndex&, const QModelIndex&, const QList<int>&) {
+            this, [this](const QModelIndex&, const QModelIndex&, const SnowRoleList&) {
               resetFromSourceChange();
             });
   }

@@ -1441,7 +1441,7 @@ bool OverlayPopupController::syncPopupGeometry() {
           return false;
         }
       }
-      popup->setScreen(toolScreen);
+      snowSetWidgetScreen(popup, toolScreen);
       if (!lifetime || !popup) {
         return false;
       }
@@ -1596,7 +1596,7 @@ void OverlayPopupController::handleTriggerPress(QObject* watched, QEvent* event)
   if (mouseEvent->button() != Qt::LeftButton || triggerPressActive_) {
     return;
   }
-  if (!triggerContainsGlobalPos(mouseEvent->globalPosition().toPoint())) {
+  if (!triggerContainsGlobalPos(snowGlobalPos(mouseEvent).toPoint())) {
     return;
   }
   triggerPressActive_ = true;
@@ -1615,10 +1615,10 @@ void OverlayPopupController::handleTriggerRelease(QObject* watched, QEvent* even
   QWidget* releaseTarget = qobject_cast<QWidget*>(watched);
   const bool releaseOnTriggerTree = widgetInTree(releaseTarget, popupTriggerWidget());
   if (!releaseOnTriggerTree) {
-    if (!triggerContainsGlobalPos(mouseEvent->globalPosition().toPoint())) {
+    if (!triggerContainsGlobalPos(snowGlobalPos(mouseEvent).toPoint())) {
       return;
     }
-  } else if (!triggerContainsGlobalPos(mouseEvent->globalPosition().toPoint())) {
+  } else if (!triggerContainsGlobalPos(snowGlobalPos(mouseEvent).toPoint())) {
     return;
   }
 
@@ -1748,7 +1748,7 @@ bool OverlayPopupController::handlePopupShadowPointerEvent(QEvent* event) {
   switch (eventType) {
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonDblClick:
-      globalPos = static_cast<QMouseEvent*>(event)->globalPosition().toPoint();
+      globalPos = snowGlobalPos(static_cast<QMouseEvent*>(event)).toPoint();
       break;
     case QEvent::Wheel:
       if (surface->isWindow()) {
@@ -1806,10 +1806,17 @@ bool OverlayPopupController::handlePopupShadowPointerEvent(QEvent* event) {
   const QPointF localPos = target->mapFromGlobal(globalPos);
   if (eventType == QEvent::Wheel) {
     const auto* wheelEvent = static_cast<QWheelEvent*>(event);
+    // Qt6 appended a QPointingDevice* to both event constructors; Qt5's trailing
+    // parameter is Qt::MouseEventSource (already passed above) and it has no
+    // QInputEvent::pointingDevice() accessor at all.
     QWheelEvent forwardedEvent(localPos, globalPos, wheelEvent->pixelDelta(),
-                               wheelEvent->angleDelta(), wheelEvent->buttons(),
-                               wheelEvent->modifiers(), wheelEvent->phase(), wheelEvent->inverted(),
-                               wheelEvent->source(), wheelEvent->pointingDevice());
+                              wheelEvent->angleDelta(), wheelEvent->buttons(),
+                              wheelEvent->modifiers(), wheelEvent->phase(),
+                              wheelEvent->inverted(), wheelEvent->source()
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+                              , wheelEvent->pointingDevice()
+#endif
+                              );
     QApplication::sendEvent(target, &forwardedEvent);
   } else if (eventType == QEvent::ContextMenu) {
     const auto* contextEvent = static_cast<QContextMenuEvent*>(event);
@@ -1821,8 +1828,13 @@ bool OverlayPopupController::handlePopupShadowPointerEvent(QEvent* event) {
     QWidget* targetWindow = target->window();
     const QPointF scenePos = targetWindow ? targetWindow->mapFromGlobal(globalPos) : localPos;
     QMouseEvent forwardedEvent(eventType, localPos, scenePos, globalPos, mouseEvent->button(),
-                               mouseEvent->buttons(), mouseEvent->modifiers(),
-                               mouseEvent->pointingDevice());
+                              mouseEvent->buttons(), mouseEvent->modifiers()
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+                              , mouseEvent->pointingDevice()
+#else
+                              , mouseEvent->source()
+#endif
+                              );
     QApplication::sendEvent(target, &forwardedEvent);
   }
   return true;

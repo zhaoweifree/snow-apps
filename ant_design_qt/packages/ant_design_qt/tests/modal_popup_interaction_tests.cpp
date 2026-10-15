@@ -3,7 +3,7 @@
 #include "widgets/tooltip.h"
 
 #include <QApplication>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QPushButton>
 #include <QTest>
 #include <QWindow>
@@ -16,7 +16,7 @@ namespace {
 
 void enter(QWidget* target) {
   const QPoint local = target->rect().center();
-  QEnterEvent event(local, target->mapTo(target->window(), local), target->mapToGlobal(local));
+  SnowEnterEvent event(local, target->mapTo(target->window(), local), target->mapToGlobal(local));
   QApplication::sendEvent(target, &event);
 }
 

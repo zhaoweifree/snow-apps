@@ -188,7 +188,7 @@ class CarouselArrowButton final : public QAbstractButton {
     }
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     QAbstractButton::enterEvent(event);
     update();
   }
@@ -273,7 +273,7 @@ class CarouselDotButton final : public QAbstractButton {
     }
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     QAbstractButton::enterEvent(event);
     update();
   }
@@ -1395,7 +1395,7 @@ bool AdCarousel::eventFilter(QObject* watched, QEvent* event) {
     return QWidget::eventFilter(watched, event);
   }
   auto mappedPosition = [this, watchedWidget](QMouseEvent* mouseEvent) {
-    return QPointF(watchedWidget->mapTo(this, mouseEvent->position().toPoint()));
+    return QPointF(watchedWidget->mapTo(this, snowPos(mouseEvent).toPoint()));
   };
   if (event->type() == QEvent::MouseButtonPress) {
     auto* mouseEvent = static_cast<QMouseEvent*>(event);
@@ -1471,7 +1471,7 @@ void AdCarousel::keyPressEvent(QKeyEvent* event) {
 
 void AdCarousel::mousePressEvent(QMouseEvent* event) {
   if (d_->draggable && event->button() == Qt::LeftButton && !d_->running) {
-    d_->beginDrag(event->position());
+    d_->beginDrag(snowPos(event));
     event->accept();
     return;
   }
@@ -1480,7 +1480,7 @@ void AdCarousel::mousePressEvent(QMouseEvent* event) {
 
 void AdCarousel::mouseMoveEvent(QMouseEvent* event) {
   if (d_->dragging) {
-    d_->updateDrag(event->position());
+    d_->updateDrag(snowPos(event));
     event->accept();
     return;
   }
@@ -1492,7 +1492,7 @@ void AdCarousel::mouseReleaseEvent(QMouseEvent* event) {
     QWidget::mouseReleaseEvent(event);
     return;
   }
-  d_->finishDrag(event->position());
+  d_->finishDrag(snowPos(event));
   event->accept();
 }
 

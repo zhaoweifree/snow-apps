@@ -3,7 +3,7 @@
 #include "window_modality.h"
 
 #include <QApplication>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QHoverEvent>
 #include <QMouseEvent>
 #include <QWidget>
@@ -59,15 +59,15 @@ inline std::optional<QPoint> pointerEventGlobalPosition(const QWidget* receiver,
                                                         const QEvent* event) {
   switch (event->type()) {
     case QEvent::Enter:
-      return static_cast<const QEnterEvent*>(event)->globalPosition().toPoint();
+      return snowGlobalPos(static_cast<const SnowEnterEvent*>(event)).toPoint();
     case QEvent::MouseMove:
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonRelease:
-      return static_cast<const QMouseEvent*>(event)->globalPosition().toPoint();
+      return snowGlobalPos(static_cast<const QMouseEvent*>(event)).toPoint();
     case QEvent::HoverEnter:
     case QEvent::HoverMove:
       if (receiver)
-        return receiver->mapToGlobal(static_cast<const QHoverEvent*>(event)->position().toPoint());
+        return receiver->mapToGlobal(snowPos(static_cast<const QHoverEvent*>(event)).toPoint());
       break;
     default:
       break;

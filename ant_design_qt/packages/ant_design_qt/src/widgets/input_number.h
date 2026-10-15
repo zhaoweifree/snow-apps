@@ -11,7 +11,6 @@
 
 #include "icon_core.h"
 
-class QEnterEvent;
 class QHideEvent;
 class QLabel;
 class QLineEdit;
@@ -356,7 +355,7 @@ class AdInputNumber final : public QAbstractSpinBox {
   void focusInEvent(QFocusEvent* event) override;
   void focusOutEvent(QFocusEvent* event) override;
   bool event(QEvent* event) override;
-  void enterEvent(QEnterEvent* event) override;
+  void enterEvent(SnowEnterEvent* event) override;
   void leaveEvent(QEvent* event) override;
   void paintEvent(QPaintEvent* event) override;
   void changeEvent(QEvent* event) override;

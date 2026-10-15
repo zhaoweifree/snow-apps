@@ -1001,7 +1001,7 @@ void AdContextMenu::setActionBadge(QAction* action, const QString& text) {
   action->setProperty(kActionBadgeProperty, text);
   // Dynamic properties do not invalidate QMenu item geometry. Notify every menu
   // sharing this action so its trailing column and native badge stay in sync.
-  const auto owners = action->associatedObjects();
+  const auto owners = snowAssociatedObjects(action);
   for (QObject* owner : owners) {
     if (auto* menu = qobject_cast<AdContextMenu*>(owner)) {
       QActionEvent event(QEvent::ActionChanged, action);
@@ -1161,7 +1161,7 @@ bool AdContextMenu::event(QEvent* event) {
        event->type() == QEvent::PaletteChange ||
        event->type() == QEvent::ApplicationPaletteChange ||
        event->type() == QEvent::LayoutDirectionChange || event->type() == QEvent::LanguageChange ||
-       event->type() == QEvent::DevicePixelRatioChange)) {
+       event->type() == snowDevicePixelRatioChange)) {
     d_->menuStyle->invalidateVisuals();
   }
   return QMenu::event(event);

@@ -26,8 +26,8 @@ bool operator==(const ContextKey& lhs, const ContextKey& rhs) {
   return lhs.context == rhs.context && lhs.key == rhs.key;
 }
 
-size_t qHash(const ContextKey& value, size_t seed) {
-  return qHashMulti(seed, value.context, value.key);
+SnowHashSeed qHash(const ContextKey& value, SnowHashSeed seed = 0) {
+  return snowHashMulti(seed, value.context, value.key);
 }
 
 class TimingHub final : public QObject {

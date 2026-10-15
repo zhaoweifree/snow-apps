@@ -22,8 +22,8 @@ struct CheckerboardKey {
   bool operator==(const CheckerboardKey& other) const = default;
 };
 
-size_t qHash(const CheckerboardKey& key, size_t seed) {
-  return qHashMulti(seed, key.cellSize, key.base, key.alternate);
+SnowHashSeed qHash(const CheckerboardKey& key, SnowHashSeed seed = 0) {
+  return snowHashMulti(seed, key.cellSize, key.base, key.alternate);
 }
 
 QPair<QColor, QColor> colorsForValues(const theme::ThemeMapToken& values) {

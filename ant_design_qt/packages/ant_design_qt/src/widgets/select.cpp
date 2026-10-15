@@ -1081,7 +1081,7 @@ class AdSelect::PopupFrame final : public QFrame, public detail::TopLevelToolRes
   }
 
  protected:
-  bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override {
+  bool nativeEvent(const QByteArray& eventType, void* message, snowNativeEventResult* result) override {
     detail::constrainTopLevelToolStackingToOwner(this, message);
     return QFrame::nativeEvent(eventType, message, result);
   }
@@ -1353,9 +1353,11 @@ AdSelect::AdSelect(QWidget* parent) : QWidget(parent) {
   compositeModel_->setPrimaryColumn(modelColumn_);
   filterProxyModel_ = std::make_unique<detail::SelectFilterProxyModel>(this);
   filterProxyModel_->setSourceModel(compositeModel_.get());
-  searchFilterFields_ = {QStringLiteral("label"), QStringLiteral("value")};
+  // Explicit type: the braced list alone is ambiguous for QStringList's
+  // operator= under Qt5.
+  searchFilterFields_ = QStringList{QStringLiteral("label"), QStringLiteral("value")};
   searchRoles_ = {DefaultLabelRole, DefaultValueRole};
-  tokenSeparators_ = {QStringLiteral(",")};
+  tokenSeparators_ = QStringList{QStringLiteral(",")};
   updateRoleConfig();
 
   rootLayout_ = new QHBoxLayout(this);
@@ -2562,9 +2564,9 @@ void AdSelect::setModelInternal(QAbstractItemModel* model, bool ownsModel) {
               syncModelBackedOptions();
             });
     connect(sourceModel_,
-            qOverload<const QModelIndex&, const QModelIndex&, const QList<int>&>(
+            qOverload<const QModelIndex&, const QModelIndex&, const SnowRoleList&>(
                 &QAbstractItemModel::dataChanged),
-            this, [this](const QModelIndex&, const QModelIndex&, const QList<int>&) {
+            this, [this](const QModelIndex&, const QModelIndex&, const SnowRoleList&) {
               syncModelBackedOptions();
             });
   }
@@ -3400,7 +3402,7 @@ bool AdSelect::event(QEvent* event) {
   return handled;
 }
 
-void AdSelect::enterEvent(QEnterEvent* event) {
+void AdSelect::enterEvent(SnowEnterEvent* event) {
   QWidget::enterEvent(event);
 
   bumpJoinedZOrder();
@@ -4414,9 +4416,12 @@ void AdSelect::updateDisplay() {
     const QString inputText = lineEdit_->text();
     QString effectiveInputText = inputText;
     if (!inputMethodPreeditText_.isEmpty()) {
-      const qsizetype cursorPosition =
-          std::clamp(static_cast<qsizetype>(lineEdit_->cursorPosition()), qsizetype(0),
-                     effectiveInputText.size());
+      // Qt5 QString::size() returns int, Qt6 returns qsizetype, so std::clamp
+      // cannot deduce one common type from (qsizetype, qsizetype, int). Keep the
+      // whole expression in int - both versions accept int for
+      // QLineEdit::cursorPosition(), QString::size() and QString::insert().
+      const int cursorPosition = std::clamp(lineEdit_->cursorPosition(), 0,
+                                            static_cast<int>(effectiveInputText.size()));
       effectiveInputText.insert(cursorPosition, inputMethodPreeditText_);
     }
     const int inputWidth =
@@ -5654,7 +5659,7 @@ void AdSelect::syncPopupGeometry() {
   QScreen* toolScreen = screenAnchor.screen;
   if (useTopLevelToolLayer) {
     if (toolScreen && popup_->isWindow() && popup_->screen() != toolScreen) {
-      popup_->setScreen(toolScreen);
+      snowSetWidgetScreen(popup_, toolScreen);
     }
     detail::syncTopLevelToolTransientParent(popup_, scopeWindow);
   }

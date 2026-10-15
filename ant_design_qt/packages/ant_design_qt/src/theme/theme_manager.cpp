@@ -353,7 +353,7 @@ void ThemeManager::applyScopeState(QObject* scope) {
   localResolved.palette = buildPalette(localResolved.theme, basePalette);
 
   widget->setPalette(localResolved.palette);
-  if (localResolved.config.appFont.resolveMask() != 0) {
+  if (snowFontResolveMask(localResolved.config.appFont) != 0) {
     widget->setFont(localResolved.theme.appFont);
   } else if (it->hadExplicitFont) {
     widget->setFont(it->originalFont);

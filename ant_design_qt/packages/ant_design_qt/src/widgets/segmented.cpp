@@ -7,7 +7,7 @@
 #include <QApplication>
 #include <QBoxLayout>
 #include <QButtonGroup>
-#include <QEnterEvent>
+#include "snow_shot/compat/qt_compat.h"
 #include <QEvent>
 #include <QFocusEvent>
 #include <QKeyEvent>
@@ -296,7 +296,7 @@ class SegmentButton final : public QRadioButton {
     return QRadioButton::event(event);
   }
 
-  void enterEvent(QEnterEvent* event) override {
+  void enterEvent(SnowEnterEvent* event) override {
     update();
     if (stateChanged) {
       stateChanged();

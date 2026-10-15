@@ -860,7 +860,8 @@ void AdProgress::paintProgress(QPainter& painter) {
             ((d_->alignment == PercentAlignment::Start) != rtl ? Qt::AlignLeft : Qt::AlignRight);
       const QString text =
           QFontMetricsF(d_->infoFont).elidedText(d_->text, Qt::ElideRight, indicator.width());
-      painter.drawText(indicator, static_cast<int>(alignment.toInt()), text);
+      // Qt6 added QFlags::toInt(); Qt5's QFlags already converts to int.
+      painter.drawText(indicator, static_cast<int>(alignment), text);
     }
   }
 }
