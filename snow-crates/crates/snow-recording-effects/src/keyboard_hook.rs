@@ -636,13 +636,160 @@ mod platform {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
+impl KeyObservation {
+    /// Shared conversion for live preview and encoded effects.
+    ///
+    /// Two fields carry a platform-specific meaning here:
+    ///
+    /// * `scan` holds the resolved X11 **keysym**, not a hardware scancode.
+    ///   X11 has no scancode to report, and the symbol is what lets
+    ///   `printable_label` render the character the key actually produced —
+    ///   including the shifted one — instead of guessing from a virtual key.
+    /// * `layout` is unused: the observer owns the single keyboard mapping in
+    ///   force and refreshes it on `MappingNotify`, so there is no per-event
+    ///   layout handle to carry.
+    ///
+    /// `alt_gr` stays false because X11 gives AltGr a key of its own, mapped
+    /// onto `0xa5` and labelled `AltGr`. The flag exists to hide the Ctrl chip
+    /// Windows synthesises for AltGr, and there is no such synthetic Ctrl here.
+    pub fn from_linux(
+        event: &snow_linux::input::InputEvent,
+        at: Instant,
+        generation: u64,
+    ) -> Option<Self> {
+        let down = match event.kind {
+            snow_linux::input::InputEventKind::KeyPress => true,
+            snow_linux::input::InputEventKind::KeyRelease => false,
+            _ => return None,
+        };
+        let keysym = event.keysym?;
+        // Symbols without a virtual-key identity keep the keycode, offset out of
+        // the virtual-key range, so the keycap can still be painted and labelled
+        // (`Д`, `Brightness Up`) instead of silently disappearing.
+        let key = snow_linux::input::keys::virtual_key(keysym)
+            .unwrap_or_else(|| 0x100 + u16::from(event.keycode));
+        Some(Self {
+            at,
+            key,
+            scan: keysym,
+            down,
+            layout: 0,
+            pressed: event.pressed,
+            alt_gr: false,
+            generation,
+            #[cfg(test)]
+            extra_info: 0,
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::*;
+    use snow_linux::input::{InputEvent, InputEventKind, X11InputObserver};
+
+    pub struct Observer {
+        stop: Sender<()>,
+        worker: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Observer {
+        pub fn start(
+            sender: Sender<KeyObservation>,
+            generation: Arc<AtomicU64>,
+        ) -> Result<Self, String> {
+            let input =
+                X11InputObserver::start(true, false).map_err(|error| error.to_string())?;
+            let (stop, stopped) = crossbeam_channel::bounded(1);
+            let worker = std::thread::Builder::new()
+                .name("snow-keyboard-adapter".into())
+                .spawn(move || {
+                    snow_core::qos::apply_current_thread();
+                    let mut input_generation = input.generation();
+                    loop {
+                        crossbeam_channel::select_biased! {
+                            recv(stopped) -> _ => break,
+                            recv(input.events) -> event => {
+                                // A disconnected stream means the observer
+                                // stopped; the recording keeps running without
+                                // key effects rather than waiting forever.
+                                let Ok(event) = event else { break };
+                                let current = input.generation();
+                                if current != input_generation {
+                                    // The observer dropped a batch, so a release
+                                    // may be missing. The shared generation is
+                                    // what tells the encoder to discard
+                                    // everything it has not consumed yet.
+                                    input_generation = current;
+                                    generation.fetch_add(1, Ordering::AcqRel);
+                                }
+                                if event.generation != input_generation {
+                                    continue;
+                                }
+                                forward(&event, &sender, &generation);
+                            },
+                        }
+                    }
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(Self {
+                stop,
+                worker: Some(worker),
+            })
+        }
+    }
+
+    /// Translate one observation, widening the generation if the consumer
+    /// outran the channel.
+    fn forward(event: &InputEvent, sender: &Sender<KeyObservation>, generation: &AtomicU64) {
+        if !matches!(
+            event.kind,
+            InputEventKind::KeyPress | InputEventKind::KeyRelease
+        ) {
+            return;
+        }
+        let at = std::time::Instant::now();
+        let current = generation.load(Ordering::Acquire);
+        let Some(observation) = KeyObservation::from_linux(event, at, current) else {
+            return;
+        };
+        if sender.try_send(observation).is_err() {
+            // The next observation carries a fresh generation and a fresh
+            // physical modifier snapshot.
+            generation.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    impl Drop for Observer {
+        fn drop(&mut self) {
+            let _ = self.stop.try_send(());
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+
+    /// Label for the keycap the overlay is about to paint.
+    ///
+    /// The generic modifier numbers the overlay asks about are named directly;
+    /// everything else is rendered from the keysym the observation carries, so a
+    /// keycap shows `!` or `Д` rather than a virtual-key number.
+    pub fn printable_label(key: u16, observation: &KeyObservation) -> Option<String> {
+        if let Some(name) = snow_linux::input::keys::virtual_key_label(key) {
+            return Some(name.into());
+        }
+        snow_linux::input::keys::label(observation.scan)
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod platform {
     use super::*;
     pub struct Observer;
     impl Observer {
         pub fn start(_: Sender<KeyObservation>, _: Arc<AtomicU64>) -> Result<Self, String> {
-            Err("keyboard recording is supported only on Windows".into())
+            Err("keyboard recording is supported only on Windows, macOS and X11".into())
         }
     }
     pub fn printable_label(_: u16, _: &KeyObservation) -> Option<String> {

@@ -490,7 +490,193 @@ mod platform {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
+mod platform {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::thread::JoinHandle;
+    use std::time::Instant;
+
+    use crossbeam_channel::{Sender, TrySendError};
+    use snow_linux::input::tracking::{ClickTracker, MotionTracker, PointerButton, Region};
+    use snow_linux::input::{InputEvent, InputEventKind, X11InputObserver};
+
+    use super::{MouseClickObservation, MouseMovement, ObservedMouseButton};
+
+    pub struct MouseHookObserver {
+        stop: Sender<()>,
+        generation: std::sync::Arc<AtomicU64>,
+        worker: Option<JoinHandle<()>>,
+    }
+
+    impl MouseHookObserver {
+        pub fn generation(&self) -> u64 {
+            self.generation.load(Ordering::Acquire)
+        }
+
+        pub fn start(
+            region: (i32, i32, u32, u32),
+            sender: Sender<MouseClickObservation>,
+        ) -> Result<Self, String> {
+            Self::start_with_movement(region, sender, None)
+        }
+
+        pub fn start_with_movement(
+            region: (i32, i32, u32, u32),
+            sender: Sender<MouseClickObservation>,
+            movement: Option<(
+                Sender<MouseMovement>,
+                crossbeam_channel::Receiver<MouseMovement>,
+            )>,
+        ) -> Result<Self, String> {
+            let input =
+                X11InputObserver::start(false, true).map_err(|error| error.to_string())?;
+            let generation = std::sync::Arc::new(AtomicU64::new(0));
+            let thread_generation = std::sync::Arc::clone(&generation);
+            let (stop, stopped) = crossbeam_channel::bounded(1);
+            let worker = std::thread::Builder::new()
+                .name("snow-mouse-adapter".into())
+                .spawn(move || {
+                    snow_core::qos::apply_current_thread();
+                    run(
+                        input,
+                        stopped,
+                        region,
+                        sender,
+                        movement,
+                        thread_generation,
+                    );
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(Self {
+                stop,
+                generation,
+                worker: Some(worker),
+            })
+        }
+    }
+
+    fn run(
+        input: X11InputObserver,
+        stopped: crossbeam_channel::Receiver<()>,
+        region: (i32, i32, u32, u32),
+        sender: Sender<MouseClickObservation>,
+        movement: Option<(
+            Sender<MouseMovement>,
+            crossbeam_channel::Receiver<MouseMovement>,
+        )>,
+        generation: std::sync::Arc<AtomicU64>,
+    ) {
+        let region = Region::new(region.0, region.1, region.2, region.3);
+        let mut motions = MotionTracker::new(region);
+        let mut clicks = ClickTracker::default();
+        let mut input_generation = input.generation();
+        loop {
+            crossbeam_channel::select_biased! {
+                recv(stopped) -> _ => break,
+                recv(input.events) -> event => {
+                    // A disconnected stream means the observer stopped; the
+                    // recording keeps running without pointer effects rather
+                    // than waiting forever.
+                    let Ok(event) = event else { break };
+                    let current = input.generation();
+                    if current != input_generation {
+                        input_generation = current;
+                        // A dropped batch can hide a release, and the held
+                        // buttons cannot be resynchronised from the server,
+                        // so the next press is treated as the start of a
+                        // gesture — the same repair the Windows hook applies.
+                        clicks.reset();
+                        generation.fetch_add(1, Ordering::AcqRel);
+                    }
+                    if event.generation != input_generation {
+                        continue;
+                    }
+                    handle(&event, region, &mut motions, &mut clicks, &sender, movement.as_ref(), &generation);
+                },
+            }
+        }
+    }
+
+    fn handle(
+        event: &InputEvent,
+        region: Region,
+        motions: &mut MotionTracker,
+        clicks: &mut ClickTracker,
+        sender: &Sender<MouseClickObservation>,
+        movement: Option<&(Sender<MouseMovement>, crossbeam_channel::Receiver<MouseMovement>)>,
+        generation: &AtomicU64,
+    ) {
+        let at = Instant::now();
+        match event.kind {
+            InputEventKind::Motion => {
+                let update = motions.update(event.x, event.y);
+                let Some((sender, drain)) = movement else {
+                    return;
+                };
+                let sample = MouseMovement {
+                    at,
+                    position: update.position,
+                    continuity: update.continuity,
+                };
+                // The consumer only ever keeps the newest movement, so a full
+                // channel is drained rather than grown: dropping the oldest
+                // sample loses nothing that would still have been drawn.
+                if let Err(TrySendError::Full(sample)) = sender.try_send(sample) {
+                    let _ = drain.try_recv();
+                    let _ = sender.try_send(sample);
+                }
+            }
+            InputEventKind::ButtonPress | InputEventKind::ButtonRelease => {
+                let down = matches!(event.kind, InputEventKind::ButtonPress);
+                // Wheel detents are not clicks; the overlay draws no keycap for
+                // them.
+                let Some(button) = snow_linux::input::tracking::pointer_button(event.button)
+                else {
+                    return;
+                };
+                let inside = region.contains(event.x, event.y);
+                if !clicks.accept(button, down, inside) {
+                    return;
+                }
+                let (x, y) = region.relative(event.x, event.y);
+                let observation = MouseClickObservation {
+                    at,
+                    x,
+                    y,
+                    button: observed_button(button),
+                    down,
+                    modifiers: event.modifiers.as_array(),
+                };
+                if sender.try_send(observation).is_err() {
+                    clicks.reset();
+                    generation.fetch_add(1, Ordering::AcqRel);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn observed_button(button: PointerButton) -> ObservedMouseButton {
+        match button {
+            PointerButton::Left => ObservedMouseButton::Left,
+            PointerButton::Right => ObservedMouseButton::Right,
+            PointerButton::Middle => ObservedMouseButton::Middle,
+            PointerButton::Button4 => ObservedMouseButton::Button4,
+            PointerButton::Button5 => ObservedMouseButton::Button5,
+        }
+    }
+
+    impl Drop for MouseHookObserver {
+        fn drop(&mut self) {
+            let _ = self.stop.try_send(());
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod platform {
     use crossbeam_channel::Sender;
 
@@ -506,7 +692,7 @@ mod platform {
             _region: (i32, i32, u32, u32),
             _sender: Sender<MouseClickObservation>,
         ) -> Result<Self, String> {
-            Ok(Self)
+            Err("mouse observation is supported only on Windows, macOS and X11".into())
         }
         pub fn start_with_movement(
             _region: (i32, i32, u32, u32),
@@ -516,7 +702,7 @@ mod platform {
                 crossbeam_channel::Receiver<MouseMovement>,
             )>,
         ) -> Result<Self, String> {
-            Err("native mouse observation requires Windows".into())
+            Err("mouse observation is supported only on Windows, macOS and X11".into())
         }
     }
 }
