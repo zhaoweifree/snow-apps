@@ -3270,6 +3270,7 @@ dependencies = [
 name = "snow-linux"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel",
  "snow-core",
  "thiserror 2.0.20",
  "x11rb",
@@ -3370,6 +3371,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "snow-core",
+ "snow-linux",
  "snow-macos",
  "snow-recording-model",
  "windows",

@@ -3,12 +3,13 @@
 //! The crate is deliberately layered so that most of it stays verifiable on a
 //! developer machine that is not running Linux:
 //!
-//! * [`capture`], [`geometry`] and [`pixels`] are pure and compile everywhere,
-//!   so their unit tests run on any host.
+//! * [`capture`], [`geometry`], [`pixels`] and [`input`]'s `keys`/`tracking`
+//!   modules are pure and compile everywhere, so their unit tests run on any
+//!   host.
 //! * [`session`] only inspects environment variables and therefore compiles
 //!   everywhere too.
-//! * [`x11`], [`display`] and [`cursor`] talk to an X server and are gated on
-//!   `target_os = "linux"`; they are type-checked with
+//! * [`x11`], [`display`], [`cursor`] and [`input::x11`] talk to an X server and
+//!   are gated on `target_os = "linux"`; they are type-checked with
 //!   `cargo check --target x86_64-unknown-linux-gnu`.
 //!
 //! The X11 work is deliberately built on `x11rb` (pure Rust, no `libxcb`), so
@@ -17,6 +18,7 @@
 pub mod capture;
 pub mod error;
 pub mod geometry;
+pub mod input;
 pub mod pixels;
 pub mod session;
 

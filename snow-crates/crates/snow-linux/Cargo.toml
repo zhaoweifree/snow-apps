@@ -16,4 +16,9 @@ thiserror.workspace = true
 x11rb = { version = "0.14", default-features = false, features = [
     "randr",
     "xfixes",
+    "xinput",
 ] }
+# The input observer hands events to its consumer over a channel, and the
+# consumer selects on it alongside its own stop signal; matching the channel type
+# the macOS observer already uses keeps both adapters shaped the same way.
+crossbeam-channel.workspace = true
