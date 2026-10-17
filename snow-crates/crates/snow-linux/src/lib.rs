@@ -3,7 +3,7 @@
 //! The crate is deliberately layered so that most of it stays verifiable on a
 //! developer machine that is not running Linux:
 //!
-//! * [`capture`], [`geometry`], [`pixels`], [`text`] and [`input`]'s
+//! * [`capture`], [`geometry`], [`pixels`], [`pointer`], [`text`] and [`input`]'s
 //!   `keys`/`tracking` modules are pure and compile everywhere, so their unit
 //!   tests run on any host.
 //! * [`session`] only inspects environment variables and therefore compiles
@@ -22,6 +22,7 @@ pub mod error;
 pub mod geometry;
 pub mod input;
 pub mod pixels;
+pub mod pointer;
 pub mod session;
 pub mod text;
 pub mod window;

@@ -3,6 +3,7 @@
 //! All X11 traffic in the crate funnels through [`X11Session`] so that
 //! connection setup, extension probing and error translation stay in one place.
 
+pub mod pointer;
 pub mod shm;
 pub mod window;
 
