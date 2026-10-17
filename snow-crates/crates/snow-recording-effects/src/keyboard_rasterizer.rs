@@ -544,11 +544,65 @@ mod platform {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod platform {
     use super::*;
     pub fn create(_: &KeyboardOverlayConfig) -> Result<Box<dyn KeycapRasterizer>, String> {
-        Err("keyboard rendering is supported only on Windows".into())
+        Err("keyboard rendering is not implemented for this platform".into())
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::*;
+    use crate::keyboard_overlay::Keycap;
+    use snow_linux::text::{FontRequest, KeycapRenderer, KeycapStyle};
+
+    struct Rasterizer(KeycapRenderer);
+
+    impl KeycapRasterizer for Rasterizer {
+        fn rasterize(&mut self, label: &str, scale: f32) -> Result<Keycap, String> {
+            // `KeycapRenderer::render` rejects a scale outside 0.25..=4.0, so the
+            // clamp only exists to turn a nonsensical request into the nearest
+            // usable one rather than failing the whole recording.
+            let bitmap = self
+                .0
+                .render(label, scale.clamp(0.25, 4.0))
+                .map_err(|error| error.to_string())?;
+            Ok(Keycap {
+                width: bitmap.width,
+                height: bitmap.height,
+                pixels: bitmap.pixels,
+            })
+        }
+    }
+
+    pub fn create(config: &KeyboardOverlayConfig) -> Result<Box<dyn KeycapRasterizer>, String> {
+        let style = KeycapStyle {
+            background_rgba: config.background_rgba,
+            text_rgba: config.text_rgba,
+            border_rgba: config.border_rgba,
+        };
+        // An empty request means "the desktop's default", which the adapter
+        // probes in its own preference order. Naming a family here is the same
+        // request the application makes of its own UI font, and a family that
+        // is not installed is reported rather than substituted.
+        let request = match &config.font {
+            Some(font) => FontRequest {
+                family: &font.family,
+                cjk_family: &font.cjk_family,
+                weight: font.weight,
+            },
+            None => FontRequest {
+                family: "",
+                cjk_family: "",
+                weight: 400,
+            },
+        };
+        // `load` renders a probe keycap before returning, so a font problem
+        // surfaces before the recorder reports that it started.
+        let renderer = KeycapRenderer::load(&request, style).map_err(|error| error.to_string())?;
+        Ok(Box::new(Rasterizer(renderer)))
     }
 }
 
