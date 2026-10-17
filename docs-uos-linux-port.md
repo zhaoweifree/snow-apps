@@ -27,7 +27,7 @@
 | `ant_design_qt` | 中 | 中高 | **中改** | 4 个 `.mm`、`enterEvent`、`position()` |
 | `snow_shot`（主程序） | 低（平台层全缺） | 中 | **大改** | 需从零实现全部 Linux 平台后端 |
 | `snow_image_viewer` | 低 | **极低** | **重写或裁剪** | `QRhi*` 为 Qt6 专有公开 API |
-| Rust `snow-capture` / `snow-cursor` | 低 | — | **已完成 X11 部分** | 采集与光标走 X11（见 9.4.3）；PipeWire / portal 仍缺 |
+| Rust `snow-capture` / `snow-cursor` | 低 | — | **已完成 X11 部分** | 采集与光标走 X11（见 9.4.3），经 MIT-SHM 零拷贝读像素（见 9.4.7）；PipeWire / portal 仍缺 |
 | Rust 输入钩子 / 键帽渲染 | 低 | — | **已完成 X11 部分** | XInput2 观测（见 9.4.4）+ `ab_glyph` 光栅化（见 9.4.5）；Wayland / 无 XInput2 退路仍缺 |
 | Rust 元素拾取 | 低 | — | **已完成窗口级** | X11 窗口树 + `_NET_*`（见 9.4.6）；控件级仍需 AT-SPI2 |
 | Rust 音频 | 低（全为 `UnsupportedBackend`） | — | **从零实现** | PulseAudio / PipeWire 全缺 |
@@ -301,7 +301,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 动作 | 路径 | 说明 |
 |---|---|---|
-| **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`window`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `x11`/`display`/`cursor`/`input::x11`/`x11::window`（X11，`x11rb` 纯 Rust 实现）。待补：PipeWire/Wayland capture、PulseAudio、evdev 退路 |
+| **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`window`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `x11`/`display`/`cursor`/`input::x11`/`x11::window`/`x11::shm`（X11，`x11rb` 纯 Rust 实现）。待补：PipeWire/Wayland capture、PulseAudio、evdev 退路 |
 | **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集。待补：PipeWire + XDG portal（Wayland）、X11 Damage 脏矩形、XShm 零拷贝 |
 | **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | PulseAudio / PipeWire |
 | **新增** | `snow-crates/crates/snow-cursor/src/platform/linux.rs` | XFixes `GetCursorImage` + 核心 `QueryPointer`。**已完成**（含 image 缓存的瞬时失败保护，与 Windows 后端同策略） |
@@ -354,7 +354,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 能力 | Windows 实现 | macOS 实现 | **Linux 目标实现** |
 |---|---|---|---|
-| 屏幕采集 | DXGI Duplication / WGC | ScreenCaptureKit | **PipeWire**（Wayland） / **X11 XShm** |
+| 屏幕采集 | DXGI Duplication / WGC | ScreenCaptureKit | **X11 `GetImage` + MIT-SHM —— 已落地**（见 9.4.3 / 9.4.7）；**PipeWire**（Wayland）仍缺 |
 | 窗口采集 | WGC per-window | SCK per-window | PipeWire `restore_token` / X11 Composite |
 | 防截屏排除 | `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` | `NSWindowSharingNone` | **无等价**，X11 用 shape/`XComposite` 近似；建议降级说明 |
 | 全局快捷键 | `RegisterHotKey` | Carbon/CGEventTap | **X11 `XGrabKey`** / Wayland `GlobalShortcuts` portal |
@@ -422,7 +422,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–5）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、音频、AT-SPI2 控件级 |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、音频、AT-SPI2 控件级、Damage 脏矩形 |
 | **P4 C++ 平台层** | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用 |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
@@ -584,6 +584,10 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 > C 层用不到）。A 类仍是每架构 6 个、逐条未变（`snow-ocr-process` 在两个架构上撞的是不同依赖，
 > 见下表）。**这就是本片选 X11 窗口树而不是直接上 AT-SPI2 的实际收益：一次把 2 个门禁项转绿，
 > 且没有新增任何 C 依赖。**
+>
+> **2026-10-17 复跑（slice 6 之后）**：仍是 **48/60**，失败清单逐条未变。新增的两项依赖
+> （`x11rb` 的 `shm` 特性、`memmap2`）都不含 C 源码，所以门禁范围没有任何变化 ——
+> 这是选 `CreateSegment` + `mmap` 而不是 SysV `shmget` 的直接后果。
 
 **(A) 需要交叉 C 编译器 —— 不是我们的代码问题（每架构 6 个）**
 
@@ -647,9 +651,9 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 （**显式拒绝而非替换**）、三个 benchmark example、`snow-capture-c` / `snow-recording-c`
 的 `capture_backend_value`。
 
-**已知的性能缺口（P5 处理）**：整条路径是同步服务器往返 + 服务端拷贝，**没有脏矩形**，
-`is_duplicate` 恒为 false。Windows 侧靠 DXGI 脏矩形跳过编码的优化在这里没有对应物；
-X11 的等价物是 Damage 扩展，属后续 slice。
+**性能**：同步往返 + 服务端拷贝的形态已在 slice 6 改掉——像素经 MIT-SHM 直接写进双方
+共享的内存，回复里只剩下深度与字节数（见 9.4.7）。**仍缺**的是脏矩形：`is_duplicate` 恒为 false，
+Windows 侧靠 DXGI 脏矩形跳过编码的优化在这里没有对应物；X11 的等价物是 Damage 扩展，属后续 slice。
 
 #### 9.4.4 P3 slice 3：X11 输入观测后端落地（2026-10-17）
 
@@ -876,6 +880,65 @@ slice 1–4 让 Linux「看上屏、看见手、画得出键帽」，这一片�
   X 空间坐标；Wayland 会话下的实际映射需真机验证。
 - **真机待验**：UOS 20 的 `dde-daemon` / `dde-dock` 是否导出 `_NET_CLIENT_LIST`（不导出则走
   `QueryTree` 回退，选中粒度变成 frame 窗口）、以及 `_NET_WM_WINDOW_TYPE` 在国产应用上的实际设置率。
+
+#### 9.4.7 P3 slice 6：MIT-SHM 零拷贝采集（2026-10-17）
+
+slice 2 的 X11 采集能出画面，但每帧的像素要穿过整条连接：服务端分配回复、拷进去，客户端再拷出来。
+1920×1080 一帧 ≈ 8 MB，三份拷贝，按录制帧率重复。本片把这条路换成 MIT-SHM：
+服务端直接写进双方共享的内存，回复里只剩深度与字节数。
+
+| 层 | 位置 | 平台 | 内容 |
+|---|---|---|---|
+| 尺寸规则 | `snow-linux/src/capture.rs::shm_segment_size` | **全平台** | 按服务端的 `scanline_pad` 规则算段大小，溢出/退化返回 `None`。**4 个单测在 Windows 上跑** |
+| 对话 | `snow-linux/src/x11/shm.rs` | linux | `Segment`（`CreateSegment` 取 fd + `mmap`）、`prepare_shm`（分配/按需扩大）、`read_shm_image`（`ShmGetImage` + 用回复的 `size` 反推 stride） |
+| 接线 | `snow-linux/src/x11.rs::capture_image` | linux | 先 `prepare_shm`（`&mut`）再 `read_image`（`&self`）；后者优先读共享段，不可用则 `GetImage` |
+
+**为什么这仍然是"纯 Rust"且不缩门禁**：`CreateSegment`（MIT-SHM 1.2）由服务端分配段并把 fd 传回来，
+客户端只用 `memmap2` 映射（它本身也不含 C 源码）。换成经典的 SysV `shmget` + `Attach` 也能做，
+但那要直接调 libc，且段的生命周期要自己用 `shmctl(IPC_RMID)` 管；`CreateSegment` 的段随连接消失。
+
+五个判断：
+
+1. **`ShmGetImage` 没有回复数据，所以必须先分配再知道大小**。这是与 `GetImage` 最根本的差别：
+   后者可以「读回复 → 从长度反推 stride」，前者必须在发请求前就算出字节数，
+   算小了服务端就写越界。故用 `shm_segment_size`（与服务端同一套 padding 规则）估算，
+   再用回复里的 `size` 反推真实 stride（复用 slice 2 的 `reply_stride`）——**不信任自己的估算**。
+2. **失败是连接级属性，不是瞬时故障**。远程 TCP 显示、无 MIT-SHM 的服务器、拒绝映射 fd 的沙箱，
+   这三种情况都不会因为下一帧而改变。所以第一次失败就把会话标成 `Unavailable` 并按 `GetImage` 走到底；
+   若每帧重试，等于每帧多一次往返去确认同一件事。
+3. **越界一律不读**。服务端已经在回复到达前写完了，所以 `size > 段长` 时数据可能已经越界；
+   该帧直接交给 `GetImage`（它带回长度可校验）。另外 `mmap` 按页映射，小幅越界通常落在同一页里
+   不会崩 —— 但这是"没崩"，不是"正确"，不能拿来当保证。
+4. **准备与读取必须拆成两个函数**。分配需要 `&mut self`，而读取要把映射里的切片借出去；
+   一个方法同时做两件事，就会出现「一条路径返回自身借用、另一条路径继续用自身」——
+   可变借用的生命周期被返回类型钉死到整个函数体，编译器直接拒绝。这个拆分是编译器逼出来的，
+   不是风格选择。
+5. **`capture_access_active` 仍为 `false`**：共享段不是"采集访问句柄"，释放它并不会让别的程序
+   重新获得采集能力。语义没变，就没有理由跟着改。
+
+**验证（2026-10-17，Windows + rustc 1.97.1）**：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-linux` | **105 通过**（slice 5 后是 101，本片 +4 = `shm_segment_size`） |
+| `cargo check -p snow-capture --target {x86_64,aarch64}-unknown-linux-gnu` | 双架构全绿（`-Dwarnings` 生效） |
+| `bash scripts/check-rust.sh snow-linux`（fmt + clippy `-D warnings`） | 绿。**顺带修掉前几片遗留的 3 个 clippy 与全 crate 的 fmt 漂移**（单独一个 `style` 提交） |
+| `bash scripts/linux-cross-check.sh`（双架构，slice 6 后复跑） | **48/60**，失败清单逐条未变；`snow-linux`、`snow-capture` 均 PASS |
+
+**必须说清楚的一点**：这一片**在 Windows 上无法验证行为，只能说类型正确**。零拷贝是否真的更快、
+`ShmGetImage` 在 UOS 的 Xorg 上是否按 `size` 报告长度、以及 `CreateSegment` 在 dde 会话下是否被允许，
+都必须在真机上测。手册层面的依据是 MIT-SHM 规范与 Xorg 的实现，不是本机的观测。
+
+**本片未覆盖（诚实记账）**：
+
+- **Damage 脏矩形**：`is_duplicate` 仍恒为 false，录制器无法跳过未变化的帧。Damage 是纯协议
+  （`x11rb` 的 `damage` 特性，零 C），但"根窗口的 Damage 在无 Composite 重定向时是否覆盖
+  遮挡变化"必须真机确认，属独立 slice。
+- **窗口采集**：仍 `BackendUnavailable`。读别的窗口像素需要 Composite 重定向，而**有合成器运行时
+  重定向会被拒（BadAccess）**，届时要走合成器的截图 portal 或从根图像裁剪。这是设计决策，不是补丁。
+- **合成器的 `XCompositeNameWindowPixmap` 路径**、`XShmPutImage`（本工程不往屏幕写像素，用不到）。
+- **真机待验**：UOS 20 / Deepin 23 上 `CreateSegment` 的可用率、1440p 下每帧耗时与 CPU 占用
+  相对 `GetImage` 的实际差距。
 
 ### 9.5 打包
 
