@@ -762,7 +762,7 @@ CoreText + Quartz、其余平台是**硬返回 Err** 的桩。**判据**：凡�
 
 | 检查 | 结果 |
 |---|---|
-| `cargo test -p snow-linux` | **90 通过**（slice 3 后是 65，本片 +25：`text::font` 10 + `text::raster` 15） |
+| `cargo test -p snow-linux` | **91 通过**（slice 3 后是 65，本片 +26：`text::font` 10 + `text::raster` 16） |
 | `cargo test -p snow-recording-effects` | **74 通过**，1 ignored —— 与改动前逐条一致，无回归 |
 | `cargo check -p snow-recording-effects --all-targets` × {windows, x86_64-linux, aarch64-linux} | 三目标全绿（`-Dwarnings` 生效） |
 | `cargo check -p snow-linux --target {x86_64,aarch64}-unknown-linux-gnu` | 双架构全绿 |
@@ -772,6 +772,11 @@ CoreText + Quartz、其余平台是**硬返回 Err** 的桩。**判据**：凡�
 支撑本片的断言 —— Latin 家族**故意不含汉字轮廓**（"fallback 测试不能靠基础字体蒙混过关"）、
 Bold 的笔画是 Regular 的两倍多（能区分「真加载了粗体」与「又用了一次常规体」）、每个非 ASCII 字形的
 advance 都比 Latin 的 `M` 宽（能区分「量了回退字体」与「没量」）。
+
+测试字体是 fontTools 生成的**单 face TTF**，与真实安装仍有距离（集合 `.ttc`、CFF 轮廓、本地化 name
+记录），所以另有一个 `#[cfg(windows)]` 的冒烟测试直接枚举宿主 `C:/Windows/Fonts`（约 3.8 秒），
+用 **Arial 画拉丁图例、微软雅黑做汉字回退**，两者都要求真有墨迹落地；目录不存在时不执行。
+这条测试是「发现层不是只对生成字体成立」的实证。
 
 **本片未覆盖（诚实记账）**：fontconfig 的 alias / 替换规则与按语言选字形（`lang=` 匹配）；
 颜色字体（COLR / CBDT emoji）；可变字体的 `wght` 轴插值（只按静态 face 选字重）；

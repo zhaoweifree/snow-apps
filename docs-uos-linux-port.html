@@ -1787,7 +1787,7 @@ CoreText + Quartz、其余平台是<strong>硬返回 Err</strong> 的桩。<stro
 <tbody>
 <tr>
 <td><code>cargo test -p snow-linux</code></td>
-<td><strong>90 通过</strong>（slice 3 后是 65，本片 +25：<code>text::font</code> 10 + <code>text::raster</code> 15）</td>
+<td><strong>91 通过</strong>（slice 3 后是 65，本片 +26：<code>text::font</code> 10 + <code>text::raster</code> 16）</td>
 </tr>
 <tr>
 <td><code>cargo test -p snow-recording-effects</code></td>
@@ -1811,6 +1811,10 @@ CoreText + Quartz、其余平台是<strong>硬返回 Err</strong> 的桩。<stro
 支撑本片的断言 —— Latin 家族<strong>故意不含汉字轮廓</strong>（"fallback 测试不能靠基础字体蒙混过关"）、
 Bold 的笔画是 Regular 的两倍多（能区分「真加载了粗体」与「又用了一次常规体」）、每个非 ASCII 字形的
 advance 都比 Latin 的 <code>M</code> 宽（能区分「量了回退字体」与「没量」）。</p>
+<p>测试字体是 fontTools 生成的<strong>单 face TTF</strong>，与真实安装仍有距离（集合 <code>.ttc</code>、CFF 轮廓、本地化 name
+记录），所以另有一个 <code>#[cfg(windows)]</code> 的冒烟测试直接枚举宿主 <code>C:/Windows/Fonts</code>（约 3.8 秒），
+用 <strong>Arial 画拉丁图例、微软雅黑做汉字回退</strong>，两者都要求真有墨迹落地；目录不存在时不执行。
+这条测试是「发现层不是只对生成字体成立」的实证。</p>
 <p><strong>本片未覆盖（诚实记账）</strong>：fontconfig 的 alias / 替换规则与按语言选字形（<code>lang=</code> 匹配）；
 颜色字体（COLR / CBDT emoji）；可变字体的 <code>wght</code> 轴插值（只按静态 face 选字重）；
 <code>Xft</code> / X core 位图字体。<strong>真机待验</strong>：UOS 20 上实际的默认族名（候选表按 Noto / 文泉驿写的，
