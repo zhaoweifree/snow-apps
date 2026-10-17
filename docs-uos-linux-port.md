@@ -25,12 +25,12 @@
 | `snow_image` | 高 | 中 | **小改** | `_M_X64` 内联汇编/SSE → NEON |
 | `snow_memory` | 高（`mmap` 已实现） | — | **可直接复用** | `pages.rs:123-137` 已就绪 |
 | `ant_design_qt` | 中 | 中高 | **中改** | 4 个 `.mm`、`enterEvent`、`position()` |
-| `snow_shot`（主程序） | 低（平台层全缺） | 中 | **大改** | 需从零实现全部 Linux 平台后端 |
+| `snow_shot`（主程序） | 低（平台层全缺） | 中 | **大改** | 需从零实现全部 Linux 平台后端。**已起步**：物理光标走 X11，并建立了 Rust↔C++ 平台桥（见 9.4.8） |
 | `snow_image_viewer` | 低 | **极低** | **重写或裁剪** | `QRhi*` 为 Qt6 专有公开 API |
 | Rust `snow-capture` / `snow-cursor` | 低 | — | **已完成 X11 部分** | 采集与光标走 X11（见 9.4.3），经 MIT-SHM 零拷贝读像素（见 9.4.7）；PipeWire / portal 仍缺 |
 | Rust 输入钩子 / 键帽渲染 | 低 | — | **已完成 X11 部分** | XInput2 观测（见 9.4.4）+ `ab_glyph` 光栅化（见 9.4.5）；Wayland / 无 XInput2 退路仍缺 |
 | Rust 元素拾取 | 低 | — | **已完成窗口级** | X11 窗口树 + `_NET_*`（见 9.4.6）；控件级仍需 AT-SPI2 |
-| Rust 音频 | 低（全为 `UnsupportedBackend`） | — | **从零实现** | PulseAudio / PipeWire 全缺 |
+| Rust 音频 | 低（全为 `UnsupportedBackend`） | — | **范围外（决策 4）** | 不做：只在 Win/mac 提供录制音轨，Linux 上诚实上报不可用 |
 | Rust OCR（`snow-ocr-process`） | 中 | — | **中改** | 默认 `directml-provider` 为 Windows 专有 |
 
 ### 0.3 必须向决策方澄清的前置问题
@@ -60,6 +60,11 @@
 占非测试 C++ 文件总量的 8.6%。完整清单、兼容层代码、阶段计划与 Windows 环境前置
 全部落在 **[`docs-qt5-downgrade-plan.md`](docs-qt5-downgrade-plan.md)**。
 
+**决策 4：Linux 不做音频采集。** 录屏在 UOS 上只录画面。理由不是"做不了"，而是代价与收益不成比例：
+PulseAudio / PipeWire 的客户端库全是 C 绑定，一旦引入，「平台后端只用纯 Rust」这条铁律就破了，
+此后音频路径**没有任何能在 Windows 上跑的门禁**，只能靠真机反复试。而 `snow-audio-recorder`
+在 Linux 上本来就已经是 `UnsupportedBackend`，保持"如实上报不可用"比给一个无法验证的实现更诚实。
+
 > ⚠️ **新增前置阻塞**：经实测，本机**未安装 Qt / CMake / MSVC / Ninja / Rust / vcpkg，且仓库从未在本机构建过**。
 > 因此 Windows 验证前必须先完成环境 bootstrap（约 10–12 GB 下载、数小时），这是不可绕过的门槛。
 
@@ -82,7 +87,7 @@ snow-apps/                             (cmake_minimum_required 4.2, project snow
 ├── snow_image/          (GPL-3.0)     图像编解码库（PNG/JPEG/GIF/HEIF/JXL/WEBP/AVIF...）
 ├── snow_image_viewer/   (GPL-3.0)     看图器：QRhi 渲染（Qt6 专有）
 ├── snow_memory/                       显式 OS 页所有权的大缓冲
-├── snow-crates/         (Apache-2.0)  Rust workspace，29 个 crate
+├── snow-crates/         (Apache-2.0)  Rust workspace，31 个 crate
 ├── snow_rust_ffi/       (Apache-2.0)  汇总 C ABI staticlib，供 CMake 链接
 └── cmake/ scripts/                    共享 CMake 模块、vcpkg overlay、PowerShell/sh 入口
 ```
@@ -153,6 +158,7 @@ fn unsupported_error() -> CaptureError {
 | 全局键鼠钩子 | `snow-recording-effects/src/{keyboard_hook.rs:124, mouse_hook.rs:90}` | **XInput2 raw events —— 已落地**：`snow-linux/src/input/`（见 9.4.4）。待补：无 XInput2 时的 XRecord / evdev 退路、Wayland portal |
 | DirectWrite + Direct2D 键帽光栅化 | `snow-recording-effects/src/keyboard_rasterizer.rs:8`（macOS 走 CoreText + Quartz） | **`ab_glyph` + `ttf-parser` —— 已落地**：`snow-linux/src/text/`（见 9.4.5）。字体发现自建，**刻意不链 fontconfig** |
 | Win32 窗口层 | `snow_shot/src/platform/windows/*`（30 文件）：`windowchrome.cpp:255` `SetWindowDisplayAffinity`、`pinnedwindownative.cpp` `WS_EX_*` | X11 属性 / 无对应 |
+| Win32 物理光标 | `platform/physicalcursor.cpp:26-39`（`GetPhysicalCursorPos` / `SetPhysicalCursorPos`）、macOS 侧 `CGEventGetLocation` / `CGWarpMouseCursorPosition` | **XQueryPointer / XWarpPointer —— 已落地**（见 9.4.8）：`snow_linux::x11::pointer` + C ABI `snow_linux.h`。**刻意不用 XFixes**，因为这两个请求是核心协议，缺扩展的服务器也能用 |
 | 注册表自启动 | `platform/windows/autostartregistration.cpp:14` | `~/.config/autostart/*.desktop` |
 | ShellExecute 提权 | `platform/windows/administratorlaunch.cpp:25-31` | `pkexec` / polkit |
 | 资源管理器右键菜单 | `platform/windows/shellcontextmenuregistration.cpp:20-21` | `~/.local/share/applications/*.desktop` |
@@ -288,8 +294,8 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 动作 | 路径 | 说明 |
 |---|---|---|
-| **新增** | `snow_shot/src/platform/linux/` | 对应 `windows/` 全部能力：全局快捷键、全局鼠标、物理光标、全屏窗口检测、窗口捕获排除、窗口 chrome、托盘、单实例、自启动、提权、剪贴板、系统通知、滚动注入 |
-| **修改** | `snow_shot/src/platform/focusedfullscreenwindow.cpp:39`、`globalmousebackend.cpp:5-38`、`physicalcursor.cpp:13-97` | 增加 `Q_OS_LINUX` 分支 |
+| **新增** | `snow_shot/src/platform/linux/` | 对应 `windows/` 全部能力：全局快捷键、全局鼠标、物理光标、全屏窗口检测、窗口捕获排除、窗口 chrome、托盘、单实例、自启动、提权、剪贴板、系统通知、滚动注入。**例外**：物理光标没有落在这里 —— `physicalcursor.cpp` 的 Linux 分支直接调 `snow-linux-c`，因为那块逻辑的价值在于可离线单测，放进纯转发目录反而失去意义（见 9.4.8） |
+| **修改** | `snow_shot/src/platform/focusedfullscreenwindow.cpp:39`、`globalmousebackend.cpp:5-38`、`physicalcursor.cpp:13-97` | 增加 `Q_OS_LINUX` 分支。**`physicalcursor.cpp` 已完成**（见 9.4.8）；其余两个仍是通用桩（全屏检测恒 false、全局鼠标 `Unavailable`） |
 | **修改** | `snow_shot/src/presentation/{globalcanvas/globalcanvasplatform.cpp, pinned/pinnedwindowplatform.cpp}` | Win/Mac 分发 + 桩，需 Linux 实现 |
 | **重构** | `snow_shot/include/snow_shot/platform/screenshotnative.h:3` | **无条件 include `windows/scrollinput.h`**，须拆出平台中立接口 |
 | **修改** | `ant_design_qt/.../widgets/{context_menu,modal}.cpp` + `detail/*` | Win32/`.mm` 分发，需 X11 对应 |
@@ -301,14 +307,16 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 动作 | 路径 | 说明 |
 |---|---|---|
-| **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`window`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `x11`/`display`/`cursor`/`input::x11`/`x11::window`/`x11::shm`（X11，`x11rb` 纯 Rust 实现）。待补：PipeWire/Wayland capture、PulseAudio、evdev 退路 |
+| **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`window`/`pointer`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `x11`/`display`/`cursor`/`input::x11`/`x11::{window,shm,pointer}`（X11，`x11rb` 纯 Rust 实现）。待补：PipeWire/Wayland capture、evdev 退路。**音频按决策 4 不做** |
+| **新增** | `snow-crates/crates/snow-linux-c/`（`include/snow_linux.h`） | Rust↔C++ 平台桥：C ABI 头 + `staticlib`。**已建**（见 9.4.8）：`create`/`destroy` + 指针读写。刻意与 `snow_rust_ffi` **分成两个 archive** —— 后者经 `zstd-sys` 撞 C 源码，跨目标检查在依赖图里就断了，走不到这段 Linux-only 代码；这个 archive 只依赖纯 Rust 的 `snow-linux`，因此每次 `bash scripts/linux-cross-check.sh` 都覆盖它 |
 | **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集。待补：PipeWire + XDG portal（Wayland）、X11 Damage 脏矩形、XShm 零拷贝 |
-| **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | PulseAudio / PipeWire |
+| **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | ~~PulseAudio / PipeWire~~ **不做（决策 4）**：保持 `UnsupportedBackend`，Linux 录制无音轨 |
 | **新增** | `snow-crates/crates/snow-cursor/src/platform/linux.rs` | XFixes `GetCursorImage` + 核心 `QueryPointer`。**已完成**（含 image 缓存的瞬时失败保护，与 Windows 后端同策略） |
 | **新增** | `snow-crates/crates/snow-ui-selector/src/linux.rs` | **窗口级已落地**（见 9.4.6）：X11 窗口树 + `_NET_CLIENT_LIST`，`ElementRegionService` 在 Linux 上导出，`snow-ui-selector-c` 恢复可编译。控件级仍需 AT-SPI2（D-Bus）——未实现，`HitTestMode::UiElement` 与 `Window` 目前返回同一个窗口矩形 |
 | **新增** | `snow-crates/crates/snow-selected-text/src/platform/linux/` | AT-SPI2（D-Bus）取选中文本 + PRIMARY selection。未开始 |
 | **修改** | `snow-recording-effects/src/{keyboard_hook,mouse_hook}.rs` 的 `#[cfg(not(any(windows,macos)))]` 空实现 | **已落地 X11 实现**（见 9.4.4）：`#[cfg(target_os="linux")] mod platform` 把 `snow_linux::input` 的观测翻译成 `KeyObservation` / `MouseClickObservation` / `MouseMovement` |
 | **修改** | `snow-recording-effects/src/keyboard_rasterizer.rs:547` 的 `#[cfg(not(any(windows,macos)))]` 桩 | **已落地**（见 9.4.5）。**注意**：该文件不是纯逻辑 —— 每个平台各自实现 `mod platform`（Windows 是 DirectWrite+D2D，macOS 是 CoreText+Quartz），Linux 分支原先是硬返回 Err ⇒ 按键能采到但画不出来。现已接 `snow_linux::text` |
+| **修改** | `snow_rust_ffi/{Cargo.toml,src/lib.rs}` | `snow-ui-selector-c` 的依赖与 `pub mod ui_selector` 门控从 `cfg(any(windows, target_os="macos"))` 放宽到 `cfg(any(windows, unix))`。不改的话，Linux 上 C++ 那头 `snow_ui_selector_service_*` 会在链接期全部 undefined。**本机无法验证**：该 archive 在 Linux 目标上连 `cargo check` 都过不去（见 9.4.2 A 类），只能到真机验 |
 | **修改** | `snow-recording-runtime/src/{capture_policy.rs:18-90,direct_capture.rs:4-90}` | 放开 Windows-only 门控，接入 CPU 合成路径 |
 | **修改** | `rapid-ocr-rs/src/model_store.rs:94-102` | `LOCALAPPDATA` → XDG (`$XDG_DATA_HOME`) |
 | **修改** | `snow-ocr-process/build.rs:35-36` | `winres` 改为 `[target.'cfg(windows)'.build-dependencies]` |
@@ -361,8 +369,8 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 | 全局鼠标 | `WH_MOUSE_LL` | `CGEventTap` | **XInput2 raw events —— 已落地**（see 9.4.4）；无 XInput2 时诚实上报不可用 |
 | 窗口 / 元素拾取 | UIA / MSAA | `AXUIElement` + `CGWindowList` | **X11 窗口树 + `_NET_CLIENT_LIST` —— 已落地窗口级**（见 9.4.6）。控件级需 AT-SPI2，仍缺 |
 | 键帽文字渲染 | DirectWrite + Direct2D | CoreText + Quartz | **`ab_glyph` + `ttf-parser` —— 已落地**（见 9.4.5）。字体发现自建枚举（族名 → 文件），**刻意不链 fontconfig / FreeType**，以保住跨目标类型检查 |
-| 物理光标位置 | `GetPhysicalCursorPos` | `CGEventGetLocation` | **XQueryPointer** / XFixes |
-| 音频采集 | WASAPI | CoreAudio | **PulseAudio** / PipeWire |
+| 物理光标位置 | `GetPhysicalCursorPos` | `CGEventGetLocation` | **XQueryPointer / XWarpPointer —— 已落地**（见 9.4.8）。不用 XFixes：这两个是核心协议请求，缺扩展的服务器也能用 |
+| 音频采集 | WASAPI | CoreAudio | ~~PulseAudio / PipeWire~~ **不做（决策 4）**：Linux 录制无音轨 |
 | 自启动 | 注册表 Run 键 | SMAppService | **`~/.config/autostart/*.desktop`** |
 | 提权 | `ShellExecute(runas)` | Authorization Services | **`pkexec`**（polkit） |
 | 剪贴板图像 | DIB / CF_DIBV5 | `NSPasteboard` | **X11 `image/png` 选择** / Wayland `wl_data_device` |
@@ -422,8 +430,8 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、音频、AT-SPI2 控件级、Damage 脏矩形 |
-| **P4 C++ 平台层** | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用 |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
+| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：全局快捷键（XGrabKey）、全局鼠标 backend、全屏窗口检测、托盘/自启动/单实例/通知、`screenshotnative.h` 拆分 |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -566,7 +574,7 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 
 #### 9.4.2 逐 crate 体检现状（2026-10-15 实测，x86_64 + aarch64）
 
-30 个 workspace 成员 × 2 架构 = 60 次检查，**首跑 46 通过（每架构 23/30）、当前 48 通过（每架构 24/30）**，9.4.1 的脚本已固化为
+31 个 workspace 成员 × 2 架构 = 62 次检查，**首跑 46 通过（每架构 23/30）、当前 50 通过（每架构 25/31）**，9.4.1 的脚本已固化为
 `bash scripts/linux-cross-check.sh`。缺口分两类，性质完全不同：
 
 > **2026-10-17 复跑（slice 3 之后）**：仍是 **46/60**，失败项与分类**逐条未变**。差别在覆盖范围：
@@ -589,14 +597,19 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 > （`x11rb` 的 `shm` 特性、`memmap2`）都不含 C 源码，所以门禁范围没有任何变化 ——
 > 这是选 `CreateSegment` + `mmap` 而不是 SysV `shmget` 的直接后果。
 
+> **2026-10-17 复跑（P4 slice 1 之后）**：**50/62**（每架构 25/31）。分母从 60 变成 62 是因为
+> `snow-linux-c` 进了 workspace —— 它自己在两个架构上都 PASS，所以这是一次**纯增量**的覆盖，
+> 不是通过率被稀释。A 类仍是每架构 6 个、逐条未变（`snow-ocr-process` 在两个架构上撞的都是
+> `clipper-sys` 要 `*-linux-gnu-g++`）。**新增的门禁价值**：这段 C++ 直接调用的代码以前根本
+> 不存在，现在它每次都在 Windows 上被类型检查。
+
 **(A) 需要交叉 C 编译器 —— 不是我们的代码问题（每架构 6 个）**
 
 | crate | 卡住的 C 依赖 | 说明 |
 |---|---|---|
 | `rapid-ocr-rs` | `ring` | rustls 链引入 |
-| `snow-ocr-process` | `clipper-sys` | — |
-| `snow-recording-c` / `snow-recording-export` | `zstd-sys` / `ffmpeg-sys-next` | 视 crate 并行调度，先撞哪个不定 |
-| `snow-recording-runtime` / `snow-screen-recorder` | `ffmpeg-sys-next` | FFmpeg 绑定还需真机上的 `pkg-config` |
+| `snow-ocr-process` | `clipper-sys` | 要 `*-linux-gnu-g++`（两个架构都一样） |
+| `snow-recording-c` / `snow-recording-export` / `snow-recording-runtime` / `snow-screen-recorder` | `ffmpeg-sys-next` | FFmpeg 绑定；真机上还要 `pkg-config` 找 `libav*-dev` |
 
 这一类的失败**与 Linux 移植无关**：同一份代码在 UOS 真机上只要有 `gcc` + `libav*-dev` 就能过。
 
@@ -939,6 +952,84 @@ slice 2 的 X11 采集能出画面，但每帧的像素要穿过整条连接：�
 - **合成器的 `XCompositeNameWindowPixmap` 路径**、`XShmPutImage`（本工程不往屏幕写像素，用不到）。
 - **真机待验**：UOS 20 / Deepin 23 上 `CreateSegment` 的可用率、1440p 下每帧耗时与 CPU 占用
   相对 `GetImage` 的实际差距。
+
+#### 9.4.8 P4 slice 1：Rust↔C++ 平台桥 + 物理光标（2026-10-17）
+
+P4 的第一个问题不是"写什么"，而是**写在哪里才能被验证**。C++ 侧在这个仓库里**一行都没被编译过**
+（本机没有 Linux C++ 交叉工具链，也没有 Qt5 的 Linux 头），所以如果直接把 Win32 调用逐条翻译成
+Xlib 调用，产出的是一批**只能靠眼睛读的代码**。本片的取舍是：把逻辑压到纯 Rust 里（可跨目标类型检查
++ 可在 Windows 上跑单测），C++ 只剩转发，并**先用一个最小能力把桥建立起来**，后续 P4 各项复用同一座桥。
+
+| 层 | 位置 | 平台 | 内容 |
+|---|---|---|---|
+| 坐标规则 | `snow-linux/src/pointer.rs` | **全平台** | `RootPosition::new`（i32 → i16 越界即 `None`）、`PointerSample::position`（`same_screen == false` ⇒ 无位置）。**6 个单测在 Windows 上跑** |
+| 对话 | `snow-linux/src/x11/pointer.rs` | linux | `pointer_sample`（`QueryPointer`）、`warp_pointer_to`（`WarpPointer` + 显式 `flush`） |
+| C ABI | `snow-crates/crates/snow-linux-c/`（`include/snow_linux.h`） | linux | 进程级连接 + 空句柄；`create`/`destroy`/`pointer_position`/`set_pointer_position`。**整 crate 在 `#![cfg(target_os = "linux")]` 之后**，非 Linux 上导出为空 |
+| 接线 | `snow_shot/src/platform/physicalcursor.cpp` | linux | `#elif defined(Q_OS_LINUX)` 分支，形状与 macOS 分支同构；CMake 用遍历把所有编译该文件的 target 都链上 `snow_shot_linux_platform` |
+
+**为什么非要另开一个 archive**（实测依据，不是偏好）：把这段代码塞进 `snow_rust_ffi` 是更"自然"的做法，
+但本机实测那个 archive 的 Linux 目标 `cargo check` 在 `zstd-sys` 就断了（A 类，需 C 交叉编译器），
+**永远走不到我们的代码**。也就是说：塞进去 = 写了但没有门禁。新 archive 只依赖纯 Rust 的 `snow-linux`，
+每次 `bash scripts/linux-cross-check.sh` 都会真的编译它。代价是 C++ 侧多链一个静态库。
+
+六个判断：
+
+1. **句柄不持有连接**。Qt 在热路径上构造临时 `PhysicalCursor`（`globalcanvascontroller.cpp:68` 与 `:387`
+   都是 `platform::PhysicalCursor().logicalPosition()`），若一实例一条连接，就是**每次鼠标移动做一次
+   X11 握手**。所以连接放进 `OnceLock<Option<Mutex<X11Session>>>`，句柄只是一个能力令牌 +
+   以后挂 per-caller 状态的地方；`create` 返回 NULL 就等于"这个会话不支持"。
+2. **第一次尝试决定终身**。会话打不开要么是永久的（纯 Wayland 无 XWayland），要么是暂时的
+   （合成器还没起来）。每次调用重试等于每次花一次握手去确认同一个答案；而应用本身没有 X 就跑不起来，
+   所以这个 latch 的代价可以接受 —— 但**必须写在文档里**，不能让人以为是随机失败。
+3. **`WarpPointer` 没有回复，所以必须显式 `flush`**。否则请求躺在外发缓冲里，直到**下一次需要回复的
+   请求**顺手把它冲出去，光标会在一个不可预测的时刻跳。这类 bug 不报错、不复现，只是"有时候不灵"。
+4. **越界要拒绝，不要 clamp、更不要 `as` 转**。root 坐标是 `i16`，而 C ABI 收的是 `int32_t`；
+   `as i16` 会把 32768 变成 -32768，把光标送到**对面角落**。`RootPosition::new` 返回 `Option`，
+   C 侧拿 0（失败）。同样地，也不 clamp 到屏幕边缘 —— 那会把调用方的 bug 藏在一个"只是位置不对"的
+   现象后面。
+5. **`same_screen == false` 必须当成"没有位置"**。`QueryPointer` 的坐标是相对**持有指针的那个 root**；
+   本后端只连一个 screen，把别的 root 的坐标当本 root 的读出来，结果是**光标跳到左上角**，而不是读取失败。
+6. **不提供 `readLogicalPosition`，也不合成鼠标事件**。X11 的 root 坐标是设备像素，而 logical 坐标
+   依赖屏幕缩放 —— 那是 `QCursor::pos()` 已经算过的事，在这里再算一遍是"用更少信息给出第二个答案"。
+   反过来，X11 的 warp 对服务器而言是**真实的 motion 事件**（与 macOS 的 `CGWarpMouseCursorPosition` 相反），
+   所以 `generatesMouseMoveEvents` 保持 `true`，不需要 `QWindowSystemInterface` 合成。
+
+**两个附带判断**：
+
+- **C++ 分支要先看 `QGuiApplication::platformName() == "xcb"`**。Wayland 会话下即使有 XWayland，
+  Qt 的 platform 仍是 `wayland`；此时 `XQueryPointer` 读的是 XWayland 自己那份指针副本，
+  **指针离开 X 窗口后就不再跟随**。那是一个"过期的位置"，比"不支持"更糟。
+- **CMake 的链接不能只写一处，也要防匹配器静默失效**。静态库可以留 undefined 符号，最终可执行文件不行；
+  而仓库里多个测试 target 会**各自重编** `physicalcursor.cpp`。所以沿用本文件中已有的
+  `canvas_status_readout` 遍历写法，但加一条**配置期自检**：一个 target 都没匹配到就 `FATAL_ERROR`。
+  否则匹配器写错的表现会是链接期的 undefined symbol，出现在离原因很远的日志里。
+
+**验证（2026-10-17，Windows + rustc 1.97.1）**：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-linux` | **111 通过**（slice 6 后是 105，本片 +6 = `pointer`） |
+| `cargo check -p snow-linux-c` 三目标（host / x86_64-linux / aarch64-linux） | 全绿。host 上是**空 crate**（整 crate 在 `#![cfg(target_os="linux")]` 之后），Linux 上是真实现 |
+| `cargo fmt --check` + `cargo clippy --all-targets`（host 与 linux target） | 双绿，`-Dwarnings` 生效 |
+| **反向验证** | 往 `snow-linux-c/src/lib.rs` 末尾注入 `compile_error!` 后重跑 Linux 目标检查，**如期失败**。理由同 slice 5：整 crate 都在 crate 级 `cfg` 之后，cfg 写错会让门禁**静默通过**而真机编译出空 archive |
+| `bash scripts/linux-cross-check.sh`（双架构） | **50/62**（每架构 25/31），新增的 `snow-linux-c` 双架构 PASS，A 类失败逐条未变 |
+
+**必须说清楚的一点**：**C++ 那一侧一行都没有被编译过**。本片能保证的是
+(a) 它调用的 C ABI 在两个 Linux 架构上类型正确，(b) 逻辑与坐标规则有单测，
+(c) CMake 的匹配错误会在 configure 阶段大声失败，而不是在链接期。
+但 `#elif defined(Q_OS_LINUX)` 分支本身是否有语法/类型错误，**只有 UOS 上的第一次构建能回答**。
+这是 P4 全阶段的共同约束，不是本片的疏漏。
+
+**本片未覆盖（诚实记账）**：
+
+- **全屏窗口检测**、**全局鼠标 backend**、**全局快捷键（`XGrabKey`）**、托盘 / 自启动 / 单实例 / 通知、
+  `screenshotnative.h` 的平台中立化 —— 都属 P4 后续 slice，桥已就位。
+- **`snow_rust_ffi` 的 selector 门控放宽**（`cfg(any(windows, unix))`）：slice 5 让
+  `snow-ui-selector-c` 能在 Linux 编译，但那个 archive 仍把它排除在 Linux 之外，C++ 侧
+  `snow_ui_selector_service_*` 会在链接期全部 undefined。本片一并改掉，**但本机无法验证**
+  （该 archive 的 Linux 目标连 `cargo check` 都过不去），只能到真机验。
+- **真机待验**：`XWarpPointer` 在 dde 下是否被合成的鼠标抓取拦截（拖动中 warp 的行为）、
+  多屏负坐标布局下的读数、以及 `QCursor::pos()` 与 root 坐标在 `QT_SCALE_FACTOR` 非 1 时的对应关系。
 
 ### 9.5 打包
 
