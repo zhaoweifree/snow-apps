@@ -3,6 +3,8 @@
 //! All X11 traffic in the crate funnels through [`X11Session`] so that
 //! connection setup, extension probing and error translation stay in one place.
 
+pub mod window;
+
 use x11rb::connection::Connection;
 use x11rb::protocol::randr;
 use x11rb::protocol::xfixes;
