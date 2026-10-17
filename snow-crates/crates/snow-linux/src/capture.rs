@@ -86,7 +86,11 @@ impl ChannelMask {
 
 /// `bits` low bits set; saturates instead of shifting by 32.
 const fn low_bits(bits: u32) -> u32 {
-    if bits >= 32 { u32::MAX } else { (1u32 << bits) - 1 }
+    if bits >= 32 {
+        u32::MAX
+    } else {
+        (1u32 << bits) - 1
+    }
 }
 
 /// Packed pixel layout of an `GetImage` reply.
@@ -111,6 +115,10 @@ impl ImageLayout {
     /// alternative is a silently wrong picture: a depth-8 `PseudoColor` root
     /// resolves through a colormap this backend does not read, and a
     /// discontiguous mask has no single extraction shift.
+    /// Eight scalars, all of them load-bearing: the geometry, the pixel width,
+    /// the stride, the byte order and three colour masks. Bundling them into a
+    /// struct would only move the argument list to the call site.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         width: u32,
         height: u32,
@@ -288,10 +296,9 @@ impl ImageLayout {
 /// Assemble one pixel from its packed bytes in the server's byte order.
 fn read_pixel(bytes: &[u8], lsb_first: bool) -> u32 {
     if lsb_first {
-        bytes
-            .iter()
-            .enumerate()
-            .fold(0u32, |acc, (index, byte)| acc | (u32::from(*byte) << (index * 8)))
+        bytes.iter().enumerate().fold(0u32, |acc, (index, byte)| {
+            acc | (u32::from(*byte) << (index * 8))
+        })
     } else {
         bytes
             .iter()
@@ -324,6 +331,34 @@ pub fn reply_stride(width: u32, height: u32, data_len: usize, bits_per_pixel: u8
     u32::try_from(per_row).ok().filter(|_| per_row >= minimum)
 }
 
+/// Bytes the server needs in a shared-memory segment for this rectangle.
+///
+/// `ShmGetImage` has no reply data: the server writes straight into the
+/// segment, and the reply only reports how much it wrote. So the client has to
+/// ask for a segment big enough *before* it knows the size, using the same
+/// padding rule [`scanline_bytes`] implements. Getting this wrong is not an
+/// error the protocol reports -- a segment that is too small either truncates
+/// the image or, worse, has the server write past the mapping.
+///
+/// `None` for a degenerate request and for anything that does not fit in the
+/// 32-bit size field the request carries. Callers fall back to `GetImage`, which
+/// needs no size up front.
+pub fn shm_segment_size(
+    width: u32,
+    height: u32,
+    bits_per_pixel: u8,
+    scanline_pad: u8,
+) -> Option<u32> {
+    if width == 0 || height == 0 || bits_per_pixel == 0 {
+        return None;
+    }
+    let pad = u64::from(scanline_pad.max(8));
+    let bits = u64::from(width) * u64::from(bits_per_pixel);
+    let stride = bits.div_ceil(pad) * (pad / 8);
+    let bytes = stride.checked_mul(u64::from(height))?;
+    u32::try_from(bytes).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,8 +367,17 @@ mod tests {
     /// little-endian, `0x00RRGGBB`.
     fn native_layout(width: u32, height: u32) -> ImageLayout {
         let stride = scanline_bytes(width, 32, 32);
-        ImageLayout::new(width, height, 32, stride, true, 0x00ff_0000, 0x0000_ff00, 0x0000_00ff)
-            .expect("native X11 layout")
+        ImageLayout::new(
+            width,
+            height,
+            32,
+            stride,
+            true,
+            0x00ff_0000,
+            0x0000_ff00,
+            0x0000_00ff,
+        )
+        .expect("native X11 layout")
     }
 
     #[test]
@@ -432,7 +476,11 @@ mod tests {
     fn truncated_reply_is_rejected_instead_of_read_past_the_end() {
         let layout = native_layout(4, 2);
         let mut out = [0u8; 32];
-        assert!(layout.decode_into(&[0u8; 4], &mut out, OutputOrder::Bgra).is_err());
+        assert!(
+            layout
+                .decode_into(&[0u8; 4], &mut out, OutputOrder::Bgra)
+                .is_err()
+        );
         assert!(layout.required_len() <= 32);
     }
 
@@ -508,8 +556,8 @@ mod tests {
         let packed = ImageLayout::new(2, 2, 24, 8, true, 0xff0000, 0xff00, 0xff).unwrap();
         assert!(!packed.is_native_bgrx());
         // Swapped red and blue masks are still contiguous but are not BGRX.
-        let bgr = ImageLayout::new(1, 1, 32, 4, true, 0x0000_00ff, 0x0000_ff00, 0x00ff_0000)
-            .unwrap();
+        let bgr =
+            ImageLayout::new(1, 1, 32, 4, true, 0x0000_00ff, 0x0000_ff00, 0x00ff_0000).unwrap();
         assert!(!bgr.is_native_bgrx());
     }
 
@@ -556,11 +604,49 @@ mod tests {
             layout.decode_into(&source, &mut fast, order).unwrap();
 
             let mut reference = vec![0u8; layout.output_len()];
-            layout.decode_generic(&source, &mut reference, order).unwrap();
+            layout
+                .decode_generic(&source, &mut reference, order)
+                .unwrap();
 
             assert_eq!(fast, reference, "fast path diverged for {order:?}");
             // Opacity is asserted, never forwarded from the padding byte.
             assert!(fast.chunks_exact(4).all(|pixel| pixel[3] == 0xff));
         }
+    }
+
+    #[test]
+    fn a_full_hd_segment_is_the_visible_bytes_plus_padding() {
+        // 1920 * 4 is already a multiple of 4 bytes, so the segment is the
+        // frame itself -- the case a UOS desktop will actually hit.
+        assert_eq!(shm_segment_size(1920, 1080, 32, 32), Some(1920 * 4 * 1080));
+        // A 1366-wide row is 5464 bytes, which pads to 5464 (already 4-aligned).
+        assert_eq!(shm_segment_size(1366, 768, 32, 32), Some(1366 * 4 * 768));
+    }
+
+    #[test]
+    fn a_narrow_row_is_padded_up_to_the_scanline_boundary() {
+        // 3 pixels at 32bpp is 12 bytes: still a multiple of the 32-bit pad.
+        assert_eq!(shm_segment_size(3, 2, 32, 8), Some(12 * 2));
+        // At 24bpp a 1-pixel row is 3 bytes and pads to 4 with a 32-bit pad.
+        assert_eq!(shm_segment_size(1, 1, 24, 32), Some(4));
+        // The same row with an 8-bit pad needs no padding at all.
+        assert_eq!(shm_segment_size(1, 1, 24, 8), Some(3));
+    }
+
+    #[test]
+    fn a_degenerate_request_has_no_segment_size() {
+        assert_eq!(shm_segment_size(0, 10, 32, 32), None);
+        assert_eq!(shm_segment_size(10, 0, 32, 32), None);
+        // A zero bit depth would divide the row down to nothing.
+        assert_eq!(shm_segment_size(10, 10, 0, 32), None);
+    }
+
+    #[test]
+    fn an_absurd_rectangle_reports_no_size_instead_of_wrapping() {
+        // The request's size field is 32 bits, so a desktop-sized *desktop*
+        // must be refused rather than truncated to something the server would
+        // happily write past.
+        assert_eq!(shm_segment_size(u32::MAX, u32::MAX, 32, 32), None);
+        assert_eq!(shm_segment_size(65_536, 65_536, 32, 32), None);
     }
 }

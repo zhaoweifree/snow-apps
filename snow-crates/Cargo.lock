@@ -3272,6 +3272,7 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "crossbeam-channel",
+ "memmap2",
  "snow-core",
  "thiserror 2.0.20",
  "ttf-parser",

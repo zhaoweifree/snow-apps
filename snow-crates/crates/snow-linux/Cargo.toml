@@ -23,7 +23,13 @@ x11rb = { version = "0.14", default-features = false, features = [
     "randr",
     "xfixes",
     "xinput",
+    # MIT-SHM: `ShmGetImage` writes straight into a segment both sides map,
+    # instead of shipping every pixel through the connection.
+    "shm",
 ] }
+# The client side of that segment. `CreateSegment` hands the client a file
+# descriptor, so mapping it is all that is left -- no System V IPC, no C.
+memmap2 = "0.9"
 # The input observer hands events to its consumer over a channel, and the
 # consumer selects on it alongside its own stop signal; matching the channel type
 # the macOS observer already uses keeps both adapters shaped the same way.

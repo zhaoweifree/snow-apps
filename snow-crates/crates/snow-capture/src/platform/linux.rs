@@ -164,9 +164,12 @@ fn target_rect(target: &CaptureTarget, session: &X11Session) -> CaptureResult<X1
                 geometry.pixel_height,
             ))
         }
-        CaptureTarget::Region(region) => {
-            Ok(X11Rect::new(region.x, region.y, region.width, region.height))
-        }
+        CaptureTarget::Region(region) => Ok(X11Rect::new(
+            region.x,
+            region.y,
+            region.width,
+            region.height,
+        )),
         CaptureTarget::Window(_) => Err(window_capture_unsupported()),
     }
 }
@@ -249,7 +252,10 @@ struct X11Capturer {
 
 impl X11Capturer {
     fn new(target: CaptureTarget, options: CaptureOptions) -> CaptureResult<Self> {
-        if !matches!(options.backend_tuning, crate::tuning::BackendTuning::Default) {
+        if !matches!(
+            options.backend_tuning,
+            crate::tuning::BackendTuning::Default
+        ) {
             return Err(CaptureError::BackendUnavailable(
                 "Windows capture tuning is unavailable on Linux".into(),
             ));
@@ -281,6 +287,10 @@ impl MonitorCapturer for X11Capturer {
 
     fn capture(&mut self, reuse: Option<Frame>) -> CaptureResult<Frame> {
         let requested = target_rect(&self.target, &self.session)?;
+        // Read the output order first: `capture_image` borrows the session until
+        // the returned image is dropped, and that image borrows the capture
+        // buffer inside it.
+        let order = self.output_order();
         let image = self.session.capture_image(requested).map_err(map_error)?;
         let width = image.rect.width;
         let height = image.rect.height;
@@ -298,7 +308,7 @@ impl MonitorCapturer for X11Capturer {
         let mut frame = reuse.unwrap_or_else(Frame::empty);
         frame.prepare_for_overwrite(width, height, self.output_format)?;
         image
-            .decode_into(frame.as_mut_bytes(), self.output_order())
+            .decode_into(frame.as_mut_bytes(), order)
             .map_err(map_error)?;
 
         frame.metadata = Default::default();
