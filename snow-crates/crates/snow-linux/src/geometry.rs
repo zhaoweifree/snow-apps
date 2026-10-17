@@ -123,7 +123,10 @@ mod tests {
     fn union_of_negative_origin_head_keeps_desktop_origin() {
         let left_head = Rect::new(-1920, -200, 1920, 1080);
         let primary = Rect::new(0, 0, 1920, 1080);
-        assert_eq!(left_head.union(&primary), Rect::new(-1920, -200, 3840, 1280));
+        assert_eq!(
+            left_head.union(&primary),
+            Rect::new(-1920, -200, 3840, 1280)
+        );
     }
 
     #[test]

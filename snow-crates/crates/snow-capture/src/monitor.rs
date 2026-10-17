@@ -86,10 +86,7 @@ impl MonitorId {
     /// Only the Windows and macOS backends read this: X11 identifies monitors
     /// by RandR output name, so the Linux backend never touches it and the
     /// getter would otherwise trip `dead_code` under `-Dwarnings`.
-    #[cfg_attr(
-        not(any(target_os = "windows", target_os = "macos")),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
     pub(crate) fn raw_handle(&self) -> isize {
         self.handle
     }

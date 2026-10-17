@@ -99,7 +99,10 @@ impl X11CursorSampler {
             return self.cached_image.clone();
         }
 
-        let reply = xfixes::get_cursor_image(self.session.conn()).ok()?.reply().ok()?;
+        let reply = xfixes::get_cursor_image(self.session.conn())
+            .ok()?
+            .reply()
+            .ok()?;
 
         if let Some(image) = convert_cursor_image(&reply) {
             self.cached_image = Some(image);

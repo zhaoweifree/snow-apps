@@ -104,7 +104,10 @@ mod tests {
             classify_session(Some("tty"), true, false),
             SessionKind::Wayland
         );
-        assert_eq!(classify_session(Some(""), false, false), SessionKind::Headless);
+        assert_eq!(
+            classify_session(Some(""), false, false),
+            SessionKind::Headless
+        );
     }
 
     #[test]

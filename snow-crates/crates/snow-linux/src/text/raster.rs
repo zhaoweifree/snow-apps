@@ -63,10 +63,10 @@ impl FontStack {
         if self.primary.glyph_id(character).0 != 0 {
             return 0;
         }
-        if let Some(cjk) = &self.cjk {
-            if cjk.glyph_id(character).0 != 0 {
-                return 1;
-            }
+        if let Some(cjk) = &self.cjk
+            && cjk.glyph_id(character).0 != 0
+        {
+            return 1;
         }
         // Nothing can draw it. The primary face keeps the layout deterministic
         // by advancing the notdef width the same way the OS adapters do.
@@ -113,15 +113,14 @@ impl KeycapRenderer {
         request: &FontRequest<'_>,
         style: KeycapStyle,
     ) -> Result<Self, TextError> {
-        let (primary, cjk) = super::font::resolve(request, faces).ok_or_else(|| {
-            TextError::FontUnavailable {
+        let (primary, cjk) =
+            super::font::resolve(request, faces).ok_or_else(|| TextError::FontUnavailable {
                 family: if request.family.trim().is_empty() {
                     "<default>".into()
                 } else {
                     request.family.to_string()
                 },
-            }
-        })?;
+            })?;
         Self::load_sources(primary, cjk, style)
     }
 
@@ -159,9 +158,13 @@ impl KeycapRenderer {
             return Err(TextError::InvalidConfig("keycap label is too long"));
         }
 
-        let measured = self.stack.measure(label, snow_core::keycap_layout::FONT_SIZE);
+        let measured = self
+            .stack
+            .measure(label, snow_core::keycap_layout::FONT_SIZE);
         let (logical_width, font_size) = snow_core::keycap_layout::fit(measured);
-        let width = (logical_width as f32 * scale).ceil().clamp(1.0, MAX_BITMAP_WIDTH) as u32;
+        let width = (logical_width as f32 * scale)
+            .ceil()
+            .clamp(1.0, MAX_BITMAP_WIDTH) as u32;
         let height = (snow_core::keycap_layout::HEIGHT as f32 * scale).round() as u32;
         let size = font_size * scale;
 
@@ -488,7 +491,12 @@ mod tests {
         // The Han fixture gives every non-ASCII glyph a wider advance than the
         // Latin fixture gives `M`, which is what makes the two measurable.
         let latin = rasterizer.render("M", 1.0).unwrap();
-        assert!(han.width > latin.width, "han {} latin {}", han.width, latin.width);
+        assert!(
+            han.width > latin.width,
+            "han {} latin {}",
+            han.width,
+            latin.width
+        );
     }
 
     #[test]
@@ -511,7 +519,10 @@ mod tests {
         let mut bold = renderer(SANS, HAN, 700);
         let regular_ink = count_opaque(&regular.render("M", 1.0).unwrap(), TEXT);
         let bold_ink = count_opaque(&bold.render("M", 1.0).unwrap(), TEXT);
-        assert!(bold_ink > regular_ink, "regular {regular_ink} bold {bold_ink}");
+        assert!(
+            bold_ink > regular_ink,
+            "regular {regular_ink} bold {bold_ink}"
+        );
     }
 
     #[test]
@@ -563,7 +574,10 @@ mod tests {
         )
         .err()
         .expect("an uninstalled family must not resolve");
-        assert!(matches!(error, TextError::FontUnavailable { .. }), "{error}");
+        assert!(
+            matches!(error, TextError::FontUnavailable { .. }),
+            "{error}"
+        );
     }
 
     #[test]
@@ -594,7 +608,10 @@ mod tests {
             return;
         }
         let installed = scan_faces(&[dir.to_path_buf()]);
-        assert!(!installed.is_empty(), "the host font tree enumerated nothing");
+        assert!(
+            !installed.is_empty(),
+            "the host font tree enumerated nothing"
+        );
 
         // Arial ships with every Windows install; a machine without it should
         // not fail the suite over a smoke test.
@@ -622,6 +639,9 @@ mod tests {
         // CJK outlines live in a different file, so this only widens if the
         // fallback face was actually resolved and measured.
         let han = rasterizer.render("汉", 1.0).unwrap();
-        assert!(count_opaque(&han, TEXT) > 0, "no ink from the fallback face");
+        assert!(
+            count_opaque(&han, TEXT) > 0,
+            "no ink from the fallback face"
+        );
     }
 }

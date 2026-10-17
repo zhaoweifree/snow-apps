@@ -71,7 +71,12 @@ pub(crate) fn build_backend(
     _auto_policy: AutoBackendPolicy,
     _auto_policy_is_explicit: bool,
 ) -> crate::error::CaptureResult<Arc<dyn CaptureBackend>> {
-    build_backend_for_mode(kind, _auto_policy, _auto_policy_is_explicit, CaptureMode::Snapshot)
+    build_backend_for_mode(
+        kind,
+        _auto_policy,
+        _auto_policy_is_explicit,
+        CaptureMode::Snapshot,
+    )
 }
 
 #[cfg(target_os = "linux")]

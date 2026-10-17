@@ -56,7 +56,7 @@ impl KeyMap {
             return None;
         }
         let columns = usize::from(keysyms_per_keycode);
-        if keysyms.len() % columns != 0 {
+        if !keysyms.len().is_multiple_of(columns) {
             return None;
         }
         let rows = keysyms.len() / columns;
@@ -99,7 +99,9 @@ impl KeyMap {
     /// needs (for example a keypad key with no AltGr column).
     pub fn keysym(&self, keycode: u8, shift: bool, alt_gr: bool) -> Option<u32> {
         let level = self.level(shift, alt_gr);
-        let selected = self.keysym_at(keycode, level).filter(|sym| *sym != NO_SYMBOL);
+        let selected = self
+            .keysym_at(keycode, level)
+            .filter(|sym| *sym != NO_SYMBOL);
         selected.or_else(|| {
             self.keysym_at(keycode, LEVEL_BASE)
                 .filter(|sym| *sym != NO_SYMBOL)

@@ -206,10 +206,10 @@ fn read_names(face: &ttf_parser::Face<'_>) -> Option<(String, String)> {
     let mut subfamily: Option<(u8, String)> = None;
 
     for name in face.names() {
-        let is_family = name.name_id == name_id::TYPOGRAPHIC_FAMILY
-            || name.name_id == name_id::FAMILY;
-        let is_subfamily = name.name_id == name_id::TYPOGRAPHIC_SUBFAMILY
-            || name.name_id == name_id::SUBFAMILY;
+        let is_family =
+            name.name_id == name_id::TYPOGRAPHIC_FAMILY || name.name_id == name_id::FAMILY;
+        let is_subfamily =
+            name.name_id == name_id::TYPOGRAPHIC_SUBFAMILY || name.name_id == name_id::SUBFAMILY;
         if !is_family && !is_subfamily {
             continue;
         }
@@ -225,13 +225,20 @@ fn read_names(face: &ttf_parser::Face<'_>) -> Option<(String, String)> {
         let score = u8::from(name.name_id != name_id::TYPOGRAPHIC_FAMILY)
             + u8::from(name.name_id != name_id::TYPOGRAPHIC_SUBFAMILY)
             + 2 * u8::from(name.language_id != 0x0409);
-        let slot = if is_family { &mut family } else { &mut subfamily };
+        let slot = if is_family {
+            &mut family
+        } else {
+            &mut subfamily
+        };
         if slot.as_ref().is_none_or(|(best, _)| score < *best) {
             *slot = Some((score, value));
         }
     }
 
-    Some((family?.1, subfamily.map(|(_, value)| value).unwrap_or_default()))
+    Some((
+        family?.1,
+        subfamily.map(|(_, value)| value).unwrap_or_default(),
+    ))
 }
 
 /// Fold a family name for comparison.
@@ -283,7 +290,10 @@ pub fn select_face(faces: &[FaceInfo], family: &str, weight: u32) -> Option<Face
 /// are probed in order. A missing fallback is not an error: a machine with no
 /// CJK font still renders Latin legends, and the caller only fails when a
 /// character has no face at all.
-pub fn resolve(request: &FontRequest<'_>, faces: &[FaceInfo]) -> Option<(FaceSource, Option<FaceSource>)> {
+pub fn resolve(
+    request: &FontRequest<'_>,
+    faces: &[FaceInfo],
+) -> Option<(FaceSource, Option<FaceSource>)> {
     let primary = if request.family.trim().is_empty() {
         DEFAULT_FAMILIES
             .iter()
@@ -320,7 +330,11 @@ mod tests {
     #[test]
     fn fixtures_expose_both_styles_of_every_family() {
         let faces = fixtures();
-        for family in ["Snow Recording Test Sans", "Snow Recording Test Mono", "Snow Recording Test Han"] {
+        for family in [
+            "Snow Recording Test Sans",
+            "Snow Recording Test Mono",
+            "Snow Recording Test Han",
+        ] {
             let weights: Vec<u32> = faces
                 .iter()
                 .filter(|face| face.family == family)
@@ -349,7 +363,10 @@ mod tests {
             "SNOW_RECORDING_TEST SANS",
         ] {
             let face = select_face(&faces, spelling, 400).expect(spelling);
-            assert_eq!(face, select_face(&faces, "Snow Recording Test Sans", 400).unwrap());
+            assert_eq!(
+                face,
+                select_face(&faces, "Snow Recording Test Sans", 400).unwrap()
+            );
         }
     }
 

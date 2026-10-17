@@ -89,7 +89,10 @@ mod tests {
 
     #[test]
     fn missing_session_is_an_environment_problem() {
-        assert_eq!(LinuxError::SessionMissing.class(), ErrorClass::InvalidConfig);
+        assert_eq!(
+            LinuxError::SessionMissing.class(),
+            ErrorClass::InvalidConfig
+        );
     }
 
     #[test]
