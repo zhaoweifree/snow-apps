@@ -25,9 +25,10 @@ pub struct QueryResult {
 /// Budgets and cancellation hooks handed to a platform provider.
 ///
 /// The fields are public API surface consumed by the Windows and macOS
-/// traversals; on a platform that has no provider yet nothing reads them, so
-/// the struct carries a platform-scoped `allow` rather than making the public
-/// type disappear from the crate's API.
+/// traversals. The Linux provider reads only `cancelled`: it answers from a
+/// window list rather than walking an accessibility tree, so it has no
+/// traversal to spend a budget on. On a platform with no provider yet nothing
+/// reads them at all.
 #[cfg_attr(
     not(any(target_os = "windows", target_os = "macos")),
     allow(dead_code)

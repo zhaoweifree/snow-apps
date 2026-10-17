@@ -9,6 +9,10 @@ pub use windows::{ElementRegionService, enable_high_dpi_support};
 mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{ElementRegionService, accessibility_permission};
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::ElementRegionService;
 
 /// Owned display geometry supplied by a capture session. No native objects cross threads.
 #[derive(Clone, Debug, PartialEq)]
@@ -69,12 +73,12 @@ pub struct ElementRect {
     rect: PixelRect,
 }
 impl ElementRect {
-    /// Only the platform providers build these: the Windows (UIA/MSAA) and
-    /// macOS (AX) traversals today, the Linux AT-SPI2 one when it lands. On a
-    /// platform with no provider yet the constructor has no caller, which would
-    /// otherwise trip `dead_code` under `-Dwarnings`.
+    /// Only the platform providers build these: the Windows (UIA/MSAA), macOS
+    /// (AX) and Linux (X11 window tree) traversals. On a platform with no
+    /// provider yet the constructor has no caller, which would otherwise trip
+    /// `dead_code` under `-Dwarnings`.
     #[cfg_attr(
-        not(any(target_os = "windows", target_os = "macos")),
+        not(any(target_os = "windows", target_os = "macos", target_os = "linux")),
         allow(dead_code)
     )]
     pub(crate) fn new(rect: impl Into<PixelRect>) -> Self {
@@ -146,4 +150,10 @@ pub struct WindowSnapshot {
     pub(crate) displays: Vec<macos::DisplayInfo>,
     #[cfg(target_os = "macos")]
     pub(crate) activation: std::sync::Arc<macos::activation::Session>,
+    /// Selectable windows in bottom-to-top stacking order.
+    #[cfg(target_os = "linux")]
+    pub(crate) windows: Vec<linux::WindowInfo>,
+    /// The root window rectangle, reported when no window covers the point.
+    #[cfg(target_os = "linux")]
+    pub(crate) desktop: PixelRect,
 }
