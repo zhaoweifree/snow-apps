@@ -314,6 +314,24 @@ if(NOT TARGET snow_visual_region_detector_c)
     snow_add_rust_static_library(snow_visual_region_detector_c PACKAGE snow-visual-region-detector-c MANIFEST_DIR "${SNOW_SHOT_CAPTURE_CRATES_DIR}" OUTPUT_NAME snow_visual_region_detector_c)
 endif()
 
+# X11 platform services the Qt layer calls directly. Deliberately a separate
+# archive from snow_shot_rust_ffi: that one reaches C sources, so on a Windows
+# dev box `cargo check --target <linux-triple>` stops inside its dependency
+# graph and never reaches this Linux-only code. This archive depends only on the
+# pure-Rust snow-linux crate and is therefore covered by the cross-target check.
+if(UNIX AND NOT APPLE)
+    if(NOT TARGET snow_linux_platform)
+        snow_add_rust_static_library(snow_linux_platform PACKAGE snow-linux-c
+            MANIFEST_DIR "${SNOW_SHOT_CAPTURE_CRATES_DIR}" OUTPUT_NAME snow_linux_platform)
+    endif()
+    if(NOT TARGET snow_shot_linux_platform)
+        add_library(snow_shot_linux_platform INTERFACE)
+        target_link_libraries(snow_shot_linux_platform INTERFACE snow_linux_platform)
+        target_include_directories(snow_shot_linux_platform INTERFACE
+            "${SNOW_SHOT_CAPTURE_CRATES_DIR}/crates/snow-linux-c/include")
+    endif()
+endif()
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/SnowSelectedText.cmake")
 
 # OpenCV's contrib wechat_qrcode module backs in-process QR recognition and
@@ -11449,4 +11467,25 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-canvas-status-readout-tests -platform offscreen)
     set_tests_properties(snow-shot-canvas-status-readout-tests PROPERTIES LABELS unit TIMEOUT 30
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+endif()
+
+# Anything that compiles the shared platform sources also has to carry the X11
+# archive those sources call into. A static library may keep an undefined symbol;
+# the executable that links it may not, and the test hosts build the same sources
+# standalone. This runs at the very end so that every target, including those
+# declared inside the tests block above, is already in scope.
+if(UNIX AND NOT APPLE)
+    get_property(_snow_x11_consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    set(_snow_x11_linked 0)
+    foreach(_snow_target IN LISTS _snow_x11_consumers)
+        get_target_property(_snow_sources ${_snow_target} SOURCES)
+        if("${_snow_sources}" MATCHES "platform/physicalcursor\\.cpp")
+            target_link_libraries(${_snow_target} PRIVATE snow_shot_linux_platform)
+            math(EXPR _snow_x11_linked "${_snow_x11_linked} + 1")
+        endif()
+    endforeach()
+    if(_snow_x11_linked EQUAL 0)
+        message(FATAL_ERROR
+            "No target compiles src/platform/physicalcursor.cpp, so the X11 archive would be linked into nothing. Fix the matcher above rather than deleting this check.")
+    endif()
 endif()

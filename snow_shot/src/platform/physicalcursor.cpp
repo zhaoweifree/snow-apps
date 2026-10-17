@@ -17,6 +17,9 @@
 #include <QScreen>
 #include <QPointer>
 #include <memory>
+#elif defined(Q_OS_LINUX)
+#include <memory>
+#include "snow_linux.h"
 #endif
 
 namespace snow_shot::platform {
@@ -91,6 +94,44 @@ PhysicalCursorAccess nativeAccess() {
             // half-point request otherwise moves up/left but stalls down/right.
             return *display ? qRound((*display)->devicePixelRatio()) : 1;
         }};
+#elif defined(Q_OS_LINUX)
+    // X11 only. Under a Wayland session Qt uses the `wayland` platform even when
+    // XWayland is running, and there XQueryPointer answers from XWayland's copy of
+    // the pointer, which stops following it once it leaves an X window -- a stale
+    // position rather than an absent one, which is worse than unsupported.
+    if (!qGuiApp || QGuiApplication::platformName() != QStringLiteral("xcb"))
+        return {};
+    // One X11 connection for the process, kept by the Rust platform layer: Qt
+    // constructs a PhysicalCursor as a temporary on hot paths, so a connection
+    // per instance would handshake with the server on every mouse move. A null
+    // handle means no X server is reachable, which is exactly "unsupported".
+    std::shared_ptr<SnowLinuxPlatform> platform(snow_linux_platform_create(),
+                                                &snow_linux_platform_destroy);
+    if (!platform)
+        return {};
+    return PhysicalCursorAccess{
+        true,
+        [platform]() -> std::optional<QPoint> {
+            int32_t x = 0;
+            int32_t y = 0;
+            if (snow_linux_platform_pointer_position(platform.get(), &x, &y) == 0)
+                return std::nullopt;
+            return QPoint(static_cast<int>(x), static_cast<int>(y));
+        },
+        [platform](const QPoint& pixels) {
+            return snow_linux_platform_set_pointer_position(platform.get(), pixels.x(),
+                                                            pixels.y()) != 0;
+        },
+        // `readLogicalPosition` stays empty on purpose: on X11 the root
+        // coordinates are device pixels, and the logical ones depend on the
+        // screen's scale factor, which Qt already applies to QCursor::pos().
+        // Callers fall back to that, so mapping a second time here would be a
+        // second opinion with worse information.
+        {},
+        // A warp is a real motion event for the server, so Qt's own pointer
+        // state follows it; there is nothing to synthesize.
+        true,
+    };
 #else
     return {};
 #endif
