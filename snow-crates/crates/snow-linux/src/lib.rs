@@ -24,6 +24,7 @@ pub mod input;
 pub mod pixels;
 pub mod session;
 pub mod text;
+pub mod window;
 
 #[cfg(target_os = "linux")]
 pub mod cursor;
