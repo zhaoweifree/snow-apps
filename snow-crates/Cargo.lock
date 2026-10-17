@@ -3280,6 +3280,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "snow-linux-c"
+version = "0.1.0"
+dependencies = [
+ "snow-linux",
+]
+
+[[package]]
 name = "snow-macos"
 version = "0.1.0"
 dependencies = [

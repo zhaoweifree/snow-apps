@@ -1,0 +1,12 @@
+[package]
+name = "snow-linux-c"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "C ABI over the Linux platform backend, for the Qt application"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+snow-linux = { path = "../snow-linux" }
