@@ -8,6 +8,12 @@ description = "Linux (X11 / Wayland) platform backend for Snow Apps"
 [dependencies]
 snow-core = { path = "../snow-core" }
 thiserror.workspace = true
+# The keycap overlay needs text, and neither fontconfig nor FreeType is
+# available without a C toolchain. `ab_glyph` rasterizes outlines and
+# `ttf-parser` reads the `name` table during font discovery, both in pure Rust,
+# which keeps the text path type-checkable from a Windows host.
+ab_glyph = { version = "0.2.32", default-features = false, features = ["std"] }
+ttf-parser = "0.25.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Pure-Rust X11 bindings: no libxcb / no C toolchain required, which keeps the
