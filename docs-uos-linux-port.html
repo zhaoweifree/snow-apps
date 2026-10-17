@@ -250,11 +250,18 @@ del{color:var(--fg-soft)}
 <td>XInput2 观测（见 9.4.4）+ <code>ab_glyph</code> 光栅化（见 9.4.5）；Wayland / 无 XInput2 退路仍缺</td>
 </tr>
 <tr>
-<td>Rust 音频 / 元素拾取</td>
+<td>Rust 元素拾取</td>
+<td>低</td>
+<td>—</td>
+<td><strong>已完成窗口级</strong></td>
+<td>X11 窗口树 + <code>_NET_*</code>（见 9.4.6）；控件级仍需 AT-SPI2</td>
+</tr>
+<tr>
+<td>Rust 音频</td>
 <td>低（全为 <code>UnsupportedBackend</code>）</td>
 <td>—</td>
 <td><strong>从零实现</strong></td>
-<td>PulseAudio / PipeWire、AT-SPI2 全缺</td>
+<td>PulseAudio / PipeWire 全缺</td>
 </tr>
 <tr>
 <td>Rust OCR（<code>snow-ocr-process</code>）</td>
@@ -425,7 +432,7 @@ fn unsupported_error() -&gt; CaptureError {
 <tr>
 <td>UIA/MSAA 元素拾取</td>
 <td><code>snow-ui-selector/src/windows/*</code>、<code>snow-selected-text/src/platform/windows/*</code></td>
-<td>AT-SPI2 (D-Bus)</td>
+<td><strong>X11 窗口树 —— 已落地窗口级</strong>：<code>snow-linux/src/window.rs</code>（纯逻辑）+ <code>snow-linux/src/x11/window.rs</code>（见 9.4.6）。控件级仍需 AT-SPI2 (D-Bus)；跨进程读选中文字（<code>snow-selected-text</code>）同样仍缺</td>
 </tr>
 <tr>
 <td>全局键鼠钩子</td>
@@ -841,7 +848,7 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <tr>
 <td><strong>新增</strong></td>
 <td><code>snow-crates/crates/snow-linux/</code></td>
-<td>替代 <code>snow-macos</code> 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。<strong>已建</strong>：<code>geometry</code>/<code>pixels</code>/<code>session</code>/<code>capture</code>（纯逻辑，任何平台可单测）+ <code>input::{keys,tracking}</code>（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ <code>text::{font,raster}</code>（纯逻辑：字体发现 + 键帽光栅化，<code>ab_glyph</code>/<code>ttf-parser</code>）+ <code>x11</code>/<code>display</code>/<code>cursor</code>/<code>input::x11</code>（X11，<code>x11rb</code> 纯 Rust 实现）。待补：PipeWire/Wayland capture、PulseAudio、evdev 退路</td>
+<td>替代 <code>snow-macos</code> 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。<strong>已建</strong>：<code>geometry</code>/<code>pixels</code>/<code>session</code>/<code>capture</code>/<code>window</code>（纯逻辑，任何平台可单测）+ <code>input::{keys,tracking}</code>（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ <code>text::{font,raster}</code>（纯逻辑：字体发现 + 键帽光栅化，<code>ab_glyph</code>/<code>ttf-parser</code>）+ <code>x11</code>/<code>display</code>/<code>cursor</code>/<code>input::x11</code>/<code>x11::window</code>（X11，<code>x11rb</code> 纯 Rust 实现）。待补：PipeWire/Wayland capture、PulseAudio、evdev 退路</td>
 </tr>
 <tr>
 <td><strong>新增</strong></td>
@@ -860,8 +867,13 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 </tr>
 <tr>
 <td><strong>新增</strong></td>
-<td><code>snow-crates/crates/snow-ui-selector/src/linux/</code>、<code>snow-selected-text/src/platform/linux/</code></td>
-<td>AT-SPI2（D-Bus）+ PRIMARY selection。<strong>注意</strong>：<code>snow-ui-selector-c</code> 依赖 <code>ElementRegionService</code>，在 Linux provider 落地前该 crate 无法编译（见 9.4.2 B 类）</td>
+<td><code>snow-crates/crates/snow-ui-selector/src/linux.rs</code></td>
+<td><strong>窗口级已落地</strong>（见 9.4.6）：X11 窗口树 + <code>_NET_CLIENT_LIST</code>，<code>ElementRegionService</code> 在 Linux 上导出，<code>snow-ui-selector-c</code> 恢复可编译。控件级仍需 AT-SPI2（D-Bus）——未实现，<code>HitTestMode::UiElement</code> 与 <code>Window</code> 目前返回同一个窗口矩形</td>
+</tr>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow-crates/crates/snow-selected-text/src/platform/linux/</code></td>
+<td>AT-SPI2（D-Bus）取选中文本 + PRIMARY selection。未开始</td>
 </tr>
 <tr>
 <td><strong>修改</strong></td>
@@ -1047,6 +1059,12 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <td><code>WH_MOUSE_LL</code></td>
 <td><code>CGEventTap</code></td>
 <td><strong>XInput2 raw events —— 已落地</strong>（see 9.4.4）；无 XInput2 时诚实上报不可用</td>
+</tr>
+<tr>
+<td>窗口 / 元素拾取</td>
+<td>UIA / MSAA</td>
+<td><code>AXUIElement</code> + <code>CGWindowList</code></td>
+<td><strong>X11 窗口树 + <code>_NET_CLIENT_LIST</code> —— 已落地窗口级</strong>（见 9.4.6）。控件级需 AT-SPI2，仍缺</td>
 </tr>
 <tr>
 <td>键帽文字渲染</td>
@@ -1244,8 +1262,8 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <tr>
 <td><strong>P3 Rust 平台后端</strong> <em>(进行中)</em></td>
 <td>补齐 L2/L3 平台能力</td>
-<td><code>snow-linux</code> crate；capture(X11→PipeWire)、cursor、audio、input hooks、text</td>
-<td><code>cargo test -p snow-capture</code> 在 UOS 通过；能截到主屏。<strong>已达成（slice 1–4）</strong>：<code>snow-linux</code>（X11 会话 / RandR / 光标 / <code>GetImage</code> 解码 / XInput2 输入观测 / <code>ab_glyph</code> 键帽光栅化）+ <code>snow-cursor</code> Linux 后端 + <code>snow-capture</code> X11 后端 + <code>snow-recording-effects</code> 键鼠观测与键帽渲染，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。<strong>剩余</strong>：PipeWire/Wayland、音频、AT-SPI2</td>
+<td><code>snow-linux</code> crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking</td>
+<td><code>cargo test -p snow-capture</code> 在 UOS 通过；能截到主屏。<strong>已达成（slice 1–5）</strong>：<code>snow-linux</code>（X11 会话 / RandR / 光标 / <code>GetImage</code> 解码 / XInput2 输入观测 / <code>ab_glyph</code> 键帽光栅化 / X11 窗口树拾取）+ <code>snow-cursor</code> Linux 后端 + <code>snow-capture</code> X11 后端 + <code>snow-recording-effects</code> 键鼠观测与键帽渲染 + <code>snow-ui-selector</code> Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。<strong>剩余</strong>：PipeWire/Wayland、音频、AT-SPI2 控件级</td>
 </tr>
 <tr>
 <td><strong>P4 C++ 平台层</strong></td>
@@ -1449,7 +1467,7 @@ Windows 上装 Zig 并设 <code>CC_x86_64_unknown_linux_gnu="zig cc -target x86_
 也仍需真机，除非手工给 <code>FFMPEG_*</code> 环境变量。</p>
 </blockquote>
 <h4>9.4.2 逐 crate 体检现状（2026-10-15 实测，x86_64 + aarch64）</h4>
-<p>30 个 workspace 成员 × 2 架构 = 60 次检查，<strong>46 通过（每架构 23/30）</strong>，9.4.1 的脚本已固化为
+<p>30 个 workspace 成员 × 2 架构 = 60 次检查，<strong>首跑 46 通过（每架构 23/30）、当前 48 通过（每架构 24/30）</strong>，9.4.1 的脚本已固化为
 <code>bash scripts/linux-cross-check.sh</code>。缺口分两类，性质完全不同：</p>
 <blockquote>
 <p><strong>2026-10-17 复跑（slice 3 之后）</strong>：仍是 <strong>46/60</strong>，失败项与分类<strong>逐条未变</strong>。差别在覆盖范围：
@@ -1460,6 +1478,11 @@ Windows 上装 Zig 并设 <code>CC_x86_64_unknown_linux_gnu="zig cc -target x86_
 本片新增的 <code>snow-linux::text</code>（<code>ab_glyph</code> + <code>ttf-parser</code>）<strong>没有给任何 crate 增加新的失败项</strong>，
 因为它只往依赖树里加了两个纯 Rust crate —— 这正是选它们而不选 fontconfig / FreeType 的原因：
 若链了 C 字体栈，<code>snow-linux</code> 自己就会掉进 A 类，本片代码将不再有任何自动门禁。</p>
+<p><strong>2026-10-17 复跑（slice 5 之后）</strong>：<strong>48/60</strong>（每架构 24/30），<strong>B 类清零</strong>。新增通过的两项就是
+<code>snow-ui-selector</code> 与 <code>snow-ui-selector-c</code> —— 它们此前是同一个根因的两面（provider 未导出 /
+C 层用不到）。A 类仍是每架构 6 个、逐条未变（<code>snow-ocr-process</code> 在两个架构上撞的是不同依赖，
+见下表）。<strong>这就是本片选 X11 窗口树而不是直接上 AT-SPI2 的实际收益：一次把 2 个门禁项转绿，
+且没有新增任何 C 依赖。</strong></p>
 </blockquote>
 <p><strong>(A) 需要交叉 C 编译器 —— 不是我们的代码问题（每架构 6 个）</strong></p>
 <table>
@@ -1494,7 +1517,7 @@ Windows 上装 Zig 并设 <code>CC_x86_64_unknown_linux_gnu="zig cc -target x86_
 </tbody>
 </table>
 <p>这一类的失败<strong>与 Linux 移植无关</strong>：同一份代码在 UOS 真机上只要有 <code>gcc</code> + <code>libav*-dev</code> 就能过。</p>
-<p><strong>(B) 真实缺口 —— 必须在 P3 里补（每架构 1 个）</strong></p>
+<p><strong>(B) 真实缺口 —— ~~必须在 P3 里补（每架构 1 个）~~ 已于 slice 5 清零（每架构 0 个）</strong></p>
 <table>
 <thead>
 <tr>
@@ -1506,10 +1529,10 @@ Windows 上装 Zig 并设 <code>CC_x86_64_unknown_linux_gnu="zig cc -target x86_
 </thead>
 <tbody>
 <tr>
-<td><code>snow-ui-selector-c</code></td>
-<td><code>E0432 unresolved import snow_ui_selector::ElementRegionService</code></td>
+<td>~~<code>snow-ui-selector-c</code>~~</td>
+<td>~~<code>E0432 unresolved import snow_ui_selector::ElementRegionService</code>~~</td>
 <td>该类型只在 <code>#[cfg(windows)]</code> / <code>#[cfg(target_os="macos")]</code> 下导出；<code>snow-ui-selector</code> 尚无 Linux provider</td>
-<td><strong>不放假桩</strong>。AT-SPI2 provider 落地前，此 crate 就是 Win/macOS-only；塞一个"返回空元素集"的 Linux 实现会让 C 层以为无障碍"可用但没结果"，比编译失败更危险</td>
+<td><strong>已修（slice 5，见 9.4.6）</strong>：新增 <code>snow-ui-selector/src/linux.rs</code> 导出 <code>ElementRegionService</code>，走 X11 窗口树。原判断「不放假桩」保留 —— 当时塞一个"返回空元素集"的实现会让 C 层以为无障碍"可用但没结果"，比编译失败更危险；本片给的是<strong>真实现</strong>（窗口级），不是空元素集</td>
 </tr>
 </tbody>
 </table>
@@ -1820,6 +1843,131 @@ advance 都比 Latin 的 <code>M</code> 宽（能区分「量了回退字体」�
 <code>Xft</code> / X core 位图字体。<strong>真机待验</strong>：UOS 20 上实际的默认族名（候选表按 Noto / 文泉驿写的，
 若镜像用的是别的族名，<code>create</code> 会在录制启动时报 <code>FontUnavailable</code> 而不是静默画错），
 以及汉字键帽在真实字体下的墨迹居中效果。</p>
+<h4>9.4.6 P3 slice 5：X11 窗口级拾取落地（2026-10-17）</h4>
+<p>slice 1–4 让 Linux「看上屏、看见手、画得出键帽」，这一片补的是<strong>指针指向谁</strong>：
+<code>snow-ui-selector</code> 在 Linux 上第一次有了 <code>ElementRegionService</code>，<code>snow-ui-selector-c</code> 随之恢复可编译。
+这就是 9.4.2 里唯一一个 B 类门禁失败的根因，本片把它清零（46/60 → <strong>48/60</strong>）。</p>
+<p><strong>范围是窗口级，不是控件级。</strong> 控件级要 AT-SPI2（另一个协议、另一条总线），本片没做，
+也不假装做了 —— 见下面第 5 条判断。</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>平台</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>规则</td>
+<td><code>snow-linux/src/window.rs</code></td>
+<td><strong>全平台</strong></td>
+<td><code>WindowKind</code> / <code>classify</code>（<code>_NET_WM_WINDOW_TYPE</code> 折叠）/ <code>selectable</code>（可选中判据）/ <code>DesktopWindows::hit_test</code>（叠放序命中）。<strong>10 个单测在 Windows 上跑</strong></td>
+</tr>
+<tr>
+<td>对话</td>
+<td><code>snow-linux/src/x11/window.rs</code></td>
+<td>linux</td>
+<td><code>desktop_windows_for</code>：<code>_NET_CLIENT_LIST</code> → 逐窗口 <code>GetWindowAttributes</code> + <code>_NET_WM_WINDOW_TYPE</code> + <code>GetGeometry</code> + <code>TranslateCoordinates</code> → 根坐标 frame 矩形</td>
+</tr>
+<tr>
+<td>接线</td>
+<td><code>snow-ui-selector/src/linux.rs</code></td>
+<td>linux</td>
+<td><code>ElementRegionService</code>：与 macOS provider 同形的 API（<code>new</code> / <code>with_backend*</code> / <code>refresh*</code> / <code>release_cache</code> / <code>window_snapshot</code> / <code>from_snapshot</code> / <code>query</code>），<code>!Send</code>/<code>!Sync</code></td>
+</tr>
+</tbody>
+</table>
+<p>五个必须写下来的判断：</p>
+<ol>
+<li><strong><code>_NET_CLIENT_LIST</code> 是自下而上，命中测试必须倒着找</strong>。这是本片最容易写错、且<strong>错了不会崩</strong>的地方：
+   正序遍历命中第一个，拿到的是最底层窗口 —— 表现为"选择器总指向后面那个应用"，看起来像
+   业务逻辑 bug 而不是遍历方向 bug。所以规则模块的文档注释和单测都把这条写在最前面
+   （<code>the_topmost_window_wins</code> 用两个<strong>完全重合</strong>的矩形来断言：叠放序相同则无法靠几何区分）。</li>
+<li><strong><code>TranslateCoordinates</code> 给的是内区原点，边框要自己补回来</strong>。X11 的 <code>GetGeometry</code> 里
+   <code>width</code>/<code>height</code> 是内区尺寸，<code>border_width</code> 单独给出；而用户看到的、他要截的那块是<strong>含边框</strong>的外框。
+   两者不一致时框会整体向内缩一圈，且窗口越有边框偏得越多。故 <code>bounds = (dst − border, w + 2·border)</code>。
+   <code>translate_coordinates</code> 的 <code>same_screen == false</code> 一律丢弃候选：那表示窗口在另一个 screen 上，
+   在本 screen 的根坐标里没有位置。</li>
+<li><strong>属性的三种状态必须分开</strong>：「读失败（窗口没了）」「属性不存在（<code>type_ == NONE</code>）」「存在但为空」。
+   - <code>GetWindowAttributes</code> / <code>GetGeometry</code> / <code>TranslateCoordinates</code> 失败 ⇒ <strong>丢弃这一个候选</strong>，不让整次
+     枚举失败。桌面在任何时刻都有应用被关掉，一次瞬时竞态不该让选择器整体报错。
+   - <code>_NET_CLIENT_LIST</code> <strong>属性不存在</strong>才回退到 <code>QueryTree</code> 遍历根窗口子窗口（reparenting WM 下的
+     frame 窗口）；<strong>存在但为空</strong>是窗口管理器在说"没有受管窗口"，此时回退会把 frame 当成窗口，是反的。
+   - <code>_NET_WM_WINDOW_TYPE</code> 不存在 ⇒ <code>Normal</code>。该属性是<strong>可选的</strong>，绝大多数应用根本不设；
+     若把"没写类型"当成"不可选中"，等于把几乎所有程序排除在外。</li>
+<li><strong><code>_NET_WM_WINDOW_TYPE</code> 与 <code>override_redirect</code> 两道过滤都要</strong>，因为它们描述的是不同的东西。
+   菜单/工具提示通常 <code>override_redirect</code>，于是<strong>根本不会出现在 <code>_NET_CLIENT_LIST</code> 里</strong>（受管窗口才进）；
+   但回退路径读的是根窗口子窗口，那时它们就在。反过来，dock/desktop 是受管窗口、会进列表。
+   单测 <code>only_plain_application_windows_are_selectable</code> 把七种"看似窗口但不可选"的形态列了一遍
+   （不可见 / override-redirect / <code>InputOnly</code> / 零面积 / 桌面 / 面板 / 瞬态），逐条断言被拒。</li>
+<li><strong><code>HitTestMode::UiElement</code> 与 <code>Window</code> 返回同一个窗口矩形 —— 这是有意的，且写进了模块文档</strong>。
+   没有控件级 provider 时，把窗口矩形当控件矩形返回会让调用方以为拿到了控件；
+   而返回"空元素集"会让 C 层以为无障碍<strong>可用但没结果</strong>（比编译失败更危险，与 9.4.2 原来的判断一致）。
+   所以只承诺窗口级，并在 <code>query</code> 的文档里写明"需要控件时应把本 provider 当窗口级退路"。</li>
+</ol>
+<p><strong>其余刻意的取舍</strong>：</p>
+<ul>
+<li><strong>点落在窗口之间的空隙时报根窗口矩形</strong>，不返回空 path。空 path 在 C ABI 里是 <code>path: None</code>，
+  上层当作"这次没选中"；而 macOS provider 在同样情形返回显示器矩形。两者行为保持一致，
+  用户在裸桌面上点一下也能框到一块区域。</li>
+<li><strong><code>Point::window_id</code> 优先</strong>：UI 线程已经用 <code>QueryPointer</code> 解析过命中窗口时，以它的答案收窄搜索范围。
+  两次遍历的时差可能让重叠窗口的结论不一致，让先解析的一方说了算，比让两边各自猜更稳。</li>
+<li><strong>属性读取上限 <code>MAX_PROPERTY_ITEMS = 1024</code></strong>：一次 hover 里读几千项的窗口列表不是任何真实桌面，
+  上限只是防止一个畸形属性把一次 hover 变成大分配。</li>
+<li><strong><code>release_cache</code> 只清快照</strong>：X11 provider 不持有长生命周期的服务器对象，连接随快照一起丢掉；
+  这与 macOS provider 需要显式释放 AX 对象不同，因此"释放"在这里就是丢弃 <code>WindowSnapshot</code>。</li>
+</ul>
+<p><strong>验证（2026-10-17，Windows + rustc 1.97.1）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-linux</code></td>
+<td><strong>101 通过</strong>（slice 4 后是 91，本片 +10 = <code>window</code> 全部）</td>
+</tr>
+<tr>
+<td><code>cargo test -p snow-ui-selector</code></td>
+<td><strong>50 通过</strong>，无回归</td>
+</tr>
+<tr>
+<td aarch64-linux windows_="windows," x86_64-linux_="x86_64-linux,"><code>cargo check -p snow-ui-selector -p snow-ui-selector-c --all-targets</code> ×</td>
+<td>三目标全绿（<code>-Dwarnings</code> 生效）</td>
+</tr>
+<tr>
+<td><strong>反向验证</strong>：往 <code>linux.rs</code> 末尾注入 <code>compile_error!</code> 后重跑 linux 目标检查</td>
+<td>构建<strong>如期失败</strong> —— 证明该文件在 linux 目标下确实参与编译，而不是被 cfg 掉后"检查通过"</td>
+</tr>
+<tr>
+<td><code>bash scripts/linux-cross-check.sh</code>（双架构）</td>
+<td><strong>48/60</strong>（每架构 24/30）；<code>snow-ui-selector</code> 与 <code>snow-ui-selector-c</code> 均 <strong>PASS</strong>，B 类清零</td>
+</tr>
+</tbody>
+</table>
+<p>反向验证这一步不是形式主义：<code>snow-ui-selector</code> 的 Linux 面全部在 <code>#[cfg(target_os = "linux")]</code> 之后，
+如果 cfg 名写错（例如写成 <code>target_os = "linux "</code>），跨目标检查会<strong>静默通过</strong>，而真机上照样编译不过。
+注入一个必然失败的语句，是把"这条路径真的被编译了"从假设变成事实的最便宜办法。</p>
+<p><strong>本片未覆盖（诚实记账）</strong>：</p>
+<ul>
+<li><strong>控件级拾取（AT-SPI2）</strong>：<code>HitTestMode::UiElement</code> 拿不到按钮/输入框。已完成可行性探针：
+  <code>zbus 6.0.0</code>（<code>--no-default-features --features default-rt,proxy</code>）能在 Windows 上为
+  <code>x86_64-unknown-linux-gnu</code> 交叉编译通过、依赖树无 C 源码 ⇒ <strong>不会破坏纯 Rust 铁律</strong>。
+  但代价是 1000+ 行协议代码 + 「在 Windows 上无法验证行为」—— 属于独立切片。</li>
+<li><strong>非矩形窗口的形状</strong>：<code>Shape</code> 扩展裁剪过的窗口，这里按外接矩形处理，会多框一圈透明区域。</li>
+<li><strong>多 screen 的老式 X 配置</strong>（<code>Xinerama</code> 之前的 <code>screen 0/1</code>）：跨 screen 的窗口被直接丢弃，不折算坐标。</li>
+<li><strong>窗口的最小化状态</strong>：靠 <code>IsViewable</code> 判断（最小化窗口通常已 unmap）；不额外读
+  <code>_NET_WM_STATE_HIDDEN</code>。</li>
+<li><strong>XWayland 下的缩放</strong>：XWayland 会把逻辑坐标与物理像素的关系交给合成器，本层拿到的仍是
+  X 空间坐标；Wayland 会话下的实际映射需真机验证。</li>
+<li><strong>真机待验</strong>：UOS 20 的 <code>dde-daemon</code> / <code>dde-dock</code> 是否导出 <code>_NET_CLIENT_LIST</code>（不导出则走
+  <code>QueryTree</code> 回退，选中粒度变成 frame 窗口）、以及 <code>_NET_WM_WINDOW_TYPE</code> 在国产应用上的实际设置率。</li>
+</ul>
 <h3 id="9-5-打包">9.5 打包</h3>
 <pre><code class="language-cmake"># cmake/SnowShotLinuxPackage.cmake（新增）
 set(CPACK_GENERATOR &quot;DEB;External&quot;)
