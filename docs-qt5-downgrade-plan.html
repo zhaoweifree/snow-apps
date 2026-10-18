@@ -1452,10 +1452,13 @@ template &lt;typename T&gt;
 <pre><code class="language-bash">bash .workbuddy/qt5-port/launch-qt5-app.sh windows-qt5-full snow_shot/snow_shot.exe 20 \
     --e2e-instance-id=qt5smoke
 </code></pre>
-<p>这个脚本在观察窗口结束时会<strong>主动结束进程</strong>，只适合冒烟判活；要坐下来逐项手测，就照它的
-环境装配方式（<code>PATH</code> 里加 Qt5 的 <code>bin</code> 与 <code>vcpkg_installed/x64-windows/bin</code>、设
-<code>QT_PLUGIN_PATH</code> 与 <code>QT_QPA_PLATFORM_PLUGIN_PATH</code>）自己起，参数照抄
-<code>--e2e-instance-id=qt5smoke</code>。</p>
+<p>这个脚本在观察窗口结束时会<strong>主动结束进程</strong>，只适合冒烟判活；要坐下来逐项手测就用
+下面这个（不设观察窗口、不杀进程，顺带把截图热键播种成 F24 并打印数据目录）：</p>
+<pre><code class="language-bash">bash .workbuddy/qt5-port/start-qt5-manual.sh qt5manual
+</code></pre>
+<p>它同样带 <code>--e2e-instance-id</code>，所以不会和正式版抢单实例键与热键；日志与崩溃转储落在
+<code>%APPDATA%</code> / <code>%LOCALAPPDATA%</code> 下的 <code>SnowShot/snow_shot-e2e-qt5manual/</code>。
+<strong>必须在你自己的终端里跑</strong>：从自动化工具里起的话，工具调用一结束子进程就被回收了。</p>
 <table>
 <thead>
 <tr>
