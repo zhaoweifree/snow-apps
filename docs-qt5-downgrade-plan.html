@@ -109,6 +109,7 @@ del{color:var(--fg-soft)}
 <li><a href="#3-6-本轮新增-snow-shot-的-cmake-面首次过-qt5-r35">3.6 本轮新增：<code>snow_shot</code> 的 CMake 面首次过 Qt5（R35）</a></li>
 <li><a href="#3-7-本轮新增-qt5-windows-三档阶梯与首次真编译-r36">3.7 本轮新增：Qt5 Windows 三档阶梯与首次真编译（R36）</a></li>
 <li><a href="#3-8-本轮新增-full-档链接闭环-首次真机启动-r37">3.8 本轮新增：full 档链接闭环 + 首次真机启动（R37）</a></li>
+<li><a href="#3-9-本轮新增-拖框即崩的根因是-qt-5-15-2-自己的-trystart-std-function-r38">3.9 本轮新增：拖框即崩的根因是 Qt 5.15.2 自己的 <code>tryStart(std::function)</code>（R38）</a></li>
 </ul>
 </li>
 <li><a href="#4-分阶段实施计划">4. 分阶段实施计划</a>
@@ -1497,6 +1498,10 @@ template &lt;typename T&gt;
 </tr>
 </tbody>
 </table>
+<p><strong>自动化已经覆盖到的部分</strong>（R38 起）：热键 → overlay → 拖框选中 → Ctrl+C 落剪贴板，
+连跑 5 轮全绿，入口见 §3.9。表里剩下的项仍是手测。</p>
+<p>注意：全新实例的默认 <code>screenshot</code> 热键是 <strong>F1</strong>，不是 F24。手测前要么按 F1，
+要么照 §3.9(5) 把 <code>config.json</code> 的绑定播成 F24（注入工具发的是 F24）。</p>
 <h3 id="3-5-本轮新增-一个真缺陷修复-三个可复跑的验证入口">3.5 本轮新增：一个真缺陷修复 + 三个可复跑的验证入口</h3>
 <h4>(1) 修复了 Qt5 翻译管线的构建顺序缺陷（<code>cmake/SnowQtVersionShims.cmake</code>）</h4>
 <p><strong>症状</strong>：在<strong>全新</strong>构建目录里 <code>cmake --build</code> 会在构图阶段直接失败：</p>
@@ -2116,6 +2121,142 @@ emergency 为空）。以下两条告警<strong>不是缺陷</strong>，别当�
 <li><code>Snow Shot updater service exited unexpectedly 1</code>：开发树里没有待应用的更新包。</li>
 </ul>
 <p>仍未验证的是 §3.4 的手测项（截图三模式、贴图、快捷键、工具栏悬停、设置页、OCR、录屏）。</p>
+<h3 id="3-9-本轮新增-拖框即崩的根因是-qt-5-15-2-自己的-trystart-std-function-r38">3.9 本轮新增：拖框即崩的根因是 Qt 5.15.2 自己的 <code>tryStart(std::function)</code>（R38）</h3>
+<p>这是 P5 出口前最后一个阻塞缺陷，现已修复并端到端验证。结论放在最前面：</p>
+<blockquote>
+<p><strong>Qt 5.15.2 的 <code>QThreadPool::tryStart(std::function&lt;void()&gt;)</code> 忘了给 <code>QRunnable::ref</code> 做 +1。
+而池线程在跑任务前断言 <code>!del || r-&gt;ref == 1</code>，且 5.15 里 <code>autoDelete()</code> 就是 <code>ref != -1</code>。
+于是「池子收下了、但 ref 仍是 0」必然触发断言。</strong> 修法是绕开那条重载，改走一直正确的
+<code>tryStart(QRunnable*)</code>。</p>
+</blockquote>
+<h4>(1) 现象与第一层定位</h4>
+<p>拖框松开后 30 ms 内进程消失，emergency 日志给出：</p>
+<pre><code class="language-json">{&quot;event&quot;:&quot;qt.fatal.message&quot;,&quot;level&quot;:&quot;FATAL&quot;,
+ &quot;message&quot;:&quot;ASSERT: \&quot;!del || r-&gt;ref == 1\&quot; in file thread\\qthreadpool.cpp, line 92&quot;,
+ &quot;thread&quot;:&quot;Thread (pooled)&quot;}
+</code></pre>
+<p>R37 加在 Fatal 记录里的 <code>thread</code> 字段这次<strong>没能缩小范围</strong>，原因值得记下来：
+<code>QThreadPoolPrivate::startThread()</code> 对每个池线程<strong>无条件</strong>执行
+<code>thread-&gt;setObjectName("Thread (pooled)")</code>，所以给 <code>QThreadPool</code> 对象命名不会传到线程上，
+线程名对所有池都一样。顺着这条线只会白跑。</p>
+<p>换思路：用<strong>串行闸门</strong>做二分。在 <code>snow_canvas_image.cpp</code> 的 <code>processChunks()</code> 里加
+<code>SNOW_QT5_SERIAL_CHUNKS=1</code> 让分块工作走串行分支，同一条复现路径<strong>立刻不再崩</strong>。
+再在 <code>tryStart</code> 前后打点，最后一条日志是：</p>
+<pre><code>[pooltrace] chunks=23 pixels=361201 workers=4 serial=0
+[pooltrace] pool before active=0 max=8
+[pooltrace] tryStart #1 accepted=1
+                    &lt;- 下一行就是 FATAL
+</code></pre>
+<p><code>pixels=361201</code> 正好是 601×601 的选区，说明这是<strong>选区确认时把选区图像做格式转换</strong>那条路径，
+而崩在新起的第一个池线程上。</p>
+<h4>(2) 用最小探针把「本项目用法」与「Qt 套件缺陷」分开</h4>
+<p>本机没有调试器，池线程的调用栈里也只有 <code>QThreadPoolThread::run()</code>（断言在 <code>run()</code> 之前，
+拿不到提交方），所以改用<strong>纯净探针</strong>：<code>.workbuddy/qt5-port/qthreadpool-probe.cpp</code>，
+只依赖 cl + Qt5 头/库（无 moc；必须 <code>/MDd</code> + <code>Qt5Cored.lib</code>，否则链接到 release 的 Qt5Core，
+<code>Q_ASSERT</code> 根本不存在，探针等于什么都没验）。四种模式，同一台机器、同一个 Qt 5.15.2：</p>
+<table>
+<thead>
+<tr>
+<th>模式</th>
+<th>调用</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>start</code></td>
+<td><code>pool-&gt;start(std::function)</code> ×3</td>
+<td>正常，3 个任务都跑完</td>
+</tr>
+<tr>
+<td><code>trystart-runnable</code></td>
+<td><code>tryStart(QRunnable::create(...))</code> ×3</td>
+<td>正常，3 个任务都跑完</td>
+</tr>
+<tr>
+<td><code>worker</code> / <code>main</code></td>
+<td><code>tryStart(std::function)</code> ×3 + <code>QSemaphore</code> 等待</td>
+<td><strong>挂死</strong>：<code>accepted=1/1/1</code>，任务一个都不跑</td>
+</tr>
+<tr>
+<td><code>worker-runnable</code></td>
+<td>工作线程里 <code>tryStart(QRunnable::create(...))</code> ×3</td>
+<td>正常</td>
+</tr>
+</tbody>
+</table>
+<p><code>qVersion()</code> 打印确认运行时就是 5.15.2。对照 qtbase 源码可以看清差别：</p>
+<pre><code class="language-cpp">// v5.15.2 —— 没有 ++ref
+QRunnable *runnable = QRunnable::create(std::move(functionToRun));
+if (d-&gt;tryStart(runnable)) return true;
+delete runnable;
+return false;
+
+// 5.15 分支 head（补上了，同时补了失败路径的 --ref）
+QRunnable *runnable = QRunnable::create(std::move(functionToRun));
+Q_ASSERT(runnable-&gt;ref == 0);
+++runnable-&gt;ref;
+if (d-&gt;tryStart(runnable)) return true;
+--runnable-&gt;ref; Q_ASSERT(runnable-&gt;ref == 0); delete runnable; return false;
+</code></pre>
+<p>而 <code>start(std::function)</code> 是转调 <code>start(QRunnable*)</code> 的，那条重载一直有
+<code>Q_ASSERT(ref == 0); ++ref;</code>，所以<strong>只有 <code>tryStart(std::function)</code> 这一条重载不可用</strong>。
+本仓正好只有一处用到它（<code>snow_canvas_image.cpp</code> 的并行分块）。</p>
+<p>顺带解释两种症状为什么不一样：应用里断言先炸（<code>ref=0</code> 被池线程抓到），
+探针里表现为「任务永不执行」—— 同一处 <code>ref</code> 记账缺失，在不同线程时序下的两种表现。</p>
+<h4>(3) 修法与验证</h4>
+<pre><code class="language-cpp">QRunnable* const job = QRunnable::create([&amp;] { consume(); finished.release(); });
+if (pool-&gt;tryStart(job)) {
+    ++started;
+} else {
+    delete job;   // tryStart 失败时所有权仍在调用方（Qt5/Qt6 同约定）
+}
+</code></pre>
+<p><code>tryStart(QRunnable*)</code> 两个大版本语义一致，Qt6 上同样是正确写法，不需要 <code>#if QT_VERSION</code>。</p>
+<p>两个可复跑入口：</p>
+<pre><code class="language-bash"># 1) 最小探针：四种模式的对照（挂死的两个模式 20s 超时即可判定）
+bash .workbuddy/qt5-port/build-qthreadpool-probe.sh
+.workbuddy/qt5-port/tmp-uia-build/qthreadpool-probe.exe worker-runnable   # 期望 exit=0
+
+# 2) 真机剧本：起隔离实例 -&gt; 播种 F24 -&gt; 发热键 -&gt; 拖框 -&gt; 判活
+bash .workbuddy/qt5-port/probe-pool-crash.sh &lt;instance-id&gt; drag            # 期望 PASS
+</code></pre>
+<p>修复前后同一条 <code>drag</code> 剧本：修复前 <code>probe: FAIL</code>（emergency 里是上面那条断言），
+修复后 <code>probe: PASS</code>；窗口枚举能看到拖框后三扇可见窗口（overlay 1536×864、
+绘制工具栏 994×114、选区工具栏 128×171），视觉核对见 <code>.workbuddy/qt5-port/logs/qt5-toolbar.png</code>。</p>
+<h4>(4) 端到端：Ctrl+C 5 轮全绿</h4>
+<p><code>uia-ctrl-c.exe</code>（<code>build-uia-ctrl-c.sh</code> 独立编译，不进 CMake）现在能跑完 5 轮：</p>
+<pre><code>round 1..5: hotkey+Ctrl+C recognized
+screenshot Ctrl+C end-to-end test passed
+</code></pre>
+<p>覆盖链路：全局热键 → overlay 出现并取得前台 → 拖 500×500 选区 → Ctrl+C → 剪贴板里是合法 PNG。</p>
+<h4>(5) 两个把「误判」变成「结论」的改动</h4>
+<p><strong>(a) 驱动不再把崩溃报成「控件没暴露」</strong>。原来只要等不到工具栏元素就报
+<code>did not expose its toolbar</code>，而 R37 那轮应用其实<strong>已经崩了</strong>，于是这条缺陷被误记成
+「UIA automationId 没暴露，属测试基础设施限制」，白绕了一整轮。现在先查退出码：</p>
+<pre><code class="language-cpp">const std::string status = application.exitStatus();
+if (status != &quot;the application is still running&quot;) throw ... status ...
+</code></pre>
+<p><strong>(b) Qt5 确实不暴露 UIA automationId，工具栏断言降级为提示</strong>。Qt5 的 Windows 无障碍
+只走 MSAA → UIA 桥，元素的 <code>automationId</code> 一律为空；把 <code>objectName</code> 映射到
+<code>UIA_AutomationIdPropertyId</code> 是 Qt6 才有的行为。所以驱动现在先数一遍
+「有 automationId 的元素个数」，为 0 就打印明确提示并<strong>跳过工具栏元素断言</strong>，
+以剪贴板结果作为判据 —— 视觉核对交给 §3.4 手测。这条比「直接失败」诚实，
+也比「静默跳过」安全。</p>
+<h4>(6) 新坑：全新实例的截图热键是 F1</h4>
+<p>隔离实例首次启动时 <code>global_shortcuts.screenshot</code> 的默认值是 <strong>F1</strong>，不是 F24。
+注入工具发的是 F24，于是「热键发出去了、overlay 就是不出现」，而
+<code>shortcut.registration</code> 里 <code>code</code> 一律是 0（注册成功）—— 极容易被读成注入失效或
+热键注册失败。播种 <code>config.json</code> 时必须显式写：</p>
+<pre><code class="language-json">{&quot;storage&quot;:{&quot;schema_version&quot;:1},&quot;global_shortcuts&quot;:{&quot;screenshot&quot;:[&quot;F24&quot;]}}
+</code></pre>
+<p><code>probe-pool-crash.sh</code> 已经把这一步做进去了。</p>
+<h4>(7) 本轮删除的临时代码</h4>
+<p>R37 为定位「overlay 全透明」加的 4 处 <code>TEMP-QT5-DIAG</code> 全部删除
+（<code>screenshotoverlaywindow.cpp</code> 的 <code>window.paint</code> 与 <code>grab()</code> 落盘、
+<code>screenshotcanvasrenderer.cpp</code> 的 <code>covers</code>/<code>frame</code>、<code>screenshotoverlaycanvaswidget.cpp</code> 的
+<code>canvas.paint</code>），<code>snow_canvas_image.cpp</code> 的 <code>[pooltrace]</code> 也一并清掉。
+诊断结论已固化在本节，不需要留在代码里。</p>
 <hr>
 <h2 id="4-分阶段实施计划">4. 分阶段实施计划</h2>
 <table>
@@ -2160,7 +2301,7 @@ emergency 为空）。以下两条告警<strong>不是缺陷</strong>，别当�
 <tr>
 <td><strong>P5</strong></td>
 <td><strong>Windows Qt5 编译打通 + 3.4 冒烟清单全绿</strong></td>
-<td>冒烟清单逐项通过，无红色误报弹窗。<strong>进行中（R37）</strong>：full 档 <code>550/550</code> 目标全绿、链接通过、真机启动到 <code>application.ready</code> 且零崩溃（见 3.8）；<strong>只剩 3.4 手测项</strong></td>
+<td>冒烟清单逐项通过，无红色误报弹窗。<strong>进行中（R38）</strong>：full 档 <code>550/550</code> 目标全绿、链接通过、真机启动零崩溃；拖框崩溃已定位并修复（Qt 5.15.2 <code>tryStart(std::function)</code> 缺陷，见 3.9）；自动化覆盖热键→overlay→拖框→Ctrl+C→剪贴板连跑 5 轮全绿；<strong>只剩 3.4 手测项</strong></td>
 </tr>
 <tr>
 <td><strong>P6</strong></td>
