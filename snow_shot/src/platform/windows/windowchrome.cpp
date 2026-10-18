@@ -1,4 +1,5 @@
 #include "snow_shot/platform/windows/windowchrome.h"
+#include "snow_shot/compat/qt_compat.h"
 #include "snow_shot/platform/windowcaptureexclusion.h"
 
 #if defined(Q_OS_WIN) || defined(_WIN32)
@@ -65,7 +66,7 @@ bool supportsExcludeFromCapture() {
     return supported;
 }
 
-bool adjustClientRectForMaximizedWindow(const MSG* msg, qintptr* result) {
+bool adjustClientRectForMaximizedWindow(const MSG* msg, snowNativeEventResult* result) {
     // LPARAM carries a NCCALCSIZE_PARAMS pointer for WM_NCCALCSIZE.
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto* const params = reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam);
@@ -83,7 +84,7 @@ bool adjustClientRectForMaximizedWindow(const MSG* msg, qintptr* result) {
     return true;
 }
 
-bool handleNcCalcSize(const MSG* msg, qintptr* result) {
+bool handleNcCalcSize(const MSG* msg, snowNativeEventResult* result) {
     if (msg->wParam != TRUE) {
         return false;
     }
@@ -91,7 +92,7 @@ bool handleNcCalcSize(const MSG* msg, qintptr* result) {
     return adjustClientRectForMaximizedWindow(msg, result);
 }
 
-bool hitTestResizeBorder(const MSG* msg, qintptr* result) {
+bool hitTestResizeBorder(const MSG* msg, snowNativeEventResult* result) {
     RECT winRect{};
     GetWindowRect(msg->hwnd, &winRect);
 
@@ -159,7 +160,7 @@ bool isTitleBarDragArea(QWidget* titleBar) {
     return hitWidget == titleBar || (hitWidget == nullptr && window == titleBar);
 }
 
-bool handleNcHitTest(QWidget* titleBar, const MSG* msg, qintptr* result) {
+bool handleNcHitTest(QWidget* titleBar, const MSG* msg, snowNativeEventResult* result) {
     // Let the DWM run its default hit-test first (for things like the
     // top-of-screen snap zone).
     LRESULT dpiResult = 0;
@@ -410,7 +411,7 @@ bool flushWindowComposition() {
     return SUCCEEDED(DwmFlush());
 }
 
-bool handleNativeWindowEvent(QWidget* titleBar, void* message, qintptr* result) {
+bool handleNativeWindowEvent(QWidget* titleBar, void* message, snowNativeEventResult* result) {
     if (message == nullptr || result == nullptr) {
         return false;
     }

@@ -18,6 +18,16 @@ class QWidget;
 
 namespace adqt::widgets {
 
+// Qt5's QWidget::nativeEvent() takes `long*` (32-bit on Win64); Qt6 takes
+// `qintptr*`. Every forwarded native-event result in this package has to use
+// the same type the owning widget's override was declared with, otherwise the
+// call site fails with C2664 (snowNativeEventResult* -> qintptr*).
+#if defined(QT_VERSION) && QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+using AdNativeEventResult = qintptr;
+#else
+using AdNativeEventResult = long;
+#endif
+
 class AdDpiStableWindowControllerTestAccess;
 
 struct AdDpiStableWindowDiagnostics {
@@ -85,10 +95,10 @@ class AdDpiStableWindowController final : public QObject {
 
   static bool enforceStablePhysicalSizeForMessage(void* nativeMessage, WId expectedWindowId,
                                                   const QSize& stableFrameSize,
-                                                  bool transitionActive, qintptr* result);
+                                                  bool transitionActive, AdNativeEventResult* result);
 
   // Used by the platform subclass trampoline. Consumers should not call this.
-  bool handleNativeMessage(void* nativeMessage, qintptr* result);
+  bool handleNativeMessage(void* nativeMessage, AdNativeEventResult* result);
 
  signals:
   // Direct GUI-thread handlers reconcile content while presentation is suspended.

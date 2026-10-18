@@ -86,6 +86,34 @@ QString severity(QtMsgType type) {
 
 void messageHandler(QtMsgType type, const QMessageLogContext& context, const QString& message) {
     if (type == QtFatalMsg) {
+        // qFatal 的**正文**必须落盘，否则致命错误完全不可诊断：snow_diag_fatal 只记事件名，
+        // snow_diag_panic 只记 "qt.fatal" 这个标签，正文丢了就只剩「崩了」这一个事实。
+        // （P5 首次 Qt5 真机启动即撞上：日志里只有 event=qt.fatal，无从判断是哪个 qFatal。）
+        //
+        // 走 emergency 通道而非常规记录通道，原因有两条：
+        //   1. 常规通道是**异步队列**，紧接着 DumpAndCrash 会直接终止进程，排队的记录多半丢；
+        //      emergency 是 FILE_FLAG_WRITE_THROUGH 同步写，能活到进程死之后。
+        //   2. record() 对 QtFatalMsg 的处理是**再次 panic**，传 Fatal 会自递归。
+        // 用 QJsonDocument 而不是手拼字符串，避免正文里的引号/换行/反斜杠把日志行弄坏。
+        try {
+            constexpr int maxFatalMessage = 8000;
+            const QJsonObject fatalRecord{
+                {QStringLiteral("level"), QStringLiteral("FATAL")},
+                {QStringLiteral("category"), QString::fromUtf8(context.category)},
+                {QStringLiteral("event"), QStringLiteral("qt.fatal.message")},
+                // 线程名能定位到具体线程池：QThreadPool 会把池的 objectName 传给工作线程。
+                {QStringLiteral("thread"),
+                 QThread::currentThread() != nullptr ? QThread::currentThread()->objectName()
+                                                     : QString()},
+                {QStringLiteral("message"),
+                 message.size() > maxFatalMessage ? message.left(maxFatalMessage) : message},
+            };
+            QByteArray line = QJsonDocument(fatalRecord).toJson(QJsonDocument::Compact);
+            line.append('\n');
+            snow_diag_emergency(line.constData(), static_cast<size_t>(line.size()));
+        } catch (...) {
+            // 诊断失败不能改变崩溃本身的语义，继续走 panic。
+        }
         snow_diag_fatal("qt.fatal");
         snow_diag_panic(reinterpret_cast<const unsigned char*>("qt.fatal"), 8);
         return;
@@ -423,7 +451,7 @@ struct DiagnosticsService::Impl {
             }
             output.setFileName(QDir(directory).filePath(QStringLiteral("snow-shot-%1-%2.log")
                                                             .arg(state.sessionId)
-                                                            .arg(++part, 6, 10, u'0')));
+                                                            .arg(++part, 6, 10, QLatin1Char('0'))));
             outputLock = std::make_unique<QLockFile>(output.fileName() + QStringLiteral(".lock"));
             outputLock->setStaleLockTime(0);
             if (!safePath(output.fileName()) || !outputLock->tryLock(0) ||

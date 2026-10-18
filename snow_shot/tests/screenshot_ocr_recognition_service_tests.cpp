@@ -35,6 +35,7 @@
 #endif
 #ifdef Q_OS_MACOS
 #include <libproc.h>
+#include "snow_shot/compat/qt_compat.h"
 #endif
 
 namespace {
@@ -269,7 +270,7 @@ void oneEngineIsInitializedAfterReadyAndReused() {
                 ++readyCount;
             if (event == QStringLiteral("ocr.worker_finished")) {
                 ++workers;
-                require(fields.value(QStringLiteral("initialization_ms")).toInteger() == 0,
+                require(snowJsonInteger(fields.value(QStringLiteral("initialization_ms"))) == 0,
                         "requests must reuse the initialized engine");
             }
         }

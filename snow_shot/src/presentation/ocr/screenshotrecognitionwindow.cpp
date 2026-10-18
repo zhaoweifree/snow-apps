@@ -118,8 +118,8 @@ bool isHttpUrl(const QString& text, QUrl* result = nullptr) {
 QList<QKeyCombination> standardCombinations(QKeySequence::StandardKey standardKey) {
     QList<QKeyCombination> combinations;
     for (const QKeySequence& sequence : QKeySequence::keyBindings(standardKey)) {
-        if (sequence.count() == 1 && !combinations.contains(sequence[0])) {
-            combinations.push_back(sequence[0]);
+        if (sequence.count() == 1 && !combinations.contains(snowKeySequenceAt(sequence, 0))) {
+            combinations.push_back(snowKeySequenceAt(sequence, 0));
         }
     }
     return combinations;
@@ -2251,16 +2251,28 @@ bool ScreenshotRecognitionWindow::forwardFormattedTextPointerEvent(QObject* watc
         return false;
     }
     auto* mouse = static_cast<QMouseEvent*>(event);
-    const QPointF local = m_formattedTextLayer->viewport()->mapTo(this, snowPos(mouse));
+    const QPointF local = snowMapTo(m_formattedTextLayer->viewport(), this, snowPos(mouse));
     if (!isOcrBackgroundAt(local) &&
-        !mouse->modifiers().testAnyFlags(Qt::ControlModifier | Qt::AltModifier)) {
+        !snowTestAnyFlags(mouse->modifiers(), Qt::ControlModifier | Qt::AltModifier)) {
         return false;
     }
     // Blank document space belongs to the host's pin gestures, including double-clicks.
     // An active native text selection retains every phase of its mouse gesture.
-    QMouseEvent forwarded(mouse->type(), local, mapTo(window(), local), snowGlobalPos(mouse),
-                          mouse->button(), mouse->buttons(), mouse->modifiers(), mouse->source(),
-                          mouse->pointingDevice());
+    //
+    // The constructor signature itself differs: Qt6 takes
+    //   (type, localPos, scenePos, globalPos, button, buttons, modifiers, source, device)
+    // while Qt 5.15 has no pointing-device argument at all - its 8-argument form
+    // ends at Qt::MouseEventSource (QtGui/qevent.h). A version branch is the only
+    // option here: a shim cannot rewrite a constructor's argument list.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    QMouseEvent forwarded(mouse->type(), local, snowMapTo(this, window(), local),
+                          snowGlobalPos(mouse), mouse->button(), mouse->buttons(),
+                          mouse->modifiers(), mouse->source(), mouse->pointingDevice());
+#else
+    QMouseEvent forwarded(mouse->type(), local, snowMapTo(this, window(), local),
+                          snowGlobalPos(mouse), mouse->button(), mouse->buttons(),
+                          mouse->modifiers(), mouse->source());
+#endif
     forwarded.setTimestamp(mouse->timestamp());
     forwarded.ignore();
     const bool handled = QCoreApplication::sendEvent(this, &forwarded);
@@ -2284,7 +2296,13 @@ bool ScreenshotRecognitionWindow::eventFilter(QObject* watched, QEvent* event) {
         case QEvent::WindowDeactivate:
         case QEvent::UngrabMouse:
         case QEvent::ScreenChangeInternal:
+            // Qt6 delivers DevicePixelRatioChange in addition to
+            // ScreenChangeInternal and both must cancel the selection. On Qt5
+            // snowDevicePixelRatioChange *is* ScreenChangeInternal, so listing it
+            // again would be a duplicate case label (C2196) - hence the branch.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         case snowDevicePixelRatioChange:
+#endif
             cancelLineBoxSelection();
             break;
         default:
@@ -2307,7 +2325,11 @@ bool ScreenshotRecognitionWindow::eventFilter(QObject* watched, QEvent* event) {
         case QEvent::Resize:
         case QEvent::WindowStateChange:
         case QEvent::ScreenChangeInternal:
+            // snowDevicePixelRatioChange is ScreenChangeInternal on Qt5, so it may
+            // only be listed as a second label where the two really differ.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         case snowDevicePixelRatioChange:
+#endif
         case QEvent::WinIdChange:
         case QEvent::PlatformSurface:
             refreshOriginalImagePreview();

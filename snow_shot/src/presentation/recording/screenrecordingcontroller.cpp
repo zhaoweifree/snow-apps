@@ -68,6 +68,7 @@
 #include <thread>
 #include <memory>
 #include <utility>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace {
 constexpr int kDurationTickMilliseconds = 100;
@@ -1434,7 +1435,7 @@ struct ScreenRecordingController::Impl {
                                          : QString();
                 const QString error = completed->error();
                 const qint64 renderedDuration =
-                    state.value(QStringLiteral("render_duration_ms")).toInteger();
+                    snowJsonInteger(state.value(QStringLiteral("render_duration_ms")));
                 renderJob = nullptr;
                 completed->deleteLater();
                 finishExport(outcome == RecordingRenderJob::Outcome::Succeeded, error,

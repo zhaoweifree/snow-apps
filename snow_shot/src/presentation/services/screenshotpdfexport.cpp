@@ -258,7 +258,13 @@ std::shared_ptr<Payload> prepare(const ScreenshotImageRowSource& source, int qua
                         const qsizetype index = qsizetype(row) * rect.width() + column;
                         std::memcpy(color.data() + index * 3, pixels + column * 4, 3);
                         if (!verifiedOpaque) {
-                            alpha[index] = char(pixels[column * 4 + 3]);
+                            // static_cast<int>: Qt 5.15's QByteArray declares BOTH
+                            // operator[](int) and operator[](uint) (qbytearray.h:219-222),
+                            // so a qsizetype subscript is ambiguous - MSVC reports
+                            // "error C2666: operator []: overloads have similar
+                            // conversions". Qt6 kept only the qsizetype overload.
+                            // Qt5's QByteArray::size() is int, so the value fits.
+                            alpha[static_cast<int>(index)] = char(pixels[column * 4 + 3]);
                             opaque = opaque && pixels[column * 4 + 3] == 255;
                         }
                     }
@@ -414,7 +420,10 @@ bool decodeTiles(const Payload& payload, const std::function<bool(QRect, const Q
                 for (int column = 0; column < image.width(); ++column) {
                     const qsizetype index = qsizetype(row) * image.width() + column;
                     std::memcpy(pixels + column * 4, color.constData() + index * 3, 3);
-                    pixels[column * 4 + 3] = alpha.isEmpty() ? 255 : uchar(alpha[index]);
+                    // static_cast<int>: same Qt5 QByteArray int/uint subscript
+                    // ambiguity as above.
+                    pixels[column * 4 + 3] =
+                        alpha.isEmpty() ? 255 : uchar(alpha[static_cast<int>(index)]);
                 }
             }
         }

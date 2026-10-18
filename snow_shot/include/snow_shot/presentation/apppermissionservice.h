@@ -13,6 +13,15 @@
 
 namespace snow_shot::presentation {
 enum class AppPermission { ScreenRecording, Accessibility, InputMonitoring, Microphone };
+// Qt6 在 qhashfunctions.h 里为**所有枚举**提供了 qHash 重载，Qt5 没有；
+// 而下面用到了 QSet<AppPermission>，缺它会以极不直观的形式炸在 Qt 头文件里
+// （error C2665: “qHash”: 没有重载函数可以转换所有参数类型 @ qhashfunctions.h:118）。
+// 同命名空间 + 同参数类型 ⇒ ADL 优先命中这里，Qt6 下也不会冲突（Qt6 的泛型模板
+// 与这个精确重载并存，精确匹配胜出）。
+inline uint qHash(AppPermission permission, uint seed = 0) noexcept
+{
+    return ::qHash(static_cast<int>(permission), seed);
+}
 enum class AppPermissionStatus {
     Checking,
     Granted,

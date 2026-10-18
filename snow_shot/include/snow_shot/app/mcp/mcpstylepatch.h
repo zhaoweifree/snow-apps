@@ -10,6 +10,7 @@
 #include <type_traits>
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
 #include "snow_draw_engine_qt/snow_canvas_export_types.h"
+#include "snow_shot/compat/qt_compat.h"
 
 namespace snow_shot::app::mcp {
 // Capture image geometry once per annotation. Rendering scale and monitor DPI are independent.
@@ -137,7 +138,18 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
                               QStringLiteral("factor"),
                               QStringLiteral("decimal_places"),
                               QStringLiteral("endpoint_scale")};
-    QStringList allowed;
+    // Deliberately QList<QString>, not QStringList: every branch below assigns a
+    // braced-init-list (`allowed = {QStringLiteral(...), ...}`). Qt 5.15's
+    // QStringList declares operator=(const QList<QString>&), which hides
+    // QList's operator=(std::initializer_list<T>); a braced list then has two
+    // equally-ranked user-defined conversions - via QStringList's and via
+    // QList's initializer_list constructor - and MSVC fails with
+    //   error C2593: "operator =" is ambiguous
+    // Qt6 removed QStringList's initializer_list constructor, so the same code
+    // is unambiguous there. A plain QList<QString> has the exact-match
+    // initializer_list operator= and behaves identically for the only two
+    // operations used on it below (contains / append).
+    QList<QString> allowed;
     if (target == QStringLiteral("text"))
         allowed = {QStringLiteral("color"),
                    QStringLiteral("font_size"),
@@ -480,7 +492,7 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
     } else if (target == QStringLiteral("serial_number")) {
         auto style = state.serialNumberStyle;
         if (patch.contains(QStringLiteral("number")))
-            style.number = patch.value(QStringLiteral("number")).toInteger();
+            style.number = snowJsonInteger(patch.value(QStringLiteral("number")));
         style.numericType = static_cast<SnowCanvasSerialNumberNumericType>(
             enumeration("numeric_type", static_cast<int>(style.numericType)));
         style.type = static_cast<SnowCanvasSerialNumberType>(

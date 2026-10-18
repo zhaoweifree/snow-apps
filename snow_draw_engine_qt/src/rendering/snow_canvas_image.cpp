@@ -69,6 +69,7 @@ bool ownsWritableStorage(QImage& image) {
 void copyMetadata(const QImage& source, QImage& destination) {
     destination.setColorTable(source.colorTable());
     const QColorSpace colorSpace = source.colorSpace();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
     const bool cmykProfile = colorSpace.colorModel() == QColorSpace::ColorModel::Cmyk;
     if (destination.depth() == 32 && colorSpace.isValid() &&
         cmykProfile != (destination.format() == QImage::Format_CMYK8888)) {
@@ -83,6 +84,14 @@ void copyMetadata(const QImage& source, QImage& destination) {
         }
     } else
         destination.setColorSpace(colorSpace);
+#else
+    // CMYK images (`QColorSpace::ColorModel`, `Format_CMYK8888`) and the
+    // metadata-only `reinterpretAsFormat` retag all arrived in Qt 6.8. Below that
+    // there is no model mismatch to preserve, so the plain setter is not a
+    // simplification of Qt6's dance -- it is the same final state, and the setter
+    // cannot reject anything here because the target model always matches.
+    destination.setColorSpace(colorSpace);
+#endif
     destination.setDevicePixelRatio(source.devicePixelRatio());
     destination.setDotsPerMeterX(source.dotsPerMeterX());
     destination.setDotsPerMeterY(source.dotsPerMeterY());
@@ -91,9 +100,38 @@ void copyMetadata(const QImage& source, QImage& destination) {
         destination.setText(key, source.text(key));
 }
 
+// Qt converts a colour space *and* a pixel format in one pass from 6.0 onwards
+// (`convertedToColorSpace(space, format, flags)` and `colorTransformed(...)`).
+// Qt5 has only the single-argument forms: the space is converted in place and the
+// format afterwards, which costs one extra temporary but produces the same pixels.
+// Funnelling both through one helper keeps every call site version-free and, more
+// importantly, keeps the Qt6 route byte-identical to what it does today.
+QImage convertColorAndFormat(const QImage& image, const QColorSpace& colorSpace,
+                             QImage::Format format, Qt::ImageConversionFlags flags) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return image.convertedToColorSpace(colorSpace, format, flags);
+#else
+    return image.convertedToColorSpace(colorSpace).convertToFormat(format, flags);
+#endif
+}
+
+QImage transformColorAndFormat(const QImage& image, const QColorTransform& transform,
+                               QImage::Format format, Qt::ImageConversionFlags flags) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return image.colorTransformed(transform, format, flags);
+#else
+    QImage converted = image;
+    converted.applyColorTransform(transform);
+    return converted.convertToFormat(format, flags);
+#endif
+}
+
 struct ImageFormatInfo {
     quint8 depth = 0;
-    QList<QRgb> defaultColorTable;
+    // `QVector` rather than `QList`: in Qt6 the two are the same type, while Qt5
+    // keeps them apart and `QImage::setColorTable` takes the vector. Spelling the
+    // vector keeps the call site common to both instead of branching on it.
+    QVector<QRgb> defaultColorTable;
 };
 
 const ImageFormatInfo& imageFormatInfo(QImage::Format format) {
@@ -141,11 +179,23 @@ template <typename Work> void processChunks(qsizetype chunks, qsizetype pixels, 
     QThreadPool* pool = QThreadPool::globalInstance();
     for (int worker = 1; worker < workers; ++worker) {
         try {
-            if (pool->tryStart([&] {
-                    consume();
-                    finished.release();
-                }))
+            // 必须自己包一层 QRunnable::create 再走 tryStart(QRunnable*)，
+            // 不能直接用 tryStart(std::function)：Qt 5.15.2 的那条重载丢掉了
+            // 引用计数（见 qthreadpool.cpp，只有 QRunnable* 重载会 ++ref），
+            // 而池线程在跑任务前断言 `!del || r->ref == 1`。于是
+            // autoDelete 为真、ref 却停在 0 —— debug 构建直接 Q_ASSERT 崩，
+            // release 构建则因为 autoDelete 判定为真而少删一次/漏执行。
+            // 5.15.7 之后才补上 ++ref，这里按 Qt6 也成立的写法收敛。
+            QRunnable* const job = QRunnable::create([&] {
+                consume();
+                finished.release();
+            });
+            if (pool->tryStart(job)) {
                 ++started;
+            } else {
+                // tryStart 失败时所有权仍在调用方（两个 Qt 大版本都是这个约定）。
+                delete job;
+            }
         } catch (const std::bad_alloc&) {
             // Already-started workers still refer to this call's state. Finish
             // their work before returning, even if another runnable cannot fit.
@@ -516,9 +566,10 @@ bool snowCanvasCopyRgba8888Rows(const QImage& image, int firstRow, int rowCount,
                         image.format());
             view.setColorTable(image.colorTable());
             view.setColorSpace(image.colorSpace());
-            return copyRows(transformColor ? view.convertedToColorSpace(
-                                                 colorSpace, QImage::Format_RGBA8888, flags)
-                                           : view.convertToFormat(QImage::Format_RGBA8888, flags));
+            return copyRows(transformColor
+                                ? convertColorAndFormat(view, colorSpace, QImage::Format_RGBA8888,
+                                                        flags)
+                                : view.convertToFormat(QImage::Format_RGBA8888, flags));
         }
 
         // A tile, including Qt's highest-precision intermediate format, is at
@@ -557,8 +608,9 @@ bool snowCanvasCopyRgba8888Rows(const QImage& image, int firstRow, int rowCount,
                         : image.format() <= QImage::Format_Indexed8
                             // Qt converts the global palette before expanding
                             // pixels; colorTransformed follows a different route.
-                            ? view.convertedToColorSpace(colorSpace, QImage::Format_RGBA8888, flags)
-                            : view.colorTransformed(transform, QImage::Format_RGBA8888, flags);
+                            ? convertColorAndFormat(view, colorSpace, QImage::Format_RGBA8888, flags)
+                            : transformColorAndFormat(view, transform, QImage::Format_RGBA8888,
+                                                      flags);
                     if (converted.isNull()) {
                         failed.store(true, std::memory_order_relaxed);
                         return;
@@ -674,18 +726,18 @@ QImage snowCanvasColorConvertedImage(const QImage& image, const QColorSpace& col
     if (image.colorSpace() == colorSpace)
         return snowCanvasConvertImage(image, format, flags);
     if (format <= QImage::Format_Indexed8) {
-        QImage result = image.convertedToColorSpace(colorSpace, format, flags);
+        QImage result = convertColorAndFormat(image, colorSpace, format, flags);
         return result.sizeInBytes() < qsizetype(snow::memory::kMappedPixelBufferMinimum)
                    ? result
                    : snowCanvasCopyImage(result);
     }
     if (!largeRaster(image.size(), image.format()) && !largeRaster(image.size(), format))
-        return image.convertedToColorSpace(colorSpace, format, flags);
+        return convertColorAndFormat(image, colorSpace, format, flags);
     const QColorTransform transform = image.colorSpace().transformationToColorSpace(colorSpace);
     QImage result = convertStrips(
         image, format,
         [&transform, format, flags](const QImage& strip) {
-            return strip.colorTransformed(transform, format, flags);
+            return transformColorAndFormat(strip, transform, format, flags);
         },
         {}, (flags & Qt::PreferDither) && (flags & Qt::Dither_Mask) != Qt::ThresholdDither);
     result.setColorSpace(colorSpace);
@@ -751,9 +803,16 @@ QImage snowCanvasTransformImage(const QImage& image, const QTransform& transform
             return result;
         }
     }
+    // CMYK images only exist from Qt 6.8; there is nothing to fall back from below
+    // that version, so the term is compiled away rather than compared against a
+    // constant the enum does not have.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    const bool cmykSource = image.format() == QImage::Format_CMYK8888;
+#else
+    const bool cmykSource = false;
+#endif
     const bool exactQtFallback =
-        !orthogonal || !integralOrigin || image.format() < QImage::Format_RGB32 ||
-        image.format() == QImage::Format_CMYK8888 ||
+        !orthogonal || !integralOrigin || image.format() < QImage::Format_RGB32 || cmykSource ||
         // Qt's identity smooth scaler still computes sample origins using a
         // signed 0x8000 * dimension expression. Beyond this range its native
         // resampling is not equivalent to a byte mirror; retain that behavior.
@@ -782,13 +841,18 @@ QImage snowCanvasTransformImage(const QImage& image, const QTransform& transform
         case QImage::Format_RGBA8888_Premultiplied:
         case QImage::Format_RGBX64:
         case QImage::Format_RGBA64_Premultiplied:
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+        // Half-float and float rasters arrived in Qt 6.2; Qt5 has no such formats
+        // at all, so these labels would not compile there.
         case QImage::Format_RGBX32FPx4:
         case QImage::Format_RGBA32FPx4_Premultiplied:
+#endif
             break;
         case QImage::Format_RGBA64:
         case QImage::Format_Grayscale16:
             workingFormat = QImage::Format_RGBA64_Premultiplied;
             break;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
         case QImage::Format_RGBX16FPx4:
             workingFormat = QImage::Format_RGBX32FPx4;
             break;
@@ -797,6 +861,7 @@ QImage snowCanvasTransformImage(const QImage& image, const QTransform& transform
         case QImage::Format_RGBA32FPx4:
             workingFormat = QImage::Format_RGBA32FPx4_Premultiplied;
             break;
+#endif
         default:
             workingFormat = image.hasAlphaChannel() ? QImage::Format_ARGB32_Premultiplied
                                                     : QImage::Format_RGB32;
@@ -812,7 +877,14 @@ QImage snowCanvasTransformImage(const QImage& image, const QTransform& transform
                     QImage working = strip.convertToFormat(workingFormat);
                     // This bounded temporary is owned by Qt, so its public in-place
                     // flip retains its allocation. Managed external images cannot.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
                     working.flip(mirrored);
+#else
+                    // Qt5 (and every Qt6 before 6.9) has no in-place flip; the
+                    // out-of-place mirror is still copy-on-write, so the pixel data
+                    // is not duplicated while `working` is the only owner.
+                    working = working.mirrored(mirrored);
+#endif
                     return std::move(working).convertToFormat(strip.format());
                 },
                 mirrored);

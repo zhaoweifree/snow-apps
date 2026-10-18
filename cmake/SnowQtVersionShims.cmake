@@ -113,8 +113,17 @@ endfunction()
 #   A) 目标形式（6 处）：qt_add_resources(<target> <name> PREFIX p BASE b FILES f...)
 #   B) 变量形式（1 处，cmake/MicroTeX.cmake:96）：qt_add_resources(<VAR> <file.qrc>)
 # Qt5 的 qt5_add_resources 只支持 B。A 需要在这里手工生成 .qrc 再挂到目标上。
+#
+# **这里是本文件里唯一一处必须"覆盖" Qt 自带命令的地方**（违反下面第 2 条原则的那一半），
+# 原因是实测出来的：Qt 5.15 的 Qt5CoreMacros.cmake:355 **确实定义了** `qt_add_resources`，
+# 但它只是 `qt5_add_resources` 的**变量形式**别名。所以早先的 `if(NOT COMMAND ...)` 守卫
+# 在 Qt 5.15 上恒为假 —— 垫片根本没装，目标形式的调用被 Qt5 当成"一串 .qrc 文件名"，
+# 于是把 `BASE resources/about` 里的目录当 qrc 去读，报
+#   file failed to open for reading (Permission denied): .../snow_shot/resources/about
+# 这类错误看起来像资源路径写错，实际是命令签名错位。
+# 覆盖是安全的：本函数对变量形式（.qrc 结尾）原样转发给 qt5_add_resources，行为与 Qt5 一致。
 # ---------------------------------------------------------------------------
-if(NOT COMMAND qt_add_resources)
+if(NOT COMMAND qt_add_resources OR Qt5_FOUND)
     function(qt_add_resources)
         list(LENGTH ARGV _snow_argc)
         if(_snow_argc LESS 2)
@@ -124,8 +133,14 @@ if(NOT COMMAND qt_add_resources)
         list(GET ARGV 1 _snow_second)
         if(_snow_second MATCHES "\\.qrc$")
             # ---- 形式 B：qt_add_resources(<VAR> <file.qrc>) ----
+            #
+            # **必须显式把结果回传给调用方**：qt5_add_resources 自己只 `set(... PARENT_SCOPE)`，
+            # 而它的 parent 就是本垫片函数，不是真正的调用者。少这一行时 outvar 在调用方
+            # 恒为空 —— 表现为 rcc 一次都不跑、目标少一个 qrc 源文件，最终链接期报
+            # `LNK2019: 无法解析的外部符号 qInitResources_<name>`（实测于 snow_shot_microtex）。
             list(GET ARGV 0 _snow_var)
-            qt5_add_resources(${_snow_var} ${_snow_second})
+            qt5_add_resources(_snow_qrc_sources ${_snow_second})
+            set(${_snow_var} ${_snow_qrc_sources} PARENT_SCOPE)
             return()
         endif()
 
@@ -148,6 +163,17 @@ if(NOT COMMAND qt_add_resources)
         endif()
 
         # 复刻 Qt6 的别名计算：alias = 文件相对 BASE 的路径（BASE 缺省时取文件名）。
+        # BASE 在实仓里有两种写法：绝对（`${CMAKE_CURRENT_SOURCE_DIR}/resources`）
+        # 和相对（`resources/about`）。`file(RELATIVE_PATH)` **只收绝对目录**，传相对
+        # 会直接 "must be passed a full path to the directory" 配置失败；Qt6 对两种
+        # 写法都接受，所以这里必须先把 BASE 归一化成绝对路径。
+        set(_snow_base "${_snow_res_BASE}")
+        if(NOT _snow_base)
+            set(_snow_base "${CMAKE_CURRENT_SOURCE_DIR}")
+        elseif(NOT IS_ABSOLUTE "${_snow_base}")
+            get_filename_component(_snow_base
+                "${CMAKE_CURRENT_SOURCE_DIR}/${_snow_base}" ABSOLUTE)
+        endif()
         set(_snow_qrc "<RCC>\n  <qresource prefix=\"${_snow_res_PREFIX}\">\n")
         foreach(_snow_file IN LISTS _snow_res_FILES)
             if(NOT IS_ABSOLUTE "${_snow_file}")
@@ -155,7 +181,7 @@ if(NOT COMMAND qt_add_resources)
             else()
                 set(_snow_abs "${_snow_file}")
             endif()
-            file(RELATIVE_PATH _snow_alias "${_snow_res_BASE}" "${_snow_abs}")
+            file(RELATIVE_PATH _snow_alias "${_snow_base}" "${_snow_abs}")
             if(_snow_alias MATCHES "^\\.\\./" OR _snow_alias STREQUAL "")
                 get_filename_component(_snow_alias "${_snow_abs}" NAME)
             endif()
@@ -166,8 +192,18 @@ if(NOT COMMAND qt_add_resources)
         endforeach()
         string(APPEND _snow_qrc "  </qresource>\n</RCC>\n")
 
-        set(_snow_qrc_file "${CMAKE_CURRENT_BINARY_DIR}/${_snow_target}_${_snow_name}.qrc")
-        file(GENERATE OUTPUT "${_snow_qrc_file}" CONTENT "${_snow_qrc}")
+        # **qrc 文件名必须恰好等于资源名**。Qt5 的 qt5_add_resources 用
+        # `get_filename_component(outfilename NAME_WE)` 的值作为 `rcc --name`，而
+        # `Q_INIT_RESOURCE(x)` 展开成 `qInitResources_x`。所以 qrc 只能叫 `<资源名>.qrc`。
+        # 早先命名成 `${target}_${name}.qrc`，得到的是 `qInitResources_<target>_<name>`，
+        # 链接期必报 `LNK2019: 无法解析的外部符号 qInitResources_<name>`
+        # （实测 aboutpagewidget.cpp 的 Q_INIT_RESOURCE(snow_shot_about_assets)）。
+        # 实仓 6 处目标形式的资源名全局唯一，不会撞名。
+        set(_snow_qrc_file "${CMAKE_CURRENT_BINARY_DIR}/${_snow_name}.qrc")
+        # 用 file(CONFIGURE)（**配置期**写盘）而不是 file(GENERATE)（生成期写盘）：
+        # qt5_add_resources 在**配置期**调 _qt5_parse_qrc_file 解析 qrc 来算 DEPENDS，
+        # 此时文件若还不存在，依赖清单为空 ⇒ 之后改 .svg 不会触发重新 rcc。
+        file(CONFIGURE OUTPUT "${_snow_qrc_file}" CONTENT "${_snow_qrc}" @ONLY)
 
         qt5_add_resources(_snow_qrc_sources "${_snow_qrc_file}")
         target_sources(${_snow_target} PRIVATE ${_snow_qrc_sources})
@@ -312,7 +348,7 @@ if(NOT COMMAND qt_add_lrelease)
         if(SNOW_LRELEASE_EXECUTABLE AND _snow_lr_TS_FILES)
             _snow_qt_translate_lrelease_options(
                 _snow_lr_effective_options _snow_lr_enforce "${_snow_lr_OPTIONS}")
-            set(_snow_lr_commands)
+            set(_snow_qm_files)
             foreach(_snow_ts IN LISTS _snow_lr_TS_FILES)
                 get_filename_component(_snow_stem "${_snow_ts}" NAME_WE)
                 set(_snow_qm "${_snow_qm_dir}/${_snow_stem}.qm")
@@ -320,12 +356,22 @@ if(NOT COMMAND qt_add_lrelease)
                 _snow_qt_lrelease_command(_snow_lr_one_command "${_snow_lr_enforce}"
                     "${SNOW_LRELEASE_EXECUTABLE}" "${_snow_ts}" "${_snow_qm}"
                     "${_snow_lr_effective_options}")
-                list(APPEND _snow_lr_commands ${_snow_lr_one_command})
+                # 必须是 add_custom_command(OUTPUT <qm> ...) 而不是把命令挂在
+                # add_custom_target 上：只有带 OUTPUT 的自定义命令才会给 ninja 生成
+                # **构建规则**。早了这一步就会出现
+                #   ninja: error: 'snow_shot/snow_shot_en_US.qm', needed by
+                #   'qrc_..._translations.cpp', missing and no known rule to make it
+                # 因为 qt_add_resources 生成的 .qrc 把 .qm 当输入，而没有任何规则能造出它。
+                add_custom_command(
+                    OUTPUT "${_snow_qm}"
+                    DEPENDS "${_snow_ts}"
+                    ${_snow_lr_one_command}
+                    COMMENT "Snow Qt5 shim: lrelease ${_snow_stem}.qm"
+                    VERBATIM)
             endforeach()
-            add_custom_target(${_snow_lr_target} ${_snow_lr_commands}
-                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-                COMMENT "Snow Qt5 shim: lrelease ${_snow_lr_owner}"
-                VERBATIM)
+            add_custom_target(${_snow_lr_target} DEPENDS ${_snow_qm_files})
+            # 旧写法（整体挂在 target 上）保留说明：它只在"没有别的目标依赖 .qm 文件"时
+            # 才不暴问题，一旦 .qm 进了 .qrc 输入就必然断链。
         else()
             message(WARNING
                 "Snow Qt shims: lrelease or TS_FILES unavailable for ${_snow_lr_owner}; "
@@ -482,10 +528,36 @@ if(NOT COMMAND qt_add_translation)
 endif()
 
 if(NOT COMMAND qt_add_lupdate)
-    function(qt_add_lupdate target)
+    # Qt6 的 qt_add_lupdate 会建出真正的 lupdate 目标；Qt5 没有等价实现，但
+    # **不能连目标都不建**：实仓在 snow_shot_add_translations() 里紧接着
+    #   add_dependencies(snow_shot_update_translations snow_shot_prepare_translation_update)
+    #   add_custom_command(TARGET snow_shot_update_translations POST_BUILD ...)
+    # 都指向这个名字。只打一行 STATUS 的"空实现"会让 configure 直接死在
+    # "Cannot add target-level dependencies to non-existent target"。
+    # 所以照 LUPDATE_TARGET 建一个空的 custom target：接口保住了，语义仍然诚实
+    # （翻译更新要手工跑 lupdate，这一点由下面的 STATUS 明说）。
+    function(qt_add_lupdate)
+        set(_one_value LUPDATE_TARGET)
+        set(_multi_value SOURCE_TARGETS SOURCES TS_FILES OPTIONS)
+        cmake_parse_arguments(_snow_lu "" "${_one_value}" "${_multi_value}" ${ARGN})
+        if(_snow_lu_UNPARSED_ARGUMENTS)
+            message(WARNING
+                "Snow Qt shims: qt_add_lupdate ignored arguments: "
+                "${_snow_lu_UNPARSED_ARGUMENTS}")
+        endif()
+        if(NOT _snow_lu_LUPDATE_TARGET)
+            message(STATUS
+                "Snow Qt shims: qt_add_lupdate() without LUPDATE_TARGET; "
+                "nothing to create under Qt5.")
+            return()
+        endif()
+        if(NOT TARGET ${_snow_lu_LUPDATE_TARGET})
+            add_custom_target(${_snow_lu_LUPDATE_TARGET})
+        endif()
         message(STATUS
-            "Snow Qt shims: qt_add_lupdate(${target}) has no Qt5 equivalent; "
-            "refresh translations with the lupdate tool explicitly.")
+            "Snow Qt shims: qt_add_lupdate created empty target "
+            "'${_snow_lu_LUPDATE_TARGET}' (Qt5 has no qt_add_lupdate equivalent; "
+            "run lupdate explicitly to refresh translations).")
     endfunction()
 endif()
 
@@ -530,9 +602,15 @@ if(NOT COMMAND qt_generate_deploy_app_script)
             set_property(GLOBAL APPEND PROPERTY SNOW_QT5_DEPLOY_TARGETS ${_snow_deploy_TARGET})
         endif()
         if(_snow_deploy_OUTPUT_SCRIPT)
-            # 生成一个空脚本，保证调用方的 install(SCRIPT ...) 不会因文件缺失而失败。
-            file(GENERATE OUTPUT "${_snow_deploy_OUTPUT_SCRIPT}"
+            # OUTPUT_SCRIPT 在 Qt6 里是**变量名**，不是路径：Qt6 把生成脚本的路径
+            # 写回这个变量，调用方随后 `install(SCRIPT "${VAR}")`。
+            # 早先版本把它当路径直接 file(GENERATE ...)，结果变量始终为空，
+            # install(SCRIPT "") 报 "install given a directory as value of SCRIPT argument"。
+            set(_snow_deploy_script
+                "${CMAKE_CURRENT_BINARY_DIR}/${_snow_deploy_OUTPUT_SCRIPT}_qt5_noop.cmake")
+            file(GENERATE OUTPUT "${_snow_deploy_script}"
                 CONTENT "# Snow Qt5 shim: deployment is handled by the Snow packaging scripts.\n")
+            set(${_snow_deploy_OUTPUT_SCRIPT} "${_snow_deploy_script}" PARENT_SCOPE)
         endif()
         message(STATUS
             "Snow Qt shims: qt_generate_deploy_app_script is a no-op under Qt5; "

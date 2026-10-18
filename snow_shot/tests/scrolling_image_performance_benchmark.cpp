@@ -16,6 +16,7 @@
 
 #include <iostream>
 #include <stdexcept>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace {
 using namespace snow_shot::scrolling_benchmark;
@@ -297,7 +298,7 @@ int main(int argc, char** argv) {
         report[QStringLiteral("replay")].toObject()[QStringLiteral("stages")].toObject();
     for (auto it = stages.begin(); it != stages.end(); ++it) {
         const auto summary = it.value().toObject();
-        if (summary[QStringLiteral("count")].toInteger() == 0)
+        if (snowJsonInteger(summary[QStringLiteral("count")]) == 0)
             continue;
         std::cout << it.key().toStdString()
                   << ": p50=" << summary[QStringLiteral("p50_ns")].toDouble() / 1'000'000.0

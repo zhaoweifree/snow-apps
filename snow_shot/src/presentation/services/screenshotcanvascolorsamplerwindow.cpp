@@ -1,4 +1,5 @@
 #include "snow_shot/presentation/screenshotcanvascolorsamplerwindow.h"
+#include "snow_shot/compat/qt_compat.h"
 
 #include "snow_shot/presentation/components/icons/iconrenderutils.h"
 #include "snow_shot/presentation/components/icons/snowshoticons.h"
@@ -150,7 +151,7 @@ void ScreenshotCanvasColorSamplerWindow::endSampling() {
 }
 
 bool ScreenshotCanvasColorSamplerWindow::nativeEvent(const QByteArray& eventType, void* message,
-                                                     qintptr* result) {
+                                                     snowNativeEventResult* result) {
     adqt::widgets::detail::constrainTopLevelToolStackingToOwner(this, message);
     return QWidget::nativeEvent(eventType, message, result);
 }

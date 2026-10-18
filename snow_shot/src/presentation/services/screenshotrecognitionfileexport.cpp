@@ -101,7 +101,7 @@ bool ScreenshotRecognitionFileExport::confirmOverwrite(QWidget* owner, const QSt
                                   "Replace the existing file(s)?\n%1"))
             .arg(existing.join(QLatin1Char('\n'))),
         QMessageBox::Yes | QMessageBox::No, owner);
-    dialog.setOption(QMessageBox::Option::DontUseNativeDialog);
+    snowMessageBoxDontUseNativeDialog(dialog);
     dialog.button(QMessageBox::Yes)
         ->setText(message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport", "Replace")));
     dialog.button(QMessageBox::No)
@@ -142,7 +142,11 @@ ScreenshotRecognitionFileExport::saveToPath(const ScreenshotRecognitionFileSnaps
 
     const QByteArray bytes = snapshot.source.toUtf8();
     QStringList staged;
-    QStringList backups(paths.size());
+    // QVector<QString>, not QStringList: Qt5's QStringList (a QList<QString>)
+    // has neither a size constructor nor resize() (QtCore/qlist.h only offers
+    // reserve()), while Qt6 added QStringList(qsizetype). QVector is the one
+    // spelling that works on both - Qt6 aliases QVector to QList.
+    QVector<QString> backups(paths.size());
     QStringList published;
     auto rollback = [&]() {
         for (const QString& publishedPath : published)

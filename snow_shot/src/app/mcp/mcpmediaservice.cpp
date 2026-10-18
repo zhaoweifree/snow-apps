@@ -26,6 +26,7 @@
 #include <QUuid>
 #include <QUrl>
 #include <cmath>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace snow_shot::app::mcp {
 namespace {
@@ -329,7 +330,7 @@ class McpMediaService::Impl {
                     pending.remove(token);
                     const auto state = pinState(id);
                     if (!expected ||
-                        static_cast<quint64>(state.value(QStringLiteral("revision")).toInteger()) !=
+                        static_cast<quint64>(snowJsonInteger(state.value(QStringLiteral("revision")))) !=
                             *expected) {
                         reply(state, QStringLiteral("stale_revision"));
                         return;
@@ -479,7 +480,7 @@ void McpMediaService::request(const ScreenshotMcpRequest& r,
         response.errorMessage = response.errorCode;
         if (response.result.contains(QStringLiteral("revision")))
             response.revision =
-                static_cast<quint64>(response.result.value(QStringLiteral("revision")).toInteger());
+                static_cast<quint64>(snowJsonInteger(response.result.value(QStringLiteral("revision"))));
         auto serialized = QJsonDocument(response.result).toJson(QJsonDocument::Compact);
         if (serialized.size() > 1024 * 1024) {
             const auto artifact =
@@ -531,7 +532,7 @@ void McpMediaService::request(const ScreenshotMcpRequest& r,
             return false;
         }
         if (*r.expectedRevision !=
-            static_cast<quint64>(state.value(QStringLiteral("revision")).toInteger())) {
+            static_cast<quint64>(snowJsonInteger(state.value(QStringLiteral("revision"))))) {
             reply(state, QStringLiteral("stale_revision"));
             return false;
         }

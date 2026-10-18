@@ -40,6 +40,7 @@
 #include <cmath>
 #include <cstddef>
 #include <utility>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace snow_shot::app::mcp {
 namespace {
@@ -128,7 +129,7 @@ ScreenshotMcpResponse success(const ScreenshotMcpRequest& request, QJsonObject v
     response.ok = true;
     if (value.contains(QStringLiteral("revision")))
         response.revision =
-            static_cast<quint64>(value.value(QStringLiteral("revision")).toInteger());
+            static_cast<quint64>(snowJsonInteger(value.value(QStringLiteral("revision"))));
     response.result = std::move(value);
     return response;
 }
@@ -555,7 +556,7 @@ class DocumentWorker final : public QObject {
                     return {failure(request, QStringLiteral("invalid_source")), {}};
                 QImageReader reader(&buffer);
                 reader.setAutoTransform(true);
-                auto size = reader.effectiveSize();
+                auto size = snowImageReaderEffectiveSize(reader);
                 const bool native = !size.isValid();
                 auto nativeFormat = snow::image::Format::unknown;
                 if (native) {
@@ -708,8 +709,8 @@ class DocumentWorker final : public QObject {
             bool ok = false;
             if (action == QStringLiteral("select")) {
                 const auto elementId = params.value(QStringLiteral("id")).toObject();
-                const auto index = elementId.value(QStringLiteral("index")).toInteger(-1);
-                const auto generation = elementId.value(QStringLiteral("generation")).toInteger(-1);
+                const auto index = snowJsonInteger(elementId.value(QStringLiteral("index")), -1);
+                const auto generation = snowJsonInteger(elementId.value(QStringLiteral("generation")), -1);
                 ok = index >= 0 && generation >= 0 && index <= UINT32_MAX &&
                      generation <= UINT32_MAX &&
                      editor.select(static_cast<quint32>(index), static_cast<quint32>(generation));
@@ -747,7 +748,7 @@ class DocumentWorker final : public QObject {
             else if (action == QStringLiteral("adjust_serial_numbers"))
                 ok = params.value(QStringLiteral("delta")).isDouble() &&
                      editor.adjustSelectedSerialNumbers(
-                         params.value(QStringLiteral("delta")).toInteger());
+                         snowJsonInteger(params.value(QStringLiteral("delta"))));
             else if (action == QStringLiteral("opacity")) {
                 const auto opacity = params.value(QStringLiteral("opacity")).toDouble(-1);
                 ok = std::isfinite(opacity) && opacity >= 0 && opacity <= 1 &&
@@ -1136,7 +1137,7 @@ struct McpDocumentService::Impl {
             return;
         cached->metadata = metadata;
         retainEncodedBytes(documentId, artifact,
-                           metadata.value(QStringLiteral("byte_count")).toInteger());
+                           snowJsonInteger(metadata.value(QStringLiteral("byte_count"))));
     }
     struct Blob {
         quint64 owner = 0;
@@ -1262,8 +1263,8 @@ struct McpDocumentService::Impl {
         }
         const auto offsetValue = request.params.value(QStringLiteral("offset"));
         const auto limitValue = request.params.value(QStringLiteral("max_bytes"));
-        const auto offset = offsetValue.toInteger(0);
-        const auto limit = limitValue.toInteger(65536);
+        const auto offset = snowJsonInteger(offsetValue, 0);
+        const auto limit = snowJsonInteger(limitValue, 65536);
         if ((!offsetValue.isUndefined() &&
              (!offsetValue.isDouble() || offsetValue.toDouble() != static_cast<double>(offset))) ||
             (!limitValue.isUndefined() &&
@@ -1459,7 +1460,7 @@ struct McpDocumentService::Impl {
                         documentLanes.remove(documentId);
                 }
                 const auto documentRevision = static_cast<quint64>(
-                    result.response.result.value(QStringLiteral("revision")).toInteger());
+                    snowJsonInteger(result.response.result.value(QStringLiteral("revision"))));
                 if (result.response.ok &&
                     (request.method == QStringLiteral("snow_shot_document_recognition_state") ||
                      request.method == QStringLiteral("snow_shot_document_edit_recognition") ||
@@ -1686,7 +1687,7 @@ struct McpDocumentService::Impl {
         const qsizetype index = modes.indexOf(kind);
         const auto documentId = request.params.value(QStringLiteral("document_id")).toString();
         const auto sourceRevision = static_cast<quint64>(
-            result.response.result.value(QStringLiteral("revision")).toInteger());
+            snowJsonInteger(result.response.result.value(QStringLiteral("revision"))));
         ScreenshotRecognitionResults cached;
         const auto retained = retainedRecognition.value(documentId);
         if (retained.session && retained.sourceRevision == sourceRevision)
@@ -1815,13 +1816,16 @@ struct McpDocumentService::Impl {
             entry->owner != request.connectionId ||
             entry->sourceRevision !=
                 static_cast<quint64>(
-                    response.result.value(QStringLiteral("revision")).toInteger())) {
+                    snowJsonInteger(response.result.value(QStringLiteral("revision"))))) {
             done(failure(request, QStringLiteral("recognition_required")));
             return;
         }
         if (request.method == QStringLiteral("snow_shot_document_edit_recognition")) {
-            if (request.params.value(QStringLiteral("expected_recognition_revision"))
-                    .toInteger(-1) != static_cast<qint64>(entry->revision)) {
+            // Qt5 has no QJsonValue::toInteger (Qt 6.0+); snowJsonInteger keeps the
+            // Qt6 semantics including the "default for non-numeric" rule.
+            const qint64 expectedRecognitionRevision = snowJsonInteger(
+                request.params.value(QStringLiteral("expected_recognition_revision")), -1);
+            if (expectedRecognitionRevision != static_cast<qint64>(entry->revision)) {
                 auto value = failure(request, QStringLiteral("stale_revision"));
                 value.errorDetails.insert(QStringLiteral("recognition_revision"),
                                           static_cast<qint64>(entry->revision));
@@ -1969,7 +1973,7 @@ struct McpDocumentService::Impl {
         const QString outputId = QString::number(request.connectionId) + u':' + request.requestId;
         const QString documentId = request.params.value(QStringLiteral("document_id")).toString();
         const auto revision = static_cast<quint64>(
-            result.response.result.value(QStringLiteral("revision")).toInteger());
+            snowJsonInteger(result.response.result.value(QStringLiteral("revision"))));
         const auto scale = result.response.result.value(QStringLiteral("scale")).toDouble(1);
         const bool pngSave =
             request.method == QStringLiteral("snow_shot_document_save") &&

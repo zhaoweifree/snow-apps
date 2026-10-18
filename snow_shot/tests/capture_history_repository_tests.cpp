@@ -23,6 +23,7 @@
 #include <limits>
 #include <mutex>
 #include <thread>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace storage = snow_shot::storage;
 
@@ -455,7 +456,7 @@ void publicationAndRecovery() {
             QFileInfo(QDir(directory).filePath(QStringLiteral("capture_result.png"))).size();
         physicalBytes += resultBytes;
         require(published.totalBytes == physicalBytes &&
-                    manifest.value(QStringLiteral("total_record_size")).toInteger() ==
+                    snowJsonInteger(manifest.value(QStringLiteral("total_record_size"))) ==
                         physicalBytes,
                 "manifest total byte accounting is inconsistent");
         const storage::CaptureHistoryUsage usage = repository->usage();

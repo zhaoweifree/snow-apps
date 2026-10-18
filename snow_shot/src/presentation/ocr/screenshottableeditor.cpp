@@ -911,14 +911,13 @@ void ScreenshotTableEditor::continueEditingAfter(QWidget* closingEditor, int row
         return;
     }
     const QPointer<ScreenshotTableEditor> guard(this);
-    connect(
+    snowConnectSingleShot(
         closingEditor, &QObject::destroyed, this,
         [guard, row, column, rowDelta, columnDelta]() {
             if (guard != nullptr) {
                 guard->continueEditingFrom(row, column, rowDelta, columnDelta);
             }
-        },
-        Qt::SingleShotConnection);
+        });
 }
 
 void ScreenshotTableEditor::continueEditingFrom(int row, int column, int rowDelta,

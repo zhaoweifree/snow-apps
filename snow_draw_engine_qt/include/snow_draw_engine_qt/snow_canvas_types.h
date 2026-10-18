@@ -47,6 +47,31 @@ enum class SnowCanvasTool {
     SpeechBubble,
 };
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#include <type_traits>
+
+// Qt 6.0 added a qHash() overload for enum types; Qt 5.15 has none, so using this
+// enum as a QHash / QSet key fails to compile:
+//   error C2665: "qHash": none of the overloads could convert all the argument types
+// (first hit: QSet<SnowCanvasTool> built by
+//  snow_shot::presentation::screenshotQuickSelectionDisabledTools()).
+//
+// This MUST be a non-template overload. A generic `template <T, is_enum> qHash(T, uint)`
+// is ambiguous against Qt5's own qHash(const T&, uint) - verified C2668 against the
+// real 5.15.2 headers. A non-template always wins over Qt5's template.
+//
+// It has to live here (global namespace, right after the enum) rather than in
+// qt_compat.h: the compat header cannot know this type, and Qt's QHash instantiates
+// qHash(key) unqualified, relying on ADL - for a global-scope enum that means the
+// overload must be declared before the first QSet/QHash instantiation, i.e. as soon
+// as the enum itself is visible.
+[[nodiscard]] inline uint qHash(SnowCanvasTool tool, uint seed = 0) noexcept
+{
+    // Hashing the underlying integer is exactly what Qt6's overload does.
+    return ::qHash(static_cast<std::underlying_type_t<SnowCanvasTool>>(tool), seed);
+}
+#endif
+
 enum class SnowCanvasCursorLayer {
     CanvasTool,
     Host,

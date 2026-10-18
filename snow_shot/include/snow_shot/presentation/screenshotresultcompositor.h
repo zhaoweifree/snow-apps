@@ -8,6 +8,7 @@
 #include <QRect>
 #include <QRectF>
 #include <QSize>
+#include "snow_shot/compat/qt_compat.h"
 #include "snow_shot/image/screenshotregiongeometry.h"
 #include <QPainterPath>
 #include <QIODevice>
@@ -27,9 +28,16 @@ struct ScreenshotResultStyle {
 inline QByteArray encodeScreenshotResultStyle(const ScreenshotResultStyle& style) {
     QByteArray bytes;
     QDataStream stream(&bytes, QIODevice::WriteOnly);
-    // These bytes are persisted without a Qt stream-version header. Keep the format used by
-    // existing records when upgrading Qt.
-    stream.setVersion(QDataStream::Qt_6_11);
+    // These bytes go to disk without a Qt stream-version header, so the format
+    // has to match the records written by earlier builds. QDataStream::Version
+    // tops out at Qt_5_15 on Qt 5.15 (the Qt_6_* values are Qt6-only), so the
+    // version comes from snowDataStreamVersion(), which reports the highest one
+    // this build supports. The encoding of the basic types used here
+    // (int/qreal/QColor/QByteArray) is identical between the two versions, so
+    // existing records stay readable.
+    // Keep this comment ASCII: some TUs that include this header are not
+    // compiled with /utf-8.
+    stream.setVersion(snowDataStreamVersion());
     stream << style.cornerRadius << style.shadowWidth << style.shadowColor;
     stream << quint32(0x53535247) << quint8(1) << style.regionScale
            << (style.region ? QJsonDocument(style.region->toJson()).toJson(QJsonDocument::Compact)
@@ -43,7 +51,7 @@ inline std::optional<ScreenshotResultStyle> decodeScreenshotResultStyle(const QB
     if (bytes.isEmpty())
         return style;
     QDataStream stream(bytes);
-    stream.setVersion(QDataStream::Qt_6_11);
+    stream.setVersion(snowDataStreamVersion());
     stream >> style.cornerRadius >> style.shadowWidth >> style.shadowColor;
     if (stream.status() != QDataStream::Ok)
         return std::nullopt;

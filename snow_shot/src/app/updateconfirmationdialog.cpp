@@ -24,7 +24,7 @@ bool confirmRestartAndUpdate(QWidget* owner) {
                   "Snow Shot will close and restart to install the update. Continue?"));
     QMessageBox dialog(QMessageBox::Question, title, message,
                        QMessageBox::Yes | QMessageBox::Cancel, owner);
-    dialog.setOption(QMessageBox::Option::DontUseNativeDialog);
+    snowMessageBoxDontUseNativeDialog(dialog);
     dialog.button(QMessageBox::Yes)->setText(title);
     dialog.button(QMessageBox::Cancel)
         ->setText(translated(QT_TRANSLATE_NOOP("snow_shot::app::ApplicationController", "Cancel")));

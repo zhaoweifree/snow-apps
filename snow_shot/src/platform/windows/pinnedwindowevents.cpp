@@ -1,4 +1,5 @@
 #include "../../presentation/pinned/pinnedwindowplatform.h"
+#include "snow_shot/compat/qt_compat.h"
 #include "snow_shot/presentation/screenshotpinnedwindow.h"
 #include "snow_shot/presentation/pinnedwindowselectioncontroller.h"
 #include "snow_shot/presentation/pinnedgeometry.h"
@@ -137,7 +138,7 @@ void writeNativeRect(const QRect& source, RECT* target) {
 
 } // namespace
 bool PinnedWindowWindowsEvents::handle(ScreenshotPinnedWindow& window, const QByteArray& eventType,
-                                       void* message, qintptr* result) {
+                                       void* message, snowNativeEventResult* result) {
 
     const bool isWindowsMessage = eventType == QByteArrayLiteral("windows_generic_MSG") ||
                                   eventType == QByteArrayLiteral("windows_dispatcher_MSG");

@@ -18,6 +18,21 @@ include(RustStaticLibrary)
 snow_configure_windows_architecture()
 snow_detect_rust_target(SNOW_SHOT_RUST_TARGET)
 
+if(MSVC)
+    # Every source under this directory is UTF-8 (comments included, plus a few
+    # UTF-8 literals such as the shortcut glyphs in shortcutdisplayservice.cpp
+    # and the OCR fixture text in the tests). Release presets get /utf-8 through
+    # ProjectWarnings strict mode, and the snow_shot target already sets it
+    # explicitly, but the secondary targets (snow_shot_translation, print,
+    # helpers) were left on the system code page. Under code page 936 that is not
+    # merely a C4819 warning: a UTF-8 sequence at end of line can consume the
+    # newline, merging the following `#if` into the comment so the guarded
+    # `#include` executes unguarded -- observed as a bogus C1083 on
+    # QHttp1Configuration (a Qt6-only header) in a Qt5 build. Set it once for the
+    # whole directory instead of per target.
+    add_compile_options(/utf-8)
+endif()
+
 if(WIN32)
     if(SNOW_WINDOWS_ARCHITECTURE STREQUAL "arm64")
         set(_snow_ocr_manifest_default

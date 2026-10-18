@@ -11,6 +11,7 @@
 #include <set>
 #include <stdexcept>
 #include <thread>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace snow_shot::scrolling_benchmark {
 namespace {
@@ -253,10 +254,10 @@ QJsonObject replayReport(const ReplayState& state, qint64 finishedAt) {
         sampledOffsets.insert(trace->offset);
         mailboxDepth = std::max(mailboxDepth, trace->queueDepth);
         const auto disposition = QString::fromLatin1(trace->disposition);
-        dispositions[disposition] = dispositions[disposition].toInteger() + 1;
+        dispositions[disposition] = snowJsonInteger(dispositions[disposition]) + 1;
         if (trace->event >= 0) {
             const auto outcome = QString::number(trace->event);
-            outcomes[outcome] = outcomes[outcome].toInteger() + 1;
+            outcomes[outcome] = snowJsonInteger(outcomes[outcome]) + 1;
         }
         if (trace->paintedAt != 0)
             ++painted;

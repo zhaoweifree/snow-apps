@@ -211,8 +211,10 @@ QRectF glyphRunInkBounds(const QGlyphRun& run) {
     // substantially taller than the painted glyphs for variable font faces.
     const QRawFont rawFont = run.rawFont();
     if (rawFont.isValid()) {
-        const QList<quint32> glyphIndexes = run.glyphIndexes();
-        const QList<QPointF> positions = run.positions();
+        // Qt5 returns these as QVector, Qt6 as QList (the same type there); the
+        // vector spelling is the one that compiles against both kits.
+        const QVector<quint32> glyphIndexes = run.glyphIndexes();
+        const QVector<QPointF> positions = run.positions();
         const qsizetype count = qMin(glyphIndexes.size(), positions.size());
         QRectF bounds;
         bool hasBounds = false;

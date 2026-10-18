@@ -1,4 +1,5 @@
 #include "snow_shot/presentation/screenshotcolorpickerwindow.h"
+#include "snow_shot/compat/qt_compat.h"
 #include "widgets/detail/top_level_popup_window.h"
 
 #include "snow_shot/presentation/screenshotgeometry.h"
@@ -391,7 +392,7 @@ bool ScreenshotColorPickerWindow::event(QEvent* event) {
 }
 
 bool ScreenshotColorPickerWindow::nativeEvent(const QByteArray& eventType, void* message,
-                                              qintptr* result) {
+                                              snowNativeEventResult* result) {
     adqt::widgets::detail::constrainTopLevelToolStackingToOwner(this, message);
     return QWidget::nativeEvent(eventType, message, result);
 }

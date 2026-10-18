@@ -306,13 +306,12 @@ class ApplicationPinnedDataSource final : public PinnedWindowManagementDataSourc
         }
         const auto alive = m_alive;
         const auto previewEpoch = m_previewEpoch;
-        connect(
+        snowConnectSingleShot(
             &applicationStorage, &storage::ApplicationStorage::directoryChangeFinished, this,
             [this, alive, previewEpoch, requestedEpoch, id, requestId, targetSize](const auto&) {
                 if (alive->load() && previewEpoch->load() == requestedEpoch)
                     requestPreviewAttempt(id, requestId, targetSize, false);
-            },
-            Qt::SingleShotConnection);
+            });
     }
 
     quint64 m_storageGeneration = 0;

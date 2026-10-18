@@ -384,8 +384,12 @@ bool RecordingEffectPreview::eventFilter(QObject* watched, QEvent* event) {
         case QEvent::Resize:
             updateReadout();
             break;
-        case snowDevicePixelRatioChange:
         case QEvent::ScreenChangeInternal:
+            // snowDevicePixelRatioChange == ScreenChangeInternal on Qt5, so it is
+            // only listed as a separate label where the two really differ (Qt6).
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        case snowDevicePixelRatioChange:
+#endif
             m_configurationDirty = true;
             m_failed = false;
             m_configurationTimer.start();

@@ -283,9 +283,17 @@ QColorSpace decodedColorSpace(const SnowShotImageCodecColorEncoding& color) {
     case SNOW_SHOT_IMAGE_CODEC_PRIMARIES_ADOBE_RGB:
         primaries = QColorSpace::Primaries::AdobeRgb;
         break;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
     case SNOW_SHOT_IMAGE_CODEC_PRIMARIES_REC2020:
         primaries = QColorSpace::Primaries::Bt2020;
         break;
+#else
+    // Qt 5.15 的 QColorSpace 只有 SRgb/AdobeRgb/DciP3D65/ProPhotoRgb 四组原色，
+    // BT.2020 是 Qt 6.1 才加的。这里如实降级为"不支持"，不做近似换算——
+    // 拿 BT.709 冒充 BT.2020 会让 HDR 素材静默偏色，比明确失败更糟。
+    case SNOW_SHOT_IMAGE_CODEC_PRIMARIES_REC2020:
+        return {};
+#endif
     default:
         return {};
     }
@@ -300,12 +308,19 @@ QColorSpace decodedColorSpace(const SnowShotImageCodecColorEncoding& color) {
     case SNOW_SHOT_IMAGE_CODEC_TRANSFER_GAMMA:
         transfer = QColorSpace::TransferFunction::Gamma;
         break;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
     case SNOW_SHOT_IMAGE_CODEC_TRANSFER_PQ:
         transfer = QColorSpace::TransferFunction::St2084;
         break;
     case SNOW_SHOT_IMAGE_CODEC_TRANSFER_HLG:
         transfer = QColorSpace::TransferFunction::Hlg;
         break;
+#else
+    // 同上：PQ(St2084) 与 HLG 也是 Qt 6.1 才进入 TransferFunction 的。
+    case SNOW_SHOT_IMAGE_CODEC_TRANSFER_PQ:
+    case SNOW_SHOT_IMAGE_CODEC_TRANSFER_HLG:
+        return {};
+#endif
     default:
         return {};
     }
@@ -616,7 +631,14 @@ QImage readManagedImage(QImageReader& reader) {
                            static_cast<quint64>(std::numeric_limits<qsizetype>::max()) / stride)
         return fallback();
     const quint64 bytes = stride * static_cast<quint64>(size.height());
-    const int limit = QImageReader::allocationLimit();
+    // Qt 6.0 才提供读取接口 QImageReader::allocationLimit()；Qt 5.15 只有
+    // setAllocationLimit()，拿不回当前值，因此按 Qt5 自己的默认上限 128 MiB 处理
+    // （与 Qt6 默认值一致，语义不变）。
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const int limit = static_cast<int>(QImageReader::allocationLimit());
+#else
+    const int limit = 128;
+#endif
     if (limit > 0 && bytes > static_cast<quint64>(limit) * 1024 * 1024)
         return fallback();
 

@@ -83,9 +83,17 @@ QColorSpace colorSpace(const SnowShotImageCodecColorEncoding& color) {
     case SNOW_SHOT_IMAGE_CODEC_PRIMARIES_ADOBE_RGB:
         primaries = QColorSpace::Primaries::AdobeRgb;
         break;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
     case SNOW_SHOT_IMAGE_CODEC_PRIMARIES_REC2020:
         primaries = QColorSpace::Primaries::Bt2020;
         break;
+#else
+    // Qt 5.15 的 QColorSpace 只有 SRgb/AdobeRgb/DciP3D65/ProPhotoRgb 四组原色，
+    // BT.2020 是 Qt 6.1 才加的。这里如实降级为"不支持"，不做近似换算——
+    // 拿 BT.709 冒充 BT.2020 会让 HDR 素材静默偏色，比明确失败更糟。
+    case SNOW_SHOT_IMAGE_CODEC_PRIMARIES_REC2020:
+        return {};
+#endif
     default:
         return {};
     }
@@ -100,12 +108,19 @@ QColorSpace colorSpace(const SnowShotImageCodecColorEncoding& color) {
     case SNOW_SHOT_IMAGE_CODEC_TRANSFER_GAMMA:
         transfer = QColorSpace::TransferFunction::Gamma;
         break;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
     case SNOW_SHOT_IMAGE_CODEC_TRANSFER_PQ:
         transfer = QColorSpace::TransferFunction::St2084;
         break;
     case SNOW_SHOT_IMAGE_CODEC_TRANSFER_HLG:
         transfer = QColorSpace::TransferFunction::Hlg;
         break;
+#else
+    // 同上：PQ(St2084) 与 HLG 也是 Qt 6.1 才进入 TransferFunction 的。
+    case SNOW_SHOT_IMAGE_CODEC_TRANSFER_PQ:
+    case SNOW_SHOT_IMAGE_CODEC_TRANSFER_HLG:
+        return {};
+#endif
     default:
         return {};
     }

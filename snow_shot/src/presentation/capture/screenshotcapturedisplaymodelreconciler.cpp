@@ -170,7 +170,9 @@ void applySnapshotsToDisplaySession(ScreenshotDisplaySession& displaySession,
         ScreenshotCaptureDisplayModelReconciler::clearCaptureMetadata(display);
     });
 
-    displaySession.reserve(std::max(displaySession.size(), snapshots.size()));
+    // Explicit qsizetype: Qt5's QVector::size() returns int while the session
+    // container returns qsizetype, and std::max needs one common type.
+    displaySession.reserve(std::max<qsizetype>(displaySession.size(), snapshots.size()));
     if (shouldUseIndexedLookup(displaySession.size(), snapshots.size())) {
         DisplaySlotLookup lookup(displaySession);
         for (const CapturedDisplayModel& snapshot : snapshots) {

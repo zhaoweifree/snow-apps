@@ -21,7 +21,7 @@ QString fallbackKeyText(const ShortcutBinding& binding) {
     if (sequence.count() != 1) {
         return binding.portableText;
     }
-    return QKeySequence(QKeyCombination(Qt::NoModifier, sequence[0].key()))
+    return snowKeySequence(QKeyCombination(Qt::NoModifier, snowKeyCombination(sequence).key()))
         .toString(QKeySequence::NativeText);
 }
 
@@ -120,7 +120,7 @@ QString translatedMacKeyLegend(quint32 keyCode) {
 }
 
 QString nativeKeypadPrefix() {
-    const QString keypadOne = QKeySequence(QKeyCombination(Qt::KeypadModifier, Qt::Key_1))
+    const QString keypadOne = snowKeySequence(QKeyCombination(Qt::KeypadModifier, Qt::Key_1))
                                   .toString(QKeySequence::NativeText);
     const QString plainOne = QKeySequence(Qt::Key_1).toString(QKeySequence::NativeText);
     if (!plainOne.isEmpty() && keypadOne.endsWith(plainOne)) {
@@ -241,7 +241,8 @@ QString ShortcutDisplayService::text(const ShortcutBinding& binding) const {
     }
     const QKeySequence sequence =
         QKeySequence::fromString(canonical.portableText, QKeySequence::PortableText);
-    if (sequence.count() == 1 && sequence[0].keyboardModifiers().testFlag(Qt::KeypadModifier)) {
+    if (sequence.count() == 1
+        && snowKeyCombination(sequence).keyboardModifiers().testFlag(Qt::KeypadModifier)) {
         keyText.prepend(nativeKeypadPrefix());
     }
     const QString modifiers = modifierText(identity.modifiers);

@@ -199,10 +199,10 @@ struct NativeShortcut {
 bool parseNativeShortcut(const shortcuts::ShortcutBinding& binding, NativeShortcut* output) {
     const QKeySequence sequence =
         QKeySequence::fromString(binding.portableText, QKeySequence::PortableText);
-    if (output == nullptr || sequence.count() != 1 || modifierKey(sequence[0].key())) {
+    if (output == nullptr || sequence.count() != 1 || modifierKey(snowKeyCombination(sequence).key())) {
         return false;
     }
-    const QKeyCombination combination = sequence[0];
+    const QKeyCombination combination = snowKeyCombination(sequence);
     UINT modifiers = MOD_NOREPEAT;
     const Qt::KeyboardModifiers qtModifiers = combination.keyboardModifiers();
     if (qtModifiers.testFlag(Qt::ControlModifier)) {
@@ -240,7 +240,7 @@ bool parseNativeShortcut(const shortcuts::ShortcutBinding& binding, NativeShortc
     return true;
 }
 
-GlobalShortcutValidationResult validation(const shortcuts::ShortcutBinding& binding,
+GlobalShortcutValidationResult nativeValidation(const shortcuts::ShortcutBinding& binding,
                                           bool supported) {
     GlobalShortcutValidationResult result;
     result.binding = binding;
@@ -283,7 +283,7 @@ class WindowsGlobalShortcutBackend final : public GlobalShortcutBackend,
     GlobalShortcutValidationResult
     validateShortcut(const shortcuts::ShortcutBinding& binding) const override {
         NativeShortcut native;
-        return validation(binding, parseNativeShortcut(binding, &native));
+        return nativeValidation(binding, parseNativeShortcut(binding, &native));
     }
     GlobalShortcutBackendResult
     registerShortcut(int registrationId, const shortcuts::ShortcutBinding& binding) override {

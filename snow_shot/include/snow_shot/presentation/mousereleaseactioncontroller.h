@@ -2,6 +2,7 @@
 #define SNOW_SHOT_PRESENTATION_MOUSERELEASEACTIONCONTROLLER_H
 
 #include <QObject>
+#include "snow_shot/compat/qt_compat.h"
 #include <QPointer>
 #include <QWidget>
 
@@ -22,7 +23,7 @@ class MouseReleaseActionController final : public QObject {
     [[nodiscard]] bool pending() const;
     // Forward from the scope's nativeEvent, including directly sent non-client
     // messages that do not pass through an application native event filter.
-    bool handleNativeEvent(void* message, qintptr* result);
+    bool handleNativeEvent(void* message, snowNativeEventResult* result);
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

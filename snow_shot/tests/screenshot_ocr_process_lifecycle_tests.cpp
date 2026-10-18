@@ -30,6 +30,7 @@
 #include <Windows.h>
 #include <fcntl.h>
 #include <io.h>
+#include "snow_shot/compat/qt_compat.h"
 #endif
 
 namespace {
@@ -399,7 +400,7 @@ void ocrProcessLifecycleTests() {
                                     .back()
                                     .value(QStringLiteral("fields"))
                                     .toObject();
-        require(allocation.value(QStringLiteral("shared_memory_bytes")).toInteger() ==
+        require(snowJsonInteger(allocation.value(QStringLiteral("shared_memory_bytes"))) ==
                     8 * 8 * 4 + 32,
                 "an 8x8 request must allocate one 288-byte slot, not four 4K slots");
         const qint64 original = service.processId();
@@ -440,7 +441,7 @@ void ocrProcessLifecycleTests() {
         require(!finished.isEmpty(), "process failure must retain request completion diagnostics");
         const auto failedFields = finished.back().value(QStringLiteral("fields")).toObject();
         require(failedFields.value(QStringLiteral("outcome")) == QStringLiteral("failed") &&
-                    failedFields.value(QStringLiteral("child_pid")).toInteger() > 0 &&
+                    snowJsonInteger(failedFields.value(QStringLiteral("child_pid"))) > 0 &&
                     failedFields.contains(QStringLiteral("queue_ms")) &&
                     failedFields.contains(QStringLiteral("worker_ms")),
                 "process failure must preserve the affected request PID and timings");
@@ -521,7 +522,7 @@ void ocrProcessLifecycleTests() {
                                 .back()
                                 .value(QStringLiteral("fields"))
                                 .toObject();
-        require(fields.value(QStringLiteral("shared_memory_bytes")).toInteger() == 32 * 32 * 4 + 32,
+        require(snowJsonInteger(fields.value(QStringLiteral("shared_memory_bytes"))) == 32 * 32 * 4 + 32,
                 "replacement mapping must fit the largest queued image exactly");
         require(waitUntil([&] {
                     return service.findChildren<QThread*>(QStringLiteral("snow-ocr-transport"))

@@ -92,7 +92,7 @@ bool parseNativeShortcut(const shortcuts::ShortcutBinding& binding, NativeShortc
     if (output == nullptr || sequence.count() != 1 || !keyCode.has_value()) {
         return false;
     }
-    const QKeyCombination combination = sequence[0];
+    const QKeyCombination combination = snowKeyCombination(sequence);
     if (combination.key() == Qt::Key_unknown || combination.key() == Qt::Key_Control ||
         combination.key() == Qt::Key_Alt || combination.key() == Qt::Key_Shift ||
         combination.key() == Qt::Key_Meta || combination.key() == Qt::Key_AltGr) {

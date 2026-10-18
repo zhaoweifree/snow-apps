@@ -177,9 +177,23 @@ macro(snow_find_qt_private module)
         endif()
     else()
         # Qt5 的私有模块没有独立的 find_package 包装。
-        # 5.15 通常直接导出 <Module>Private 目标；若未导出，则退回
-        # Qt5<Module>_PRIVATE_INCLUDE_DIRS 变量（Qt5 官方文档承认的可用方式）。
-        if(NOT TARGET Qt5::${module}Private)
+        # 5.15 的 Qt5GuiConfig.cmake 会按 OWN_PRIVATE_INCLUDE_DIRS 建出
+        # Qt5::GuiPrivate 目标，但**没有任何目标去链接它**（各目标只链 Qt::Gui），
+        # 于是 `#include <qpa/qplatformnativeinterface.h>` 会以
+        # "fatal error C1083: 无法打开包括文件" 的形式失败 —— 看着像缺 Qt 组件，
+        # 实际是缺一个 -I。这里直接把私有头目录加到**当前目录作用域**，
+        # 覆盖 snow_shot/ 下所有目标（宏就是在 snow_shot/CMakeLists.txt 里调用的）。
+        if(TARGET Qt5::${module}Private)
+            get_target_property(_snow_priv_incs Qt5::${module}Private
+                INTERFACE_INCLUDE_DIRECTORIES)
+            if(_snow_priv_incs)
+                include_directories(${_snow_priv_incs})
+                message(STATUS
+                    "Snow Qt: Qt5 private includes for ${module} applied to this directory: "
+                    "${_snow_priv_incs}")
+                unset(_snow_priv_incs)
+            endif()
+        else()
             set_property(GLOBAL APPEND PROPERTY SNOW_QT5_PRIVATE_MODULES "${module}")
             message(STATUS
                 "Snow Qt: Qt5 kit does not export Qt5::${module}Private; "

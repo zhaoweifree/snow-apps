@@ -78,6 +78,7 @@
 #include "snow_shot/presentation/settings/settingsregistry.h"
 #include "snow_shot/presentation/settings/settingsformfield.h"
 #include <future>
+#include "snow_shot/compat/qt_compat.h"
 #ifdef Q_OS_MACOS
 #include "macos_capture_exclusion_probe.h"
 #include "macos_recording_modal_probe.h"
@@ -3592,7 +3593,7 @@ void recordingPostProcessingLifecycle() {
         renderPercent = 100;
         waitForIdle(controller);
         require(controller.automationState().value(QStringLiteral("finalized")).toBool() &&
-                    controller.automationState().value(QStringLiteral("duration_ms")).toInteger() ==
+                    snowJsonInteger(controller.automationState().value(QStringLiteral("duration_ms"))) ==
                         2300 &&
                     sourceDiscards == discardedBefore && (!modal || !modal->isOpen()),
                 "successful publication completes the job without repeating backend cleanup");
@@ -5643,8 +5644,8 @@ int main(int argc, char** argv) {
                 require(original != value, "option fixture must change the value");
                 change(value);
                 const auto changed = manual.automationState();
-                require(changed.value(QStringLiteral("revision")).toInteger() >
-                                before.value(QStringLiteral("revision")).toInteger() &&
+                require(snowJsonInteger(changed.value(QStringLiteral("revision"))) >
+                                snowJsonInteger(before.value(QStringLiteral("revision"))) &&
                             changed.value(QStringLiteral("options")).toObject().value(key) == value,
                         "manual options must be observable immediately without a timer tick");
                 change(value);
@@ -5653,8 +5654,8 @@ int main(int argc, char** argv) {
                         "repeated option values must not invalidate a revision");
                 change(original);
                 const auto restored = manual.automationState();
-                require(restored.value(QStringLiteral("revision")).toInteger() >
-                                changed.value(QStringLiteral("revision")).toInteger() &&
+                require(snowJsonInteger(restored.value(QStringLiteral("revision"))) >
+                                snowJsonInteger(changed.value(QStringLiteral("revision"))) &&
                             restored.value(QStringLiteral("options")).toObject().value(key) ==
                                 original,
                         "change then restore must invalidate stale commands between timer ticks");
@@ -5684,10 +5685,10 @@ int main(int argc, char** argv) {
                             palette()->recordingMouseTrailColorChanged(QColor(value.toString()));
                         });
             const auto beforeRegion =
-                manual.automationState().value(QStringLiteral("revision")).toInteger();
+                snowJsonInteger(manual.automationState().value(QStringLiteral("revision")));
             manual.open(region.translated(20, 20));
             manual.open(region);
-            require(manual.automationState().value(QStringLiteral("revision")).toInteger() >
+            require(snowJsonInteger(manual.automationState().value(QStringLiteral("revision"))) >
                             beforeRegion &&
                         manual.automationState()
                                 .value(QStringLiteral("options"))
@@ -5751,7 +5752,7 @@ int main(int argc, char** argv) {
         require(lastDirectConfig.quality == 63,
                 "automation quality must reach the native capture configuration");
         const auto runningRevision =
-            controller.automationState().value(QStringLiteral("revision")).toInteger();
+            snowJsonInteger(controller.automationState().value(QStringLiteral("revision")));
         require(controller.controlAutomation(QStringLiteral("pause"), {}, &error),
                 "automation pause must succeed");
         require(controller.automationState().value(QStringLiteral("state")).toString() ==
@@ -5759,7 +5760,7 @@ int main(int argc, char** argv) {
                 "automation must expose paused state");
         require(controller.controlAutomation(QStringLiteral("resume"), {}, &error),
                 "automation resume must succeed");
-        require(controller.automationState().value(QStringLiteral("revision")).toInteger() >
+        require(snowJsonInteger(controller.automationState().value(QStringLiteral("revision"))) >
                     runningRevision,
                 "pause then resume must invalidate a stale revision despite restoring state");
         const int previousExports = exports.load();

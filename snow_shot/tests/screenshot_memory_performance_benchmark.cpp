@@ -25,6 +25,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include "snow_shot/compat/qt_compat.h"
 
 #ifndef SNOW_SHOT_BENCHMARK_MANAGED_READER
 #define SNOW_SHOT_BENCHMARK_MANAGED_READER 1
@@ -288,8 +289,8 @@ QJsonObject run(const QString& scenario, QSize size, int warmup, int samples, bo
             continue;
         createTimes.push_back(createMs);
         releaseTimes.push_back(releaseMs);
-        maximumRetained = std::max(maximumRetained, retained.toInteger());
-        maximumReleased = std::max(maximumReleased, released.toInteger());
+        maximumRetained = std::max(maximumRetained, snowJsonInteger(retained));
+        maximumReleased = std::max(maximumReleased, snowJsonInteger(released));
         scratchPeak = std::max(scratchPeak, diagnostics.regionScratchPeakBytes);
         cacheRetainedPeak = std::max(cacheRetainedPeak, diagnostics.regionCacheRetainedBytes);
         raw.append(QJsonObject{{QStringLiteral("index"), index},

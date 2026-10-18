@@ -603,7 +603,7 @@ class ScreenshotOcrRecognitionService::Impl final {
             if (newline < 0 && m_stderrBuffer.size() < 8192 && !flush)
                 break;
             const qsizetype length = newline >= 0 ? qMin(newline, qsizetype(8192))
-                                                  : qMin(m_stderrBuffer.size(), qsizetype(8192));
+                                                  : qMin(qsizetype(m_stderrBuffer.size()), qsizetype(8192));
             const QByteArray line = m_stderrBuffer.left(length);
             m_stderrBuffer.remove(0, length + (newline == length ? 1 : 0));
             const QString output = QString::fromUtf8(line).trimmed();

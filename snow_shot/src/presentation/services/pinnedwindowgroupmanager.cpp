@@ -305,14 +305,14 @@ bool PinnedWindowGroupManager::setActiveGroup(const QString& groupId) {
 std::optional<QString>
 PinnedWindowGroupManager::createGroup(const QString& name,
                                       ::ScreenshotPinnedWindow* currentWindow) {
-    QVector<QPointer<::ScreenshotPinnedWindow>> windows;
+    QList<QPointer<::ScreenshotPinnedWindow>> windows;
     if (currentWindow != nullptr)
         windows.append(currentWindow);
     return createGroup(name, windows);
 }
 
 std::optional<QString> PinnedWindowGroupManager::createGroup(
-    const QString& name, const QVector<QPointer<::ScreenshotPinnedWindow>>& currentWindows) {
+    const QString& name, const QList<QPointer<::ScreenshotPinnedWindow>>& currentWindows) {
     if (!currentWindows.isEmpty() &&
         std::none_of(currentWindows.cbegin(), currentWindows.cend(),
                      [](const auto& window) { return !window.isNull(); })) {
@@ -522,11 +522,11 @@ bool PinnedWindowGroupManager::moveWindow(::ScreenshotPinnedWindow* window,
 }
 
 bool PinnedWindowGroupManager::moveWindows(
-    const QVector<QPointer<::ScreenshotPinnedWindow>>& windows, const QString& groupId) {
+    const QList<QPointer<::ScreenshotPinnedWindow>>& windows, const QString& groupId) {
     if (!contains(groupId))
         return false;
 
-    QVector<QPointer<::ScreenshotPinnedWindow>> targets;
+    QList<QPointer<::ScreenshotPinnedWindow>> targets;
     targets.reserve(windows.size());
     QSet<::ScreenshotPinnedWindow*> seen;
     QVector<QString> persistenceIds;
@@ -659,14 +659,14 @@ QString PinnedWindowGroupManager::windowKey(::ScreenshotPinnedWindow* window) co
 
 void PinnedWindowGroupManager::openCreateGroupModal(QWidget* owner,
                                                     ::ScreenshotPinnedWindow* currentWindow) {
-    QVector<QPointer<::ScreenshotPinnedWindow>> windows;
+    QList<QPointer<::ScreenshotPinnedWindow>> windows;
     if (currentWindow != nullptr)
         windows.append(currentWindow);
     openCreateGroupModal(owner, windows);
 }
 
 void PinnedWindowGroupManager::openCreateGroupModal(
-    QWidget* owner, const QVector<QPointer<::ScreenshotPinnedWindow>>& currentWindows) {
+    QWidget* owner, const QList<QPointer<::ScreenshotPinnedWindow>>& currentWindows) {
     const QPointer<PinnedWindowGroupManager> managerGuard(this);
     auto* form = new adqt::widgets::AdForm();
     form->setObjectName(QStringLiteral("pinnedWindowGroupCreateForm"));

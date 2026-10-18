@@ -55,7 +55,13 @@ bool sameRow(const QRectF& a, const QRectF& b, qreal height = 0) {
                                                       std::min(a.height(), b.height()) * 0.45;
 }
 QPolygonF quad(const QRectF& bounds) {
-    return {bounds.topLeft(), bounds.topRight(), bounds.bottomRight(), bounds.bottomLeft()};
+    // Qt5's QPolygonF has no std::initializer_list constructor (QtGui/qpolygon.h
+    // only declares the QVector<QPointF> and QRectF forms), and a braced list
+    // cannot reach it through two user-defined conversions - hence the explicit
+    // QVector. Qt6 added the initializer_list constructor, so both spellings work
+    // there.
+    return QPolygonF(QVector<QPointF>{bounds.topLeft(), bounds.topRight(), bounds.bottomRight(),
+                                      bounds.bottomLeft()});
 }
 bool latin(QChar c) {
     return (c >= QLatin1Char('a') && c <= QLatin1Char('z')) ||

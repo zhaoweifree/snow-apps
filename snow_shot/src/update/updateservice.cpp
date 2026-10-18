@@ -14,6 +14,7 @@
 #include <QSet>
 #include <QTimer>
 #include <optional>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace snow_shot::update {
 namespace {
@@ -580,7 +581,7 @@ struct UpdateService::Impl {
         } else if (type != u"command_result") {
             protocolFailure();
         } else if (pendingHandoffRequestId != 0 &&
-                   event.value(QStringLiteral("id")).toInteger(-1) ==
+                   snowJsonInteger(event.value(QStringLiteral("id")), -1) ==
                        static_cast<qint64>(pendingHandoffRequestId)) {
             pendingHandoffRequestId = 0;
             if (!event.value(QStringLiteral("ok")).toBool(false)) {
@@ -590,7 +591,7 @@ struct UpdateService::Impl {
             handedOff = true;
             commitHandoffIfReady();
         } else if (pendingRelaunchRequestIds.remove(
-                       static_cast<quint64>(event.value(QStringLiteral("id")).toInteger(0)))) {
+                       static_cast<quint64>(snowJsonInteger(event.value(QStringLiteral("id")), 0)))) {
             if (!event.value(QStringLiteral("ok")).toBool(false)) {
                 fail(translatedError(event.value(QStringLiteral("error")).toObject()));
                 return;

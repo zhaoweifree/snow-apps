@@ -1,4 +1,5 @@
 #include "snow_shot/presentation/screenshotfloatingtoolpalettewindow.h"
+#include "snow_shot/compat/qt_compat.h"
 
 #include "screenshotfloatingtoolpalettenative.h"
 #include "snow_shot/presentation/screenshotgeometry.h"
@@ -529,7 +530,7 @@ bool ScreenshotFloatingToolPaletteWindow::eventFilter(QObject* watched, QEvent* 
 }
 
 bool ScreenshotFloatingToolPaletteWindow::nativeEvent(const QByteArray& eventType, void* message,
-                                                      qintptr* result) {
+                                                      snowNativeEventResult* result) {
     adqt::widgets::detail::constrainTopLevelToolStackingToOwner(this, message);
 #if defined(Q_OS_WIN) || defined(_WIN32)
     const auto* msg = static_cast<MSG*>(message);
@@ -617,7 +618,7 @@ void ScreenshotFloatingToolPaletteWindow::refreshPaletteWindow(bool forceRepaint
 }
 
 bool ScreenshotFloatingToolPaletteWindow::handleNativeHitTest(void* message,
-                                                              qintptr* result) const {
+                                                              snowNativeEventResult* result) const {
 #if defined(Q_OS_WIN) || defined(_WIN32)
     if (message == nullptr || result == nullptr) {
         return false;

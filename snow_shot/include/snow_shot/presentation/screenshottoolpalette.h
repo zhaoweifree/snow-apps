@@ -55,6 +55,18 @@ class AdSelect;
 class AdSlider;
 } // namespace adqt::widgets
 
+// Qt5's QObject::connect() statically checks that every signal argument type is a
+// declared metatype (QtPrivate::TypesAreDeclaredMetaType in qobject_impl.h:70),
+// and for a pointer it also requires the pointee to be *complete*
+// (qmetatype.h:1528, "Type argument of Q_DECLARE_METATYPE(T*) must be fully
+// defined"). Qt6 dropped that requirement, so connecting a signal that carries
+// `AdColorPicker*` compiles there but fails here as long as only the forward
+// declaration above is visible. Q_DECLARE_OPAQUE_POINTER is the Qt5 answer: it
+// registers the pointer type without needing the definition.
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+Q_DECLARE_OPAQUE_POINTER(adqt::widgets::AdColorPicker*)
+#endif
+
 namespace snow_shot::presentation {
 class ScreenshotToolPaletteColorPresets;
 }

@@ -31,6 +31,7 @@
 #include <thread>
 #include <vector>
 #include <cwchar>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace {
 using namespace std::chrono_literals;
@@ -387,7 +388,7 @@ QJsonObject readTraceLine(const QString& path, int expectedLine) {
 }
 
 qint64 milestoneNs(const QJsonObject& record, const QString& name) {
-    return record.value(QStringLiteral("milestones_ns")).toObject().value(name).toInteger();
+    return snowJsonInteger(record.value(QStringLiteral("milestones_ns")).toObject().value(name));
 }
 
 bool revealPaintOrderValid(const QJsonObject& record) {
@@ -407,7 +408,7 @@ bool revealPaintOrderValid(const QJsonObject& record) {
 }
 
 qint64 spanNs(const QJsonObject& record, const QString& name) {
-    return record.value(QStringLiteral("spans_ns")).toObject().value(name).toInteger();
+    return snowJsonInteger(record.value(QStringLiteral("spans_ns")).toObject().value(name));
 }
 
 double asMilliseconds(double nanoseconds) {
@@ -440,7 +441,7 @@ QVector<MetricSource> derivedMetrics() {
     return {
         {QStringLiteral("end_to_end"),
          [](const QJsonObject& record) {
-             return record.value(QStringLiteral("end_to_end_ns")).toInteger();
+             return snowJsonInteger(record.value(QStringLiteral("end_to_end_ns")));
          }},
         {QStringLiteral("capture_image_acquired_native"), milestone("capture.native_returned")},
         {QStringLiteral("capture_image_applied"), milestone("capture.displays_applied")},

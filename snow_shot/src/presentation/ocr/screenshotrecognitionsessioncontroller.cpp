@@ -2271,10 +2271,12 @@ void ScreenshotRecognitionSessionController::applyTextFormatting(const QString& 
             if (m_translating) {
                 // Translated drafts have no per-line OCR geometry of their own.
                 const QRectF bounds(entry.presentation->selection);
-                presentation.lines = {{session->text(),
-                                       1.0,
-                                       {bounds.topLeft(), bounds.topRight(), bounds.bottomRight(),
-                                        bounds.bottomLeft()}}};
+                // QPolygonF(QVector<QPointF>{...}) rather than a nested braced
+                // list: Qt5's QPolygonF has no initializer_list constructor.
+                presentation.lines = {
+                    {session->text(), 1.0,
+                     QPolygonF(QVector<QPointF>{bounds.topLeft(), bounds.topRight(),
+                                                bounds.bottomRight(), bounds.bottomLeft()})}};
             }
             smartText = snow_shot::presentation::smartOcrText(presentation);
         }

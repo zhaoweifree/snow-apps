@@ -182,7 +182,7 @@ void legacyPinPayloadsRetainOnlySupportedRecognition() {
     for (const quint8 translationVersion : {quint8(1), quint8(2)}) {
         QByteArray bytes;
         QDataStream stream(&bytes, QIODevice::WriteOnly);
-        stream.setVersion(QDataStream::Qt_6_11);
+        stream.setVersion(snowDataStreamVersion());
         ScreenshotOcrLine line;
         line.text = QStringLiteral("Legacy local text");
         line.confidence = 0.99;

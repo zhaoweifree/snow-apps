@@ -313,14 +313,14 @@ bool RecordingTrimToolbar::eventFilter(QObject* watched, QEvent* event) {
         if (event->type() == QEvent::MouseButtonPress && mouse->button() == Qt::LeftButton) {
             m_dragging = handle;
             m_dragOffset =
-                mapFromGlobal(snowGlobalPos(mouse)).x() - xForFrame(handle->value()) * m_scale;
+                snowMapFromGlobal(this, snowGlobalPos(mouse)).x() - xForFrame(handle->value()) * m_scale;
             handle->setFocus(Qt::MouseFocusReason);
             if (seekRequested)
                 seekRequested(handle == m_first ? firstFrame() : endFrame() - 1);
         }
         if (m_dragging == handle) {
             if (event->type() != QEvent::MouseButtonPress)
-                moveHandle(handle, mapFromGlobal(snowGlobalPos(mouse)));
+                moveHandle(handle, snowMapFromGlobal(this, snowGlobalPos(mouse)));
             if (event->type() == QEvent::MouseButtonRelease)
                 m_dragging = nullptr;
             return true;

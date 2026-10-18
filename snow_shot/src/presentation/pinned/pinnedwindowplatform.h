@@ -16,7 +16,7 @@ class ScreenshotPinnedWindow;
 class PinnedWindowWindowsEvents {
   public:
     static bool handle(ScreenshotPinnedWindow& window, const QByteArray& type, void* message,
-                       qintptr* result);
+                       snowNativeEventResult* result);
 };
 
 namespace snow_shot::presentation {
@@ -51,7 +51,10 @@ class PinnedWindowPlatform : public QObject {
         return false;
     }
     [[nodiscard]] virtual bool activate() = 0;
-    virtual bool handleNativeEvent(const QByteArray&, void*, qintptr*) {
+    // snowNativeEventResult is qintptr on Qt6 and long on Qt5 - exactly the type
+    // QWidget::nativeEvent() hands out on each version. Spelling qintptr here
+    // would make every Qt5 override fail the signature match (C3668).
+    virtual bool handleNativeEvent(const QByteArray&, void*, snowNativeEventResult*) {
         return false;
     }
     virtual void setResizeInteractionState(const bool*) {}

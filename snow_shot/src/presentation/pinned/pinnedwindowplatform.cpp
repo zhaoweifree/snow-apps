@@ -1,4 +1,5 @@
 #include "pinnedwindowplatform.h"
+#include "snow_shot/compat/qt_compat.h"
 #include "pinneddisplayselection.h"
 #include "screenshotpinnedgeometrymapping.h"
 #if defined(Q_OS_WIN)
@@ -204,7 +205,7 @@ class QtPinnedWindowPlatform final : public PinnedWindowPlatform {
             placement.units != storage::kPinnedGeometryUnits)
             return false;
         m_placement = placement;
-        m_window->setScreen(screen);
+        snowSetWidgetScreen(m_window, screen);
         const QRectF target = pinnedDesktopRect(placement, *screen);
         QSize logicalSize = target.size().toSize();
         if (placement.units == storage::PinnedGeometryUnits::PhysicalPixels) {
@@ -296,7 +297,7 @@ class WindowsPinnedWindowPlatform final : public PinnedWindowPlatform {
     bool startSystemMove() override {
         return m_window && m_window->windowHandle() && m_window->windowHandle()->startSystemMove();
     }
-    bool handleNativeEvent(const QByteArray& type, void* message, qintptr* result) override {
+    bool handleNativeEvent(const QByteArray& type, void* message, snowNativeEventResult* result) override {
         auto* pin = qobject_cast<ScreenshotPinnedWindow*>(m_window.data());
         return pin && PinnedWindowWindowsEvents::handle(*pin, type, message, result);
     }

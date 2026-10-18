@@ -84,7 +84,7 @@ LRESULT CALLBACK dpiStableSubclassProc(HWND hwnd, UINT message, WPARAM wParam, L
     nativeMessage.message = message;
     nativeMessage.wParam = wParam;
     nativeMessage.lParam = lParam;
-    qintptr result = 0;
+    AdNativeEventResult result = 0;
     if (controller->handleNativeMessage(&nativeMessage, &result)) {
       return static_cast<LRESULT>(result);
     }
@@ -344,7 +344,7 @@ bool AdDpiStableWindowController::enforceStablePhysicalSizeForMessage(void* mess
                                                                       WId expectedWindowId,
                                                                       const QSize& stableFrameSize,
                                                                       bool transitionActive,
-                                                                      qintptr* result) {
+                                                                      AdNativeEventResult* result) {
 #if defined(Q_OS_WIN) || defined(_WIN32)
   if (!message || !expectedWindowId || !stableFrameSize.isValid() || stableFrameSize.isEmpty())
     return false;
@@ -576,7 +576,7 @@ void AdDpiStableWindowController::syncAuxiliarySurfaces(const QPoint& physicalDe
   }
 }
 
-bool AdDpiStableWindowController::handleNativeMessage(void* message, qintptr* result) {
+bool AdDpiStableWindowController::handleNativeMessage(void* message, AdNativeEventResult* result) {
 #if defined(Q_OS_WIN) || defined(_WIN32)
   if (!message || !hasBaseline() || !subclassWinId_ || baseline_.windowId != subclassWinId_)
     return false;

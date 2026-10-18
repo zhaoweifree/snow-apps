@@ -346,7 +346,13 @@ void populateFontFamilyComboBox(QComboBox* comboBox) {
     addFontFamilyComboBoxItem(comboBox, "Default", QString(), FontFamilyItemKind::Default, true,
                               false);
 
+    // Qt6 made QFontDatabase's accessors static; in Qt5 they are instance methods
+    // on an implicitly-shared handle, so the object is cheap either way.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     QStringList families = QFontDatabase::families();
+#else
+    QStringList families = QFontDatabase().families();
+#endif
     families.removeDuplicates();
     families.sort(Qt::CaseInsensitive);
     for (const QString& family : families) {

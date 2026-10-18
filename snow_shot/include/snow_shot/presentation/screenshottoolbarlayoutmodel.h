@@ -622,14 +622,20 @@ normalizedLayout(const storage::ScreenshotToolbarLayout& input, const QStringLis
             });
         }
         auto previousDefault = previousScreenshotDefault;
-        previousDefault[0] = {QStringLiteral("barcode-recognition"),
-                              QStringLiteral("table-recognition")};
+        // The QStringList{...} is required: Qt5's QStringList has a
+        // std::initializer_list constructor AND inherits QList<QString>'s, so a
+        // bare braced list is ambiguous between operator=(const QStringList&)
+        // and operator=(const QList<QString>&) -> error C2593 on MSVC.
+        // Qt6 dropped the initializer_list constructor, which is why the Qt6
+        // build accepts the bare form.
+        previousDefault[0] =
+            QStringList{QStringLiteral("barcode-recognition"), QStringLiteral("table-recognition")};
         previousDefault.insert(1, QStringList{QStringLiteral("convert-to-markdown")});
         previousDefault.insert(2, QStringList{QStringLiteral("convert-to-html")});
         auto previousGroupedDefault = previousScreenshotDefault;
-        previousGroupedDefault[0] = {
-            QStringLiteral("table-recognition"), QStringLiteral("barcode-recognition"),
-            QStringLiteral("convert-to-markdown"), QStringLiteral("convert-to-html")};
+        previousGroupedDefault[0] =
+            QStringList{QStringLiteral("table-recognition"), QStringLiteral("barcode-recognition"),
+                        QStringLiteral("convert-to-markdown"), QStringLiteral("convert-to-html")};
         if (result.hidden.isEmpty() &&
             (result.positions == previousDefault || result.positions == previousGroupedDefault)) {
             result.positions = defaultLayout;

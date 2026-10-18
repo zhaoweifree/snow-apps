@@ -98,8 +98,15 @@ QCursor cursorForSnowCursor(SnowCursorStyle style, qreal devicePixelRatio) {
 }
 
 SnowInputEvent makePointerInput(const QMouseEvent& event, SnowPointerEventType eventType) {
+    // Qt6 renamed `localPos()` to `position()`; both are the event position in the
+    // widget's own coordinates, which is what the adapter wants.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     return makePointerInput(event.position(), event.button(), event.buttons(), event.modifiers(),
                             eventType);
+#else
+    return makePointerInput(event.localPos(), event.button(), event.buttons(), event.modifiers(),
+                            eventType);
+#endif
 }
 
 SnowInputEvent makePointerInput(const QPointF& position, Qt::MouseButton button,

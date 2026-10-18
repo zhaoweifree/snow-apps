@@ -914,14 +914,15 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      {},
      2},
     {QStringLiteral("screenshot_shortcuts/next_selection_type"),
-     QJsonArray{QKeySequence(screenshotRegionTypeCycleKey()).toString(QKeySequence::PortableText)},
+     QJsonArray{snowKeySequence(screenshotRegionTypeCycleKey())
+                       .toString(QKeySequence::PortableText)},
      ConfigurationValueKind::StringList,
      std::nullopt,
      {},
      2},
     {QStringLiteral("screenshot_shortcuts/previous_selection_type"),
      QJsonArray{
-         QKeySequence(screenshotRegionTypeCycleKey(true)).toString(QKeySequence::PortableText)},
+         snowKeySequence(screenshotRegionTypeCycleKey(true)).toString(QKeySequence::PortableText)},
      ConfigurationValueKind::StringList,
      std::nullopt,
      {},
@@ -2277,12 +2278,14 @@ normalizeToolbarLayout(const QJsonValue& value, const QStringList& itemIds,
             });
         }
         auto previousDefault = previousScreenshotDefault;
-        previousDefault[0] = {QStringLiteral("barcode-recognition"),
-                              QStringLiteral("table-recognition")};
+        // 显式 QStringList{...}：Qt5 的 QStringList 对「单元素花括号初始化」有多个
+        // 可行重载（initializer_list 与 QString 单参构造），会报 error C2593 operator= 不明确。
+        previousDefault[0] = QStringList{QStringLiteral("barcode-recognition"),
+                                        QStringLiteral("table-recognition")};
         previousDefault.insert(1, QStringList{QStringLiteral("convert-to-markdown")});
         previousDefault.insert(2, QStringList{QStringLiteral("convert-to-html")});
         auto previousGroupedDefault = previousScreenshotDefault;
-        previousGroupedDefault[0] = {
+        previousGroupedDefault[0] = QStringList{
             QStringLiteral("table-recognition"), QStringLiteral("barcode-recognition"),
             QStringLiteral("convert-to-markdown"), QStringLiteral("convert-to-html")};
         if (hidden.isEmpty() &&
@@ -2553,25 +2556,25 @@ ConfigurationNormalization ConfigurationSchema::normalize(const QString& key,
         bool valid = false;
         const auto values = cloudUploadSettingsFromJson(value, &valid);
         const auto normalized = cloudUploadSettingsToJson(values);
-        return {normalized, valid, normalized != value};
+        return {normalized, valid, QJsonValue(normalized) != value};
     }
 #if SNOW_SHOT_ENABLE_API_CONFIGURATION
     if (key == QStringLiteral("api_configuration/server_url")) {
         const auto normalized = normalizedServerUrl(value.toString());
         return {normalized.value_or(QString()), value.isString() && normalized.has_value(),
-                normalized.has_value() && *normalized != value};
+                normalized.has_value() && QJsonValue(*normalized) != value};
     }
     if (key == QStringLiteral("api_configuration/custom_models")) {
         bool valid = false;
         const auto models = customAiModelsFromJson(value, &valid);
         const auto normalized = customAiModelsToJson(models);
-        return {normalized, valid, normalized != value};
+        return {normalized, valid, QJsonValue(normalized) != value};
     }
     if (key == QStringLiteral("api_configuration/text_translation")) {
         bool valid = false;
         const auto models = textTranslationConfigurationsFromJson(value, &valid);
         const auto normalized = textTranslationConfigurationsToJson(models);
-        return {normalized, valid, normalized != value};
+        return {normalized, valid, QJsonValue(normalized) != value};
     }
 #endif
     if (key == QStringLiteral("interface/theme_mode")) {

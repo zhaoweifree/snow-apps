@@ -41,8 +41,8 @@ QRectF glyphRunInkBounds(const QGlyphRun& run) {
     // the painted ink authority, including bearings and variable-font shapes.
     const QRawFont rawFont = run.rawFont();
     if (rawFont.isValid()) {
-        const QList<quint32> glyphIndexes = run.glyphIndexes();
-        const QList<QPointF> positions = run.positions();
+        const QVector<quint32> glyphIndexes = run.glyphIndexes();
+        const QVector<QPointF> positions = run.positions();
         const qsizetype count = std::min(glyphIndexes.size(), positions.size());
         QRectF bounds;
         bool hasBounds = false;
@@ -343,7 +343,7 @@ char32_t verticalPresentationForm(char32_t character) {
 }
 
 QString verticalDisplayText(const QString& grapheme, bool* rotated) {
-    const QList<uint> codePoints = grapheme.toUcs4();
+    const QVector<uint> codePoints = grapheme.toUcs4();
     if (codePoints.isEmpty()) {
         if (rotated != nullptr) {
             *rotated = false;

@@ -10099,7 +10099,7 @@ void ScreenshotToolPalette::updateRecordingControls() {
     updateRecordingExportSettingsControls();
     const auto directlyVisible = [this](const adqt::widgets::AdButton* button, bool phaseVisible) {
         return button != nullptr && phaseVisible && m_mainPanel != nullptr &&
-               m_mainPanel->contentLayout()->indexOf(button) >= 0;
+               m_mainPanel->contentLayout()->indexOf(const_cast<adqt::widgets::AdButton*>(button)) >= 0;
     };
     const bool startVisible = directlyVisible(m_recordStartButton, idle);
     const bool stopVisible = directlyVisible(m_recordStopButton, active);

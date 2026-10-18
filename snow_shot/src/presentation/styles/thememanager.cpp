@@ -354,8 +354,8 @@ void ThemeManager::applyFontSize(ThemeStyleConfig& config) const {
         config.appFont.setPixelSize(qRound(m_baseAppFont.pixelSize() * scale));
     }
     if (m_appFontSizePercentage == 100) {
-        config.appFont.setResolveMask(snowFontResolveMask(config.appFont) &
-                                      ~static_cast<uint>(QFont::SizeResolved));
+        snowSetFontResolveMask(config.appFont, snowFontResolveMask(config.appFont) &
+                                                  ~static_cast<uint>(QFont::SizeResolved));
     }
 }
 

@@ -28,6 +28,7 @@
 #include <QThreadPool>
 #include <algorithm>
 #include <atomic>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace snow_shot::app::mcp {
 namespace {
@@ -41,7 +42,7 @@ ScreenshotMcpResponse reply(const ScreenshotMcpRequest& request, QJsonObject res
     response.requestId = request.requestId;
     response.result = std::move(result);
     if (response.result.contains(QStringLiteral("revision")))
-        response.revision = response.result.value(QStringLiteral("revision")).toInteger();
+        response.revision = snowJsonInteger(response.result.value(QStringLiteral("revision")));
     return response;
 }
 

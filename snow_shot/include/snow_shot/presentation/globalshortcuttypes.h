@@ -3,6 +3,7 @@
 
 #include "snow_shot/shortcuts/shortcutbinding.h"
 
+#include <QHash>
 #include <QMetaType>
 #include <QString>
 #include <QStringList>
@@ -36,6 +37,19 @@ enum class GlobalShortcutAction {
     ScreenshotQuickSave,
     HideShowAllWindows,
 };
+
+// Qt6 provides a qHash overload for *every* enum in qhashfunctions.h; Qt5 does
+// not. settingscatalog stores a QSet<GlobalShortcutAction>, and the missing
+// overload fails inside the Qt headers themselves
+// (error C2665: no overload of "qHash" can convert all argument types).
+// Same namespace plus same parameter type means ADL finds this one, while the
+// exact match still wins under Qt6, so the two do not conflict.
+// Keep this comment ASCII: some TUs that include this header are not compiled
+// with /utf-8.
+inline uint qHash(GlobalShortcutAction action, uint seed = 0) noexcept
+{
+    return ::qHash(static_cast<int>(action), seed);
+}
 
 [[nodiscard]] constexpr bool controlsGlobalHotkeyGates(GlobalShortcutAction action) {
     return action == GlobalShortcutAction::ToggleGlobalHotkeys ||

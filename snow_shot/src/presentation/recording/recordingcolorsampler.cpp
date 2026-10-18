@@ -102,7 +102,7 @@ bool RecordingColorSampler::owns(QWidget* widget) const {
 
 QImage RecordingColorSampler::previewAt(const QPointF& globalPosition) {
     if (!m_area.canvas()->rect().contains(
-            m_area.canvas()->mapFromGlobal(globalPosition).toPoint())) {
+            snowMapFromGlobal(m_area.canvas(), globalPosition).toPoint())) {
         m_preview->hide();
         return {};
     }

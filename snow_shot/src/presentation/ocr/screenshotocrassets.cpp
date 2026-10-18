@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <optional>
 #include <mutex>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace {
 constexpr auto kManifestName = "asset-manifest.json";
@@ -223,7 +224,7 @@ std::optional<FileDescriptor> parseFile(const QJsonObject& object, bool requireU
                                         QString* error) {
     FileDescriptor result;
     result.name = object.value(QStringLiteral("name")).toString();
-    result.size = object.value(QStringLiteral("size")).toInteger(-1);
+    result.size = snowJsonInteger(object.value(QStringLiteral("size")), -1);
     const QByteArray encodedSha256 =
         object.value(QStringLiteral("sha256")).toString().toLatin1().toLower();
     result.sha256 = QByteArray::fromHex(encodedSha256);

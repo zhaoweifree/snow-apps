@@ -89,6 +89,7 @@
 #include <QChildEvent>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
+#include <QScopeGuard>
 #include <QDragLeaveEvent>
 #include <QDropEvent>
 #include <QCloseEvent>
@@ -205,8 +206,8 @@ constexpr quint8 kTextTranslationPayloadVersion = 2;
 QList<QKeyCombination> standardKeyCombinations(QKeySequence::StandardKey standardKey) {
     QList<QKeyCombination> combinations;
     for (const QKeySequence& sequence : QKeySequence::keyBindings(standardKey)) {
-        if (sequence.count() == 1 && !combinations.contains(sequence[0])) {
-            combinations.push_back(sequence[0]);
+        if (sequence.count() == 1 && !combinations.contains(snowKeySequenceAt(sequence, 0))) {
+            combinations.push_back(snowKeySequenceAt(sequence, 0));
         }
     }
     return combinations;
@@ -223,7 +224,7 @@ QByteArray serializeRecognitionResults(const ScreenshotRecognitionResults& sourc
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     // Pinned records do not store a Qt stream version alongside their recognition payload.
     // Preserve the existing wire format independently of the Qt version compiling this code.
-    stream.setVersion(QDataStream::Qt_6_11);
+    stream.setVersion(snowDataStreamVersion());
     stream << results.key << quint8(results.text.has_value() ? 1 : 0)
            << quint8(results.table.has_value() ? 1 : 0) << quint8(results.qr.has_value() ? 1 : 0);
     if (results.text.has_value() && results.text->presentation != nullptr) {
@@ -300,7 +301,7 @@ ScreenshotRecognitionResults deserializeRecognitionResults(const QByteArray& byt
         return results;
     }
     QDataStream stream(bytes);
-    stream.setVersion(QDataStream::Qt_6_11);
+    stream.setVersion(snowDataStreamVersion());
     quint8 hasText = 0, hasTable = 0, hasQr = 0;
     stream >> results.key >> hasText >> hasTable >> hasQr;
     if (stream.status() != QDataStream::Ok) {
@@ -732,7 +733,7 @@ class PinnedFileDropRouting final : public QObject {
         if (widget != m_owner) {
             widget->setAcceptDrops(false);
         }
-        const auto children = widget->findChildren<QWidget*>(Qt::FindDirectChildrenOnly);
+        const auto children = widget->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly);
         for (QWidget* child : children) {
             watch(child);
         }
@@ -2214,7 +2215,7 @@ bool ScreenshotPinnedWindow::event(QEvent* event) {
 }
 
 bool ScreenshotPinnedWindow::nativeEvent(const QByteArray& eventType, void* message,
-                                         qintptr* result) {
+                                         snowNativeEventResult* result) {
 #ifdef Q_OS_WIN
     if (message) {
         const auto* native = static_cast<const MSG*>(message);
@@ -4974,15 +4975,14 @@ void ScreenshotPinnedWindow::setEditMode(bool enabled) {
         QVariantAnimation* restorationAnimation = m_geometryAnimation;
         if (restorationAnimation != nullptr &&
             restorationAnimation->state() == QAbstractAnimation::Running) {
-            connect(
+            snowConnectSingleShot(
                 restorationAnimation, &QVariantAnimation::finished, this,
                 [this, restorationAnimation]() {
                     if (!m_closing && !m_thumbnailMode &&
                         m_geometryAnimation == restorationAnimation) {
                         setEditMode(true);
                     }
-                },
-                Qt::SingleShotConnection);
+                });
         } else {
             setEditMode(true);
         }
@@ -5896,7 +5896,7 @@ ScreenshotExportSource
 ScreenshotPinnedWindow::cachedPinnedExportSource(ScreenshotPinnedViewportExportSource request) {
     QByteArray key;
     QDataStream stream(&key, QIODevice::WriteOnly);
-    stream.setVersion(QDataStream::Qt_6_11);
+    stream.setVersion(snowDataStreamVersion());
     stream << m_presentationGeneration << m_runtime.documentRevision()
            << request.backgroundImage.cacheKey() << request.backgroundCanvasRect
            << request.contentPixelSize << encodeScreenshotResultStyle(request.resultStyle)
@@ -9524,7 +9524,7 @@ QJsonObject ScreenshotPinnedWindow::automationEdit(const QString& action,
             ok = m_canvas->createSerialNumberText();
         else if (action == QStringLiteral("serial_adjust"))
             ok = m_canvas->adjustSelectedSerialNumbers(
-                payload.value(QStringLiteral("delta")).toInteger());
+                snowJsonInteger(payload.value(QStringLiteral("delta"))));
         else if (action == QStringLiteral("opacity")) {
             const auto opacity = payload.value(QStringLiteral("opacity"));
             if (!opacity.isDouble() || opacity.toDouble() < 0 || opacity.toDouble() > 1)

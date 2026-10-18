@@ -6,7 +6,19 @@
 #include "snow_shot/diagnostics/diagnostics.h"
 #include <QElapsedTimer>
 #include <QDateTime>
+#include <QtGlobal>
+// QHttp1Configuration only exists since Qt 6.7; on Qt5 (and Qt 6.0-6.6) there is
+// no QNetworkRequest::setHttp1Configuration, and the library defaults stay in
+// effect (6 connections per host, keep-alive reuse unchanged).
+// The guard has to sit *after* <QtGlobal>: before it, QT_VERSION and
+// QT_VERSION_CHECK are still undefined identifiers, the preprocessor evaluates
+// them as 0, and `#if 0 >= 0` is trivially true -- the guard then silently does
+// nothing and Qt5 still tries to include the Qt6-only header (C1083).
+// Keep this comment ASCII: this TU is not compiled with /utf-8, so non-ASCII
+// bytes are decoded as the system code page and can swallow line endings.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 #include <QHttp1Configuration>
+#endif
 #include "boundednetworkresponse.h"
 #include "texttranslationprotocol.h"
 #include <QUuid>
@@ -419,7 +431,13 @@ std::optional<QString> qwenMtLanguage(const QString& language) {
         QLatin1StringView applicationCode;
         QLatin1StringView providerCode;
     };
-    static constexpr std::array<Mapping, 13> mappings{{
+    // Not constexpr: on Qt5 QLatin1StringView is plain QLatin1String, whose
+    // `QLatin1String(const char *)` constructor computes the length with strlen
+    // and therefore cannot appear in a constant expression (MSVC C2131:
+    // "expression did not evaluate to a constant"). Qt6 made that constructor
+    // constexpr, so the table only ever compiled there. A function-local static
+    // initialises once, lazily, on both versions.
+    static const std::array<Mapping, 13> mappings{{
         Mapping{QLatin1StringView("auto"), QLatin1StringView("auto")},
         Mapping{QLatin1StringView("ar"), QLatin1StringView("ar")},
         Mapping{QLatin1StringView("de"), QLatin1StringView("de")},
@@ -1106,7 +1124,7 @@ SnowShotApiClient::ensureChatModels(const QString& locale, QObject* receiver,
 
 void SnowShotApiClient::finishModelCatalogSubscribers(RequestToken owner,
                                                       SnowShotChatModelsResult result) {
-    snow::compat::removeIf(m_pendingModelCatalogs, 
+    snow::compat::removeIf(m_pendingModelCatalogs,
         [owner](QHash<QString, RequestToken>::iterator item) { return item.value() == owner; });
     const auto subscribers = m_modelCatalogSubscribers.take(owner);
     const QPointer<SnowShotApiClient> guard(this);
@@ -1544,9 +1562,11 @@ void SnowShotApiClient::startChatStream(RequestToken token, const QByteArray& bo
     }
     QNetworkRequest request(QUrl(state->endpoint));
     if (state->custom) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
         QHttp1Configuration http1;
         http1.setNumberOfConnectionsPerHost(16);
         request.setHttp1Configuration(http1);
+#endif
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                              QNetworkRequest::SameOriginRedirectPolicy);
         if (!state->apiKey.isEmpty()) {
@@ -1783,7 +1803,7 @@ void SnowShotApiClient::cancel(RequestToken token) {
         request->report(QStringLiteral("cancelled"));
     const RequestToken catalogOwner = request->catalogOwner;
     const auto subscribers = m_modelCatalogSubscribers.take(token);
-    snow::compat::removeIf(m_pendingModelCatalogs, 
+    snow::compat::removeIf(m_pendingModelCatalogs,
         [token](QHash<QString, RequestToken>::iterator item) { return item.value() == token; });
     const bool translation = request->textTranslation;
     const bool custom = request->custom;
@@ -2031,9 +2051,11 @@ void SnowShotApiClient::startTextTranslation(RequestToken token) {
         return;
     }
     QNetworkRequest request(QUrl(config.endpoint));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
     QHttp1Configuration http1;
     http1.setNumberOfConnectionsPerHost(16);
     request.setHttp1Configuration(http1);
+#endif
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::SameOriginRedirectPolicy);
     request.setHeader(QNetworkRequest::ContentTypeHeader,

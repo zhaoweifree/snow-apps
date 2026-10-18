@@ -10,6 +10,7 @@
 #include <QMutexLocker>
 #include <QSet>
 #include <QThread>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace snow_shot::presentation::recording_perf {
 namespace {
@@ -34,7 +35,7 @@ class FileSink final : public Sink {
     void recordScope(const char* name, qint64 nanoseconds) override {
         if (state.active) {
             const QString key = QString::fromLatin1(name);
-            state.spans[key] = state.spans.value(key).toInteger() + nanoseconds;
+            state.spans[key] = snowJsonInteger(state.spans.value(key)) + nanoseconds;
         }
     }
     void recordMilestone(const char* name, qint64 nanoseconds) override {
@@ -44,7 +45,7 @@ class FileSink final : public Sink {
     void recordCounter(const char* name, qint64 value) override {
         if (state.active) {
             const QString key = QString::fromLatin1(name);
-            state.counters[key] = state.counters.value(key).toInteger() + value;
+            state.counters[key] = snowJsonInteger(state.counters.value(key)) + value;
         }
     }
     void finish(bool success) override {

@@ -2,6 +2,7 @@
 #define SNOW_SHOT_PRESENTATION_SCREENSHOTFLOATINGTOOLPALETTEWINDOW_H
 
 #include "snow_shot/presentation/screenshottoolpalette.h"
+#include "snow_shot/compat/qt_compat.h"
 
 #include <QByteArray>
 #include <QHash>
@@ -99,7 +100,7 @@ class ScreenshotFloatingToolPaletteWindow : public QWidget {
   private:
     void updatePaletteGeometryForVisibleContent();
     void refreshPaletteWindow(bool forceRepaint = false);
-    bool handleNativeHitTest(void* message, qintptr* result) const;
+    bool handleNativeHitTest(void* message, snowNativeEventResult* result) const;
     bool isPointInInteractiveContent(const QPoint& localPosition) const;
     void handlePaletteContentChange();
     bool applyPlacementScreen();

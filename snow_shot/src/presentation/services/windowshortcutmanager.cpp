@@ -578,7 +578,8 @@ shortcuts::ShortcutBindingList WindowShortcutManager::shortcutBindingsFromKeyCom
             bindings.push_back(shortcuts::ShortcutBinding{QStringLiteral("Ctrl")});
             continue;
         }
-        const QString portable = QKeySequence(combination).toString(QKeySequence::PortableText);
+        const QString portable =
+            snowKeySequence(combination).toString(QKeySequence::PortableText);
         const shortcuts::ShortcutBinding binding = shortcuts::bindingFromPortableText(portable);
         if (!binding.portableText.isEmpty()) {
             bindings.push_back(binding);
@@ -603,7 +604,7 @@ QList<QKeyCombination> WindowShortcutManager::keyCombinationsFromBindings(
         const QKeySequence sequence =
             QKeySequence::fromString(binding.portableText, QKeySequence::PortableText);
         if (sequence.count() == 1) {
-            combinations.push_back(sequence[0]);
+            combinations.push_back(snowKeyCombination(sequence));
         }
     }
     return normalizedCombinations(combinations);

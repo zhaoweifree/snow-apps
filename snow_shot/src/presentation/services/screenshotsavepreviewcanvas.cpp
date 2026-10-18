@@ -148,17 +148,19 @@ void ScreenshotSavePreviewCanvas::paintEvent(QPaintEvent*) {
     painter.drawEllipse(thumbCenter, kSplitThumbRadius, kSplitThumbRadius);
 
     painter.setBrush(QColor(246, 248, 251, 242));
-    painter.drawPolygon(QPolygonF{
+    // QPolygonF(QVector<QPointF>{...}) rather than QPolygonF{...}: Qt5's
+    // QPolygonF has no initializer_list constructor (QtGui/qpolygon.h).
+    painter.drawPolygon(QPolygonF(QVector<QPointF>{
         QPointF(split - kSplitTrackWidth / 2.0, thumbCenter.y() - kSplitArrowHalfHeight),
         QPointF(split - kSplitTrackWidth / 2.0 - kSplitArrowWidth, thumbCenter.y()),
         QPointF(split - kSplitTrackWidth / 2.0, thumbCenter.y() + kSplitArrowHalfHeight),
-    });
+    }));
     painter.setBrush(theme.colorPrimary);
-    painter.drawPolygon(QPolygonF{
+    painter.drawPolygon(QPolygonF(QVector<QPointF>{
         QPointF(split + kSplitTrackWidth / 2.0, thumbCenter.y() - kSplitArrowHalfHeight),
         QPointF(split + kSplitTrackWidth / 2.0 + kSplitArrowWidth, thumbCenter.y()),
         QPointF(split + kSplitTrackWidth / 2.0, thumbCenter.y() + kSplitArrowHalfHeight),
-    });
+    }));
 }
 void ScreenshotSavePreviewCanvas::resizeEvent(QResizeEvent*) {
     if (m_fit)

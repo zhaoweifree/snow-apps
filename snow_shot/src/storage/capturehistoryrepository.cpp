@@ -29,6 +29,7 @@
 #include <mutex>
 #include <thread>
 #include <utility>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace snow_shot::storage {
 namespace {
@@ -77,7 +78,7 @@ bool integer(const QJsonValue& value, qint64 minimum, qint64 maximum, qint64* re
         value.toDouble() > static_cast<double>(maximum)) {
         return false;
     }
-    *result = value.toInteger();
+    *result = snowJsonInteger(value);
     return true;
 }
 
@@ -958,9 +959,9 @@ class CaptureHistoryRepositoryImpl final : public CaptureHistoryRepository {
         const QJsonDocument document = QJsonDocument::fromJson(bytes);
         const QJsonObject object = document.object();
         if (file.error() != QFileDevice::NoError || !document.isObject() ||
-            (object.value(QStringLiteral("format_version")).toInteger() != kIndexVersion &&
-             object.value(QStringLiteral("format_version")).toInteger() != 1 &&
-             object.value(QStringLiteral("format_version")).toInteger() != 2) ||
+            (snowJsonInteger(object.value(QStringLiteral("format_version"))) != kIndexVersion &&
+             snowJsonInteger(object.value(QStringLiteral("format_version"))) != 1 &&
+             snowJsonInteger(object.value(QStringLiteral("format_version"))) != 2) ||
             !object.value(QStringLiteral("records")).isArray() ||
             !object.value(QStringLiteral("pending_deletions")).isArray()) {
             indexFailed();

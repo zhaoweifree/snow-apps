@@ -372,7 +372,7 @@ QString canonicalPortableText(const QString& text, bool allowModifierOnlyShift,
     if (sequence.count() != 1) {
         return {};
     }
-    const QKeyCombination combination = sequence[0];
+    const QKeyCombination combination = snowKeyCombination(sequence);
     const Qt::Key key = combination.key();
     if (allowModifierOnlyShift && key == Qt::Key_Shift &&
         combination.keyboardModifiers() == Qt::ShiftModifier) {
@@ -429,7 +429,7 @@ ShortcutBinding bindingFromKeyEvent(const QKeyEvent& event, bool allowModifierOn
     const Qt::KeyboardModifiers modifiers =
         event.modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier |
                              Qt::MetaModifier | Qt::KeypadModifier);
-    ShortcutBinding result{QKeySequence(QKeyCombination(modifiers, key))
+    ShortcutBinding result{snowKeySequence(QKeyCombination(modifiers, key))
                                .toString(QKeySequence::PortableText)
                                .trimmed()};
     result = canonicalBinding(result, allowModifierOnlyShift, allowModifierOnlyAlt);
@@ -542,8 +542,14 @@ ShortcutBinding shortcutBindingFromJson(const QJsonValue& value, bool allowModif
         }
         return {};
     }
+    // `shortcutBindingToJson()` 返回 QJsonObject，而这里的 value 是 QJsonValue。
+    // 直接写 `QJsonObject == QJsonValue` 在 Qt5 上会让 MSVC 的 C++20 重写候选规则
+    // 失效（C7692：重写的候选函数已从重载解析中排除，因为同一作用域声明了对应的
+    // operator!=），而且这本来就是**跨类型**比较。显式构造 QJsonValue 两边同型，
+    // 语义不变、Qt5/Qt6 都能过。
     normalizedChanged =
-        normalizedChanged || result != candidate || shortcutBindingToJson(result) != value;
+        normalizedChanged || result != candidate
+        || QJsonValue(shortcutBindingToJson(result)) != value;
     if (valid != nullptr) {
         *valid = true;
     }
@@ -620,7 +626,7 @@ std::optional<quint32> macVirtualKeyForBinding(const ShortcutBinding& binding) {
     if (sequence.count() != 1) {
         return std::nullopt;
     }
-    const QKeyCombination combination = sequence[0];
+    const QKeyCombination combination = snowKeyCombination(sequence);
     return ansiVirtualKey(combination.key(),
                           combination.keyboardModifiers().testFlag(Qt::KeypadModifier));
 }
@@ -647,7 +653,7 @@ ShortcutIdentity effectiveIdentity(const ShortcutBinding& binding) {
     if (sequence.count() != 1) {
         return result;
     }
-    const QKeyCombination combination = sequence[0];
+    const QKeyCombination combination = snowKeyCombination(sequence);
     result.key = combination.key();
     result.modifiers = combination.keyboardModifiers();
 #ifdef Q_OS_MACOS

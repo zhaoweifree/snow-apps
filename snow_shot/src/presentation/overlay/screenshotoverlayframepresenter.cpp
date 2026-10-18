@@ -128,8 +128,32 @@ ScreenshotOverlayRevealStrategy configuredRevealStrategy() {
 }
 
 bool shouldConcealFirstPaint(const QWidget& window) {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    // Qt5 的 windows 平台插件把 setWindowOpacity() 实现成 SetLayeredWindowAttributes
+    // （常量 alpha 模式），而 WA_TranslucentBackground 的窗口内容走
+    // UpdateLayeredWindow 的逐像素 alpha 合成。两者混用之后窗口会卡在常量 alpha
+    // 模式：即使再 setWindowOpacity(1.0)，逐像素表面也拿不回来，整块 overlay
+    // 变成全透明 —— 截图遮罩、冻结帧、选区全都看不见（实测：paintEvent 里
+    // windowOpacity()==0，canvas 已绘制、帧已 materialize，但屏幕无输出）。
+    //
+    // 这个遮盖本身只是为了避开首帧白闪；半透明窗口在 Windows 上的首帧本来就是
+    // 全透明的，不存在白闪，所以 Qt5 直接跳过，绝不去碰窗口 opacity。
+    Q_UNUSED(window);
+    return false;
+#else
     return !window.isVisible() && window.isWindow() &&
            QGuiApplication::platformName() == QStringLiteral("windows");
+#endif
+}
+
+// Qt5 上绝不触碰窗口 opacity，理由见 shouldConcealFirstPaint()。
+void setConcealWindowOpacity(QWidget& window, qreal opacity) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    window.setWindowOpacity(opacity);
+#else
+    Q_UNUSED(window);
+    Q_UNUSED(opacity);
+#endif
 }
 
 void recordStrategy(ScreenshotOverlayRevealStrategy strategy) {
@@ -180,7 +204,10 @@ void ScreenshotOverlayFramePresenter::warmPresentationSurface() {
     const ScreenshotOverlayRevealPlan plan = planFor(m_strategy);
     {
         SNOW_SHOT_CAPTURE_PERF_SCOPE("presentation.window.surface_warm.opacity_conceal");
-        m_window.setWindowOpacity(0.0);
+        // 见 shouldConcealFirstPaint() 的说明：Qt5 不能用窗口 opacity 做遮盖。
+        if (shouldConcealFirstPaint(m_window)) {
+            setConcealWindowOpacity(m_window, 0.0);
+        }
     }
     ShowPaintSuppression paintSuppression(m_window, plan.suppressShowPaint);
     SNOW_SHOT_CAPTURE_PERF_MILESTONE("presentation.window.surface_warm.redraw_suppressed");
@@ -216,10 +243,12 @@ void ScreenshotOverlayFramePresenter::presentPreparedFrame(bool deferFirstPaint)
     const bool alreadyVisible = m_window.isVisible();
     const bool concealFirstPaint = shouldConcealFirstPaint(m_window);
     const qreal previousOpacity = m_window.windowOpacity();
-    const bool restoreWarmedOpacity = alreadyVisible && qFuzzyIsNull(previousOpacity);
+    // 只有真的支持窗口 opacity 遮盖的平台才可能把 opacity 留在 0；Qt5 从不碰它。
+    const bool restoreWarmedOpacity =
+        concealFirstPaint && alreadyVisible && qFuzzyIsNull(previousOpacity);
     if (concealFirstPaint) {
         SNOW_SHOT_CAPTURE_PERF_SCOPE("presentation.window.opacity_conceal");
-        m_window.setWindowOpacity(0.0);
+        setConcealWindowOpacity(m_window, 0.0);
     }
     SNOW_SHOT_CAPTURE_PERF_MILESTONE("presentation.window.concealed");
 
@@ -256,10 +285,10 @@ void ScreenshotOverlayFramePresenter::presentPreparedFrame(bool deferFirstPaint)
 
     if (concealFirstPaint) {
         SNOW_SHOT_CAPTURE_PERF_SCOPE("presentation.window.opacity_restore");
-        m_window.setWindowOpacity(previousOpacity);
+        setConcealWindowOpacity(m_window, previousOpacity);
     } else if (restoreWarmedOpacity) {
         SNOW_SHOT_CAPTURE_PERF_SCOPE("presentation.window.opacity_restore");
-        m_window.setWindowOpacity(1.0);
+        setConcealWindowOpacity(m_window, 1.0);
     }
     SNOW_SHOT_CAPTURE_PERF_MILESTONE("presentation.window.opacity_restored");
 }
@@ -273,7 +302,7 @@ void ScreenshotOverlayFramePresenter::presentFramePaced() {
         enableWidgetTreeUpdates(m_window);
         if (qFuzzyIsNull(m_window.windowOpacity())) {
             SNOW_SHOT_CAPTURE_PERF_SCOPE("presentation.window.opacity_restore");
-            m_window.setWindowOpacity(1.0);
+            setConcealWindowOpacity(m_window, 1.0);
         }
         SNOW_SHOT_CAPTURE_PERF_MILESTONE("presentation.window.frame_paced_warmed");
         return;

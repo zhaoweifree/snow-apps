@@ -32,6 +32,7 @@
 #include <limits>
 #include <stdexcept>
 #include <thread>
+#include "snow_shot/compat/qt_compat.h"
 
 namespace {
 using namespace snow_shot::scrolling_benchmark;
@@ -133,12 +134,12 @@ void scheduleTests() {
                 replayCompletion(11, 10, true, true, true) == ReplayCompletion::Complete,
             "drain waits for final position, stopped input, and pending work");
     const auto stats = distribution({1, 2, 3, 4, 100});
-    require(stats[QStringLiteral("p50_ns")].toInteger() == 3 &&
-                stats[QStringLiteral("p95_ns")].toInteger() == 100 &&
-                stats[QStringLiteral("total_ns")].toInteger() == 110,
+    require(snowJsonInteger(stats[QStringLiteral("p50_ns")]) == 3 &&
+                snowJsonInteger(stats[QStringLiteral("p95_ns")]) == 100 &&
+                snowJsonInteger(stats[QStringLiteral("total_ns")]) == 110,
             "timing distribution");
-    require(distribution({})[QStringLiteral("count")].toInteger() == 0, "unavailable timing");
-    require(distribution({0})[QStringLiteral("count")].toInteger() == 1,
+    require(snowJsonInteger(distribution({})[QStringLiteral("count")]) == 0, "unavailable timing");
+    require(snowJsonInteger(distribution({0})[QStringLiteral("count")]) == 1,
             "measured zero is distinct from unavailable");
     require(!readablePng(QByteArray("not a PNG")), "wrong-format PNG rejected");
     QImage validationImage(32, 32, QImage::Format_RGBA8888);
@@ -1119,8 +1120,8 @@ void replaySourceTest() {
     require(source->receive(1).kind == ScrollingSourceEvent::Kind::Timeout,
             "cancelled source delivered another frame");
     const auto report = replayReport(state, scrolling_perf::now());
-    require(report[QStringLiteral("sampled_frames")].toInteger() == 2 &&
-                report[QStringLiteral("unsampled_positions")].toInteger() == 9,
+    require(snowJsonInteger(report[QStringLiteral("sampled_frames")]) == 2 &&
+                snowJsonInteger(report[QStringLiteral("unsampled_positions")]) == 9,
             "adaptive skip accounting");
 }
 

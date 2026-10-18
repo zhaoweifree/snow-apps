@@ -208,7 +208,8 @@ void ScreenshotOcrTextEditingSession::synchronizePreservedSource(int position, i
     if (current == m_documentRawText)
         return;
     const qsizetype start = std::clamp<qsizetype>(position, 0, m_documentRawText.size());
-    const qsizetype end = std::min(start + charsRemoved, m_documentRawText.size());
+    const qsizetype end =
+        std::min<qsizetype>(start + charsRemoved, m_documentRawText.size());
     const qsizetype sourceStart = m_documentSourceOffsets.at(start);
     const qsizetype sourceEnd = m_documentSourceOffsets.at(end);
     QString inserted = current.mid(start, charsAdded);

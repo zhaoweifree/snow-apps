@@ -69,7 +69,7 @@ QJsonObject exceptionContext(const QString& path) {
         bytes = reinterpret_cast<const uchar*>(exception.constData());
         return {
             {QStringLiteral("exception_code"),
-             QStringLiteral("0x%1").arg(qFromLittleEndian<quint32>(bytes + 8), 8, 16, u'0')},
+             QStringLiteral("0x%1").arg(qFromLittleEndian<quint32>(bytes + 8), 8, 16, QLatin1Char('0'))},
             {QStringLiteral("exception_address"),
              QStringLiteral("0x%1").arg(qFromLittleEndian<quint64>(bytes + 24), 0, 16)},
             {QStringLiteral("thread_id"), static_cast<qint64>(qFromLittleEndian<quint32>(bytes))}};
@@ -125,10 +125,18 @@ class LocalCrashCollector final : public CrashCollector {
         m_database->GetPendingReports(&reports);
         m_database->GetCompletedReports(&completed);
         reports.insert(reports.end(), completed.begin(), completed.end());
+        // Qt 6.5 起 `QTimeZone::UTC` 是枚举值；Qt 5.15 只有 `QTimeZone::utc()` 静态函数。
+        // 两边都把它取成一个 QTimeZone 局部量，避免在表达式里塞 #if。
+        const QTimeZone utcZone =
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+            QTimeZone::UTC;
+#else
+            QTimeZone::utc();
+#endif
         for (const auto& report : reports) {
             result.push_back({QString::fromStdString(report.uuid.ToString()),
                               qtPath(report.file_path),
-                              QDateTime::fromSecsSinceEpoch(report.creation_time, QTimeZone::UTC),
+                              QDateTime::fromSecsSinceEpoch(report.creation_time, utcZone),
                               static_cast<qint64>(report.total_size),
                               exceptionContext(qtPath(report.file_path))});
         }

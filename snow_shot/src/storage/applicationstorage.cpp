@@ -894,7 +894,7 @@ StorageResult ApplicationStorage::requestDirectoryChange(const QString& director
                 return migrate || !path.startsWith(prefix) ||
                        expectedPins.contains(path.mid(prefix.size()).section(u'/', 0, 0));
             };
-            options.preparedFiles = {QStringLiteral("pinned_windows_v2/index.json")};
+            options.preparedFiles = QStringList{QStringLiteral("pinned_windows_v2/index.json")};
             options.progress = [this](const StorageDirectoryProgress& progress) {
                 QMetaObject::invokeMethod(this,
                                           snow_shot::runtime::trackRuntimeWork([this, progress] {

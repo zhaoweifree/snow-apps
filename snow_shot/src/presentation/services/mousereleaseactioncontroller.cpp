@@ -1,4 +1,5 @@
 #include "snow_shot/presentation/mousereleaseactioncontroller.h"
+#include "snow_shot/compat/qt_compat.h"
 
 #include <QApplication>
 #include <QContextMenuEvent>
@@ -154,7 +155,7 @@ bool MouseReleaseActionController::eventFilter(QObject* watched, QEvent* event) 
     return false;
 }
 
-bool MouseReleaseActionController::handleNativeEvent(void* message, qintptr* result) {
+bool MouseReleaseActionController::handleNativeEvent(void* message, snowNativeEventResult* result) {
 #ifdef Q_OS_WIN
     if (!pending() || !m_scope) {
         return false;

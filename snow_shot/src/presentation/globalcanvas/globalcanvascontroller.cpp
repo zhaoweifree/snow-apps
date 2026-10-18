@@ -385,7 +385,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
         activateDrawing();
         const QPointF globalPosition =
             platform::PhysicalCursor().logicalPosition().value_or(QCursor::pos());
-        updateColorSamplingPreview(drawing->mapFromGlobal(globalPosition));
+        updateColorSamplingPreview(snowMapFromGlobal(drawing.get(), globalPosition));
     }
     void cancelColorSampling() {
         if (!sampleTarget && sampleRaster.isNull())
@@ -411,7 +411,8 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
         if (preview.isNull()) {
             sampleWindow->hide();
         } else {
-            sampleWindow->updateSample(preview, drawing->mapToGlobal(localPosition).toPoint());
+            sampleWindow->updateSample(preview,
+                                       snowMapToGlobal(drawing.get(), localPosition).toPoint());
         }
     }
     void finishPan() {

@@ -65,7 +65,8 @@ std::optional<QPointF> dragCursorPosition(const QMouseEvent& event) {
         return std::nullopt;
     }
 #endif
-    return event.globalPosition();
+    // QMouseEvent::globalPosition() is Qt6-only; the shim maps it to globalPos().
+    return snowGlobalPos(&event);
 }
 
 bool finiteRect(const QRectF& rect) {
@@ -1165,7 +1166,7 @@ void ScreenshotOriginalImagePreviewWindow::scheduleRefresh() {
 }
 
 bool ScreenshotOriginalImagePreviewWindow::nativeEvent(const QByteArray& eventType, void* message,
-                                                       qintptr* result) {
+                                                       snowNativeEventResult* result) {
 #if defined(Q_OS_WIN) || defined(_WIN32)
     if (usesPhysicalGeometry() && message && m_targetGeometry.isValid() &&
         (eventType == QByteArrayLiteral("windows_generic_MSG") ||

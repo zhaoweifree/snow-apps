@@ -40,6 +40,7 @@
 #include <utility>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
+#include "snow_shot/compat/qt_compat.h"
 #endif
 
 using namespace snow_shot::app::mcp;
@@ -1093,7 +1094,7 @@ void recognitionModelDocuments(const QString& directory) {
             require(result.ok, "MCP selected recognition edit succeeds");
         if (result.ok)
             recognitionRevision =
-                result.result.value(QStringLiteral("recognition_revision")).toInteger();
+                snowJsonInteger(result.result.value(QStringLiteral("recognition_revision")));
         return result;
     };
     const auto opened = call(QStringLiteral("document_open"),
@@ -1607,7 +1608,7 @@ void documentWorkflows() {
                               {QStringLiteral("action"), QStringLiteral("set_text")},
                               {QStringLiteral("text"), QStringLiteral("Edited result")}});
     require(edited.ok &&
-                edited.result.value(QStringLiteral("recognition_revision")).toInteger() == 2,
+                snowJsonInteger(edited.result.value(QStringLiteral("recognition_revision"))) == 2,
             "recognition edits have independent optimistic revision");
     require(call(QStringLiteral("document_edit_recognition"),
                  {{QStringLiteral("expected_recognition_revision"), 1},
@@ -2437,7 +2438,7 @@ void documents(const QString& directory) {
         QFile file(exported.result.value(QStringLiteral("path")).toString());
         require(file.open(QIODevice::ReadOnly), "saved file opens");
         const auto bytes = file.readAll();
-        require(exported.result.value(QStringLiteral("byte_count")).toInteger() == bytes.size() &&
+        require(snowJsonInteger(exported.result.value(QStringLiteral("byte_count"))) == bytes.size() &&
                     exported.result.value(QStringLiteral("sha256")).toString() ==
                         QString::fromLatin1(
                             QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()),

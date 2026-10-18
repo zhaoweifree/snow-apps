@@ -177,7 +177,7 @@ struct screenshot_pinned_window_native::SystemMoveKeyboard::Impl final : QObject
         }
         auto* key = static_cast<QKeyEvent*>(event);
         const bool press = event->type() == QEvent::KeyPress;
-        if ((press && combinations.contains(key->keyCombination())) ||
+        if ((press && combinations.contains(snowKeyEventCombination(key))) ||
             (!press && pressedKeys.contains(key->key()))) {
             handled = true;
             if (press) {

@@ -105,7 +105,7 @@ bool readNativeKey(HKEY key, ShellContextMenuRegistryKey* result, QString* error
             return false;
         }
         result->values.insert(QString::fromWCharArray(name.data(), nameSize),
-                              {type, data.first(static_cast<qsizetype>(dataSize))});
+                              {type, data.left(static_cast<int>(dataSize))});
     }
     QStringList children;
     if (!listChildren(key, &children, error))

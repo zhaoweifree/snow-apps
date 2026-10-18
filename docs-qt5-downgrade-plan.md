@@ -557,7 +557,25 @@ R5/R8/R10/R11/R19/R20 需要括号配对与接收者表达式提取——脚本�
 
 ### 3.4 Windows 冒烟测试验收清单（P5 出口）
 
-配置 → 编译 → 逐项手测：
+配置 → 编译 → 逐项手测。**"起得来"这一步已脚本化**，不必靠双击试：
+`bash .workbuddy/qt5-port/launch-qt5-app.sh <preset> <exe 相对路径> [保持秒数]` ——
+它按这条路线的方式装配 `PATH`（Qt 5.15.2 的 `bin` + `vcpkg_installed/x64-windows/bin`）、
+设 `QT_PLUGIN_PATH`，然后在观察窗口内判活：进程活了算 PASS，两秒内退出即 FAIL，
+并区分"平台插件没加载"（环境问题）与"起来了但秒退"（应用问题）——这两种处置完全不同，
+混在一起看日志会误判。它只证明"没当场崩"，功能项仍须按下表手测：
+
+**手测务必带隔离实例参数**（原因见 §3.8(2)：已安装的正式版会抢单实例键与全局热键，
+不带的话构建产物会直接转发给它然后 `exit=0`）：
+
+```bash
+bash .workbuddy/qt5-port/launch-qt5-app.sh windows-qt5-full snow_shot/snow_shot.exe 20 \
+    --e2e-instance-id=qt5smoke
+```
+
+这个脚本在观察窗口结束时会**主动结束进程**，只适合冒烟判活；要坐下来逐项手测，就照它的
+环境装配方式（`PATH` 里加 Qt5 的 `bin` 与 `vcpkg_installed/x64-windows/bin`、设
+`QT_PLUGIN_PATH` 与 `QT_QPA_PLATFORM_PLUGIN_PATH`）自己起，参数照抄
+`--e2e-instance-id=qt5smoke`。
 
 | 项 | 验收要点 |
 |---|---|
@@ -566,9 +584,15 @@ R5/R8/R10/R11/R19/R20 需要括号配对与接收者表达式提取——脚本�
 | 贴图 | 贴图窗口置顶、拖动、缩放、关闭 |
 | 快捷键 | **重点**——`QKeyCombination` 改造的正确性直接体现在这里（含 Ctrl+Shift+Tab 区域类型循环） |
 | 工具栏悬停 | **重点**——`enterEvent` 签名改造的正确性（悬停高亮、弹出菜单） |
-| 设置页 | 各页可切换、无 `removeIf` 相关崩溃 |
+| 设置页 | 各页可切换。`removeIf` 的 Qt5 缺陷已修（§3.8(4)），这里要重点看工具栏布局的读写 |
 | OCR | 中文识别出文字 |
 | 录屏 | 能起录、能停、产物可播 |
+
+**自动化已经覆盖到的部分**（R38 起）：热键 → overlay → 拖框选中 → Ctrl+C 落剪贴板，
+连跑 5 轮全绿，入口见 §3.9。表里剩下的项仍是手测。
+
+注意：全新实例的默认 `screenshot` 热键是 **F1**，不是 F24。手测前要么按 F1，
+要么照 §3.9(5) 把 `config.json` 的绑定播成 F24（注入工具发的是 F24）。
 
 ### 3.5 本轮新增：一个真缺陷修复 + 三个可复跑的验证入口
 
@@ -750,6 +774,471 @@ Qt 自带的 stock 目录。因此 Qt5 路线下 `QFileDialog`/`QColorDialog` �
 `scripts/snow-build-environment.ps1:252` 与 `scripts/validate-static-qt.py:192`
 都写死了 `translations/qtbase_$language.qm`，在 Qt5 套件（无 `qtbase_zh_CN.qm`）上会判失败。
 
+### 3.7 本轮新增：Qt5 Windows 三档阶梯与首次真编译（R36）
+
+前几轮的证据都停在 `ant_design_qt` + `snow_image` 这两个**库**上：`snow_shot` 因为
+`find_package(OpenCV CONFIG REQUIRED)` 挡在 configure 阶段，一行都没进过编译器。
+本轮先补齐第三方依赖通道，再把"能不能编译"拆成三档，逐档回答一个更窄的问题。
+
+#### (1) 三档预设：每一档只回答一个问题
+
+| 预设 | 编译对象 | 回答的问题 | 依赖 |
+|---|---|---|---|
+| `windows-qt5-smoke` | `ant_design_qt` + `snow_image` | Qt5 底座还在吗（历轮回归基线，**范围未动**） | 无 |
+| `windows-qt5-engine` | 上面的 + `snow_draw_engine_qt` + demo | 真正吃 Qt API 的那层 C++ 过得了 Qt5 吗 | OpenCV |
+| `windows-qt5-full` | 再加 `snow_shot` 本体 | 应用整体能不能构建 | OpenCV + ffmpeg + onnxruntime + libjxl/libheif |
+
+**为什么 engine 档不是"无依赖档"**：`snow_draw_engine_qt/CMakeLists.txt:33` 的
+`find_package(OpenCV CONFIG REQUIRED COMPONENTS core imgproc)` 是无条件的，所以
+engine 继承 `windows-qt5-full` 而不是 `windows-qt5-smoke`；它隔离的是**代码层**
+（draw engine 相对 snow_shot 本体），不是依赖层。把这一点写清楚，是为了避免下一个人
+按"smoke 之上、依赖之前"去理解它，然后奇怪为什么它要 OpenCV。
+
+`windows-qt5-full` 相对 `windows-msvc-*` 只差两处：Qt 来自独立 5.15.2 套件而不是 vcpkg，
+且 **`VCPKG_MANIFEST_MODE=OFF`** —— configure 只**查找**已装好的依赖树，不启动安装。
+后者是刻意的：一个"configure 悄悄开始编译一小时端口"的构建系统，比找不到依赖更难排查。
+
+配套 `bash .workbuddy/qt5-port/run-qt5-preset.sh` 支持 `SNOW_QT5_PRESET=<档名>`，
+每档独立 build 目录，互不污染。
+
+#### (2) 三个环境前置（都不在源码里，缺了都会以误导性的错误暴露）
+
+| 前置 | 症状 | 处置 |
+|---|---|---|
+| `libclang.dll` | `bindgen` panic：`Unable to find libclang: "couldn't find any valid shared libraries matching: ['clang.dll', 'libclang.dll']"` | 本机**没有任何 LLVM**（VS BuildTools 未装 Clang 组件，`C:/Program Files/LLVM` 不存在）。用 PyPI 的 `libclang` wheel 取单个 dll（18.1.1），不装整套 LLVM、不碰注册表；`run-qt5-preset.sh` 在未显式设置 `LIBCLANG_PATH` 时自动指向它 |
+| MSVC 的 `INCLUDE`/`LIB` | 上一条修好后紧接着出现 `libavutil/samplefmt.h:22:10: fatal error: 'stdint.h' file not found` —— bindgen 找不到系统头 | 走 CMake 时 `run-vcvars.py` 已注入，无需处理；**单独手跑 `cargo build` 时必须先 source `.workbuddy/qt5-port/msvc-local/env-msvc-v143.sh`** |
+| QR 模型下载 | `cmake/FetchSnowShotQrModels.cmake` 在 configure 期从 `raw.githubusercontent.com` 取 4 个模型，失败即 `FATAL_ERROR` | 该主机在本机不可达。vcpkg 的 opencv 端口早已把同样 4 个文件缓存在 `.tools/vcpkg/downloads/opencv-cache/wechat_qrcode/`，逐个核对 SHA512 **全部命中**，拷进 `artifacts/qr-models-wechat/` 后 `file(DOWNLOAD ... EXPECTED_HASH)` 直接跳过传输 |
+
+OCR 资产（`cmake/StageSnowShotOcrAssets.cmake`）只 `WARNING` 不 `FATAL_ERROR`，
+下载失败时**OCR 功能不可用但构建继续**——这是既有的诚实降级，冒烟清单里的
+"OCR 中文识别"一项在无网络构建下应预期失败而不是误判为回归。
+
+#### (3) draw engine 首次过 Qt5：7 处差异，全部是"Qt6 把两个类型合并了"
+
+编译到链接之前一共 7 处，集中在 `snow_draw_engine_qt`。它们的共同根因只有两条：
+**Qt6 让 `QList` 与 `QVector` 变成同一类型**，以及**一批 API 是 Qt 6.x 才有的**。
+
+| # | 位置 | Qt5 报错 | 处置 |
+|---|---|---|---|
+| 1 | `src/rendering/snow_canvas_image.cpp` `copyMetadata` | `QColorSpace` 无 `colorModel`、无 `ColorModel::Cmyk`、无 `Format_CMYK8888`、无 `reinterpretAsFormat` | Qt6.8 以下是整段编译掉：CMYK 图像根本不存在，因此"保留原模型"这件事无对象，`setColorSpace` 就是同一终态 |
+| 2 | 同上 `exactQtFallback` | `Format_CMYK8888` 未定义 | 用 `#if QT_VERSION >= 6.8` 折成一个 `bool cmykSource`，版本外的分支里恒 `false` |
+| 3 | 同上，float 格式的 `switch` 标签 | `Format_RGBX32FPx4` / `RGBA16FPx4` 等未定义（Qt6.2 才有） | 标签整体包进 `#if QT_VERSION >= 6.2` |
+| 4 | 同上，`QImage::convertedToColorSpace(space, format, flags)` 与 `colorTransformed(transform, format, flags)`（共 5 个调用点） | 重载不存在 | 新增两个 helper `convertColorAndFormat` / `transformColorAndFormat`：Qt6 走上表原路，Qt5 拆成"先转色彩空间、再转格式"两步。**像素与色彩空间一致，代价是多一个临时图** |
+| 5 | 同上 `working.flip(mirrored)` | `QImage` 无 `flip`（Qt6.9 才有） | `#if >= 6.9` 保留原地翻转；否则 `working = working.mirrored(mirrored)`（仍在 `working` 独占时不复制像素） |
+| 6 | 同上 `ImageFormatInfo::defaultColorTable` | `setColorTable(const QVector<QRgb>)` 不接受 `QList` | 声明改成 `QVector<QRgb>`：Qt6 里两者同型，Qt5 里正是 `setColorTable` 要的那个 |
+| 7 | `src/rendering/snow_canvas_watermark_renderer.cpp`、`src/text/snow_canvas_text_layout.cpp`、`src/text/snow_canvas_text_edit_geometry.cpp`、`src/core/snow_canvas_input_adapter.cpp`、`qt-demo/demo_window.cpp` | `QList<quint32> = run.glyphIndexes()`、`QVector<QGlyphRun> = layout.glyphRuns()`、`qMin(int, qsizetype)`、`QMouseEvent::position()`、静态调用 `QFontDatabase::families()` | 逐条按"哪个版本来回传递就用哪个类型"修正；鼠标位置与字体枚举按版本分支（`localPos()` / `QFontDatabase().families()`） |
+
+一句话总结这 7 处的性质：**没有一处是业务逻辑差异，全是 Qt 类型/API 的年代差**。
+因此每一处都用 `QT_VERSION` 分支保持 Qt6 路径逐字不变，而不是把代码改成"两边都能接受
+的第三种写法"——后者会让 Qt6 的行为无法验证。
+
+#### (4) 编译过了、链接不过：opencv4 的 CRT 与共享 Qt5 套件冲突
+
+第 (3) 节全部修完后，engine 档 **C++ 全部编译通过**，失败前移到链接：
+
+```
+opencv_imgproc4d.lib(morph.dispatch.cpp.obj) : error LNK2038:
+  检测到 RuntimeLibrary 的不匹配项: 值(MTd_StaticDebug)不匹配值(MDd_DynamicDebug)
+```
+
+根因在端口而不是代码：`cmake/vcpkg-overlay-ports/opencv4/portfile.cmake:9` 无条件
+`set(VCPKG_CRT_LINKAGE static)`，因为**发布配置**链接的是静态 Qt 套件 + 静态 CRT，
+`std::string` / `std::vector` 跨 CRT 堆传递会直接崩。而 Qt5 验证路线用的是**共享** Qt
+5.15.2 套件（`msvc2019_64`，`/MDd`），`/MT` 的 OpenCV 根本进不了它的链接行——
+这是 `LNK2038`，不是可以忽略的警告。
+
+处置：默认保持静态 CRT 不变，另开一个**只给 Qt5 验证路线用**的变体端口：
+`.workbuddy/qt5-port/vcpkg-mirror/overlay-ports/opencv4/`，它只有两行——`set(SNOW_OPENCV_DYNAMIC_CRT TRUE)`
+然后 `include()` 仓库里的同一份 portfile。仓库 portfile 里那行改成 `if(NOT SNOW_OPENCV_DYNAMIC_CRT)`。
+
+**为什么不是环境变量**（第一版就是环境变量，白跑了一次 49 分钟）：vcpkg 求值 portfile 时用的是
+**被清洗过的环境**，`$ENV{SNOW_OPENCV_DYNAMIC_CRT}` 恒为空——实测导出 `=1` 后重装，
+`BUILD_WITH_STATIC_CRT` 仍是 `1`、`CMAKE_CXX_FLAGS_DEBUG` 仍是 `/MTd`。CMake 变量在同一次
+`include()` 里可见，所以包装端口是唯一既能生效、又不必改 triplet 的办法（改 triplet 文件会改变
+**所有**端口的 ABI 哈希，等于全量重建）。
+
+镜像 overlay 目录本来就排在仓库目录之前（`crashpad` 已经在这么用），所以同名端口会后者被前者
+覆盖，且 ABI 因 portfile 文本变化而必然重建——这正是需要的。
+
+**必须记住的副作用**：OpenCV 在同一个 `vcpkg_installed` 里只能有一个变体。跑完 Qt5 验证、要回到
+静态 CRT 的发布配置时，把该目录移除（或排到仓库目录之后）重装一次 `opencv4` 即恢复 `/MT`。
+这不是"两者共存"的开关。
+
+#### (5) 换了包装端口还是 `/MT`：vcpkg 工具链的 CRT 缓存项不做 FORCE
+
+包装端口被 vcpkg 采纳（日志里能看到 `installing overlay port from here`）、`BUILD_WITH_STATIC_CRT`
+也确实变成 `0` 了，但编译命令行**仍然是** `/MTd`：
+
+```
+BUILD_WITH_STATIC_CRT:BOOL=0                             ← portfile 的改动生效了
+CMAKE_CXX_FLAGS_DEBUG:STRING='/MTd /Z7 /Ob0 /Od /RTC1'   ← 可是标志没变
+CMAKE_MSVC_RUNTIME_LIBRARY:STRING=MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<STREQUAL:static,dynamic>:DLL>
+```
+
+第二行里那个 `$<STREQUAL:static,dynamic>` 是证据：它是
+`.tools/vcpkg/scripts/toolchains/windows.cmake:3` 用**上一次**的 `VCPKG_CRT_LINKAGE`（即 `static`）
+展开出来的。该文件里 `CMAKE_MSVC_RUNTIME_LIBRARY` 与 `CMAKE_C/CXX_FLAGS_{DEBUG,RELEASE}` 全都是
+`set(... CACHE STRING "")` —— **没有 FORCE**。于是同一个
+`buildtrees/opencv4/x64-windows-{dbg,rel}` 目录只要先按静态 CRT 配过一次，旧值就一直存活，
+后续配置既不改写也不报错。**构建是成功完成的**，问题只在链接期以 `LNK2038` 出现。
+
+这是一类值得单独记住的坑：**"portfile 已经生效"不等于"编译选项已经生效"**，判据必须取
+命令行的实际标志（或 `dumpbin //directives`），不能取 portfile 传给 CMake 的 `-D` 值。
+
+处置（不删构建目录）：在 portfile 里对动态 CRT 路线显式覆盖这些缓存项。命令行 `-D` 的优先级高于
+`set(... CACHE ...)`，所以能盖掉陈旧值；而这段被 `if(SNOW_OPENCV_DYNAMIC_CRT)` 包住，
+静态 CRT 的发布配置仍完全走 vcpkg 默认值。
+
+第二版写法又踩了一个坑：把 `CMAKE_MSVC_RUNTIME_LIBRARY` 覆盖成和 vcpkg 一样的生成器表达式
+`MultiThreaded$<$<CONFIG:Debug>:Debug>DLL`，configure 直接失败——
+
+```
+ninja: error: build.ninja:5: bad $-escape (literal $ must be written as $$)
+```
+
+经 `-D` 传进去的生成器表达式在这个位置不会被求值，原样落进 `build.ninja` 的规则变量里。
+最终写法是**置空**（= 不要自动加 `/M` 标志），CRT 由四条显式的 `*_FLAGS_*` 决定：
+
+```cmake
+if(SNOW_OPENCV_DYNAMIC_CRT)
+  list(APPEND ADDITIONAL_BUILD_FLAGS
+      "-DCMAKE_MSVC_RUNTIME_LIBRARY="
+      "-DCMAKE_C_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1"
+      "-DCMAKE_CXX_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1"
+      "-DCMAKE_C_FLAGS_RELEASE=/MD /O2 /Oi /Gy /DNDEBUG /Z7"
+      "-DCMAKE_CXX_FLAGS_RELEASE=/MD /O2 /Oi /Gy /DNDEBUG /Z7")
+endif()
+```
+
+这套组合先用一个最小工程验过（`.workbuddy/qt5-port/tmp-crt-probe/`：同一条 vcpkg 工具链 +
+同一条 overlay triplet + 一个 `main.cpp`），`dumpbin //directives` 给出
+`/DEFAULTLIB:MSVCRTD`（动态调试 CRT），且不再有任何 `RuntimeLibrary=` 的 `FAILIFMISMATCH`。
+
+**副作用要记住**：`CMAKE_MSVC_RUNTIME_LIBRARY` 置空后，目标不再发 `/FAILIFMISMATCH:RuntimeLibrary`
+指令，也就是说**这类库的 MT/MD 混用不会在链接期被 LNK2038 抓到**。所以"链接通过"对这条路线来说
+不再是 CRT 一致性的证明，判据只能是 `dumpbin //directives` 看实际 `/DEFAULTLIB`。
+
+#### (6) engine 档闭环：链接通过 + 窗口起得来
+
+CRT 修好后 engine 档一次通过：
+
+```
+[4/7] Linking CXX executable snow_draw_engine_qt\qt-demo\snow-draw-engine-qt-demo.exe
+[run-vcvars] EXIT=0
+```
+产物 36.9 MB，随后 `launch-qt5-app.sh` 的判定是 `PASS —— 存活 10s 后被脚本结束`。
+**这是 P5 第一个真正闭环的里程碑**：Qt5 + 共享套件 + 静态库 OpenCV + Rust 桥 + 全量 C++ 都跑通了，
+而且窗口能起来（不只是"编过了"）。
+
+`launch-qt5-app.sh` 自身还有一个路径坑，值得单独记：**PATH 里的条目必须写 MSYS 风格**。
+写 `C:/Qt/5.15.2/msvc2019_64/bin` 时，MSYS 不会把它转换进给原生子进程的 Windows `PATH`，
+Windows 加载器找不到 `Qt5Svgd.dll`，报出来的是伪装成 Unix 的
+`error while loading shared libraries: Qt5Svgd.dll` —— 看着像缺库或代码问题，其实是脚本写法。
+改成 `/c/Qt/...` 立刻 PASS。（`QT_PLUGIN_PATH` 反过来用 Windows 风格即可，Qt 自己能认。）
+
+#### (7) full 档 configure：三个垫片缺口（都是"签名/语义错位"，不是缺功能）
+
+`windows-qt5-full` 的 configure 从 1 处错误降到 0，中间修了三处：
+
+1. **`clang-format` 不在 PATH**（环境，不是 Qt5）：snow_shot 的图标包生成器在 configure 期
+   `shutil.which('clang-format')`，找不到就 `icon manifest error` 直接失败。它随 VS BuildTools 的
+   LLVM 组件在 `VC/Tools/Llvm/bin`，但不在默认 PATH。`run-qt5-preset.sh` 里自动补上
+   （同样必须是 `/c/...` 的 MSYS 形式）。
+2. **`qt_add_resources` 的垫片从来没生效**。Qt 5.15 的 `Qt5CoreMacros.cmake:355` **自己定义了**
+   `qt_add_resources`，只是 `qt5_add_resources` 的**变量形式**别名。于是
+   `if(NOT COMMAND qt_add_resources)` 守卫在 5.15 上恒为假，目标形式的调用被 Qt5 当成
+   "一串 .qrc 文件名"处理，把 `BASE resources/about` 里的**目录**当 qrc 去读，报
+   `file failed to open for reading (Permission denied): .../snow_shot/resources/about`。
+   这是最像"资源路径写错"、实际是命令签名错位的一类错误。处置：在 Qt5 分支无条件覆盖该命令
+   （变量形式原样转发给 `qt5_add_resources`，行为不变）。
+   顺带修掉 BASE 为**相对路径**时的 `file RELATIVE_PATH must be passed a full path`。
+3. **`qt_add_lupdate` 不能只打日志**。实仓紧接着
+   `add_dependencies(snow_shot_update_translations ...)` 与 `add_custom_command(TARGET 同名 POST_BUILD)`，
+   空实现会让 configure 死在"Cannot add target-level dependencies to non-existent target"。
+   改为按 `LUPDATE_TARGET` 建一个空的 custom target（接口保住，语义仍如实说明要手工跑 lupdate）。
+4. **`qt_generate_deploy_app_script` 的 `OUTPUT_SCRIPT` 是变量名，不是路径**。早先把它当路径
+   `file(GENERATE OUTPUT ...)`，变量始终为空，`install(SCRIPT "")` 于是报
+   `install given a directory as value of SCRIPT argument`。改为生成一个 no-op 脚本到 build 目录
+   并把**路径写回该变量**。
+
+configure 收尾：`-- Configuring done (31.0s)` / `-- Generating done (6.7s)` / `EXIT=0`。
+
+### 3.8 本轮新增：full 档链接闭环 + 首次真机启动（R37）
+
+**结论先说**：`windows-qt5-full` 全量 `550/550` 目标、`EXIT=0`、产出 154 MB 的
+`build/windows-qt5-full/snow_shot/snow_shot.exe`；真机启动不再崩溃，日志里
+`application.ready` + `capture.backend_ready` 都出现，emergency 日志为空。
+剩下的是 §3.4 的**手测**项。
+
+#### (1) 链接期的两个未定义符号 —— 都是 `qt_add_resources` 垫片的语义错位
+
+`LNK2019: qInitResources_snow_shot_about_assets` 与 `qInitResources_snow_shot_microtex`。
+看起来像"资源没编进去"，实际是垫片两处独立的错：
+
+- **形式 B（`qt_add_resources(<VAR> <file.qrc>)`）的结果没有回传**。垫片内部调
+  `qt5_add_resources`，而后者用 `set(... PARENT_SCOPE)` 回传——它的 parent 是**垫片自己**，
+  不是真正的调用方。于是 `_resource_sources` 在 `MicroTeX.cmake` 里恒为空，rcc 一次都没跑。
+  修法：垫片里显式 `set(${_snow_var} ... PARENT_SCOPE)`。
+- **形式 A 的 qrc 文件名决定了 rcc 的 `--name`**。Qt5 的 `qt5_add_resources` 用
+  `get_filename_component(outfilename NAME_WE)` 当 `--name`，而 `Q_INIT_RESOURCE(x)` 展开成
+  `qInitResources_x`。早先命名 `${target}_${name}.qrc`，于是符号成了
+  `qInitResources_<target>_<name>`，与代码要的对不上。修法：qrc 就叫 `<资源名>.qrc`
+  （实仓 6 处目标形式的资源名全局唯一，不撞名）；同时把 `file(GENERATE)` 换成
+  `file(CONFIGURE)`——`qt5_add_resources` 在**配置期**解析 qrc 算 DEPENDS，文件那时还不存在
+  就等于没有依赖，改 `.svg` 不会重新 rcc。
+
+#### (2) 真机首次启动：三次失败，三种完全不同的原因
+
+| 现象 | 真实原因 | 判定依据 |
+|---|---|---|
+| `exit=2` | 10 月 15 日遗留的旧进程（PID 5356）持着 storage lock，且无法被联系 → `SingleInstanceOutcome::Failed` | 应用日志 `Another Snow Shot process owns the storage lock but could not be contacted` |
+| `exit=127` + 崩溃转储 | 启动期 `qFatal` → 我们的 panic 桥 → Crashpad | `emergency` 日志 `event=qt.fatal` / `runtime.panic` |
+| `exit=0` 秒退 | 转发给已安装的正式版（`D:\Program Files\SnowShot\bin\snow_shot.exe --autostart`），它占着单实例键 | 进程命令行 + 无 `application.ready` |
+
+**这三种都不能靠"改代码"解决**，分别属于环境残留、真缺陷、环境共存。所以工具先补：
+`launch-qt5-app.sh` 现在支持第 4 个参数起**原样透传**给被测程序，配合应用自带的
+`--e2e-instance-id=<id>`（换应用名 → 换单实例键与 AppData 目录），可以做到
+**不动用户的正式配置**地跑构建产物：
+
+```bash
+bash .workbuddy/qt5-port/launch-qt5-app.sh windows-qt5-full snow_shot/snow_shot.exe 20 \
+    --e2e-instance-id=qt5smoke
+```
+
+#### (3) 诊断层的真缺陷：`qFatal` 的正文被丢了
+
+`diagnostics.cpp` 的 `messageHandler` 对 `QtFatalMsg` 是"记事件名 + 立刻 panic"，
+**正文一个字节都不留**，于是崩溃现场只剩 `event=qt.fatal` 四个字。这不是 Qt5 的问题，
+Qt6 同一份代码同样会丢，只是之前没人在这个路径上崩过。
+
+修法：panic 之前把正文写进 emergency 通道。三个细节都不是随意选的：
+
+- 走 `snow_diag_emergency`（`FILE_FLAG_WRITE_THROUGH` 同步写）而不是常规异步队列，
+  因为紧接着 `DumpAndCrash` 会终止进程，排队的记录多半丢；
+- `level` 写 `FATAL` 但**不能**把 `QtFatalMsg` 传给 `record()`——`record()` 对 Fatal 的处理是
+  **再次 panic**，会自递归；
+- 用 `QJsonDocument` 序列化而不是手拼字符串，正文里的引号/换行/反斜杠不会弄坏日志行。
+
+#### (4) 移植引入的真缺陷：`removeIf` 把 `end()` 缓存在循环外
+
+修完上面两项后的崩溃点，靠转储解出的调用链是：
+
+```
+ConfigurationStore::load → materializeConfiguration → ConfigurationSchema::normalize
+  → normalizeToolbarLayout → snow::compat::removeIf<QVector<QStringList>, λ>
+  → QVector<QStringList>::erase → qFatal
+    ASSERT failure in QVector::erase: "The specified iterator argument 'aend' is invalid"
+```
+
+`qt_compat.h` 里 Qt5 分支写的是：
+
+```cpp
+const auto end = container.end();   // 快照
+while (it != end) { ... it = container.erase(it); ... }
+```
+
+`erase` 让容器变短，快照立刻变成"当前 end 的下一格"；当 `it` 走到**新的** `end()` 时
+`it != 旧end` 仍成立，于是解引用一过尾位置并 `erase(it)`——`erase(iterator)` 展开成
+`erase(it, it + 1)`，那个 `it + 1` 就是非法 `aend`。Qt6 分支走容器自带的 `removeIf`，
+完全不经过这段，所以这是**移植引入**的。
+
+修法：每轮重新取 `container.end()`。验证入口：
+
+```bash
+bash .workbuddy/qt5-port/run-removeif-probe.sh   # 期望 PASS
+```
+
+探针**不真的崩**，而是镜像 Qt5 的 `isValidIterator` 判据主动检测"是否即将以非法 aend 调
+erase"。原因是实测出来的环境限制：这台机器上进程一崩就拉起 Windows 错误报告
+（WerFault → `reg.exe`），`reg.exe` 在安全中心黑名单上，命中后**整棵进程树被 SIGTERM**，
+外层脚本连输出都拿不到——第一版探针就是这样"什么都没打印就退出"，很容易误判成探针没跑。
+
+#### (5) 没有 cdb / WinDbg 时怎么读转储
+
+本机没有 Debugging Tools，`dumpbin` 也不是符号化工具。补了两个脚本（都在
+`.workbuddy/qt5-port/`）：
+
+- `read-minidump.py`：只取异常码、异常地址、模块表。够回答"是访问违例还是 fail-fast、
+  崩在哪个模块的哪个偏移"。本轮靠它认出了 `0xE0534E4F` 这个自定义码（`'SNO'`），
+  从而定位到 `snow_diag_panic` 这条 Rust/C++ 共用的崩溃桥。
+- `stack-from-minidump.py`：读 `MINIDUMP_THREAD.Stack` 的栈内存，线性扫描落在 exe
+  `.text` 内的返回地址，再用 **`dbghelp.dll`**（系统组件，不需要装调试器）翻符号。
+
+两个坑值得记下来：
+
+- `SymFromAddr` 在本机（MSVC 14.44 的 766 MB PDB + 系统自带 dbghelp）**恒返回失败且
+  GetLastError 为 0**，但 `SymEnumSymbols` 能完整枚举 54 万个符号。所以脚本退一步：
+  枚举全量符号 → 自己二分查找。`SymLoadModuleEx`/`SymEnumSymbols` 的 **`argtypes` 必须显式声明**，
+  否则 ctypes 按 32 位 int 传参，64 位地址被截断，表现同样是"一个符号都翻不出来"。
+- 符号表里混着 vftable / RTTI 描述符等**数据**符号，最近符号查询会给出
+  `kRecordLimit+0x410` 这种一眼假的结果。必须先解析 PE 拿 `.text` 的虚拟范围做过滤。
+
+#### (6) 现状与仍未验证的部分
+
+启动期零崩溃已由日志证实（`application.ready`、`capture.backend_ready`、
+emergency 为空）。以下两条告警**不是缺陷**，别当回归处理：
+
+- `shortcut.registration` `code=1409`（`ERROR_HOTKEY_ALREADY_REGISTERED`）×4：
+  已安装的正式版占着同一批全局热键，关掉正式版即消失；
+- `Snow Shot updater service exited unexpectedly 1`：开发树里没有待应用的更新包。
+
+仍未验证的是 §3.4 的手测项（截图三模式、贴图、快捷键、工具栏悬停、设置页、OCR、录屏）。
+
+
+### 3.9 本轮新增：拖框即崩的根因是 Qt 5.15.2 自己的 `tryStart(std::function)`（R38）
+
+这是 P5 出口前最后一个阻塞缺陷，现已修复并端到端验证。结论放在最前面：
+
+> **Qt 5.15.2 的 `QThreadPool::tryStart(std::function<void()>)` 忘了给 `QRunnable::ref` 做 +1。
+> 而池线程在跑任务前断言 `!del || r->ref == 1`，且 5.15 里 `autoDelete()` 就是 `ref != -1`。
+> 于是「池子收下了、但 ref 仍是 0」必然触发断言。** 修法是绕开那条重载，改走一直正确的
+> `tryStart(QRunnable*)`。
+
+#### (1) 现象与第一层定位
+
+拖框松开后 30 ms 内进程消失，emergency 日志给出：
+
+```json
+{"event":"qt.fatal.message","level":"FATAL",
+ "message":"ASSERT: \"!del || r->ref == 1\" in file thread\\qthreadpool.cpp, line 92",
+ "thread":"Thread (pooled)"}
+```
+
+R37 加在 Fatal 记录里的 `thread` 字段这次**没能缩小范围**，原因值得记下来：
+`QThreadPoolPrivate::startThread()` 对每个池线程**无条件**执行
+`thread->setObjectName("Thread (pooled)")`，所以给 `QThreadPool` 对象命名不会传到线程上，
+线程名对所有池都一样。顺着这条线只会白跑。
+
+换思路：用**串行闸门**做二分。在 `snow_canvas_image.cpp` 的 `processChunks()` 里加
+`SNOW_QT5_SERIAL_CHUNKS=1` 让分块工作走串行分支，同一条复现路径**立刻不再崩**。
+再在 `tryStart` 前后打点，最后一条日志是：
+
+```
+[pooltrace] chunks=23 pixels=361201 workers=4 serial=0
+[pooltrace] pool before active=0 max=8
+[pooltrace] tryStart #1 accepted=1
+                    <- 下一行就是 FATAL
+```
+
+`pixels=361201` 正好是 601×601 的选区，说明这是**选区确认时把选区图像做格式转换**那条路径，
+而崩在新起的第一个池线程上。
+
+#### (2) 用最小探针把「本项目用法」与「Qt 套件缺陷」分开
+
+本机没有调试器，池线程的调用栈里也只有 `QThreadPoolThread::run()`（断言在 `run()` 之前，
+拿不到提交方），所以改用**纯净探针**：`.workbuddy/qt5-port/qthreadpool-probe.cpp`，
+只依赖 cl + Qt5 头/库（无 moc；必须 `/MDd` + `Qt5Cored.lib`，否则链接到 release 的 Qt5Core，
+`Q_ASSERT` 根本不存在，探针等于什么都没验）。四种模式，同一台机器、同一个 Qt 5.15.2：
+
+| 模式 | 调用 | 结果 |
+|---|---|---|
+| `start` | `pool->start(std::function)` ×3 | 正常，3 个任务都跑完 |
+| `trystart-runnable` | `tryStart(QRunnable::create(...))` ×3 | 正常，3 个任务都跑完 |
+| `worker` / `main` | `tryStart(std::function)` ×3 + `QSemaphore` 等待 | **挂死**：`accepted=1/1/1`，任务一个都不跑 |
+| `worker-runnable` | 工作线程里 `tryStart(QRunnable::create(...))` ×3 | 正常 |
+
+`qVersion()` 打印确认运行时就是 5.15.2。对照 qtbase 源码可以看清差别：
+
+```cpp
+// v5.15.2 —— 没有 ++ref
+QRunnable *runnable = QRunnable::create(std::move(functionToRun));
+if (d->tryStart(runnable)) return true;
+delete runnable;
+return false;
+
+// 5.15 分支 head（补上了，同时补了失败路径的 --ref）
+QRunnable *runnable = QRunnable::create(std::move(functionToRun));
+Q_ASSERT(runnable->ref == 0);
+++runnable->ref;
+if (d->tryStart(runnable)) return true;
+--runnable->ref; Q_ASSERT(runnable->ref == 0); delete runnable; return false;
+```
+
+而 `start(std::function)` 是转调 `start(QRunnable*)` 的，那条重载一直有
+`Q_ASSERT(ref == 0); ++ref;`，所以**只有 `tryStart(std::function)` 这一条重载不可用**。
+本仓正好只有一处用到它（`snow_canvas_image.cpp` 的并行分块）。
+
+顺带解释两种症状为什么不一样：应用里断言先炸（`ref=0` 被池线程抓到），
+探针里表现为「任务永不执行」—— 同一处 `ref` 记账缺失，在不同线程时序下的两种表现。
+
+#### (3) 修法与验证
+
+```cpp
+QRunnable* const job = QRunnable::create([&] { consume(); finished.release(); });
+if (pool->tryStart(job)) {
+    ++started;
+} else {
+    delete job;   // tryStart 失败时所有权仍在调用方（Qt5/Qt6 同约定）
+}
+```
+
+`tryStart(QRunnable*)` 两个大版本语义一致，Qt6 上同样是正确写法，不需要 `#if QT_VERSION`。
+
+两个可复跑入口：
+
+```bash
+# 1) 最小探针：四种模式的对照（挂死的两个模式 20s 超时即可判定）
+bash .workbuddy/qt5-port/build-qthreadpool-probe.sh
+.workbuddy/qt5-port/tmp-uia-build/qthreadpool-probe.exe worker-runnable   # 期望 exit=0
+
+# 2) 真机剧本：起隔离实例 -> 播种 F24 -> 发热键 -> 拖框 -> 判活
+bash .workbuddy/qt5-port/probe-pool-crash.sh <instance-id> drag            # 期望 PASS
+```
+
+修复前后同一条 `drag` 剧本：修复前 `probe: FAIL`（emergency 里是上面那条断言），
+修复后 `probe: PASS`；窗口枚举能看到拖框后三扇可见窗口（overlay 1536×864、
+绘制工具栏 994×114、选区工具栏 128×171），视觉核对见 `.workbuddy/qt5-port/logs/qt5-toolbar.png`。
+
+#### (4) 端到端：Ctrl+C 5 轮全绿
+
+`uia-ctrl-c.exe`（`build-uia-ctrl-c.sh` 独立编译，不进 CMake）现在能跑完 5 轮：
+
+```
+round 1..5: hotkey+Ctrl+C recognized
+screenshot Ctrl+C end-to-end test passed
+```
+
+覆盖链路：全局热键 → overlay 出现并取得前台 → 拖 500×500 选区 → Ctrl+C → 剪贴板里是合法 PNG。
+
+#### (5) 两个把「误判」变成「结论」的改动
+
+**(a) 驱动不再把崩溃报成「控件没暴露」**。原来只要等不到工具栏元素就报
+`did not expose its toolbar`，而 R37 那轮应用其实**已经崩了**，于是这条缺陷被误记成
+「UIA automationId 没暴露，属测试基础设施限制」，白绕了一整轮。现在先查退出码：
+
+```cpp
+const std::string status = application.exitStatus();
+if (status != "the application is still running") throw ... status ...
+```
+
+**(b) Qt5 确实不暴露 UIA automationId，工具栏断言降级为提示**。Qt5 的 Windows 无障碍
+只走 MSAA → UIA 桥，元素的 `automationId` 一律为空；把 `objectName` 映射到
+`UIA_AutomationIdPropertyId` 是 Qt6 才有的行为。所以驱动现在先数一遍
+「有 automationId 的元素个数」，为 0 就打印明确提示并**跳过工具栏元素断言**，
+以剪贴板结果作为判据 —— 视觉核对交给 §3.4 手测。这条比「直接失败」诚实，
+也比「静默跳过」安全。
+
+#### (6) 新坑：全新实例的截图热键是 F1
+
+隔离实例首次启动时 `global_shortcuts.screenshot` 的默认值是 **F1**，不是 F24。
+注入工具发的是 F24，于是「热键发出去了、overlay 就是不出现」，而
+`shortcut.registration` 里 `code` 一律是 0（注册成功）—— 极容易被读成注入失效或
+热键注册失败。播种 `config.json` 时必须显式写：
+
+```json
+{"storage":{"schema_version":1},"global_shortcuts":{"screenshot":["F24"]}}
+```
+
+`probe-pool-crash.sh` 已经把这一步做进去了。
+
+#### (7) 本轮删除的临时代码
+
+R37 为定位「overlay 全透明」加的 4 处 `TEMP-QT5-DIAG` 全部删除
+（`screenshotoverlaywindow.cpp` 的 `window.paint` 与 `grab()` 落盘、
+`screenshotcanvasrenderer.cpp` 的 `covers`/`frame`、`screenshotoverlaycanvaswidget.cpp` 的
+`canvas.paint`），`snow_canvas_image.cpp` 的 `[pooltrace]` 也一并清掉。
+诊断结论已固化在本节，不需要留在代码里。
+
 ---
 
 ## 4. 分阶段实施计划
@@ -762,7 +1251,7 @@ Qt 自带的 stock 目录。因此 Qt5 路线下 `QFileDialog`/`QColorDialog` �
 | **P2b** | CMake 面的 **`snow_shot` 覆盖**（§3.6）：`Concurrent` 包解析、翻译目录解析与套件命名、`qt_add_lrelease` 垫片签名、Qt5 的未完成翻译门禁 | **本轮完成**：5 个 Qt5 硬阻塞已修；探针 `run-qt5-probe.sh` 四段全绿（含反向验证）；`snow_shot` 完整 configure 仍等 vcpkg（OpenCV/onnxruntime），但**它挡不住的那部分已验完** |
 | **P3** | L2 机械改写 8 条规则，按规则逐条提交（每条一个 commit） | 每条规则后都能 `git diff --stat` 复核；Qt5 编译错误数单调下降 |
 | **P4** | L3 人工改写：viewer RHI 后端、`QStringDecoder`、Windows 打印 | viewer 可编译；若决策为"首版不交付"，则改为在 CMake 中整模块 `option()` 关闭 |
-| **P5** | **Windows Qt5 编译打通 + 3.4 冒烟清单全绿** | 冒烟清单逐项通过，无红色误报弹窗 |
+| **P5** | **Windows Qt5 编译打通 + 3.4 冒烟清单全绿** | 冒烟清单逐项通过，无红色误报弹窗。**进行中（R38）**：full 档 `550/550` 目标全绿、链接通过、真机启动零崩溃；拖框崩溃已定位并修复（Qt 5.15.2 `tryStart(std::function)` 缺陷，见 3.9）；自动化覆盖热键→overlay→拖框→Ctrl+C→剪贴板连跑 5 轮全绿；**只剩 3.4 手测项** |
 | **P6** | UOS 编译：amd64 → arm64，按 `docs-uos-linux-port.md` 的 P2–P4 推进平台后端 | UOS amd64 能起界面；arm64 真机（飞腾/鲲鹏）终验 |
 | **P7** | 收尾：changelog、版本号、双架构打包 | 产物齐全，`snow-shot-installation.json` 校验通过 |
 

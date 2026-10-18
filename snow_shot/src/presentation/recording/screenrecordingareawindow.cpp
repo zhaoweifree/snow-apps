@@ -404,7 +404,7 @@ void ScreenRecordingAreaWindow::updateNativeMouseRouting(const QPoint& desktopPo
     const QRect client = nativeClientGeometry(*this);
     const QPointF local = QPointF(desktopPosition - client.topLeft()) / devicePixelRatioF();
 #else
-    const QPointF local = mapFromGlobal(desktopPosition);
+    const QPointF local = snowMapFromGlobal(this, desktopPosition);
 #endif
     // Keep annotations visible without letting their nonzero alpha intercept
     // interior clicks. The observer queues routing work onto the UI thread; the
@@ -432,13 +432,15 @@ bool ScreenRecordingAreaWindow::eventFilter(QObject* watched, QEvent* event) {
         return QWidget::eventFilter(watched, event);
     if (watched == m_canvas && regionEditingEnabled()) {
         if (event->type() == QEvent::Enter) {
-            updateRegionCursor(mapFromGlobal(snowGlobalPos(static_cast<SnowEnterEvent*>(event))));
+            updateRegionCursor(
+                snowMapFromGlobal(this, snowGlobalPos(static_cast<SnowEnterEvent*>(event))));
         } else if (event->type() == QEvent::MouseMove) {
-            updateRegionCursor(mapFromGlobal(snowGlobalPos(static_cast<QMouseEvent*>(event))));
+            updateRegionCursor(
+                snowMapFromGlobal(this, snowGlobalPos(static_cast<QMouseEvent*>(event))));
         } else if (event->type() == QEvent::MouseButtonPress ||
                    event->type() == QEvent::MouseButtonDblClick) {
             auto* mouse = static_cast<QMouseEvent*>(event);
-            const auto edges = resizeEdgesAt(mapFromGlobal(snowGlobalPos(mouse)));
+            const auto edges = resizeEdgesAt(snowMapFromGlobal(this, snowGlobalPos(mouse)));
             if (mouse->button() == Qt::LeftButton && edges) {
                 beginRegionDrag(regionPointer(snowGlobalPos(mouse)), edges);
                 return true;
@@ -908,7 +910,7 @@ void ScreenRecordingAreaWindow::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 bool ScreenRecordingAreaWindow::nativeEvent(const QByteArray& eventType, void* message,
-                                            qintptr* result) {
+                                            snowNativeEventResult* result) {
 #if defined(Q_OS_WIN) || defined(_WIN32)
     const auto* msg = static_cast<MSG*>(message);
     if (msg != nullptr && result != nullptr) {

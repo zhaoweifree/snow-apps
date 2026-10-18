@@ -31,7 +31,7 @@
 #include <QPainterPath>
 #include <QPainterPathStroker>
 #include <QPaintEngine>
-#include <QPainterStateGuard>
+// QPainterStateGuard is Qt 6.0+; qt_compat.h provides the Qt5 equivalent.
 #include <QPen>
 #include <QPointF>
 #include <QRawFont>

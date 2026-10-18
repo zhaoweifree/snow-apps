@@ -1716,7 +1716,7 @@ void pinnedSelectionRendersCachedOcrInCanvasCoordinates(bool restoreFromStorage 
                         "the pinned snapshot should serialize its cached recognition results");
                 QByteArray expectedPayload;
                 QDataStream expected(&expectedPayload, QIODevice::WriteOnly);
-                expected.setVersion(QDataStream::Qt_6_11);
+                expected.setVersion(snowDataStreamVersion());
                 const auto saved = window->recognitionSnapshot();
                 expected << saved.key << quint8(1) << quint8(saved.table.has_value())
                          << quint8(saved.qr.has_value()) << saved.text->error
@@ -1732,7 +1732,7 @@ void pinnedSelectionRendersCachedOcrInCanvasCoordinates(bool restoreFromStorage 
                 require(record.recognitionResults == expectedPayload,
                         "persisted recognition must keep the Qt 6.11 binary format");
                 QDataStream payload(record.recognitionResults);
-                payload.setVersion(QDataStream::Qt_6_11);
+                payload.setVersion(snowDataStreamVersion());
                 QString savedKey;
                 quint8 hasText = 0, hasTable = 0, hasQr = 0;
                 QString savedError;
@@ -3336,7 +3336,7 @@ void pinnedRecognitionModelsSurviveTransferAndRestart() {
     require(invalid.isEmpty(), "oversized model entry arrays are rejected");
     QByteArray oversized;
     QDataStream stream(&oversized, QIODevice::WriteOnly);
-    stream.setVersion(QDataStream::Qt_6_11);
+    stream.setVersion(snowDataStreamVersion());
     stream << QStringLiteral("oversized") << quint8(0) << quint8(0) << quint8(0)
            << persistence::kRecognitionModelPayloadMarker
            << persistence::kRecognitionModelPayloadVersion
@@ -3428,7 +3428,7 @@ void pinnedLatexSurvivesTransferAndRestart() {
     legacy.recognitionResults = {};
     legacy.restorePersistentState = true;
     QDataStream stream(&legacy.persistedRecognitionResults, QIODevice::WriteOnly);
-    stream.setVersion(QDataStream::Qt_6_11);
+    stream.setVersion(snowDataStreamVersion());
     stream << key << quint8(0) << quint8(0) << quint8(0) << quint32(0x4C415458) << quint8(1)
            << source << true;
     QPointer<ScreenshotPinnedWindow> window(new ScreenshotPinnedWindow);
@@ -3530,7 +3530,7 @@ void restoredInvalidOcrDoesNotSuppressRecognition() {
         auto config = cachedOcrPinConfig(&recognition);
         const auto presentation = config.recognitionResults.text->presentation;
         QDataStream stream(&config.persistedRecognitionResults, QIODevice::WriteOnly);
-        stream.setVersion(QDataStream::Qt_6_11);
+        stream.setVersion(snowDataStreamVersion());
         stream << config.recognitionResults.key << quint8(1) << quint8(0) << quint8(0)
                << (trailingBytes ? QString() : QStringLiteral("Recognition failed"))
                << presentation->selection << qint64(trailingBytes ? 0 : 1);
@@ -23989,11 +23989,11 @@ int main(int argc, char* argv[]) {
             require(window.automationState().value(QStringLiteral("opacity_percent")).toInt() == 75,
                     "automation state must reflect changed pinned opacity");
             const auto opacityRevision =
-                window.automationState().value(QStringLiteral("revision")).toInteger();
+                snowJsonInteger(window.automationState().value(QStringLiteral("revision")));
             require(window.automationUpdate({{QStringLiteral("opacity_percent"), 40}}, &error) &&
                         window.automationUpdate({{QStringLiteral("opacity_percent"), 75}}, &error),
                     "inverse appearance updates must succeed without an intervening query");
-            require(window.automationState().value(QStringLiteral("revision")).toInteger() >
+            require(snowJsonInteger(window.automationState().value(QStringLiteral("revision"))) >
                         opacityRevision,
                     "state inversion must invalidate revisions even before persistence flush");
             error.clear();

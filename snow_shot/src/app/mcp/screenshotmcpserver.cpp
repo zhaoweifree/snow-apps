@@ -31,6 +31,7 @@
 #include <windows.h>
 #include <sddl.h>
 #include <aclapi.h>
+#include "snow_shot/compat/qt_compat.h"
 #endif
 
 Q_DECLARE_METATYPE(snow_shot::runtime::RuntimeActivityLease)
@@ -123,8 +124,14 @@ QByteArray frame(const QJsonObject& o, const QByteArray& attachment) {
 bool constantTimeEqual(const QByteArray& a, const QByteArray& b) {
     if (a.size() != b.size())
         return false;
+    // int index on purpose: Qt 5.15's QByteArray has BOTH operator[](int) and
+    // operator[](uint), so indexing with a qsizetype makes MSVC report
+    //   error C2666: "QByteArray::operator []": overloads have similar conversions
+    // (Qt6 only has the qsizetype overload). A QByteArray cannot exceed int range
+    // on Qt5 anyway - size() itself returns int there.
+    const int length = static_cast<int>(a.size());
     unsigned char difference = 0;
-    for (qsizetype i = 0; i < a.size(); ++i)
+    for (int i = 0; i < length; ++i)
         difference |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
     return difference == 0;
 }
@@ -738,7 +745,7 @@ void ScreenshotMcpServer::handleRequest(quint64 connection, const QJsonObject& o
     }
     QPointer<ScreenshotMcpServer> guard(this);
     const quint64 epoch = m_epoch;
-    const qint64 queueWait = object.value(QStringLiteral("_queue_wait_ms")).toInteger();
+    const qint64 queueWait = snowJsonInteger(object.value(QStringLiteral("_queue_wait_ms")));
     m_requestHandler(request, [guard, epoch, connection, queueWait,
                                id = request.requestId](ScreenshotMcpResponse response) mutable {
         if (!guard || epoch != guard->m_epoch)

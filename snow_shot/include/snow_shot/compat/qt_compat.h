@@ -66,11 +66,14 @@
 #include <QtGlobal>
 #include <QEvent>
 #include <QFuture>
+#include <QHash>
 #include <QLine>
 #include <QLibraryInfo>
 #include <QList>
 #include <QMargins>
+#include <QMetaObject>
 #include <QMetaType>
+#include <QObject>
 #include <QPoint>
 #include <QPointF>
 #include <QRect>
@@ -80,7 +83,10 @@
 #include <QVariant>
 
 #include <cstddef>
+#include <memory>
 #include <optional>
+#include <type_traits>
+#include <utility>
 
 #if SNOW_QT5
 // Qt5 keeps QVector as a distinct class; Qt6 aliases it to QList.
@@ -500,6 +506,72 @@ using SnowEnterEvent = QEvent;
 #endif // SNOW_COMPAT_HAS_GUI
 
 // ---------------------------------------------------------------------------
+// 3b. QJsonValue::toInteger - introduced in Qt 6.0.
+//
+//     Qt5's QJsonValue stores everything as double and has no integer accessor;
+//     Qt6's toInteger(defaultValue) returns the default for non-numeric values.
+//     This reproduces the Qt6 semantics 1:1.
+//     Mechanical rewrite rule R12:
+//       <v>.toInteger(d)  ->  snowJsonInteger(<v>, d)
+//       <v>.toInteger()   ->  snowJsonInteger(<v>)
+// ---------------------------------------------------------------------------
+#if SNOW_COMPAT_HAS_QT
+#include <QJsonValue>
+
+namespace snow::compat
+{
+
+[[nodiscard]] inline qint64 snowJsonInteger(const QJsonValue& value, qint64 defaultValue = 0)
+{
+#if SNOW_QT6
+    // This line must stay as Qt6 spells it (toInteger), otherwise the shim makes itself
+    // recursive through the mechanical rewrite.
+    return value.toInteger(defaultValue);
+#else
+    return value.isDouble() ? static_cast<qint64>(value.toDouble()) : defaultValue;
+#endif
+}
+
+} // namespace snow::compat
+
+using snow::compat::snowJsonInteger;
+#endif // SNOW_COMPAT_HAS_QT
+
+// ---------------------------------------------------------------------------
+// 3a. QDataStream::Version - the highest enumerator keeps moving.
+//
+//     Qt 6.11 added QDataStream::Qt_6_11; Qt 5.15's newest enumerator is Qt_5_15.
+//     Hard-coding Qt_6_11 in a Qt5 build fails as
+//       error C2039: "Qt_6_11": is not a member of "QDataStream"
+//     Because the value is persisted into on-disk records, it cannot simply be
+//     lowered everywhere: Qt6 records must keep the version they were written
+//     with. So the shim answers "highest version this build supports" and every
+//     call site stays version-agnostic.
+//
+//     Mechanical rewrite rule R13:
+//       stream.setVersion(QDataStream::Qt_6_11)  ->  stream.setVersion(snowDataStreamVersion())
+// ---------------------------------------------------------------------------
+#if SNOW_COMPAT_HAS_QT
+#include <QDataStream>
+
+namespace snow::compat
+{
+
+[[nodiscard]] inline QDataStream::Version snowDataStreamVersion() noexcept
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 11, 0)
+    return QDataStream::Qt_6_11;
+#else
+    return QDataStream::Qt_5_15;
+#endif
+}
+
+} // namespace snow::compat
+
+using snow::compat::snowDataStreamVersion;
+#endif // SNOW_COMPAT_HAS_QT
+
+// ---------------------------------------------------------------------------
 // 3. QList::removeIf - introduced in Qt 6.1.
 //
 //    Mechanical rewrite rule R5:
@@ -515,10 +587,17 @@ qsizetype removeIf(Container& container, Predicate predicate)
 #if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
     return container.removeIf(predicate);
 #else
+    // **每轮都要重新取 end()，不能缓存在循环外。** Qt5 的 erase() 让容器变短，
+    // 缓存的 end 随即变成"当前 end 的下一格"：循环会在 it 已经走到新 end() 时
+    // 仍然满足 it != 旧end，接着解引用一过尾位置并调 erase(it)。erase(iterator)
+    // 内部展开成 erase(it, it + 1)，那个 it + 1 就是非法 aend，于是 debug 版 Qt5
+    // 直接 qFatal：
+    //   ASSERT failure in QVector::erase: "The specified iterator argument 'aend'
+    //   is invalid", file qvector.h, line 905
+    // Qt6 分支走的是容器自带的 removeIf，所以这条只在 Qt5 上炸，属于移植引入的缺陷。
     auto it = container.begin();
-    const auto end = container.end();
     qsizetype removed = 0;
-    while (it != end) {
+    while (it != container.end()) {
         if (predicate(*it)) {
             it = container.erase(it);
             ++removed;
@@ -530,7 +609,138 @@ qsizetype removeIf(Container& container, Predicate predicate)
 #endif
 }
 
+// Associative containers are different: QHash::removeIf (Qt 6.1) hands the
+// predicate an *iterator*, not an element reference, because a QHash element is
+// not a std::pair and callers need key()/value(). The generic overload above
+// passes `*it`, which fails with C2664 for call sites written against Qt6, so
+// this more specialized overload keeps the Qt6 calling convention.
+// (QMap, QSet and QMultiHash behave the same way; add an overload here if one of
+// them ever needs removeIf.)
+template <typename Key, typename Value, typename Predicate>
+qsizetype removeIf(QHash<Key, Value>& container, Predicate predicate)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
+    return container.removeIf(predicate);
+#else
+    qsizetype removed = 0;
+    for (auto it = container.begin(); it != container.end();) {
+        if (predicate(it)) {
+            it = container.erase(it);
+            ++removed;
+        } else {
+            ++it;
+        }
+    }
+    return removed;
+#endif
+}
+
+namespace detail
+{
+// Calls `functor` with no arguments, discarding the signal's payload. Kept as a
+// separate template so that the call is *dependent* on the deduced argument pack:
+// see the note at the call site in snowConnectSingleShot().
+template <typename Functor, typename... Args>
+void invokeDiscardingArguments(Functor& functor, Args&&...)
+{
+    static_assert(std::is_invocable_v<Functor&>,
+                  "snowConnectSingleShot: the functor must be callable with the signal's "
+                  "arguments, or with none of them");
+    functor();
+}
+} // namespace detail
+
+// ---------------------------------------------------------------------------
+// 3b. Qt::SingleShotConnection - introduced in Qt 6.5.
+//     Qt5 has no such connection flag, so the connection is emulated: the
+//     functor disconnects itself before running. The handle is shared between
+//     the caller and the lambda so it is released together with the connection.
+//
+//     Mechanical rewrite rule R25:
+//       connect(s, sig, ctx, fn, Qt::SingleShotConnection)
+//         -> snowConnectSingleShot(s, sig, ctx, fn)
+// ---------------------------------------------------------------------------
+template <typename Sender, typename Signal, typename Context, typename Functor>
+QMetaObject::Connection snowConnectSingleShot(Sender sender, Signal signal, Context context,
+                                             Functor functor)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    return QObject::connect(sender, signal, context, functor, Qt::SingleShotConnection);
+#else
+    auto connection = std::make_shared<QMetaObject::Connection>();
+    *connection = QObject::connect(
+        sender, signal, context,
+        [connection, functor](auto&&... arguments) {
+            QObject::disconnect(*connection);
+            // Qt5 delivers the signal's full argument list here, while the caller
+            // may have supplied a functor that takes none of them - a shape Qt6
+            // accepts (a slot/functor may ignore trailing arguments) but Qt5
+            // rejects at the call itself.
+            //
+            // The discarded branch must call a *dependent* function: a plain
+            // `functor()` there is independent of the lambda's deduced pack, and
+            // MSVC diagnoses it eagerly even in a discarded if-constexpr branch
+            // ("function declaration must be available because none of the
+            // arguments depends on the template parameters", C3889) - which is
+            // exactly what a generic lambda such as `[](const auto&) {}` provokes.
+            if constexpr (std::is_invocable_v<Functor&, decltype(arguments)...>) {
+                functor(std::forward<decltype(arguments)>(arguments)...);
+            } else {
+                detail::invokeDiscardingArguments(
+                    functor, std::forward<decltype(arguments)>(arguments)...);
+            }
+        });
+    return *connection;
+#endif
+}
+
 } // namespace snow::compat
+
+// Call sites are plain business code that does not (and should not have to) know
+// that this helper lives in a namespace: the header is force-included, so the
+// name has to be reachable unqualified. removeIf is deliberately NOT exported
+// here - every call site already spells it snow::compat::removeIf.
+using snow::compat::snowConnectSingleShot;
+
+// ---------------------------------------------------------------------------
+// 3c. Key combinations: Qt6 changed the *element type* of QKeySequence and gave
+//     QKeyEvent a keyCombination() accessor.
+//
+//     Qt5: QKeySequence::operator[](int) -> int      (key code | modifiers)
+//          QKeyEvent has key() and modifiers(), no keyCombination()
+//     Qt6: QKeySequence::operator[](qsizetype) -> QKeyCombination
+//          QKeyEvent::keyCombination() -> QKeyCombination
+//
+//     So `QList<QKeyCombination> keys; keys.append(sequence[0]);` fails on Qt5
+//     with "cannot convert argument 1 from int to const QKeyCombination&", and
+//     `event->keyCombination()` fails outright.
+//
+//     Mechanical rewrite rules R35 / R36:
+//       <seq>[<i>]            -> snowKeySequenceAt(<seq>, <i>)
+//       <event>->keyCombination() -> snowKeyEventCombination(<event>)
+// ---------------------------------------------------------------------------
+#if SNOW_COMPAT_HAS_GUI
+[[nodiscard]] inline QKeyCombination snowKeySequenceAt(const QKeySequence& sequence, int index)
+{
+#if SNOW_QT6
+    return sequence[index];
+#else
+    // Qt5 stores the packed int that Qt6's fromCombined()/toCombined() pair was
+    // introduced to replace, so this is a lossless re-interpretation.
+    return QKeyCombination::fromCombined(sequence[index]);
+#endif
+}
+
+[[nodiscard]] inline QKeyCombination snowKeyEventCombination(const QKeyEvent* event)
+{
+#if SNOW_QT6
+    return event->keyCombination();
+#else
+    // Qt6 defines keyCombination() as exactly this pair of accessors.
+    return QKeyCombination(event->modifiers(), static_cast<Qt::Key>(event->key()));
+#endif
+}
+#endif // SNOW_COMPAT_HAS_GUI
 
 // ---------------------------------------------------------------------------
 // 4. QLatin1StringView - official name of QLatin1String since Qt 6.4.
@@ -597,7 +807,62 @@ using SnowRoleList = QVector<int>;
 
 #if SNOW_COMPAT_HAS_GUI
 #  include <QFont>
+#  include <QImageIOHandler>
+#  include <QImageReader>
+#  include <QPainter>
 #  include <QPixmap>
+#  include <QWindow>
+
+// QPainterStateGuard is Qt 6.0+; Qt 5.15 has no such class (nothing in
+// QtGui/qpainter.h matches "StateGuard"), so `#include <QPainterStateGuard>`
+// fails with C1083 and the RAII usage does not exist at all.
+//
+// This is the Qt6 contract as used by this tree: save() in the constructor,
+// restore() in the destructor unless restore()/release() was called first.
+// The pointer overload exists because the tree constructs it both ways
+// (`QPainterStateGuard guard(painter)` and `... guard(&painter)`), including
+// through std::optional::emplace.
+#if SNOW_QT5
+class QPainterStateGuard
+{
+public:
+    enum InitialState { Save, NoSave };
+
+    explicit QPainterStateGuard(QPainter& painter, InitialState initial = Save)
+        : m_painter(initial == Save ? &painter : nullptr)
+    {
+        if (m_painter != nullptr) {
+            m_painter->save();
+        }
+    }
+
+    explicit QPainterStateGuard(QPainter* painter, InitialState initial = Save)
+        : m_painter(initial == Save ? painter : nullptr)
+    {
+        if (m_painter != nullptr) {
+            m_painter->save();
+        }
+    }
+
+    ~QPainterStateGuard() { restore(); }
+
+    QPainterStateGuard(const QPainterStateGuard&) = delete;
+    QPainterStateGuard& operator=(const QPainterStateGuard&) = delete;
+
+    void restore()
+    {
+        if (m_painter != nullptr) {
+            m_painter->restore();
+            m_painter = nullptr;
+        }
+    }
+
+    void release() { m_painter = nullptr; }
+
+private:
+    QPainter* m_painter = nullptr;
+};
+#endif // SNOW_QT5
 
 // QPixmap::deviceIndependentSize() is Qt 6.2+; Qt5 requires the manual division.
 // Free function because a member cannot be injected into QPixmap.
@@ -785,6 +1050,29 @@ namespace detail
             ::qHash(key.y1())),
         snow::compat::detail::hashStep(::qHash(key.x2()), ::qHash(key.y2())));
 }
+
+// Scoped enums as QHash / QSet keys: NOT shimmable from here.
+//
+// Qt 6.0 added an enum overload of qHash
+//     template <typename T, std::enable_if_t<std::is_enum_v<T>, bool> = true>
+//     constexpr uint qHash(T key, uint seed = 0) noexcept
+// and Qt 5.15 has none, so `QSet<SomeEnum>` / `QHash<SomeEnum, V>` fails with
+//   error C2665: "qHash": none of the overloads could convert all the argument types
+//
+// The obvious fix - declaring the same constrained template at global scope so
+// ADL finds it for global-scope enums - does NOT work: it is ambiguous against
+// Qt5's own generic qHash(const T&, uint) in qhashfunctions.h:117. Verified
+// against the real 5.15.2 headers:
+//   error C2668: "qHash": ambiguous call to overloaded function
+//     candidate: uint qHash<Key,true>(T, uint) noexcept   [our shim]
+//     candidate: uint qHash<Key>(const T &, uint) noexcept [Qt5]
+// (Neither is more specialized: after reference removal both are `T`/`const T`,
+// and [temp.deduct.partial] does not order them.)
+//
+// So each enum needs a NON-template overload - a non-template always wins over
+// Qt5's template - declared in the same namespace as the enum so that ADL finds
+// it. See snow_draw_engine_qt/snow_canvas_types.h (SnowCanvasTool) for the
+// canonical example.
 #endif // SNOW_QT5
 
 // ---------------------------------------------------------------------------
@@ -846,7 +1134,9 @@ template <typename Location>
 #  include <QAccessible>
 #  include <QColor>
 #  include <QFont>
+#  include <QIcon>
 #  include <QPalette>
+#  include <QPixmap>
 #  include <QTouchEvent>
 #  if SNOW_QT6
 // QPointingDevice has no Qt5 counterpart at all (verified: Qt 5.15.2 ships
@@ -864,6 +1154,171 @@ template <typename Location>
     return static_cast<uint>(font.resolveMask());
 #else
     return font.resolve();
+#endif
+}
+
+// Symmetric setter. Qt6 exposes QFont::setResolveMask(); Qt 5.15 only has the
+// public getter (resolve(), qfont.h:300) and keeps resolve_mask private
+// (qfont.h:345) with no setter at all.
+//
+// Qt5 fallback is therefore a no-op: the "unresolve the size so the platform
+// picks it again" behaviour is lost, and a font whose size was assigned stays
+// explicitly sized. This only affects ThemeManager's "font scale back to 100%"
+// path, which is cosmetic; everything else in that path still works because the
+// size itself is set from the base font.
+inline void snowSetFontResolveMask(QFont& font, uint mask)
+{
+#if SNOW_QT6
+    font.setResolveMask(mask);
+#else
+    Q_UNUSED(font)
+    Q_UNUSED(mask)
+#endif
+}
+
+// Qt6 added QPointF overloads of QWidget/QWindow::mapFromGlobal() and
+// mapToGlobal(); Qt 5.15 has only the QPoint forms (QtGui/qwindow.h,
+// QtWidgets/qwidget.h) and QPointF has no implicit conversion to QPoint, so a
+// QPointF argument fails with
+//   error C2664: "QPoint QWindow::mapFromGlobal(const QPoint &) const":
+//   cannot convert argument 1 from "const QPointF" to "const QPoint &"
+//
+// The Qt5 fallback is exact, not approximate: on Qt5 both mapFromGlobal() and
+// mapToGlobal() are pure translations along the parent-window chain
+// (QWindow::mapFromGlobal is `pos - d->globalPosition()`), so mapping the
+// rounded point and then adding back the dropped fractional part gives the same
+// result as Qt6's floating-point overload.
+//
+// Templated on the receiver so it covers QWidget and QWindow alike.
+// Mechanical rewrite rules R33 / R34:
+//   <w>->mapFromGlobal(<p>) -> snowMapFromGlobal(<w>, <p>)
+//   <w>->mapToGlobal(<p>)   -> snowMapToGlobal(<w>, <p>)
+template <typename Receiver>
+[[nodiscard]] inline QPointF snowMapFromGlobal(const Receiver* receiver, const QPointF& point)
+{
+#if SNOW_QT6
+    return receiver->mapFromGlobal(point);
+#else
+    const QPoint rounded = point.toPoint();
+    return QPointF(receiver->mapFromGlobal(rounded)) + (point - QPointF(rounded));
+#endif
+}
+
+template <typename Receiver>
+[[nodiscard]] inline QPointF snowMapToGlobal(const Receiver* receiver, const QPointF& point)
+{
+#if SNOW_QT6
+    return receiver->mapToGlobal(point);
+#else
+    const QPoint rounded = point.toPoint();
+    return QPointF(receiver->mapToGlobal(rounded)) + (point - QPointF(rounded));
+#endif
+}
+
+// Same story for the three-argument QWidget::mapTo(QWidget*, QPointF).
+// Mechanical rewrite rule R33b:
+//   <w>->mapTo(<parent>, <p>) -> snowMapTo(<w>, <parent>, <p>)
+template <typename Receiver, typename Target>
+[[nodiscard]] inline QPointF snowMapTo(const Receiver* receiver, const Target* target,
+                                       const QPointF& point)
+{
+#if SNOW_QT6
+    return receiver->mapTo(target, point);
+#else
+    const QPoint rounded = point.toPoint();
+    return QPointF(receiver->mapTo(target, rounded)) + (point - QPointF(rounded));
+#endif
+}
+
+// Qt 6.2 added QFlags::testAnyFlags(); Qt 5.15 only has testFlag() (single flag)
+// - QtCore/qflags.h:151 is the whole API surface there.
+// Mechanical rewrite rule R37:
+//   <flags>.testAnyFlags(<mask>) -> snowTestAnyFlags(<flags>, <mask>)
+template <typename Enum>
+[[nodiscard]] inline bool snowTestAnyFlags(const QFlags<Enum>& flags, const QFlags<Enum>& mask)
+{
+#if SNOW_QT6
+    return flags.testAnyFlags(mask);
+#else
+    // "any of the mask bits set", which is what testAnyFlags() means.
+    return (flags & mask) != 0;
+#endif
+}
+
+// Qt 6.9 added QWindow::safeAreaMargins() and QEvent::SafeAreaMarginsChange (the
+// display-cutout / notch API). Qt 5.15 knows neither, and there is no Qt5 source
+// for the information: the platform plugin simply never reported it.
+//
+// The Qt5 answers are therefore "no inset" and "this event never arrives", which
+// is exactly the pre-6.9 behaviour, not a guess. Note the event value is -1: a
+// real QEvent::Type could collide with an existing case label in a switch (the
+// first attempt reused QEvent::ScreenChangeInternal, which collides with the
+// explicit ScreenChangeInternal case those same switches already have).
+#if SNOW_QT6
+constexpr int snowSafeAreaMarginsChange = QEvent::SafeAreaMarginsChange;
+#else
+constexpr int snowSafeAreaMarginsChange = -1;
+#endif
+
+[[nodiscard]] inline QMargins snowSafeAreaMargins(const QWindow* window)
+{
+#if SNOW_QT6
+    return window != nullptr ? window->safeAreaMargins() : QMargins();
+#else
+    Q_UNUSED(window)
+    return {};
+#endif
+}
+
+// Qt6 added QImageReader::effectiveSize(); Qt 5.15 has only size()
+// (QtGui/qimagereader.h:91). The two differ in exactly two ways:
+//   * effectiveSize() applies setScaledSize() - not used by any call site here;
+//   * effectiveSize() applies the EXIF orientation when autoTransform() is on.
+// So the Qt5 fallback is size() with the quarter-turn transposition replayed from
+// QImageReader::transformation() (available since Qt 5.5, qimagereader.h:115).
+//
+// The enumeration is bit-encoded: TransformationRotate270 is
+// TransformationRotate180 | TransformationRotate90, and the Mirror/Flip variants
+// OR Rotate90 in as well (QtGui/qimageiohandler.h:104-112), so a single
+// `& TransformationRotate90` test selects exactly the odd-quarter-turn cases -
+// the ones whose width/height swap.
+//
+// Mechanical rewrite rule R32: <r>.effectiveSize() -> snowImageReaderEffectiveSize(<r>)
+[[nodiscard]] inline QSize snowImageReaderEffectiveSize(QImageReader& reader)
+{
+#if SNOW_QT6
+    return reader.effectiveSize();
+#else
+    QSize size = reader.size();
+    if (reader.autoTransform() &&
+        (reader.transformation() & QImageIOHandler::TransformationRotate90)) {
+        size.transpose();
+    }
+    return size;
+#endif
+}
+
+// Qt6 added QIcon::pixmap(const QSize&, qreal devicePixelRatio, Mode, State);
+// Qt 5.15 only has (QSize, Mode, State), (int, int, Mode, State) and
+// (QWindow*, QSize, Mode, State) - verified in QtGui/qicon.h. Fetch the pixmap at
+// the physical pixel size instead and tag it with the ratio, which is what the
+// Qt5 high-DPI documentation recommends.
+//
+// Mechanical rewrite rule R24:
+//   <icon>.pixmap(<size>, <dpr>) -> snowIconPixmap(<icon>, <size>, <dpr>)
+[[nodiscard]] inline QPixmap snowIconPixmap(const QIcon& icon, const QSize& size,
+                                            qreal devicePixelRatio,
+                                            QIcon::Mode mode = QIcon::Normal,
+                                            QIcon::State state = QIcon::Off)
+{
+#if SNOW_QT6
+    return icon.pixmap(size, devicePixelRatio, mode, state);
+#else
+    const QSize physicalSize(qRound(size.width() * devicePixelRatio),
+                             qRound(size.height() * devicePixelRatio));
+    QPixmap pixmap = icon.pixmap(physicalSize, mode, state);
+    pixmap.setDevicePixelRatio(devicePixelRatio);
+    return pixmap;
 #endif
 }
 
@@ -1026,6 +1481,7 @@ using SnowAccessibleAnnouncementEvent = QAccessibleAnnouncementEvent;
 
 #  include <QAction>
 #  include <QLayoutItem>
+#  include <QMessageBox>
 #  include <QScreen>
 #  include <QWidget>
 #  include <QWindow>
@@ -1087,6 +1543,31 @@ inline void snowSetAccessibleIdentifier(QWidget* widget, const QString& identifi
         objects.append(widget);
     }
     return objects;
+#endif
+}
+
+// Qt6 added QMessageBox::Option and QMessageBox::setOption(Option). Qt 5.15.2's
+// QMessageBox has neither - its header declares only the StandardButton /
+// ButtonRole enums, the constructor's StandardButtons, and the static
+// convenience functions (QtWidgets/qmessagebox.h), so
+//   dialog.setOption(QMessageBox::Option::DontUseNativeDialog);
+// fails with C2039 "setOption is not a member of QMessageBox" plus C2039 on the
+// Option enumerator itself.
+//
+// The Qt5 branch is a faithful no-op rather than an approximation: on Qt5 a
+// QMessageBox *instance* is always drawn by Qt itself - the native-dialog path
+// exists only for the static convenience functions (and only on macOS, which
+// this port does not target). The call site here builds an instance and calls
+// exec(), so "do not use the native dialog" is already true.
+// Mechanical rewrite rule R31:
+//   <d>.setOption(QMessageBox::Option::DontUseNativeDialog)
+//     -> snowMessageBoxDontUseNativeDialog(<d>)
+inline void snowMessageBoxDontUseNativeDialog(QMessageBox& dialog)
+{
+#if SNOW_QT6
+    dialog.setOption(QMessageBox::Option::DontUseNativeDialog);
+#else
+    Q_UNUSED(dialog)
 #endif
 }
 
@@ -1198,7 +1679,12 @@ public:
     }
 
 private:
-    QFutureInterface<T> m_interface;
+    // mutable: Qt6's QPromise::future() is const, and call sites rely on that
+    // (they take SnowPromise by const reference), but Qt5's
+    // QFutureInterface<T>::future() is a *non-const* member
+    // (QtCore/qfutureinterface.h: "QFuture<T> future()" - no const qualifier),
+    // so a const future() can only be implemented by mutating from a const this.
+    mutable QFutureInterface<T> m_interface;
     bool m_finished = false;
 };
 #endif
@@ -1505,5 +1991,27 @@ private:
     qsizetype m_size = 0;
 };
 #endif // SNOW_QT5
+
+// ---------------------------------------------------------------------------
+// 16. Q_UNREACHABLE_RETURN - introduced in Qt 6.5 as a macro.
+//
+//     Qt 5.15 has Q_UNREACHABLE() (QtCore/qglobal.h) but no *_RETURN variant, so
+//     a Qt6-era call site fails as
+//       error C3861: "Q_UNREACHABLE_RETURN": identifier not found
+//     There is nothing to shim as a function - it has to be a macro, because the
+//     whole point is the `return` it injects into the caller's body. The Qt6
+//     definition (qtcore/qcompilerdetection.h) is reproduced verbatim below, so
+//     call sites keep their exact Qt6 semantics and need no rewrite.
+//
+//     This is intentionally defined even though the file is "compat helpers":
+//     a macro is the only possible mechanism here.
+// ---------------------------------------------------------------------------
+#if SNOW_QT5 && !defined(Q_UNREACHABLE_RETURN)
+#  define Q_UNREACHABLE_RETURN(...)                                                                \
+      do {                                                                                         \
+          Q_UNREACHABLE();                                                                         \
+          return __VA_ARGS__;                                                                       \
+      } while (false)
+#endif
 
 #endif // !SNOW_COMPAT_INERT

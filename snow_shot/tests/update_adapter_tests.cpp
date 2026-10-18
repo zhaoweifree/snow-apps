@@ -16,6 +16,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include "snow_shot/compat/qt_compat.h"
 
 using snow_shot::update::UpdateService;
 using snow_shot::update::UpdateState;
@@ -128,7 +129,7 @@ int fakeSidecar(int argc, char** argv) {
     std::string line;
     while (std::getline(std::cin, line)) {
         const auto command = QJsonDocument::fromJson(QByteArray::fromStdString(line)).object();
-        const qint64 id = command.value(QStringLiteral("id")).toInteger();
+        const qint64 id = snowJsonInteger(command.value(QStringLiteral("id")));
         const QString name = command.value(QStringLiteral("command")).toString();
         bool rejectedHandoff = false;
         if (name == u"handoff_decision") {

@@ -76,7 +76,7 @@ struct UnitKey {
 struct ShapeData {
     ShapeKey key;
     QFont font;
-    QVector<QGlyphRun> glyphRuns;
+    QList<QGlyphRun> glyphRuns;
     QRectF inkBounds;
     Qt::HANDLE creatorThread = nullptr;
 };
@@ -237,8 +237,10 @@ void refreshCacheAccountingAndEvict() {
 
 QRectF glyphRunInkBounds(const QGlyphRun& run) {
     const QRawFont rawFont = run.rawFont();
-    const QList<quint32> glyphIndexes = run.glyphIndexes();
-    const QList<QPointF> positions = run.positions();
+    // Qt5 returns these two as QVector while Qt6 returns QList (same type there).
+    // `QVector` is the spelling that compiles against both.
+    const QVector<quint32> glyphIndexes = run.glyphIndexes();
+    const QVector<QPointF> positions = run.positions();
     const qsizetype count = std::min(glyphIndexes.size(), positions.size());
     QRectF bounds;
     bool hasBounds = false;

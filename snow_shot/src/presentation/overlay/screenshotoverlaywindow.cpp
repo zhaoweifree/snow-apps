@@ -1,4 +1,5 @@
 #include "snow_shot/presentation/screenshotoverlaywindow.h"
+#include "snow_shot/compat/qt_compat.h"
 
 #include "../capture/screenshotcaptureperfinstrumentation.h"
 #include "screenshotoverlayframepresenter.h"
@@ -344,7 +345,10 @@ void ScreenshotOverlayWindow::resetScreenshotRendering() {
 
 void ScreenshotOverlayWindow::commitInitialSelectionCursor() {
 #if defined(Q_OS_WIN) || defined(_WIN32)
-    const HCURSOR crossCursor = LoadCursorW(nullptr, IDC_CROSS);
+    // LoadCursor (not LoadCursorW): this Qt5 configuration does not define UNICODE,
+    // so IDC_CROSS expands to an LPSTR while LoadCursorW wants an LPCWSTR. The
+    // unsuffixed name follows the same macro and loads the same system resource.
+    const HCURSOR crossCursor = LoadCursor(nullptr, IDC_CROSS);
     if (crossCursor != nullptr) {
         SetCursor(crossCursor);
     }
@@ -907,7 +911,7 @@ bool ScreenshotOverlayWindow::event(QEvent* event) {
         }
     }
     if (event != nullptr &&
-        (event->type() == QEvent::SafeAreaMarginsChange || event->type() == QEvent::Show)) {
+        (event->type() == snowSafeAreaMarginsChange || event->type() == QEvent::Show)) {
         layoutRegionTypeControl();
     }
 #ifdef Q_OS_MACOS
@@ -965,7 +969,7 @@ void ScreenshotOverlayWindow::keyPressEvent(QKeyEvent* event) {
 }
 
 bool ScreenshotOverlayWindow::nativeEvent(const QByteArray& eventType, void* message,
-                                          qintptr* result) {
+                                          snowNativeEventResult* result) {
     if (m_mouseReleaseAction.handleNativeEvent(message, result)) {
         return true;
     }
@@ -1246,7 +1250,7 @@ void ScreenshotOverlayWindow::layoutRegionTypeControl() {
     }
     // Keep the capture canvas full-screen, but place controls below the notch.
     // QWindow reports logical margins, matching QWidget coordinates at every DPR.
-    const int safeTop = windowHandle() != nullptr ? windowHandle()->safeAreaMargins().top() : 0;
+    const int safeTop = snowSafeAreaMargins(windowHandle()).top();
     const QPoint position(
         std::max(0, (width() - m_regionTypeControl->width()) / 2),
         std::max(0, std::min(safeTop + 12, height() - m_regionTypeControl->height())));

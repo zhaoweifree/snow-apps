@@ -107,7 +107,7 @@ class PermissionGuideDragRow final : public QAbstractButton {
         QPointer<PermissionGuideDragRow> guard(this);
         auto* drag = new QDrag(this);
         drag->setMimeData(mime);
-        drag->setPixmap(m_icon.pixmap(QSize(48, 48), devicePixelRatioF()));
+        drag->setPixmap(snowIconPixmap(m_icon, QSize(48, 48), devicePixelRatioF()));
         drag->setHotSpot(QPoint(24, 24));
         drag->exec(Qt::CopyAction, Qt::CopyAction);
         if (!guard)

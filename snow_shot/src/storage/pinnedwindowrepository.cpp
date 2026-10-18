@@ -2079,10 +2079,12 @@ StorageResult PinnedWindowRepository::removeEmptyGroup(const QString& groupId) {
         return StorageResult::failure(QStringLiteral("Pinned-window group cannot be removed"));
 
     std::lock_guard locker(m_impl->mutex);
+    // 用可变迭代器：Qt5 的 QVector::erase 只接受 iterator（Qt6 两种都收），
+    // 而 const_iterator 传进去会以"没有重载函数可以转换所有参数类型"的形式报错。
     const auto group =
-        std::find_if(m_impl->groups.cbegin(), m_impl->groups.cend(),
+        std::find_if(m_impl->groups.begin(), m_impl->groups.end(),
                      [&groupId](const auto& candidate) { return candidate.id == groupId; });
-    if (group == m_impl->groups.cend() ||
+    if (group == m_impl->groups.end() ||
         std::any_of(m_impl->records.cbegin(), m_impl->records.cend(),
                     [&groupId](const auto& stored) { return stored.record.groupId == groupId; }) ||
         std::any_of(m_impl->pendingCreations.cbegin(), m_impl->pendingCreations.cend(),
@@ -2109,8 +2111,10 @@ StorageResult PinnedWindowRepository::removeGroupAndRecords(const QString& group
     }
 
     std::lock_guard locker(m_impl->mutex);
+    // 用可变迭代器：Qt5 的 QVector::erase 只接受 iterator（Qt6 两种都收），
+    // 而 const_iterator 传进去会以"没有重载函数可以转换所有参数类型"的形式报错。
     const auto group =
-        std::find_if(m_impl->groups.cbegin(), m_impl->groups.cend(),
+        std::find_if(m_impl->groups.begin(), m_impl->groups.end(),
                      [&groupId](const auto& candidate) { return candidate.id == groupId; });
     if (group == m_impl->groups.cend()) {
         return StorageResult::failure(QStringLiteral("Pinned-window group does not exist"));

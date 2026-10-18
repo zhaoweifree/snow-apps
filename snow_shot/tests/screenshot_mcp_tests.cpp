@@ -22,6 +22,7 @@
 #include <atomic>
 #include <iostream>
 #include <utility>
+#include "snow_shot/compat/qt_compat.h"
 using namespace snow_shot::app::mcp;
 namespace {
 void require(bool condition, const char* message) {
@@ -408,7 +409,7 @@ void session() {
         r.expectedRevision =
             revision ? revision
                      : std::optional<quint64>(static_cast<quint64>(
-                           session.state().value(QStringLiteral("revision")).toInteger()));
+                           snowJsonInteger(session.state().value(QStringLiteral("revision")))));
         std::optional<ScreenshotMcpResponse> response;
         session.request(r, [&](auto value) { response = std::move(value); });
         if (method == QStringLiteral("snow_shot_screenshot_begin") && !response) {
@@ -433,7 +434,7 @@ void session() {
                 intruderBegin.errorDetails.isEmpty(),
             "busy response does not disclose the current owner");
     const auto oldRevision =
-        static_cast<quint64>(session.state().value(QStringLiteral("revision")).toInteger());
+        static_cast<quint64>(snowJsonInteger(session.state().value(QStringLiteral("revision"))));
     editor.insert(QStringLiteral("user_edit"), true);
     session.observe();
     require(
@@ -462,7 +463,7 @@ void session() {
                     saved.result.value(QStringLiteral("height")) == 20 &&
                     saved.result.value(QStringLiteral("format")).toString() ==
                         QLatin1String(format) &&
-                    saved.result.value(QStringLiteral("byte_count")).toInteger() == bytes.size() &&
+                    snowJsonInteger(saved.result.value(QStringLiteral("byte_count"))) == bytes.size() &&
                     saved.result.value(QStringLiteral("sha256")).toString() ==
                         QString::fromLatin1(
                             QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()),
@@ -480,7 +481,7 @@ void session() {
         require(pngEncodes == 1 && saved.result.value(QStringLiteral("width")) == 32 &&
                     saved.result.value(QStringLiteral("height")) == 20 &&
                     saved.result.value(QStringLiteral("format")) == QStringLiteral("png") &&
-                    saved.result.value(QStringLiteral("byte_count")).toInteger() == bytes.size() &&
+                    snowJsonInteger(saved.result.value(QStringLiteral("byte_count"))) == bytes.size() &&
                     saved.result.value(QStringLiteral("sha256")).toString() ==
                         QString::fromLatin1(
                             QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) &&
@@ -516,7 +517,7 @@ void session() {
     idempotent.method = QStringLiteral("snow_shot_screenshot_set_selection");
     idempotent.idempotencyKey = QStringLiteral("same-edit");
     idempotent.expectedRevision =
-        static_cast<quint64>(session.state().value(QStringLiteral("revision")).toInteger());
+        static_cast<quint64>(snowJsonInteger(session.state().value(QStringLiteral("revision"))));
     ScreenshotMcpResponse first, second;
     session.request(idempotent, [&](auto response) { first = response; });
     const int applied = mutations;
@@ -535,7 +536,7 @@ void session() {
     pending.method = QStringLiteral("snow_shot_screenshot_render");
     pending.sessionId = session.state().value(QStringLiteral("session_id")).toString();
     pending.expectedRevision =
-        static_cast<quint64>(session.state().value(QStringLiteral("revision")).toInteger());
+        static_cast<quint64>(snowJsonInteger(session.state().value(QStringLiteral("revision"))));
     std::optional<ScreenshotMcpResponse> deferredResponse;
     session.request(pending, [&](auto response) { deferredResponse = response; });
     await([&] { return bool(deliverImage); });
@@ -612,7 +613,7 @@ void workflowOperations() {
         r.idempotencyKey = r.requestId;
         r.sessionId = session.state().value(QStringLiteral("session_id")).toString();
         r.expectedRevision =
-            static_cast<quint64>(session.state().value(QStringLiteral("revision")).toInteger());
+            static_cast<quint64>(snowJsonInteger(session.state().value(QStringLiteral("revision"))));
         return r;
     };
     std::optional<ScreenshotMcpResponse> response;

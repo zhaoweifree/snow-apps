@@ -496,6 +496,53 @@
       }
     },
     {
+      "name": "windows-qt5-full",
+      "displayName": "Windows Qt 5.15 full application (third-party deps on)",
+      "description": "Top rung of the Qt5 route: the real `snow_shot` executable, which needs OpenCV, ffmpeg, libjxl/libheif and onnxruntime from the vcpkg manifest install. Differs from `windows-msvc-*` in exactly two ways -- Qt comes from the standalone 5.15.2 kit rather than vcpkg, and manifest mode is OFF so configure only *finds* the already-installed tree instead of trying to build it (a configure that silently starts an hour of port building is the failure mode worth avoiding here). STRICT_COMPILE stays OFF for the Qt5 port window; Qt5's own headers are warning-heavy under /W4 and would bury real errors. `SNOW_APPS_BUILD_IMAGE_VIEWER` stays OFF until docs-uos-linux-port.md 6.1 is decided.",
+      "inherits": "windows-qt5-base",
+      "toolchainFile": "${sourceDir}/.tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "environment": {
+        "VCPKG_ROOT": "${sourceDir}/.tools/vcpkg"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
+        "VCPKG_MANIFEST_MODE": "OFF",
+        "VCPKG_MANIFEST_INSTALL": "OFF",
+        "SNOW_APPS_STRICT_COMPILE": "OFF",
+        "SNOW_APPS_BUILD_ANT_DESIGN_QT": "ON",
+        "SNOW_APPS_BUILD_SNOW_IMAGE": "ON",
+        "SNOW_APPS_BUILD_DRAW_ENGINE": "ON",
+        "SNOW_APPS_BUILD_DRAW_ENGINE_DEMO": "OFF",
+        "SNOW_APPS_BUILD_IMAGE_VIEWER": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT": "ON",
+        "SNOW_APPS_BUILD_SNOW_SHOT_MINI": "OFF",
+        "SNOW_APPS_BUILD_TESTS": "OFF",
+        "SNOW_APPS_BUILD_BENCHMARKS": "OFF",
+        "SNOW_IMAGE_PROFILE": "redistributable",
+        "SNOW_IMAGE_DEFAULT_LINKAGE": "static",
+        "SNOW_IMAGE_BUILD_STATIC": "ON",
+        "SNOW_IMAGE_BUILD_SHARED": "ON",
+        "SNOW_IMAGE_BUILD_TESTS": "OFF",
+        "SNOW_IMAGE_STRICT_COMPILE": "OFF"
+      }
+    },
+    {
+      "name": "windows-qt5-engine",
+      "displayName": "Windows Qt 5.15 draw engine",
+      "description": "Middle rung of the Qt5 route: the Snow Draw Engine Qt library and its demo. Inherits `windows-qt5-full` rather than `windows-qt5-smoke` because the draw engine calls `find_package(OpenCV CONFIG REQUIRED)` unconditionally, so it is *not* a dependency-free rung -- what it isolates is the C++ surface above ant_design_qt/snow_image, with `snow_shot` itself still off. The demo is built because it is the first Qt5 executable on this route that can actually be launched; the smoke rung only produced libraries.",
+      "inherits": "windows-qt5-full",
+      "cacheVariables": {
+        "SNOW_APPS_BUILD_DRAW_ENGINE": "ON",
+        "SNOW_APPS_BUILD_DRAW_ENGINE_DEMO": "ON",
+        "SNOW_APPS_BUILD_IMAGE_VIEWER": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT_MINI": "OFF",
+        "SNOW_APPS_BUILD_TESTS": "OFF",
+        "SNOW_APPS_BUILD_BENCHMARKS": "OFF"
+      }
+    },
+    {
       "name": "linux-base",
       "displayName": "Linux / UOS Qt 5.15 base (Ninja, system packages)",
       "description": "UOS / Deepin / generic Linux port baseline. Like windows-qt5-base this preset deliberately sets NO toolchainFile, so the vcpkg manifest step never runs: Linux builds against distribution packages (qtbase5-dev, libopencv-dev, libheif-dev, libjxl-dev, libpipewire-0.3-dev ...) as listed in docs-uos-linux-port.md §9.1. Qt5 is found through CMake's default multiarch search path (/usr/lib/<triplet>/cmake/Qt5); if UOS ships Qt5 under a custom prefix, pass -DCMAKE_PREFIX_PATH=<prefix> on the configure command. SNOW_APPS_BUILD_IMAGE_VIEWER stays OFF until docs-uos-linux-port.md §6.1 is decided (Qt5 private QRhi vs QOpenGLWidget rewrite). SNOW_APPS_STRICT_COMPILE stays OFF for the port window: new platform code plus Qt5 headers under -Werror would bury the real errors, tighten it once the Linux targets are green.",
@@ -711,6 +758,14 @@
     {
       "name": "build-windows-qt5-smoke",
       "configurePreset": "windows-qt5-smoke"
+    },
+    {
+      "name": "build-windows-qt5-engine",
+      "configurePreset": "windows-qt5-engine"
+    },
+    {
+      "name": "build-windows-qt5-full",
+      "configurePreset": "windows-qt5-full"
     },
     {
       "name": "build-snow-shot-linux-x64-debug",

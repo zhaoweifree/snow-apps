@@ -6,7 +6,19 @@ if(VCPKG_TARGET_IS_WINDOWS)
     # in its debug preset. OpenCV is linked into that executable directly, so
     # the library must match the static CRT or every std::string/std::vector
     # returned by the decoders would cross CRT heap boundaries.
-    set(VCPKG_CRT_LINKAGE static)
+    #
+    # The Qt5 compatibility route is the one configuration that cannot use this:
+    # it is validated against the *shared* Qt 5.15 kit (msvc2019_64), whose
+    # objects are /MDd, and MSVC refuses the combination outright with LNK2038
+    # ("RuntimeLibrary mismatch") -- it is not a warning that can be accepted.
+    # That route shadows this port with a wrapper in
+    # `.workbuddy/qt5-port/vcpkg-mirror/overlay-ports/opencv4/`, which sets
+    # SNOW_OPENCV_DYNAMIC_CRT before including this file. Note it must be a CMake
+    # variable and not an environment variable: vcpkg evaluates portfiles in a
+    # cleaned environment, so `$ENV{...}` never sees the caller's export.
+    if(NOT SNOW_OPENCV_DYNAMIC_CRT)
+        set(VCPKG_CRT_LINKAGE static)
+    endif()
 endif()
 
 # fix to get version from eigen after v3.4.0
@@ -386,6 +398,36 @@ endif()
 
 if("qt" IN_LIST FEATURES)
   list(APPEND ADDITIONAL_BUILD_FLAGS "-DCMAKE_AUTOMOC=ON")
+endif()
+
+if(SNOW_OPENCV_DYNAMIC_CRT)
+  # 动态 CRT 路线的必填覆盖（不只是"保险"）。
+  #
+  # vcpkg 的 scripts/toolchains/windows.cmake 用 `set(... CACHE STRING "")`（**没有
+  # FORCE**）写 CMAKE_MSVC_RUNTIME_LIBRARY 与 CMAKE_C/CXX_FLAGS_{DEBUG,RELEASE}。
+  # 因此同一个 buildtrees/<port>/x64-windows-{dbg,rel} 目录只要先按静态 CRT 配置过
+  # 一次，这些缓存项就会存活下来；之后再改 VCPKG_CRT_LINKAGE 为 dynamic，编译
+  # 命令行依旧是 `/MTd`、产物依旧带 MTd_StaticDebug —— 表现为「改了配置却完全没生效」，
+  # 而此时构建是成功完成的，只有链接期才以 LNK2038 的形式暴露。
+  # 实测（R36）：BUILD_WITH_STATIC_CRT 已是 0，CMAKE_CXX_FLAGS_DEBUG 仍是
+  # '/MTd /Z7 /Ob0 /Od /RTC1'，CMAKE_MSVC_RUNTIME_LIBRARY 仍是
+  # 'MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<STREQUAL:static,dynamic>:DLL>'。
+  #
+  # 命令行 -D 的优先级高于 `set(... CACHE ...)`，所以显式覆盖即可，无需删除
+  # 构建目录。这段只在动态 CRT 路线（Qt5 验证路线）生效，静态 CRT 的发布配置
+  # 仍完全走 vcpkg 的默认值。
+  #
+  # CMAKE_MSVC_RUNTIME_LIBRARY 这里必须置**空**而不是写 genex：
+  # vcpkg 默认值是 "MultiThreaded$<$<CONFIG:Debug>:Debug>$<...>:DLL>"，而经 -D 传进来的
+  # 生成器表达式在 OpenCV 的规则里没有被求值，原样落进 build.ninja，直接
+  # `ninja: error: build.ninja:5: bad $-escape`。置空表示"不要自动加 /M 标志"，
+  # 由下面四条显式的 *_FLAGS_* 决定 CRT，语义反而更直接。
+  list(APPEND ADDITIONAL_BUILD_FLAGS
+      "-DCMAKE_MSVC_RUNTIME_LIBRARY="
+      "-DCMAKE_C_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1"
+      "-DCMAKE_CXX_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1"
+      "-DCMAKE_C_FLAGS_RELEASE=/MD /O2 /Oi /Gy /DNDEBUG /Z7"
+      "-DCMAKE_CXX_FLAGS_RELEASE=/MD /O2 /Oi /Gy /DNDEBUG /Z7")
 endif()
 
 vcpkg_cmake_configure(

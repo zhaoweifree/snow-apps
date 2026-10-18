@@ -16,7 +16,9 @@ namespace text_layout = snow_canvas_text_layout;
 
 int boundedTextLength(const QString& text) {
     constexpr qsizetype kMaximumPosition = std::numeric_limits<int>::max();
-    return static_cast<int>(qMin(text.size(), kMaximumPosition));
+    // QString::size() is `int` in Qt5 and `qsizetype` in Qt6; naming the type keeps
+    // `qMin` a single instantiation under both instead of falling back to a cast.
+    return static_cast<int>(qMin<qsizetype>(text.size(), kMaximumPosition));
 }
 
 QPointF rotatedOffset(const SnowSceneDisplayItem& item, const QPointF& offset) {

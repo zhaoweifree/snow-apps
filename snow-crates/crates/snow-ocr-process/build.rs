@@ -103,6 +103,15 @@ END
         fs::write(&resource_path, resource_contents)
             .expect("failed to write deterministic snow-ocr-process Windows resources");
         let mut resource = winres::WindowsResource::new();
+        // winres 0.1.12 finds the Windows SDK with `reg query`; where reg.exe is
+        // unavailable (this machine: Security Center program blacklist, not approvable
+        // per command) that query fails and winres falls back to the relative path
+        // bin\x64\rc.exe, panicking with `Os { code: 3, kind: NotFound }`. vcvars64.bat
+        // already exports WindowsSdkDir / WindowsSDKVersion, so point winres at the same
+        // rc.exe explicitly whenever that path really exists.
+        if let Some(bin_dir) = windows_sdk_rc_bin_dir() {
+            resource.set_toolkit_path(bin_dir.to_string_lossy().as_ref());
+        }
         resource.set_resource_file(
             resource_path
                 .to_str()
@@ -137,5 +146,25 @@ END
         for directive in link_manifest::cargo_directives(line) {
             println!("{directive}");
         }
+    }
+}
+
+/// Directory holding the Windows SDK `rc.exe` (i.e. `<SDK>\bin\<version>\x64`),
+/// derived from the environment instead of the registry. `None` when the variables are
+/// missing or the path does not exist, in which case winres keeps its own lookup.
+#[cfg(windows)]
+fn windows_sdk_rc_bin_dir() -> Option<std::path::PathBuf> {
+    println!("cargo:rerun-if-env-changed=WindowsSdkDir");
+    println!("cargo:rerun-if-env-changed=WindowsSDKVersion");
+    let sdk_dir = env::var_os("WindowsSdkDir")?;
+    let sdk_version = env::var_os("WindowsSDKVersion")?;
+    let bin_dir = std::path::PathBuf::from(sdk_dir)
+        .join("bin")
+        .join(sdk_version)
+        .join("x64");
+    if bin_dir.join("rc.exe").is_file() {
+        Some(bin_dir)
+    } else {
+        None
     }
 }

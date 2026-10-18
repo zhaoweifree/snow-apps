@@ -232,7 +232,7 @@ PhysicalCursorMoveResult PhysicalCursor::movePixels(PhysicalCursorDirection dire
             if (!window && QGuiApplication::mouseButtons() != Qt::NoButton)
                 window = QGuiApplication::focusWindow();
             if (window) {
-                const QPointF local = window->mapFromGlobal(*global);
+                const QPointF local = snowMapFromGlobal(window, *global);
                 // Enter through QPA, not sendEvent(): Qt must also update its global
                 // pointer position or it can discard the next real move back to the
                 // pre-warp position as an unchanged-position event.

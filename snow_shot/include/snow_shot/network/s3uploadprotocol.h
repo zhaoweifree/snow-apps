@@ -14,8 +14,15 @@ inline QByteArray uriEncode(const QByteArray& bytes) {
 inline QByteArray encodedEndpointPath(const QUrl& url) {
     const QByteArray path = url.path(QUrl::FullyEncoded).toLatin1();
     QByteArray result;
-    for (qsizetype i = 0; i < path.size(); ++i) {
-        if (path[i] == '%' && i + 2 < path.size()) {
+    // The index has to be `int`: Qt5's QByteArray::operator[] has both an int
+    // and a uint overload, so passing qsizetype (qint64) makes both candidates
+    // equally viable and MSVC reports C2666 "ambiguous call". Qt6 only has the
+    // qsizetype overload, so the same code is correct there as well.
+    // Keep this comment ASCII: some TUs that include this header are not
+    // compiled with /utf-8.
+    const int size = static_cast<int>(path.size());
+    for (int i = 0; i < size; ++i) {
+        if (path[i] == '%' && i + 2 < size) {
             result += path.mid(i, 3).toUpper();
             i += 2;
         } else {

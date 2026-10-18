@@ -163,7 +163,7 @@ class TrayImageCache final {
             return {};
         }
 
-        const QSize sourceSize = reader.effectiveSize();
+        const QSize sourceSize = snowImageReaderEffectiveSize(reader);
         if (!sourceSize.isValid() || sourceSize.width() <= 0 || sourceSize.height() <= 0 ||
             sourceSize.width() > 16384 || sourceSize.height() > 16384 ||
             static_cast<qint64>(sourceSize.width()) * sourceSize.height() > 64LL * 1024 * 1024) {

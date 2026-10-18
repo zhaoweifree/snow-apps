@@ -440,7 +440,7 @@ void ScreenshotPinnedHideToTopController::showHandle() {
     auto* handle = static_cast<Handle*>(m_handle.get());
     handle->visualRect = m_handleGeometry.translated(-hit.topLeft());
     if (m_screen.screen != nullptr) {
-        handle->setScreen(m_screen.screen);
+        snowSetWidgetScreen(handle, m_screen.screen);
     }
     handle->resize(std::max(1, qRound(hit.width() / m_screen.dpi)),
                    std::max(1, qRound(hit.height() / m_screen.dpi)));
