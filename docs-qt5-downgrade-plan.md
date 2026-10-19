@@ -616,6 +616,25 @@ bash .workbuddy/qt5-port/start-qt5-manual.sh qt5manual
   emergency 为空、无 `.dmp`）；用后台任务起应用、再从另一条命令发 F21，5 s 就出现在
   734×550 的位置（见 `logs/qt5-settings.png`）。所以设置页按手测处理，别指望脚本判。
 
+**一条命令跑完上面全部自动化项**（构建 + 三个剧本，最后给一张表）：
+
+```bash
+bash .workbuddy/qt5-port/verify-qt5-windows.sh            # 含增量构建
+bash .workbuddy/qt5-port/verify-qt5-windows.sh --skip-build
+```
+
+它只做编排，判据全部复用各脚本自己的退出码；实测输出：
+
+```
+================ verify summary ================
+  build              PASS
+  overlay+drag       PASS
+  ctrl+c x5          PASS
+  screenshot modes   PASS
+===============================================
+verify: ALL PASS
+```
+
 注意：全新实例的默认 `screenshot` 热键是 **F1**，不是 F24。手测前要么按 F1，
 要么照 §3.9(5) 把 `config.json` 的绑定播成 F24（注入工具发的是 F24）。
 

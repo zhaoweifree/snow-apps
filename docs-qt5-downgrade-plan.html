@@ -1541,6 +1541,19 @@ template &lt;typename T&gt;
   emergency 为空、无 <code>.dmp</code>）；用后台任务起应用、再从另一条命令发 F21，5 s 就出现在
   734×550 的位置（见 <code>logs/qt5-settings.png</code>）。所以设置页按手测处理，别指望脚本判。</li>
 </ul>
+<p><strong>一条命令跑完上面全部自动化项</strong>（构建 + 三个剧本，最后给一张表）：</p>
+<pre><code class="language-bash">bash .workbuddy/qt5-port/verify-qt5-windows.sh            # 含增量构建
+bash .workbuddy/qt5-port/verify-qt5-windows.sh --skip-build
+</code></pre>
+<p>它只做编排，判据全部复用各脚本自己的退出码；实测输出：</p>
+<pre><code>================ verify summary ================
+  build              PASS
+  overlay+drag       PASS
+  ctrl+c x5          PASS
+  screenshot modes   PASS
+===============================================
+verify: ALL PASS
+</code></pre>
 <p>注意：全新实例的默认 <code>screenshot</code> 热键是 <strong>F1</strong>，不是 F24。手测前要么按 F1，
 要么照 §3.9(5) 把 <code>config.json</code> 的绑定播成 F24（注入工具发的是 F24）。</p>
 <h3 id="3-5-本轮新增-一个真缺陷修复-三个可复跑的验证入口">3.5 本轮新增：一个真缺陷修复 + 三个可复跑的验证入口</h3>
