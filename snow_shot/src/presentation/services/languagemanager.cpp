@@ -1,11 +1,14 @@
 #include "snow_shot/presentation/languagemanager.h"
+#include "snow_shot/compat/qt_compat.h"
 #include "snow_shot/storage/settingsadapters.h"
 
 #include "locale/locale.h"
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QHash>
+#include <QLibraryInfo>
 #include <QLocale>
 #include <QString>
 #include <QStringList>
@@ -203,6 +206,76 @@ void LanguageManager::discoverCatalogs() {
               });
 }
 
+void LanguageManager::installQtStockTranslator(const QLocale& locale) {
+#if !SNOW_QT6
+    // 英文是源语言，标准控件本来就是英文，不必再装一份。
+    if (locale.language() == QLocale::English) {
+        if (m_qtTranslator != nullptr) {
+            QCoreApplication::removeTranslator(m_qtTranslator.get());
+            m_qtTranslator.reset();
+        }
+        return;
+    }
+
+    QStringList candidateDirectories;
+    const QString qtTranslations = QLibraryInfo::location(QLibraryInfo::TranslationsPath);
+    if (!qtTranslations.isEmpty()) {
+        candidateDirectories.push_back(qtTranslations);
+    }
+    // 打包后如果愿意把 .qm 跟着应用走，这个目录优先于套件目录被找到之前不会冲突，
+    // 这里只是多一个兜底位置。
+    candidateDirectories.push_back(QCoreApplication::applicationDirPath() +
+                                   QStringLiteral("/translations"));
+
+    // Qt5 的 zh_CN 只有聚合文件 qt_zh_CN.qm（没有 qtbase_zh_CN.qm），
+    // 而 zh_TW 等语言两者都有；先试拆分文件，再退到聚合文件。
+    const QString localeName = locale.name();
+    const QStringList candidateFileNames{
+        QStringLiteral("qtbase_%1.qm").arg(localeName),
+        QStringLiteral("qt_%1.qm").arg(localeName),
+    };
+
+    QString selectedPath;
+    for (const QString& directory : candidateDirectories) {
+        for (const QString& fileName : candidateFileNames) {
+            const QString candidate = QDir(directory).filePath(fileName);
+            if (QFileInfo::exists(candidate)) {
+                selectedPath = candidate;
+                break;
+            }
+        }
+        if (!selectedPath.isEmpty()) {
+            break;
+        }
+    }
+
+    if (selectedPath.isEmpty()) {
+        // 只警告一次：语言切换会反复走到这里，逐次刷屏没有信息量。
+        if (!m_qtStockTranslatorMissingLogged) {
+            m_qtStockTranslatorMissingLogged = true;
+            qWarning() << "No Qt stock translation catalog for" << localeName
+                       << "under" << candidateDirectories
+                       << "- standard dialogs and standard buttons will stay English";
+        }
+        return;
+    }
+
+    auto nextTranslator = std::make_unique<QTranslator>();
+    if (!nextTranslator->load(selectedPath)) {
+        qWarning() << "Unable to load Qt stock translation" << selectedPath;
+        return;
+    }
+
+    QTranslator* const previousTranslator = m_qtTranslator.get();
+    QCoreApplication::installTranslator(nextTranslator.get());
+    if (previousTranslator != nullptr) {
+        QCoreApplication::removeTranslator(previousTranslator);
+    }
+    m_qtTranslator = std::move(nextTranslator);
+    qInfo() << "Installed Qt stock translation" << selectedPath;
+#endif
+}
+
 bool LanguageManager::applyPreference(const QString& preference, bool persist) {
     QString effectiveLocaleName = preference;
     if (preference == QString::fromLatin1(SYSTEM_LANGUAGE_PREFERENCE)) {
@@ -261,6 +334,11 @@ bool LanguageManager::applyPreference(const QString& preference, bool persist) {
 
     m_languagePreference = preference;
     m_currentLocale = effectiveLocale;
+
+    // QTranslator 是「后装的优先」被查找。先把 Qt 自带目录的翻译装好，
+    // 再装本应用的目录，保证 snow_shot 的条目盖住 stock 里的同名条目
+    // （例如标准按钮文案，两边可能各有一份）。
+    installQtStockTranslator(effectiveLocale);
 
     QTranslator* const previousTranslator = m_translator.get();
     QCoreApplication::installTranslator(nextTranslator.get());

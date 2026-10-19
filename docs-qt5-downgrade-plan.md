@@ -806,21 +806,39 @@ PATH="/c/snow-tools/cmake/cmake-4.2.3-windows-x86_64/bin:$PATH" \
 `ant_design_qt.lib`，翻译目标无需重跑——`ant_design_qt` 传的 `LRELEASE_OPTIONS` 本来就
 是空的，故第 5 条的门禁对它不生效，行为逐字不变）。
 
-#### (3) 仍未闭合的 Qt5 缺口（本轮只记录，不静默降级）
+#### (3) Qt5 缺口的 stock 对话框翻译 —— 已用「运行时装载」收口（R45）
 
-**stock 对话框目录的合并**：Qt6 的 `MERGE_QT_TRANSLATIONS` 会把 `qtbase_<locale>.qm`
-并进 `snow_shot_<locale>.qm`；Qt5 垫片没有对应实现，只打一条 STATUS 说"由打包步骤处理"
-（而**目前没有任何打包步骤真的处理它**）。而 `LanguageManager::discoverCatalogs()`
-只从 `:/i18n` 装载 `snow_shot_*.qm` 并安装为 `QTranslator`，**没有**第二个翻译器去读
-Qt 自带的 stock 目录。因此 Qt5 路线下 `QFileDialog`/`QColorDialog` 等标准对话框的
-中文会退回英文——**编译与链接不受影响，属运行时外观回归**。
+**原缺口**：Qt6 的 `MERGE_QT_TRANSLATIONS` 会把 `qtbase_<locale>.qm` 并进
+`snow_shot_<locale>.qm`；Qt5 垫片没有对应实现，只打一条 STATUS 说"由打包步骤处理"
+（而**没有任何打包步骤真的处理它**）。而 `LanguageManager::discoverCatalogs()` 只从
+`:/i18n` 装载 `snow_shot_*.qm`，**没有**第二个翻译器读 Qt 自带的 stock 目录。结果是
+Qt5 路线下 `QColorDialog`、`QMessageBox` 的标准按钮等会退回英文
+（`QFileDialog` 在 Windows 上默认走原生对话框，由系统语言决定，不受影响；
+**但在 Linux/UOS 上 `QFileDialog` 也是 Qt 自绘，所以这个缺口在上线平台上更明显**）。
 
-两条可选的收口方式（择一，尚未实现）：
+**取方案甲（运行时装载）**，理由：改动局限在一个类里，不需要 `lconvert` 往返，
+也不碰打包清单；方案乙（构建期合并）成本高且 `.qm` 往返会丢元信息。
 
-| 方案 | 做法 | 代价 |
-|---|---|---|
-| 甲：运行时装载 | Qt5 分支在 `LanguageManager` 里额外安装一个 `QTranslator`，从 `QLibraryInfo::location(TranslationsPath)`（回退应用目录）读 `qt_zh_CN.qm` / `qtbase_zh_TW.qm`；打包时把对应 `.qm` 一并带上 | 改动小，但要动安装包清单 |
-| 乙：构建期合并 | 在 Qt5 垫片里实现等价的目录合并（需 `lconvert` 往返 `.qm`），使产物与 Qt6 逐字一致 | 成本高，且 `.qm` 往返会丢元信息 |
+实现（`languagemanager.cpp` / `.h`）：
+
+- 新增私有 `installQtStockTranslator(const QLocale&)` 与成员 `m_qtTranslator`；整体包在
+  `#if !SNOW_QT6` 里，**Qt6 行为逐字不变**（Qt6 已经靠合并拿到同样内容）。
+- 搜索顺序：`QLibraryInfo::location(TranslationsPath)` → `<exe>/translations`；
+  文件名顺序 `qtbase_<locale>.qm` → `qt_<locale>.qm`。
+  第二条是必须的：**Qt 5.15.2 套件没有 `qtbase_zh_CN.qm`，简体中文只有聚合文件
+  `qt_zh_CN.qm`**（`qtbase_zh_TW.qm` 则存在）。
+- **安装时序有讲究**：`QTranslator` 是「后装的优先」被查找，所以先装 stock、再装
+  `snow_shot_*.qm`，保证本应用自己的条目盖住 stock 的同名条目。
+- 英文（源语言）不装；找不到 catalog 只 WARN **一次**（语言切换会反复走到这里）。
+
+实测（实例 `snow_shot-e2e-i18n`）：
+
+```
+Installed Qt stock translation "C:/Qt/5.15.2/msvc2019_64/translations/qt_zh_CN.qm"
+```
+
+**打包时的待办**（P7）：`qt_zh_CN.qm` 需要随安装包带上（或在安装脚本里从套件目录拷
+一份到 `<exe>/translations`）。开发构建直接读套件的 `TranslationsPath`，不需要处理。
 
 顺带记录两处 Qt6 命名的既有假设，进 UOS 前需要一并按版本分流：
 `scripts/snow-build-environment.ps1:252` 与 `scripts/validate-static-qt.py:192`
