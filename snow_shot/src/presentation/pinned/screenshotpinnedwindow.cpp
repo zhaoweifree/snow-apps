@@ -1180,6 +1180,9 @@ ScreenshotPinnedWindow::ScreenshotPinnedWindow(QWidget* parent)
     livePinnedWindows().push_back(QPointer<ScreenshotPinnedWindow>(this));
     setWindowFlags(Qt::FramelessWindowHint | Qt::Tool | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_DeleteOnClose, true);
+    // 逐像素透明在 Qt5 上同样成立 —— 前提是客户区与窗口矩形一致。早先 Qt5 上
+    // 「窗口在、屏幕上什么都没有」不是透明的问题，而是 WS_THICKFRAME 让客户区
+    // 比窗口矩形小一圈；修法见 pinnedwindowplatform.cpp 的 attach()。
     setAttribute(Qt::WA_TranslucentBackground, true);
     setAttribute(Qt::WA_NoSystemBackground, true);
     setAttribute(Qt::WA_OpaquePaintEvent, false);

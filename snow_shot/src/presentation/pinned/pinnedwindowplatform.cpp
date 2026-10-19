@@ -5,6 +5,8 @@
 #if defined(Q_OS_WIN)
 #include "../../platform/windows/pinnedwindownative.h"
 #include "snow_shot/presentation/screenshotpinnedwindow.h"
+#include <QAbstractNativeEventFilter>
+#include <QCoreApplication>
 #include <qt_windows.h>
 #endif
 #include <QCursor>
@@ -258,6 +260,42 @@ class WindowsPinnedWindowPlatform final : public PinnedWindowPlatform {
     ~WindowsPinnedWindowPlatform() override {
         detach();
     }
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    // Qt5 的 windows 平台插件不把这些消息投给 QWidget::nativeEvent（Qt6 会）：
+    // 贴图窗口的拖边缩放命中码、拖动光标、尺寸上下限全都长在 nativeEvent 里，
+    // 少了这层投递，去掉 WS_THICKFRAME 之后拖边缩放就彻底没了。
+    // 这里按 Qt6 的语义补投一次，并且只在处理函数认领时才吞掉消息。
+    class NativeMessageRelay final : public QAbstractNativeEventFilter {
+      public:
+        explicit NativeMessageRelay(WindowsPinnedWindowPlatform& owner) : m_owner(owner) {}
+        bool nativeEventFilter(const QByteArray& type, void* message, long* result) override {
+            auto* msg = static_cast<MSG*>(message);
+            if (msg == nullptr || msg->hwnd == nullptr ||
+                msg->hwnd != reinterpret_cast<HWND>(m_owner.m_attached)) {
+                return false;
+            }
+            switch (msg->message) {
+            case WM_NCHITTEST:
+            case WM_SETCURSOR:
+            case WM_GETMINMAXINFO:
+                break;
+            default:
+                return false;
+            }
+            snowNativeEventResult nativeResult = 0;
+            if (!m_owner.handleNativeEvent(type, message, &nativeResult)) {
+                return false;
+            }
+            if (result != nullptr) {
+                *result = static_cast<long>(nativeResult);
+            }
+            return true;
+        }
+
+      private:
+        WindowsPinnedWindowPlatform& m_owner;
+    };
+#endif
     bool attach() override {
         if (!m_window || !m_window->internalWinId())
             return false;
@@ -265,8 +303,26 @@ class WindowsPinnedWindowPlatform final : public PinnedWindowPlatform {
         const WId id = m_window->internalWinId();
         if (m_attached && m_attached != id)
             detach();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         if (m_role == Role::Image && !screenshot_pinned_window_native::applySystemResizeStyle(id))
             return false;
+#else
+        // Qt5 上**不给贴图窗口加 WS_THICKFRAME**。
+        //
+        // 这圈边框在 Qt5 的 windows 平台插件里是真正的非客户区：屏幕坐标下的客户区
+        // 每边比窗口矩形小一圈（实测 8px）。逐像素透明窗口的合成面按窗口矩形提交，
+        // 客户区与窗口矩形一旦不一致，整块表面就会被判成全透明 —— 窗口 IsWindowVisible=1、
+        // paintEvent 照跑、屏幕上什么都没有（实测：去掉这圈边框，内容立刻上屏）。
+        //
+        // 拖边缩放不依赖这个样式：NativeMessageRelay 把 WM_NCHITTEST 补投给
+        // PinnedWindowWindowsEvents，那里会按 resizeHandleAt() 返回 HTLEFT 等命中码。
+        if (m_relay == nullptr) {
+            if (QCoreApplication* application = QCoreApplication::instance()) {
+                m_relay = std::make_unique<NativeMessageRelay>(*this);
+                application->installNativeEventFilter(m_relay.get());
+            }
+        }
+#endif
         if (m_resizeState &&
             !screenshot_pinned_window_native::installSynchronizedResize(id, m_resizeState))
             return false;
@@ -280,6 +336,14 @@ class WindowsPinnedWindowPlatform final : public PinnedWindowPlatform {
         m_keyboard.stop();
         if (m_attached)
             screenshot_pinned_window_native::removeSynchronizedResize(m_attached);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        if (m_relay) {
+            if (QCoreApplication* application = QCoreApplication::instance()) {
+                application->removeNativeEventFilter(m_relay.get());
+            }
+            m_relay.reset();
+        }
+#endif
         m_attached = 0;
     }
     void setResizeInteractionState(const bool* state) override {
@@ -369,6 +433,9 @@ class WindowsPinnedWindowPlatform final : public PinnedWindowPlatform {
     screenshot_pinned_window_native::SystemMoveKeyboard m_keyboard;
     WId m_attached = 0;
     const bool* m_resizeState = nullptr;
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    std::unique_ptr<NativeMessageRelay> m_relay;
+#endif
 };
 #endif
 std::unique_ptr<PinnedWindowPlatform> createPinnedWindowPlatform(QWidget* window,

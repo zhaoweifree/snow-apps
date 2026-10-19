@@ -289,27 +289,14 @@ bool screenshot_pinned_window_native::applyClientGeometry(WId windowId, const QR
     if (IsIconic(hwnd) != FALSE)
         return applyMinimizedClientGeometry(hwnd, geometry);
 
-    // SetWindowPos 的矩形是**窗口矩形**，而这个函数要设置的是**客户区矩形**。
-    // 只要窗口带 WS_THICKFRAME（applySystemResizeStyle 加的那个，用来给贴图窗口
-    // 拖边缩放），两者就差一圈边框。Qt6 在 WM_NCCALCSIZE 里把无边框窗口的客户区
-    // 撑满窗口，所以直接拿客户区矩形去 SetWindowPos 恰好成立；**Qt5 不这么做**，
-    // 于是客户区被内缩一圈（实测每边 8px），下面的校验必然失败，贴图直接上不了屏。
-    // 修法是先把客户区矩形换算成窗口矩形（按当前 style/exstyle 与 DPI），再 Set。
-    // 没有边框时 AdjustWindowRectEx* 是恒等变换，所以 Qt6 路径行为不变。
-    RECT frameRect{geometry.left(), geometry.top(), geometry.right() + 1, geometry.bottom() + 1};
-    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
-    const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
-    const UINT dpi = GetDpiForWindow(hwnd);
-    if (!(dpi != 0 && AdjustWindowRectExForDpi(&frameRect, style, FALSE, exStyle, dpi) != FALSE) &&
-        AdjustWindowRectEx(&frameRect, style, FALSE, exStyle) == FALSE) {
-        qWarning("Pinned native geometry: frame adjustment failed err=%lu", GetLastError());
-        SetRect(&frameRect, geometry.left(), geometry.top(), geometry.right() + 1,
-                geometry.bottom() + 1);
-    }
-    const int targetX = static_cast<int>(frameRect.left);
-    const int targetY = static_cast<int>(frameRect.top);
-    const int targetWidth = static_cast<int>(frameRect.right - frameRect.left);
-    const int targetHeight = static_cast<int>(frameRect.bottom - frameRect.top);
+    // SetWindowPos 的矩形是**窗口矩形**，本函数要设置的是**客户区矩形**；两者在
+    // 贴图窗口上恒等，因为 Qt5 不再给它加 WS_THICKFRAME（见 pinnedwindowplatform.cpp
+    // 里 attach() 的说明），Qt6 则本来就在 WM_NCCALCSIZE 里把客户区撑满窗口矩形。
+    // 所以这里不要做 AdjustWindowRectEx：那会把一圈并不存在的边框再算一遍。
+    const int targetX = geometry.left();
+    const int targetY = geometry.top();
+    const int targetWidth = geometry.width();
+    const int targetHeight = geometry.height();
 
     UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
     if (update == GeometryUpdate::DiscardClientPixels) {

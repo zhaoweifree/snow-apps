@@ -1311,6 +1311,9 @@ if (status != "the application is still running") throw ... status ...
 
 ### 3.10 手测反馈：「贴图无效」——客户区矩形 vs 窗口矩形（R39）
 
+> **本节 (3) 的修法已被 §3.11 证伪并回退。** 现场判据与工具用法仍然有效，
+> 结论请看 §3.11。
+
 真机上点贴图完全没反应。日志里三步就把范围锁死了：
 
 ```
@@ -1397,6 +1400,113 @@ R37 为定位「overlay 全透明」加的 4 处 `TEMP-QT5-DIAG` 全部删除
 `screenshotcanvasrenderer.cpp` 的 `covers`/`frame`、`screenshotoverlaycanvaswidget.cpp` 的
 `canvas.paint`），`snow_canvas_image.cpp` 的 `[pooltrace]` 也一并清掉。
 诊断结论已固化在本节，不需要留在代码里。
+
+### 3.11 §3.10 的修法是错的：真正的根因是「客户区 ⊂ 窗口矩形」让逐像素透明失效（R40）
+
+§3.10 (3) 把 `applyClientGeometry()` 改成「先 `AdjustWindowRectExForDpi` 换算成窗口矩形
+再 `SetWindowPos`」。手测结果：贴图**仍然无效**，而且进程直接退出。日志给出新的判据：
+
+```
+Pinned native geometry mismatch: requested=284,284 633x483  actual=640,270 640x480
+pin.rejected  outcome=failed stage=presentation
+```
+
+`actual` 和 `requested` 差了一整圈，说明换算方向和 Qt5 自己的取整打架了：写进去的是
+"请求 + 边框"，读回来 Qt5 又按它自己的非客户区语义算一遍客户区，永远对不上，
+`applyAndVerifyNativeGeometry` 的校验必然失败 → `stage=initial_geometry` → 关窗。
+
+#### (1) 用最小复现隔离「透明」与「几何」
+
+`qpin-min.exe`（`.workbuddy/qt5-port/qpin-min.cpp`，纯 Qt5 + 逐像素透明 + 无第三方依赖）
+四档对照，把两个嫌疑彻底分开：
+
+| 模式 | 做法 | 结果 |
+|---|---|---|
+| `plain` | 半透明无边框窗口 | 正常上屏 |
+| `prewarm` | `plain` + 预热建 HWND | 正常上屏 |
+| `thickframe` | `plain` + `WS_THICKFRAME` | **完全不显示**（`IsWindowVisible=1`、`paintEvent` 照跑） |
+| `nccalc` | `thickframe` + `WM_NCCALCSIZE` 撑满客户区 | 正常上屏 |
+
+结论：逐像素透明本身没问题，预热建 HWND 也没问题；**只要客户区 ≠ 窗口矩形，整块分层表面
+就被判成全透明**。逐像素透明窗口的合成面是按**窗口矩形**提交的，客户区小了，
+外面那圈"没有客户区覆盖"的区域就让整个 surface 的 alpha 判定失效。
+
+#### (2) 真正的修法：Qt5 上干脆不给贴图窗口加 `WS_THICKFRAME`
+
+`applySystemResizeStyle()` 加这圈边框的唯一目的是"让系统认为窗口可缩放"，从而支持拖边。
+但 Qt5 把这圈边框当作**真实非客户区**（每边内缩 8px），Qt6 才在 `WM_NCCALCSIZE` 里
+把无边框窗口的客户区撑满整个窗口矩形 —— 所以同一行代码只有 Qt5 出事。
+
+```cpp
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        if (m_role == Role::Image && !screenshot_pinned_window_native::applySystemResizeStyle(id))
+            return false;
+#else
+        // Qt5 上不给贴图窗口加 WS_THICKFRAME：客户区会每边内缩 8px，
+        // 逐像素透明的合成面按窗口矩形提交，整块表面被判全透明。
+#endif
+```
+
+`applyClientGeometry()` 里 §3.10 加的 `AdjustWindowRectEx*` 换算同步删除 —— 既然
+客户区 == 窗口矩形，再换算就是把不存在的边框算两遍。**§3.10 (3) 的做法作废。**
+
+#### (3) 副作用：Qt5 不投递 `WM_NCHITTEST`，拖边缩放要靠应用级过滤器补投
+
+去掉 `WS_THICKFRAME` 之后窗口不可缩放，而贴图窗口的拖边命中码全在
+`PinnedWindowWindowsEvents::handle()` 里，靠 `QWidget::nativeEvent` 收消息。
+Qt5 的 windows 平台插件**不把 `WM_NCHITTEST` / `WM_SETCURSOR` / `WM_GETMINMAXINFO`
+投给 `QWidget::nativeEvent`**（Qt6 会）。
+
+修法：在 `WindowsPinnedWindowPlatform::attach()` 里装一个
+`QAbstractNativeEventFilter`（`NativeMessageRelay`），把这三种消息补投给
+`handleNativeEvent()`，**只有处理函数认领时才吞掉**（`return true`），其余一律放行：
+
+```cpp
+if (msg == nullptr || msg->hwnd == nullptr ||
+    msg->hwnd != reinterpret_cast<HWND>(m_owner.m_attached))
+    return false;
+switch (msg->message) {
+case WM_NCHITTEST: case WM_SETCURSOR: case WM_GETMINMAXINFO: break;
+default: return false;
+}
+snowNativeEventResult nativeResult = 0;
+if (!m_owner.handleNativeEvent(type, message, &nativeResult))
+    return false;
+if (result != nullptr) *result = static_cast<long>(nativeResult);
+return true;
+```
+
+`detach()` 里 `removeNativeEventFilter` + `m_relay.reset()`，否则过滤器持有悬空 owner。
+注意 `WId` 与 `HWND` 之间没有隐式转换（`error C2446`），必须显式 `reinterpret_cast`。
+
+#### (4) 验证
+
+```
+贴图（Ctrl+F，走真实默认绑定）   426x346 → 上屏、内容在、进程不退出
+拖动                             窗口矩形跟着走，冻结帧一起走（不是"透过去看桌面"）
+拖右边框                         533x433 → 734x594，命中码 11 = HTRIGHT
+                                 等比缩放（updateResize 的设计行为，不是 bug）
+probe-pin.sh                     pin.succeeded=1 pin.rejected=0 → PASS
+```
+
+`Pinned native geometry mismatch` 与 `QWindowsWindow::setGeometry` 的告警同时消失。
+
+#### (5) 一个把人带偏的工具坑：DPI 虚拟化
+
+`enum-windows.exe` 早先没声明 DPI 感知，在 125% 缩放的机器上 `GetWindowRect` 拿到的是
+**虚拟化坐标**（物理 ÷ 1.25）。于是同一个窗口：
+
+```
+enum-windows（虚拟化）: rect=(307,227)-(733,573) size=426x346
+Qt 内部 GetClientRect :  rect=(384,284) 533x433
+```
+
+看起来像"Qt 自己算的客户区和系统不一致"，实际两边都对，只是坐标系不同
+（533/1.25=426.4、384/1.25=307.2、284/1.25=227.2 全部吻合）。
+按虚拟化矩形去算"右边框在 x≈731"是错的，实测那一点在物理图片正中，
+命中码 `HTCAPTION=2` 完全正确 —— 拖边缩放本来就没坏，是探针瞄错了地方。
+修法：`main()` 首行 `SetProcessDPIAware()`（`drag-rect.exe` 一直是这样，
+所以它是物理坐标、窗口移动量 150 与鼠标位移 150 精确相等，反而成了佐证）。
 
 ---
 
