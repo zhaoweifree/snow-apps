@@ -597,6 +597,25 @@ bash .workbuddy/qt5-port/start-qt5-manual.sh qt5manual
 **自动化已经覆盖到的部分**（R38 起）：热键 → overlay → 拖框选中 → Ctrl+C 落剪贴板，
 连跑 5 轮全绿，入口见 §3.9。表里剩下的项仍是手测。
 
+**`probe-qt5-modes.sh` 覆盖的剧本**（R38 追加，判据全走窗口枚举 + 日志事件，
+不依赖 UIA）：
+
+| 剧本 | 判据 | 实测 |
+|---|---|---|
+| fullscreen（F22 → `screenshot_full_screen`） | `export.image_finished` + `clipboard.finished` | PASS |
+| copy（F19 → 绑到 `screenshot_copy`） | `clipboard.finished` + 剪贴板里出现 1920×1080 位图 | PASS |
+| 拖框 + Ctrl+C（`uia-ctrl-c.exe`） | 剪贴板里是合法 PNG，5 轮 | PASS |
+
+注意两件事，否则会把环境问题当成产品缺陷：
+
+- **跑之前不能有别的 `snow_shot.exe` 在跑**。残留实例会先注册同一批全局热键，
+  后起的实例拿到 `code=1409`，按键被前一个进程吃掉 —— 表现是"窗口就是不出现"。
+  `probe-qt5-modes.sh` 会先检查并直接退出，注册日志里出现 1409 也会单独报出来。
+- **设置页（F21）不能和它们放在同一条命令里自动判**：只要应用是这条命令的子进程，
+  按 F21 后 20 s 都不出现设置窗口，随后整棵进程树被沙箱 SIGTERM（应用没有崩溃记录：
+  emergency 为空、无 `.dmp`）；用后台任务起应用、再从另一条命令发 F21，5 s 就出现在
+  734×550 的位置（见 `logs/qt5-settings.png`）。所以设置页按手测处理，别指望脚本判。
+
 注意：全新实例的默认 `screenshot` 热键是 **F1**，不是 F24。手测前要么按 F1，
 要么照 §3.9(5) 把 `config.json` 的绑定播成 F24（注入工具发的是 F24）。
 
@@ -1237,7 +1256,36 @@ if (status != "the application is still running") throw ... status ...
 
 `probe-pool-crash.sh` 已经把这一步做进去了。
 
-#### (7) 本轮删除的临时代码
+#### (7) 追加的自动化剧本与两个"环境陷阱"
+
+`probe-qt5-modes.sh` 把 §3.4 里能自动判的项变成本机可复跑，判据全部基于
+**窗口枚举 + 日志事件**（Qt5 没有 UIA automationId，见 (5)(b)）：
+
+| 剧本 | 判据 | 实测 |
+|---|---|---|
+| `fullscreen`（VK_F22 → `screenshot_full_screen`） | `export.image_finished` + `clipboard.finished`；剪贴板里 1920×1080 位图 | PASS |
+| `copy`（VK_F19 → 绑到 `screenshot_copy`） | `clipboard.finished`；剪贴板里 1920×1080 位图 | PASS |
+| `all`（上面两条连跑） | 外加 emergency 里零 FATAL | `ALL PASS`（exit=0） |
+
+探索这一层时撞到两个坑，都会伪装成产品缺陷：
+
+1. **残留实例抢全局热键**。前一个实例没退干净时，后起的实例注册 F21/F22 拿到
+   `code=1409`（`ERROR_HOTKEY_ALREADY_REGISTERED`），按键被**前一个进程**吃掉，
+   本实例什么都不做 —— 表现就是"窗口怎么都不出现"。当时 qm9 还在跑，qm10 的 4 个
+   热键全 1409，设置窗口实际上是开在了 qm9 身上（截图里能看到，但 `enum-windows`
+   按 qm10 的 pid 查就是 0）。现在脚本启动前先查残留进程，注册日志里出现 1409 也单独报。
+2. **设置页不能和自动化命令同处一棵进程树**。应用是该命令的子进程时，按 F21 后
+   20 s 都不出现设置窗口，随后整棵树被沙箱 SIGTERM（应用侧无崩溃记录：emergency
+   为空、无 `.dmp`）。用后台任务起应用、再从另一条命令发 F21，5 s 就出现在 734×550。
+   这是本机沙箱的限制，不是产品缺陷（两次截图都对得上），所以 `all` 里**不含**
+   `settings`，设置页回归按手测 + 截图留证处理。
+
+顺带固定的两个小事实：`screenshot_full_screen` 的行为是「截全屏并直接进剪贴板」，
+**不弹 overlay**（所以判据不能是"有没有可见窗口"，否则会把正常工作判成失败）；
+`send-vk.exe` 只会发单键（外加内置的 `ctrl+c`），要测某个组合键就把它单独绑到一个
+空闲 F 键上，比给注入器加组合键支持划算。
+
+#### (8) 本轮删除的临时代码
 
 R37 为定位「overlay 全透明」加的 4 处 `TEMP-QT5-DIAG` 全部删除
 （`screenshotoverlaywindow.cpp` 的 `window.paint` 与 `grab()` 落盘、
@@ -1257,7 +1305,7 @@ R37 为定位「overlay 全透明」加的 4 处 `TEMP-QT5-DIAG` 全部删除
 | **P2b** | CMake 面的 **`snow_shot` 覆盖**（§3.6）：`Concurrent` 包解析、翻译目录解析与套件命名、`qt_add_lrelease` 垫片签名、Qt5 的未完成翻译门禁 | **本轮完成**：5 个 Qt5 硬阻塞已修；探针 `run-qt5-probe.sh` 四段全绿（含反向验证）；`snow_shot` 完整 configure 仍等 vcpkg（OpenCV/onnxruntime），但**它挡不住的那部分已验完** |
 | **P3** | L2 机械改写 8 条规则，按规则逐条提交（每条一个 commit） | 每条规则后都能 `git diff --stat` 复核；Qt5 编译错误数单调下降 |
 | **P4** | L3 人工改写：viewer RHI 后端、`QStringDecoder`、Windows 打印 | viewer 可编译；若决策为"首版不交付"，则改为在 CMake 中整模块 `option()` 关闭 |
-| **P5** | **Windows Qt5 编译打通 + 3.4 冒烟清单全绿** | 冒烟清单逐项通过，无红色误报弹窗。**进行中（R38）**：full 档 `550/550` 目标全绿、链接通过、真机启动零崩溃；拖框崩溃已定位并修复（Qt 5.15.2 `tryStart(std::function)` 缺陷，见 3.9）；自动化覆盖热键→overlay→拖框→Ctrl+C→剪贴板连跑 5 轮全绿；**只剩 3.4 手测项** |
+| **P5** | **Windows Qt5 编译打通 + 3.4 冒烟清单全绿** | 冒烟清单逐项通过，无红色误报弹窗。**进行中（R38）**：full 档 `550/550` 目标全绿、链接通过、真机启动零崩溃；拖框崩溃已定位并修复（Qt 5.15.2 `tryStart(std::function)` 缺陷，见 3.9）；自动化覆盖热键→overlay→拖框→Ctrl+C→剪贴板连跑 5 轮全绿，另有 fullscreen/copy 剧本 `ALL PASS`；**只剩 3.4 手测项（设置页、贴图、OCR、录屏、悬停）** |
 | **P6** | UOS 编译：amd64 → arm64，按 `docs-uos-linux-port.md` 的 P2–P4 推进平台后端 | UOS amd64 能起界面；arm64 真机（飞腾/鲲鹏）终验 |
 | **P7** | 收尾：changelog、版本号、双架构打包 | 产物齐全，`snow-shot-installation.json` 校验通过 |
 
