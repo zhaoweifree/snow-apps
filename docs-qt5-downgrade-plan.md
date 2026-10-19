@@ -583,19 +583,25 @@ bash .workbuddy/qt5-port/start-qt5-manual.sh qt5manual
 `%APPDATA%` / `%LOCALAPPDATA%` 下的 `SnowShot/snow_shot-e2e-qt5manual/`。
 **必须在你自己的终端里跑**：从自动化工具里起的话，工具调用一结束子进程就被回收了。
 
-| 项 | 验收要点 |
-|---|---|
-| 启动 | 无 `This application failed to start because no Qt platform plugin could be initialized` |
-| 截图 | 全屏 / 区域 / 窗口三种模式各成一次 |
-| 贴图 | 贴图窗口置顶、拖动、缩放、关闭 |
-| 快捷键 | **重点**——`QKeyCombination` 改造的正确性直接体现在这里（含 Ctrl+Shift+Tab 区域类型循环） |
-| 工具栏悬停 | **重点**——`enterEvent` 签名改造的正确性（悬停高亮、弹出菜单） |
-| 设置页 | 各页可切换。`removeIf` 的 Qt5 缺陷已修（§3.8(4)），这里要重点看工具栏布局的读写 |
-| OCR | 中文识别出文字 |
-| 录屏 | 能起录、能停、产物可播 |
+| 项 | 验收要点 | 实测（R44） |
+|---|---|---|
+| 启动 | 无 `This application failed to start because no Qt platform plugin could be initialized` | ✅ |
+| 截图 | 全屏 / 区域 / 窗口三种模式各成一次 | ✅ 三种模式均成 |
+| 贴图 | 贴图窗口置顶、拖动、缩放、关闭 | ✅ 含拖边缩放（HTRIGHT）、关闭按钮 |
+| 快捷键 | **重点**——`QKeyCombination` 改造的正确性直接体现在这里（含 Ctrl+Shift+Tab 区域类型循环） | ✅ 含区域类型循环 |
+| 工具栏悬停 | **重点**——`enterEvent` 签名改造的正确性（悬停高亮、弹出菜单） | ✅ 高亮与弹出菜单均正常 |
+| 设置页 | 各页可切换。`removeIf` 的 Qt5 缺陷已修（§3.8(4)），这里要重点看工具栏布局的读写 | ✅ 各页可切换，布局读写正常 |
+| OCR | 中文识别出文字 | ✅ 中文识别出文字 |
+| 录屏 | 能起录、能停、产物可播 | ✅ 起停与回放正常 |
+
+**R44 结论：全表通过，P5 出口判据达成。** 到此为止，Windows Qt5 构建在
+「真实用户手测」意义上与 Qt6 版功能等价；本文档记录过的 12 个 Qt5 专属硬阻塞
+（§3.5 起逐节的 (1)~(7) 各条）全部关闭，且没有遗留的产品级缺陷——两条长期挂着的
+告警经正式版交叉对照证实是上游既有行为（§3.12(7)）。
 
 **自动化已经覆盖到的部分**（R38 起）：热键 → overlay → 拖框选中 → Ctrl+C 落剪贴板，
-连跑 5 轮全绿，入口见 §3.9。表里剩下的项仍是手测。
+连跑 5 轮全绿，入口见 §3.9。贴图链路另有 `probe-pin.sh`（事件级）与
+`probe-pin-observe.sh`（窗口级）两个可复跑入口。
 
 **`probe-qt5-modes.sh` 覆盖的剧本**（R38 追加，判据全走窗口枚举 + 日志事件，
 不依赖 UIA）：
@@ -1609,7 +1615,7 @@ disconnect 告警，对象随即销毁，无功能影响。
 | **P2b** | CMake 面的 **`snow_shot` 覆盖**（§3.6）：`Concurrent` 包解析、翻译目录解析与套件命名、`qt_add_lrelease` 垫片签名、Qt5 的未完成翻译门禁 | **本轮完成**：5 个 Qt5 硬阻塞已修；探针 `run-qt5-probe.sh` 四段全绿（含反向验证）；`snow_shot` 完整 configure 仍等 vcpkg（OpenCV/onnxruntime），但**它挡不住的那部分已验完** |
 | **P3** | L2 机械改写 8 条规则，按规则逐条提交（每条一个 commit） | 每条规则后都能 `git diff --stat` 复核；Qt5 编译错误数单调下降 |
 | **P4** | L3 人工改写：viewer RHI 后端、`QStringDecoder`、Windows 打印 | viewer 可编译；若决策为"首版不交付"，则改为在 CMake 中整模块 `option()` 关闭 |
-| **P5** | **Windows Qt5 编译打通 + 3.4 冒烟清单全绿** | 冒烟清单逐项通过，无红色误报弹窗。**进行中（R38）**：full 档 `550/550` 目标全绿、链接通过、真机启动零崩溃；拖框崩溃已定位并修复（Qt 5.15.2 `tryStart(std::function)` 缺陷，见 3.9）；自动化覆盖热键→overlay→拖框→Ctrl+C→剪贴板连跑 5 轮全绿，另有 fullscreen/copy 剧本 `ALL PASS`；**只剩 3.4 手测项（设置页、贴图、OCR、录屏、悬停）** |
+| **P5** | **Windows Qt5 编译打通 + 3.4 冒烟清单全绿** | **✅ 完成（R44）**：full 档 `550/550` 目标全绿、链接通过、真机启动零崩溃；3.4 清单**八项全部手测通过**（含设置页、录屏、工具栏悬停、`Ctrl+Shift+Tab` 区域类型循环、窗口截图）；拖框崩溃（Qt 5.15.2 `tryStart(std::function)`，§3.9）、贴图不可见（`WS_THICKFRAME` 让客户区小于窗口矩形，§3.11）、`mapTo` 非祖先 abort（§3.12）三个 Qt5 专属缺陷全部修复并回归。自动化入口：`verify-qt5-windows.sh`（build/overlay+drag/ctrl+c×5/modes 全 PASS）、`probe-pin.sh`、`probe-pin-observe.sh` |
 | **P6** | UOS 编译：amd64 → arm64，按 `docs-uos-linux-port.md` 的 P2–P4 推进平台后端 | UOS amd64 能起界面；arm64 真机（飞腾/鲲鹏）终验 |
 | **P7** | 收尾：changelog、版本号、双架构打包 | 产物齐全，`snow-shot-installation.json` 校验通过 |
 
