@@ -1576,13 +1576,26 @@ manual3（清理诊断后的干净二进制）：贴图 → 识别文字 → 鼠
 `Q_ASSERT` 不再触发，进程从前台正常活到 `session.clean_shutdown`（用户从托盘退出），
 无 dump、无 panic。
 
-**(7) 遗留（非本次范围）**
+**(7) 两条「疑似迁移遗留」经正式版交叉对照，确认是上游既有行为**
 
-- `Canvas session restoration failed: stage=deserialize status=1 bytes=408`：贴图画布标注状态
-  恢复失败，不影响上屏，但重启后标注恢复不出来。
-- `QObject::disconnect: No such slot QWidget::_q_overrideMenuActionDestroyed()`：右键菜单
-  创建/销毁时反复出现。Qt5 走的是**运行期字符串槽查找**（Qt6 用函数指针，编译期解析，所以没有），
-  对象随即销毁，功能无影响，属噪音。
+两条在 Qt5 构建里反复出现的告警，用**已安装的正式版（Qt6 构建）日志**做了对照，
+两边一字不差，因此**不是 Qt5 降级引入的**，不列为本次迁移的待办：
+
+| 告警 | Qt5 构建（隔离实例） | 正式版 Qt6（`%APPDATA%\SnowShot\snow_shot\logs`） |
+|---|---|---|
+| `Canvas session restoration failed: stage=deserialize status=1 bytes=408` | 每次选区复制后 1 条 | 4 条，**`status=1 bytes=408` 完全相同** |
+| `QObject::disconnect: No such slot QWidget::_q_overrideMenuActionDestroyed()` | 35 条（多实例累计） | 有，`qt.core.qobject.connect` 类别 |
+
+第一条的真实来路（本轮更正）：告警由 `RuntimeSession::restoreDocumentSession()`
+→ `runtimeFromSerializedSession()` 打出（`snow_canvas_runtime_session.cpp:103`），
+**不是**导出渲染路径。`status=1` = `SNOW_ERROR_INVALID_ARGUMENT`，即引擎拒绝这份
+408 字节 payload。时间轴上也对不上：`export.image_finished` → `clipboard.finished`
+之后 4 ms 才出现，此时导出已经完成，所以它不阻塞复制/导出，此前担心的「带标注导出
+被丢空」没有被证据支持。**结论：上游既有问题（空文档 session 的序列化/反序列化
+不对称），与 Qt 版本无关，留给上游单独处理。**
+
+第二条是 Qt5 走**运行期字符串槽查找**（Qt6 用函数指针编译期解析）时对已销毁对象的
+disconnect 告警，对象随即销毁，无功能影响。
 
 ---
 
