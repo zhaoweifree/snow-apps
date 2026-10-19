@@ -1395,7 +1395,9 @@ bool AdCarousel::eventFilter(QObject* watched, QEvent* event) {
     return QWidget::eventFilter(watched, event);
   }
   auto mappedPosition = [this, watchedWidget](QMouseEvent* mouseEvent) {
-    return QPointF(watchedWidget->mapTo(this, snowPos(mouseEvent).toPoint()));
+    // `watched` is an arbitrary installed receiver, not necessarily a child of
+    // this carousel; Qt5 aborts on mapTo() in that case.
+    return snowMapToWithinHierarchy(watchedWidget, this, snowPos(mouseEvent));
   };
   if (event->type() == QEvent::MouseButtonPress) {
     auto* mouseEvent = static_cast<QMouseEvent*>(event);

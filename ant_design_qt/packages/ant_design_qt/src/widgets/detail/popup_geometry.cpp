@@ -41,7 +41,10 @@ QRect PopupWidgetRect::mappedTo(const QWidget* target) const {
     return {};
   }
   if (widget->window() == target->window()) {
-    return QRect(widget->mapTo(target, rect.topLeft()), rect.size());
+    // Same top-level window does NOT imply ancestor: the target can live in a
+    // sibling subtree, and Qt5 aborts (Q_ASSERT) instead of returning garbage.
+    return QRect(snowMapToWithinHierarchy(widget, target, QPointF(rect.topLeft())).toPoint(),
+                 rect.size());
   }
   // Map one reference point, then scale offsets in the destination window's
   // coordinates. Mapping corners independently can choose different screens.

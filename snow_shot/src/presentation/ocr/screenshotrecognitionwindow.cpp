@@ -2158,7 +2158,10 @@ bool ScreenshotRecognitionWindow::handleSelectionResizeEvent(QObject* watched, Q
     QPointF localPosition = snowPos(mouseEvent);
     if (auto* watchedWidget = qobject_cast<QWidget*>(watched);
         watchedWidget != nullptr && watchedWidget != this) {
-        localPosition = QPointF(watchedWidget->mapTo(this, snowPos(mouseEvent).toPoint()));
+        // The event receiver can be a widget outside this window's hierarchy
+        // (forwarded input from the pinned window). Qt5 aborts there, Qt6 and
+        // this helper fall back to the global coordinate space.
+        localPosition = snowMapToWithinHierarchy(watchedWidget, this, snowPos(mouseEvent));
     }
     const QPointF canvasPosition = canvasPositionForLocalPoint(localPosition);
     const QPointer<ScreenshotRecognitionWindow> lifetime(this);

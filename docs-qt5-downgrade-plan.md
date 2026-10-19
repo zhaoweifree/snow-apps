@@ -1508,6 +1508,82 @@ Qt 内部 GetClientRect :  rect=(384,284) 533x433
 修法：`main()` 首行 `SetProcessDPIAware()`（`drag-rect.exe` 一直是这样，
 所以它是物理坐标、窗口移动量 150 与鼠标位移 150 精确相等，反而成了佐证）。
 
+### 3.12 贴图后做 OCR 就崩：Qt5 的 `QWidget::mapTo()` 对非祖先 target 直接 abort（R41/R42）
+
+**(1) 现场**
+
+贴图本身成功（`pin.started` / `pin.finished` 均 succeeded、内容上屏），随后点「识别文字」，
+`ocr.finished operation=4` 之后 0.6 秒进程消失。没有 `session.clean_shutdown`，
+`emergency-*.log` 里是 `qt.fatal` + `runtime.panic`：
+
+```
+ASSERT failure in QWidget::mapTo(const QWidget *parent, const QPoint &pos):
+"parent must be in parent hierarchy", kernel\qwidget.cpp:4059
+```
+
+**(2) 根因**
+
+Qt5 的 `QWidget::mapTo(parent, pos)` 在 `parent` 不是自己祖先时**不是返回错值，而是
+`Q_ASSERT_X` 直接 abort 整个进程**（Qt6 是同一契约，只是这条路径在 Qt6 上没被走到）。
+凡是「`watched` 是任意接收者」的坐标换算都踩在这条上：贴图窗口会把输入转发给识别窗口，
+而**识别窗口是独立的顶层窗口，不在贴图窗口的父子链上**。
+
+修复后的日志拿到确证：
+
+```
+WARN snowMapToWithinHierarchy: ScreenshotPinnedWindow -> ScreenshotRecognitionWindow
+     is not an ancestor of the receiver; using global coordinates
+```
+
+**(3) 修法**
+
+`qt_compat.h` 新增 `snowMapToWithinHierarchy(receiver, target, point)`：target 真是祖先就走
+`mapTo`，否则退回 `mapToGlobal` / `mapFromGlobal`，并且**只打一次** WARN（打印双方类名，
+定位完不需要再加临时日志）。替换的四处都是「target 不保证是祖先」：
+
+| 位置 | 场景 |
+|---|---|
+| `popup_geometry.cpp` `PopupWidgetRect::mappedTo()` | 同一顶层窗口的**兄弟子树**（弹层/提示） |
+| `carousel.cpp` `AdCarousel::eventFilter` | `watched` 是任意安装的接收者 |
+| `screenshotrecognitionwindow.cpp` `handleSelectionResizeEvent` | 贴图窗口转发来的鼠标事件 |
+| `screenshotpinnedwindow.cpp` `windowPositionForEvent` | 顶层工具窗口（编辑/识别浮层）的事件 |
+
+用 `window()` / `parentWidget()` / `this` / 构造期 `new X(..., this)` 当 target 的调用点
+**可证安全**，一个都没动 —— 不给按钮绘制之类的热路径加 `isAncestorOf`。
+`ant_design_qt` 侧通过 `ant_design_qt_pch.h` 拿到该 helper。
+
+**(4) 定位手段（结论：只剩「断言文案 + 二分」可用）**
+
+- minidump 符号解析在本机不可用：`stack-from-minidump.py` 对这份 2.1MB dump 吐出的是
+  Rust/OpenCV 乱码符号（PDB 与二进制不匹配的老问题），返回地址翻不出函数名。
+- 试过链接期 `/MAP` + `RtlCaptureStackBackTrace` 落 `stack` 字段：**能落，但没必要** ——
+  断言文案里已经写了 `QWidget::mapTo` 和断言内容，直接二分四处调用点更快。诊断代码已全部删除。
+
+**(5) 同时踩到的两个构建坑**
+
+1. **`LINK=/MAP` 环境变量会毁掉链接命令行**（报 `LNK1104: 无法打开文件 D:\Program.obj`）。
+   MSVC 的 `LINK` 不是简单追加；要加链接器参数得走
+   `cmake ... -DCMAKE_EXE_LINKER_FLAGS=/MAP`。
+2. **`snow-hang-watchdog.sh` 判据太激进，会误杀正常编译**：`cpu=0s && idle=6 samples`
+   就杀，而大 TU 前 30 秒本来就 0 CPU。误杀的特征是 ninja 报 `subcommand failed`
+   但日志里**一条 FAILED / error 都没有**。它只适合 vcpkg 安装循环，别给普通 ninja 构建挂。
+   真挂死长这样：单个 `cl.exe` CPU 冻结在 0.1s、内存个位数 MB、持续 10 分钟以上 ——
+   杀掉重跑即可（本轮撞了 3 次，靠 `for i in 1..5` 重试循环越过）。
+
+**(6) 验证**
+
+manual3（清理诊断后的干净二进制）：贴图 → 识别文字 → 鼠标在识别浮层上晃/点 → 拖边缩放，
+`Q_ASSERT` 不再触发，进程从前台正常活到 `session.clean_shutdown`（用户从托盘退出），
+无 dump、无 panic。
+
+**(7) 遗留（非本次范围）**
+
+- `Canvas session restoration failed: stage=deserialize status=1 bytes=408`：贴图画布标注状态
+  恢复失败，不影响上屏，但重启后标注恢复不出来。
+- `QObject::disconnect: No such slot QWidget::_q_overrideMenuActionDestroyed()`：右键菜单
+  创建/销毁时反复出现。Qt5 走的是**运行期字符串槽查找**（Qt6 用函数指针，编译期解析，所以没有），
+  对象随即销毁，功能无影响，属噪音。
+
 ---
 
 ## 4. 分阶段实施计划

@@ -4315,6 +4315,7 @@ void ScreenshotPinnedWindow::updateBorderOutline() {
                                                 ? appearance.contentRect
                                                 : QRectF(QPointF(), QSizeF(appearance.sourceSize));
             borderOutline = mapping.mapRect(borderSourceRect);
+            // m_canvas 在构造时以 this 为 parent，是本窗口的子控件，mapTo 安全。
             borderOutline.translate(m_canvas->mapTo(this, QPoint()) - m_borderFrame->pos());
             if (singleRectangle) {
                 const qreal radius =
@@ -9248,7 +9249,10 @@ QPointF ScreenshotPinnedWindow::windowPositionForEvent(QObject* watched,
     if (widget == nullptr || widget == this) {
         return position;
     }
-    return QPointF(widget->mapTo(this, QPoint())) + position;
+    // `watched` is an arbitrary installed receiver: the edit/recognition tool
+    // windows are separate top-level windows that are not in this widget's
+    // hierarchy. Qt5's QWidget::mapTo() aborts on a non-ancestor target.
+    return snowMapToWithinHierarchy(widget, this, position);
 }
 
 QPointF ScreenshotPinnedWindow::nativePositionForWindowPosition(const QPointF& position) const {

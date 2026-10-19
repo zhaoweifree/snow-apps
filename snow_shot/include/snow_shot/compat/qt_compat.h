@@ -1230,6 +1230,46 @@ template <typename Receiver, typename Target>
 #endif
 }
 
+// QWidget::mapTo(parent, pos) requires `parent` to be an ancestor of the
+// receiver. When it is not, the QPoint overload in Qt 5.15 does not return a
+// wrong value - it hits
+//   Q_ASSERT_X(..., "QWidget::mapTo(...)", "parent must be in parent hierarchy")
+// and aborts the process whole. Qt6 keeps the same contract.
+//
+// Several call sites map between widgets that only share a top-level window
+// (a pinned window forwards input to a different host widget, a popup asks a
+// sibling subtree for coordinates), which is exactly the case that aborts.
+// Route those calls through this helper: keep mapTo() when the target really
+// is an ancestor, otherwise fall back to the global coordinate space and say
+// once which pair triggered it.
+//
+// Templated on both widgets so this header still parses in translation units
+// that only see QtCore (it is force-included into every TU).
+template <typename Receiver, typename Target>
+[[nodiscard]] inline QPointF snowMapToWithinHierarchy(const Receiver* receiver,
+                                                     const Target* target, const QPointF& point)
+{
+#if SNOW_QT6
+    return receiver->mapTo(target, point);
+#else
+    if (receiver == nullptr || target == nullptr || receiver == target) {
+        return point;
+    }
+    if (!target->isAncestorOf(receiver)) {
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            qWarning("snowMapToWithinHierarchy: %s -> %s is not an ancestor of the receiver; "
+                     "using global coordinates",
+                     receiver->metaObject()->className(), target->metaObject()->className());
+        }
+        return snowMapFromGlobal(target, snowMapToGlobal(receiver, point));
+    }
+    const QPoint rounded = point.toPoint();
+    return QPointF(receiver->mapTo(target, rounded)) + (point - QPointF(rounded));
+#endif
+}
+
 // Qt 6.2 added QFlags::testAnyFlags(); Qt 5.15 only has testFlag() (single flag)
 // - QtCore/qflags.h:151 is the whole API surface there.
 // Mechanical rewrite rule R37:
