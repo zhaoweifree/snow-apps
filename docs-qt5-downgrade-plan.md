@@ -1309,6 +1309,87 @@ if (status != "the application is still running") throw ... status ...
 `send-vk.exe` 只会发单键（外加内置的 `ctrl+c`），要测某个组合键就把它单独绑到一个
 空闲 F 键上，比给注入器加组合键支持划算。
 
+### 3.10 手测反馈：「贴图无效」——客户区矩形 vs 窗口矩形（R39）
+
+真机上点贴图完全没反应。日志里三步就把范围锁死了：
+
+```
+pin.started                                          （INFO）
+pin.finished  outcome=failed stage=first_frame       （WARN，6ms 后）
+pin.rejected  outcome=failed stage=presentation      （WARN）
+```
+
+`stage=first_frame` 是「首帧没出来」，`pin.rejected` 是 `present()` 返回 false。
+但 `present()` 里每个失败分支都会打 `Pinned window presentation failed: stage=...`，
+日志里**一条都没有** —— 说明失败发生在没打日志的那几条静默分支上。
+
+#### (1) 先把静默失败变成具名 stage
+
+`ScreenshotPinnedWindow::present()` 里有 6 处 `finishPresentation(false); return false;`
+是不打日志的。全部补上 stage 名（这本身就该常驻，静默失败是这次绕远路的直接原因）：
+
+```cpp
+qWarning("Pinned window presentation failed: stage=restore_canvas_document");
+qWarning("Pinned window presentation failed: stage=platform_attach");
+qWarning("Pinned window presentation failed: stage=initial_geometry");
+...
+```
+
+重跑一次就得到 `stage=initial_geometry` —— `applyInitialGeometry()` 返回 false。
+
+#### (2) 再拆 `applyAndVerifyNativeGeometry`
+
+它内部有四种失败可能（目标非法 / 重入 / 平台层拒绝 / 尺寸对不上），原来一律返回 false。
+全部具名后，日志直接给出答案：
+
+```
+Pinned native geometry mismatch: requested=184,184 533x533  actual=192,192 517x517  window=184,184 533x533
+Pinned native geometry: platform rejected target=184,184 533x533
+```
+
+窗口矩形**正好**是请求的 533x533，客户区却内缩成 517x517（每边 8px）。
+
+#### (3) 根因：`SetWindowPos` 收的是窗口矩形，代码传的是客户区矩形
+
+`screenshot_pinned_window_native::applyClientGeometry()` 的参数叫 `geometry`、语义是
+**客户区**，但它直接把 `geometry` 塞进 `SetWindowPos` —— 而 `SetWindowPos` 设置的是
+**窗口矩形**。只要窗口带 `WS_THICKFRAME`（`applySystemResizeStyle()` 给贴图窗口加的，
+用来支持拖边缩放），两者就差一圈边框，`currentClientGeometry() == geometry` 必然不成立。
+
+为什么 Qt6 上一直没暴露：Qt6 在 `WM_NCCALCSIZE` 里把无边框窗口的客户区撑满整个窗口，
+于是客户区矩形恰好等于窗口矩形，错误写法"正好"成立；**Qt5 不做这件事**，
+客户区被内缩 8px（与 `QWindowsWindow::setGeometry` 那条告警里的 `margins: 8,8,8,8` 对得上）。
+
+修法：Set 之前先把客户区矩形换算成窗口矩形，按当前 style/exstyle 与 DPI 计算。
+没有边框时 `AdjustWindowRectEx*` 是恒等变换，所以 Qt6 路径行为不变：
+
+```cpp
+RECT frameRect{...};                      // 客户区矩形
+const DWORD style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+const DWORD exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+const UINT dpi = GetDpiForWindow(hwnd);
+if (!(dpi && AdjustWindowRectExForDpi(&frameRect, style, FALSE, exStyle, dpi)) &&
+    !AdjustWindowRectEx(&frameRect, style, FALSE, exStyle)) { /* 退回原矩形 */ }
+SetWindowPos(hwnd, nullptr, frameRect.left, frameRect.top, w, h, flags);
+```
+
+#### (4) 复跑与仍然待确认的一点
+
+新增 `probe-pin.sh`（F8 截图 → 拖框 → F7 贴图，F7 是把 overlay 内默认的 `Ctrl+F`
+重绑成单键，因为 `send-vk.exe` 只发单键）。修复前后：
+
+```
+修复前：pin.succeeded=0 pin.rejected=1  → FAIL
+修复后：pin.succeeded=1 pin.rejected=0  → PASS
+```
+
+窗口枚举能看到贴图窗口：439×439、`layered=1`、`affinity=0x0`（**没有**被排除出截图），
+持久化目录里的 `source.png` 就是拖框那块内容，说明导出链路是对的。
+
+**但本机无法用截图判断"屏幕上那张图对不对"**：贴图正好贴在它自己截的那块区域上，
+内容与背景 1:1 重合，任何截图对照都会和背景混在一起（最初我把这读成了"内容空白"，
+是误判）。这一项只能靠肉眼：贴图应该是一张带边框和阴影的浮层，且**能拖动**。
+
 #### (8) 本轮删除的临时代码
 
 R37 为定位「overlay 全透明」加的 4 处 `TEMP-QT5-DIAG` 全部删除

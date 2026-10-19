@@ -1,6 +1,7 @@
 #include "pinnedwindownative.h"
 
 #include <QCursor>
+#include <QDebug>
 #include <QEventLoop>
 #include <QGuiApplication>
 #include <QCoreApplication>
@@ -288,22 +289,63 @@ bool screenshot_pinned_window_native::applyClientGeometry(WId windowId, const QR
     if (IsIconic(hwnd) != FALSE)
         return applyMinimizedClientGeometry(hwnd, geometry);
 
+    // SetWindowPos 的矩形是**窗口矩形**，而这个函数要设置的是**客户区矩形**。
+    // 只要窗口带 WS_THICKFRAME（applySystemResizeStyle 加的那个，用来给贴图窗口
+    // 拖边缩放），两者就差一圈边框。Qt6 在 WM_NCCALCSIZE 里把无边框窗口的客户区
+    // 撑满窗口，所以直接拿客户区矩形去 SetWindowPos 恰好成立；**Qt5 不这么做**，
+    // 于是客户区被内缩一圈（实测每边 8px），下面的校验必然失败，贴图直接上不了屏。
+    // 修法是先把客户区矩形换算成窗口矩形（按当前 style/exstyle 与 DPI），再 Set。
+    // 没有边框时 AdjustWindowRectEx* 是恒等变换，所以 Qt6 路径行为不变。
+    RECT frameRect{geometry.left(), geometry.top(), geometry.right() + 1, geometry.bottom() + 1};
+    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
+    const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
+    const UINT dpi = GetDpiForWindow(hwnd);
+    if (!(dpi != 0 && AdjustWindowRectExForDpi(&frameRect, style, FALSE, exStyle, dpi) != FALSE) &&
+        AdjustWindowRectEx(&frameRect, style, FALSE, exStyle) == FALSE) {
+        qWarning("Pinned native geometry: frame adjustment failed err=%lu", GetLastError());
+        SetRect(&frameRect, geometry.left(), geometry.top(), geometry.right() + 1,
+                geometry.bottom() + 1);
+    }
+    const int targetX = static_cast<int>(frameRect.left);
+    const int targetY = static_cast<int>(frameRect.top);
+    const int targetWidth = static_cast<int>(frameRect.right - frameRect.left);
+    const int targetHeight = static_cast<int>(frameRect.bottom - frameRect.top);
+
     UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
     if (update == GeometryUpdate::DiscardClientPixels) {
         flags |= SWP_NOCOPYBITS;
     }
-    if (SetWindowPos(hwnd, nullptr, geometry.left(), geometry.top(), geometry.width(),
-                     geometry.height(), flags) == FALSE) {
+    if (SetWindowPos(hwnd, nullptr, targetX, targetY, targetWidth, targetHeight, flags) == FALSE) {
+        // 贴图窗口上屏失败最外层只报 "stage=initial_geometry"，没有这一行就不知道
+        // 是系统拒绝了 SetWindowPos 还是事后读回的客户区尺寸对不上。
+        qWarning("Pinned native geometry: SetWindowPos failed err=%lu requested=%d,%d %dx%d",
+                 GetLastError(), geometry.left(), geometry.top(), geometry.width(),
+                 geometry.height());
         return false;
     }
     if (currentClientGeometry(windowId) == geometry)
         return true;
     // Qt can round a fractional-DPI QWidget size back to a logical pixel in
     // WM_WINDOWPOSCHANGING. The controller already owns this physical target.
-    if (SetWindowPos(hwnd, nullptr, geometry.left(), geometry.top(), geometry.width(),
-                     geometry.height(), flags | SWP_NOSENDCHANGING) == FALSE)
+    if (SetWindowPos(hwnd, nullptr, targetX, targetY, targetWidth, targetHeight,
+                     flags | SWP_NOSENDCHANGING) == FALSE) {
+        qWarning("Pinned native geometry: retry SetWindowPos failed err=%lu requested=%d,%d %dx%d",
+                 GetLastError(), geometry.left(), geometry.top(), geometry.width(),
+                 geometry.height());
         return false;
-    return currentClientGeometry(windowId) == geometry;
+    }
+    const QRect applied = currentClientGeometry(windowId);
+    if (applied == geometry)
+        return true;
+    qWarning("Pinned native geometry mismatch: requested=%d,%d %dx%d actual=%d,%d %dx%d "
+             "window=%d,%d %dx%d",
+             geometry.left(), geometry.top(), geometry.width(), geometry.height(), applied.left(),
+             applied.top(), applied.width(), applied.height(),
+             screenshot_pinned_window_native::currentWindowGeometry(windowId).left(),
+             screenshot_pinned_window_native::currentWindowGeometry(windowId).top(),
+             screenshot_pinned_window_native::currentWindowGeometry(windowId).width(),
+             screenshot_pinned_window_native::currentWindowGeometry(windowId).height());
+    return false;
 #else
     Q_UNUSED(windowId);
     Q_UNUSED(update);

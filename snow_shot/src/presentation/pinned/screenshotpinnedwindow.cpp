@@ -2507,6 +2507,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
          !m_runtime.restoreDocumentSession(config.initialCanvasSession)) ||
         (config.initialCanvasSession.isEmpty() && !config.initialCanvasHistory.isEmpty() &&
          !m_runtime.restoreDocumentHistory(config.initialCanvasHistory))) {
+        qWarning("Pinned window presentation failed: stage=restore_canvas_document");
         finishPresentation(false);
         return false;
     }
@@ -2514,6 +2515,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
         const auto& tools = snow_shot::app::mcp::mcpCanvasTools();
         const auto tool = tools.constFind(config.initialCanvasTool);
         if (tool == tools.cend() || !m_canvas->setCanvasTool(*tool)) {
+            qWarning("Pinned window presentation failed: stage=restore_canvas_tool");
             finishPresentation(false);
             return false;
         }
@@ -2549,6 +2551,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
         if (animatedImage()) {
             if (config.initialPreparedAnimationFrame.isNull() ||
                 config.initialPreparedAnimationTransform != m_imageTransform) {
+                qWarning("Pinned window presentation failed: stage=restore_animation_frame");
                 finishPresentation(false);
                 return false;
             }
@@ -2618,7 +2621,15 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
             config.screen);
     };
     updateCanvasViewport();
-    if (!m_platform->attach() || !applyInitialGeometry()) {
+    // 把 attach 与几何应用拆成两个判据：合在一起时失败原因只能靠猜，
+    // 而这两步在 Qt5 上的失败特征完全不同（平台层没接上 vs 系统没接受目标矩形）。
+    if (!m_platform->attach()) {
+        qWarning("Pinned window presentation failed: stage=platform_attach");
+        finishPresentation(false);
+        return false;
+    }
+    if (!applyInitialGeometry()) {
+        qWarning("Pinned window presentation failed: stage=initial_geometry");
         finishPresentation(false);
         return false;
     }
@@ -2666,6 +2677,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
     SNOW_SHOT_PIN_PERF_MILESTONE("window.show_returned");
     SNOW_SHOT_PIN_PERF_MILESTONE("window.shell_visible");
     if (!applyInitialGeometry()) {
+        qWarning("Pinned window presentation failed: stage=post_show_geometry");
         hide();
         finishPresentation(false);
         return false;
@@ -2675,6 +2687,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
             m_platform->usesControlledInteraction() ? observedNativeGeometry()
                                                     : authoritativeNativeGeometry(),
             ScreenshotPinnedNativeGeometryController::Origin::InitialPlacement)) {
+        qWarning("Pinned window presentation failed: stage=native_geometry_begin");
         hide();
         finishPresentation(false);
         return false;
@@ -8456,13 +8469,36 @@ bool ScreenshotPinnedWindow::applyWindowGeometry(const QRect& nativeGeometry,
 }
 
 bool ScreenshotPinnedWindow::applyAndVerifyNativeGeometry(const QRect& target) {
-    if (!target.isValid() || m_platformApplying)
+    // 这一段每个失败分支都要有名字：贴图不上屏时外层只会报
+    // "stage=initial_geometry"，剩下「目标矩形非法 / 重入 / 平台层拒绝 / 尺寸对不上」
+    // 四种原因全靠猜，上一轮就是这么卡住的。
+    if (!target.isValid()) {
+        qWarning("Pinned native geometry: invalid target");
         return false;
+    }
+    if (m_platformApplying) {
+        qWarning("Pinned native geometry: reentrant application ignored");
+        return false;
+    }
     const QScopedValueRollback<bool> guard(m_platformApplying, true);
-    if (!m_platform->applyGeometry(target, screen()))
+    if (!m_platform->applyGeometry(target, screen())) {
+        qWarning("Pinned native geometry: platform rejected target=%d,%d %dx%d", target.left(),
+                 target.top(), target.width(), target.height());
         return false;
+    }
     const QRect actual = observedNativeGeometry();
-    return actual.isValid() && (m_platform->usesControlledInteraction() || actual == target);
+    if (!actual.isValid()) {
+        qWarning("Pinned native geometry: observation unavailable after applying %d,%d %dx%d",
+                 target.left(), target.top(), target.width(), target.height());
+        return false;
+    }
+    if (!m_platform->usesControlledInteraction() && actual != target) {
+        qWarning("Pinned native geometry: observed %d,%d %dx%d != requested %d,%d %dx%d",
+                 actual.left(), actual.top(), actual.width(), actual.height(), target.left(),
+                 target.top(), target.width(), target.height());
+        return false;
+    }
+    return true;
 }
 
 void ScreenshotPinnedWindow::commitNativeGeometry(bool adoptScale) {
