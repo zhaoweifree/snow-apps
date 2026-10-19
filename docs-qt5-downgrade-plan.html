@@ -1554,8 +1554,10 @@ bash .workbuddy/qt5-port/verify-qt5-windows.sh --skip-build
 ===============================================
 verify: ALL PASS
 </code></pre>
-<p>注意：全新实例的默认 <code>screenshot</code> 热键是 <strong>F1</strong>，不是 F24。手测前要么按 F1，
-要么照 §3.9(5) 把 <code>config.json</code> 的绑定播成 F24（注入工具发的是 F24）。</p>
+<p>注意：全新实例的默认 <code>screenshot</code> 热键是 <strong>F1</strong>。<strong>手测</strong>用
+<code>start-qt5-manual.sh</code> 已经播好 <strong>F8 截图 / F9 全屏直接复制 / F10 打开设置</strong> ——
+自动化和注入脚本之所以用 F24，是因为它不撞任何常见绑定，但<strong>物理键盘通常没有这个键</strong>，
+所以人工测试不要沿用 F24 那套绑定（见 §3.9(6)）。</p>
 <h3 id="3-5-本轮新增-一个真缺陷修复-三个可复跑的验证入口">3.5 本轮新增：一个真缺陷修复 + 三个可复跑的验证入口</h3>
 <h4>(1) 修复了 Qt5 翻译管线的构建顺序缺陷（<code>cmake/SnowQtVersionShims.cmake</code>）</h4>
 <p><strong>症状</strong>：在<strong>全新</strong>构建目录里 <code>cmake --build</code> 会在构图阶段直接失败：</p>
@@ -2305,6 +2307,8 @@ if (status != &quot;the application is still running&quot;) throw ... status ...
 <pre><code class="language-json">{&quot;storage&quot;:{&quot;schema_version&quot;:1},&quot;global_shortcuts&quot;:{&quot;screenshot&quot;:[&quot;F24&quot;]}}
 </code></pre>
 <p><code>probe-pool-crash.sh</code> 已经把这一步做进去了。</p>
+<p><strong>人工测试另用一套绑定</strong>：F24 在绝大多数键盘上没有这个键。<code>start-qt5-manual.sh</code>
+播的是 <strong>F8 截图 / F9 全屏直接复制 / F10 打开设置</strong>，人能按到才有意义。</p>
 <h4>(7) 追加的自动化剧本与两个"环境陷阱"</h4>
 <p><code>probe-qt5-modes.sh</code> 把 §3.4 里能自动判的项变成本机可复跑，判据全部基于
 <strong>窗口枚举 + 日志事件</strong>（Qt5 没有 UIA automationId，见 (5)(b)）：</p>

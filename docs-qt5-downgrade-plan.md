@@ -635,8 +635,10 @@ bash .workbuddy/qt5-port/verify-qt5-windows.sh --skip-build
 verify: ALL PASS
 ```
 
-注意：全新实例的默认 `screenshot` 热键是 **F1**，不是 F24。手测前要么按 F1，
-要么照 §3.9(5) 把 `config.json` 的绑定播成 F24（注入工具发的是 F24）。
+注意：全新实例的默认 `screenshot` 热键是 **F1**。**手测**用
+`start-qt5-manual.sh` 已经播好 **F8 截图 / F9 全屏直接复制 / F10 打开设置** ——
+自动化和注入脚本之所以用 F24，是因为它不撞任何常见绑定，但**物理键盘通常没有这个键**，
+所以人工测试不要沿用 F24 那套绑定（见 §3.9(6)）。
 
 ### 3.5 本轮新增：一个真缺陷修复 + 三个可复跑的验证入口
 
@@ -1274,6 +1276,9 @@ if (status != "the application is still running") throw ... status ...
 ```
 
 `probe-pool-crash.sh` 已经把这一步做进去了。
+
+**人工测试另用一套绑定**：F24 在绝大多数键盘上没有这个键。`start-qt5-manual.sh`
+播的是 **F8 截图 / F9 全屏直接复制 / F10 打开设置**，人能按到才有意义。
 
 #### (7) 追加的自动化剧本与两个"环境陷阱"
 
