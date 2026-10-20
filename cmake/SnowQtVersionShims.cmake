@@ -574,6 +574,29 @@ if(NOT COMMAND qt_import_plugins)
 endif()
 
 # ---------------------------------------------------------------------------
+# 上面那条垫片在 Qt 5.15 下**实际装不上**：5.15 自带 versionless 的
+# qt_import_plugins，`if(NOT COMMAND ...)` 因此为假，而 Qt 自带的那一版只是把参数
+# 原样转交 qt5_import_plugins —— 后者不认识 Qt6 的 NO_DEFAULT，直接
+# FATAL_ERROR "Unexpected extra argument"。
+#
+# 这与本文件「绝不覆盖 Qt 自带 versionless 命令」的约定冲突，属于**有意的例外**：
+# 被覆盖的那一版对 NO_DEFAULT 的处理是错的，不是风格差异。不覆盖就只能往 6 处
+# 调用点撒版本分支，那是本文件存在的意义所要消除的东西。
+#
+# 语义上丢掉 NO_DEFAULT 是安全的，不是降级：它表示「不要链接默认插件集」，而 Qt5
+# 的插件一律由运行时按需加载，从来没有一个默认插件集可以关 —— Qt5 本来就处于
+# 调用方想要的那个状态。
+#
+# 触发来源：`snow_shot` 的测试块。三档 windows-qt5-* 预设一直是 BUILD_TESTS=OFF，
+# 所以这条路径在本机从来没有被走通过。
+# ---------------------------------------------------------------------------
+function(qt_import_plugins target)
+    set(_snow_import_arguments ${ARGN})
+    list(REMOVE_ITEM _snow_import_arguments NO_DEFAULT)
+    qt5_import_plugins(${target} ${_snow_import_arguments})
+endfunction()
+
+# ---------------------------------------------------------------------------
 # moc 预处理：qt_wrap_cpp -> qt5_wrap_cpp
 # ---------------------------------------------------------------------------
 if(NOT COMMAND qt_wrap_cpp)

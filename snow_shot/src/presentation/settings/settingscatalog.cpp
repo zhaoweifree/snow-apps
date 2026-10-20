@@ -2095,7 +2095,7 @@ SettingsItemDefinition fullscreenHotkeySuppressionItem() {
         SettingsSwitchBinding::DisableHotkeysOnFocusedFullscreen);
 }
 
-#ifndef Q_OS_MACOS
+#ifdef Q_OS_WIN
 SettingsItemDefinition launchAsAdministratorItem() {
     return switchItem(
         QStringLiteral("system.launch-as-administrator"),
@@ -2140,6 +2140,12 @@ SettingsItemDefinition autoStartItem() {
 #ifdef Q_OS_MACOS
         QT_TRANSLATE_NOOP("SettingsCatalog", "Launch at login"),
         QT_TRANSLATE_NOOP("SettingsCatalog", "Start Snow Shot in the background when you log in."),
+#elif defined(Q_OS_LINUX)
+        // The entry a desktop session reads is an XDG autostart file, not a
+        // login item and not a registry value, so neither sibling's wording fits.
+        QT_TRANSLATE_NOOP("SettingsCatalog", "Auto start at login"),
+        QT_TRANSLATE_NOOP("SettingsCatalog",
+                          "Start Snow Shot in the background when you log in to the desktop"),
 #else
         QT_TRANSLATE_NOOP("SettingsCatalog", "Auto start at boot"),
         QT_TRANSLATE_NOOP("SettingsCatalog",
@@ -3053,7 +3059,10 @@ QVector<SettingsPageDefinition> builtInPages() {
                  {autoStartItem(),
 #ifdef Q_OS_MACOS
                   loginItemSettingsItem(),
-#else
+#elif defined(Q_OS_WIN)
+                  // Elevation and its restart action exist only on Windows; a
+                  // desktop session has no equivalent, so neither item is built
+                  // there rather than being shown disabled with Windows wording.
                   launchAsAdministratorItem(), restartAsAdministratorItem(),
 #endif
 #ifdef Q_OS_WIN

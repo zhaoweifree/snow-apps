@@ -62,6 +62,9 @@
 #include <QTimer>
 #include <QScreen>
 #endif
+#ifdef Q_OS_LINUX
+#include "snow_shot/platform/linux/autostartregistration.h"
+#endif
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
@@ -642,6 +645,12 @@ int main(int argc, char* argv[]) {
             ? snow_shot::platform::macos::loginItemService().initialize(
                   startupSettings.autoStartAtBoot())
             : snow_shot::platform::macos::LoginItemResult{};
+#elif defined(Q_OS_LINUX)
+    // A desktop session has no elevated-start concept, so the "launch as
+    // administrator" preference has nothing to select here and only the plain
+    // entry is reconciled.
+    const auto startupResult = snow_shot::platform::linux::AutoStartRegistration::reconcile(
+        startupSettings.autoStartAtBoot());
 #else
     const auto startupResult = snow_shot::platform::windows::reconcileStartupMode(
         !startupSettings.autoStartAtBoot() ? snow_shot::platform::windows::StartupMode::Off

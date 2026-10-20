@@ -15,6 +15,9 @@
 #include "snow_shot/platform/macos/loginitemservice.h"
 #include <QGuiApplication>
 #endif
+#ifdef Q_OS_LINUX
+#include "snow_shot/platform/linux/autostartregistration.h"
+#endif
 #include "snow_shot/platform/windows/administratorlaunch.h"
 
 #include "snow_shot/presentation/languagemanager.h"
@@ -211,6 +214,40 @@ applyNativeStartupSettings(bool enabled, bool elevated,
     converted.success = result.success;
     converted.error = result.error;
     return converted;
+#elif defined(Q_OS_LINUX)
+    Q_UNUSED(elevated);
+    Q_UNUSED(loginItems);
+    using snow_shot::platform::linux::AutoStartRegistration;
+    using snow_shot::platform::linux::AutoStartSnapshot;
+
+    // The desktop entry is the state that actually decides whether the
+    // application starts, so it is written first and the preference second: a
+    // save that fails afterwards can still be undone, while an entry written
+    // after the preference would leave the switch claiming something untrue.
+    const AutoStartSnapshot previous = AutoStartRegistration::snapshot();
+    if (!previous.valid)
+        return {false, false, previous.error};
+
+    QString error;
+    if (!AutoStartRegistration::setEnabled(enabled, &error))
+        return {false, false, error};
+
+    auto& configuration = storage::ApplicationStorage::instance().configuration();
+    if (configuration.setValue(QStringLiteral("system/auto_start_at_boot"), enabled) &&
+        configuration.flushNow().success) {
+        return {true, false, {}};
+    }
+
+    QString restoreError;
+    if (!AutoStartRegistration::restore(previous, &restoreError)) {
+        return {false, false,
+                QCoreApplication::translate(
+                    "SettingsBackend",
+                    "Settings could not be saved, and the autostart entry could not be restored: %1")
+                    .arg(restoreError)};
+    }
+    return {false, false,
+            QCoreApplication::translate("SettingsBackend", "Settings could not be saved.")};
 #else
     Q_UNUSED(loginItems);
     using namespace platform::windows;
@@ -1006,12 +1043,20 @@ QString BuiltInSettingsBackend::switchHint(SettingsSwitchBinding binding) const 
     if (binding == SettingsSwitchBinding::AutoStartAtBoot)
         return m_loginItems->hint();
 #endif
+#ifdef Q_OS_LINUX
+    // There is no administrator-launch item here, and the Windows wording for
+    // one ("requires membership in the Administrators group") would be an
+    // explanation for something this platform cannot do at all.
+    Q_UNUSED(binding);
+    return {};
+#else
     if (binding != SettingsSwitchBinding::LaunchAsAdministrator)
         return {};
     return platform::windows::administratorPresentation(
                platform::windows::administratorState(), storage::SystemSettings().autoStartAtBoot(),
                platform::windows::administratorOperationPending())
         .launchHint;
+#endif
 }
 bool BuiltInSettingsBackend::switchEnabled(SettingsSwitchBinding binding) const {
 #if !SNOW_SHOT_ENABLE_EXTENDED_FEATURES
@@ -1047,11 +1092,20 @@ bool BuiltInSettingsBackend::switchEnabled(SettingsSwitchBinding binding) const 
     if (binding == SettingsSwitchBinding::AutoStartAtBoot) {
 #ifdef Q_OS_MACOS
         return m_loginItems->available() && !m_loginItems->pending();
+#elif defined(Q_OS_LINUX)
+        return snow_shot::platform::linux::AutoStartRegistration::isSupported();
 #else
         return snow_shot::platform::windows::AutoStartRegistration::isSupported() &&
                !platform::windows::administratorOperationPending();
 #endif
     }
+#ifdef Q_OS_LINUX
+    if (binding == SettingsSwitchBinding::LaunchAsAdministrator) {
+        // The item is not built on this platform, but reporting it as enabled
+        // would let a stale call through to an operation with no meaning here.
+        return false;
+    }
+#endif
     return binding != SettingsSwitchBinding::DirectMlAcceleration ||
            directMlTextRecognitionSupported();
 }

@@ -1131,6 +1131,10 @@ if(APPLE)
     endif()
 endif()
 add_library(snow_shot_administrator STATIC
+    include/snow_shot/platform/linux/autostartregistration.h
+    include/snow_shot/platform/linux/desktopentry.h
+    src/platform/linux/autostartregistration.cpp
+    src/platform/linux/desktopentry.cpp
     src/platform/windows/autostartregistration.cpp
     src/platform/windows/shellcontextmenuregistration.cpp
     src/platform/windows/administratorlaunch.cpp)
@@ -1140,6 +1144,15 @@ if(WIN32)
     target_link_libraries(snow_shot_administrator PRIVATE taskschd ole32 oleaut32 advapi32 shell32 uuid comsuppw)
 endif()
 if(SNOW_SHOT_BUILD_TESTS)
+    # desktopentry.cpp is pure text handling with no filesystem access, so the
+    # escaping rules it implements are checked on every host, not only on Linux.
+    # The file-touching half of the Linux backend is not covered here: it needs a
+    # real $XDG_CONFIG_HOME and its correctness is visible in the entry it writes.
+    add_executable(snow-shot-linux-autostart-tests tests/linux_autostart_tests.cpp)
+    target_link_libraries(snow-shot-linux-autostart-tests PRIVATE snow_shot_administrator)
+    add_test(NAME snow-shot-linux-autostart-tests COMMAND snow-shot-linux-autostart-tests)
+    set_tests_properties(snow-shot-linux-autostart-tests PROPERTIES LABELS "unit" TIMEOUT 30
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
     add_executable(snow-shot-shell-image-launch-tests tests/shell_image_launch_tests.cpp)
     target_include_directories(snow-shot-shell-image-launch-tests PRIVATE include)
     target_link_libraries(snow-shot-shell-image-launch-tests PRIVATE Qt::Core)

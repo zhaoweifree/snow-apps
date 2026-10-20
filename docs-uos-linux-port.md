@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：托盘/自启动/单实例/通知、`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
+| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：托盘/单实例/通知、`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；自启动 XDG autostart slice 5 → 9.4.12；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -1276,6 +1276,92 @@ Windows/macOS 的后端**更简单**，代价是 C++ 侧共享的 `GlobalMouseGe
   用同类组合拖拽），只能在 UOS 上验证。
 - **布局切换（`MappingNotify`）不刷新掩码**：与快捷键服务同一个取舍，重建服务时才重读。
 - **托盘 / 自启动 / 单实例 / 通知 / `screenshotnative.h` 拆分** 仍是 P4 后续 slice。
+
+#### 9.4.12 P4 slice 5：自启动走 XDG autostart 落地（2026-10-20）
+
+**起点是一处假成功。** `platform::windows::AutoStartRegistration` 的每个函数都有非 Windows 兜底：
+`isSupported()` 返回 false，于是设置页的开关**灰掉**；而 `reconcileStartupMode()` 的 `#else` 分支返回
+`{true, false, {}}` —— 「成功」但一个字节都没写。后者是本项目反复强调的那种缺陷：调用方看到成功，
+用户看到开关是灰的，中间没有任何一处说实话。
+
+**XDG autostart 是这里唯一可用的基线。** 一个 `.desktop` 文件放在 `$XDG_CONFIG_HOME/autostart/`
+（默认 `~/.config/autostart/`），桌面会话登录时读它。系统级对应 `$XDG_CONFIG_DIRS/autostart`
+（默认 `/etc/xdg/autostart`），**同名时用户级优先**。这里没有 Windows 那种「一个注册表值就是全部状态」
+的单一位置：用户级文件、系统级文件、`Hidden` 键三者共同决定实际行为，所以判断「是否启用」必须三处一起看。
+
+分层：
+
+| 层 | 位置 | 平台 | 内容 |
+|---|---|---|---|
+| 纯逻辑 | `snow_shot/src/platform/linux/desktopentry.cpp` | **全平台** | `Exec` 转义与反解、条目生成、键读取、启用判定。**零文件系统访问**，因此在 Windows 上跑单测 |
+| 文件与目录 | `snow_shot/src/platform/linux/autostartregistration.cpp` | linux | `$XDG_CONFIG_HOME` 解析、系统级扫描、`QSaveFile` 原子写、快照/回滚、`reconcile` |
+| C++ 接线 | `main.cpp` / `settingsbackend.cpp` / `settingscatalog.cpp` | linux | 启动对账、开关读写、条目文案与可见性 |
+| 测试 | `snow_shot/tests/linux_autostart_tests.cpp` | 全平台 | 纯逻辑的 20 余条断言，含「写→读」闭环 |
+
+六条判断（前四条错了都是静默错位）：
+
+1. **`Exec` 有两层转义，顺序不能反**。规范说 string 层的转义「在 quoting 规则之前应用」，于是：
+   字面反斜杠在引号参数里要写 **四个**；字面 `$` 要写 `\$`。写少一层，路径里的反斜杠就会被
+   shell 层吃掉一位。
+2. **`%%` 是字面百分号，而且引号内也成立**。本条是本片测试自己抓出来的：初版按「引号内不展开
+   field code，所以引号内的 `%` 不必双写」处理，结果往返失败 —— 读回来多一个 `%`。
+   `%%` 属于**转义**而不是**展开**，规范对转义没有引号内例外。
+3. **禁用时不能只删自己的文件**。如果打包时装了系统级条目，删掉用户级文件等于让系统级那条重新生效 ——
+   用户点了「关」，重启后照样自启。规范的解法是写一个 `Hidden=true` 的存根把同名条目遮住。
+4. **`X-GNOME-Autostart-enabled=false` 也必须认**。GNOME 的「启动应用程序」面板禁用时写这个键而**不**写
+   `Hidden`。不认它，用户在面板里关掉、我们的开关还显示「开」。
+5. **文件名跟 `productId()` 走，不跟显示名走**。文件名同时是「覆盖哪条系统级条目」的身份，
+   用翻译过的显示名意味着切换语言就换了要遮的文件。
+6. **比较「参数列表」而不是「文本」**。`matchesExpectedEntry()` 先用 `parseExec()` 反解再比 argv：
+   打包者用不同但等价的引号写法时，不会每次启动都被判不匹配而重写。
+
+**顺手修的两处 Linux 产品缺陷**（都是本片接线时才暴露的）：
+
+- 设置项文案原样写着「Start Snow Shot in the background when **Windows starts**」——`autoStartItem()` 的
+  `#else` 分支是 Windows 专用，被 Linux 借用。现改为三分支，Linux 用「登录桌面后启动」。
+- 「Launch as administrator」与「Restart as administrator」两项在 Linux 上仍会构建出来：桌面会话没有提权
+  概念，它们只能永远灰着，附带一句「需要 Administrators 组成员资格」的 Windows 解释。现改为只在
+  Windows 构建；`switchEnabled` 同时对该 binding 返回 false，避免陈旧调用落到无意义的操作上。
+
+**验证（2026-10-20，Windows + Qt 5.15.2 / MSVC 14.44）**：
+
+| 检查 | 结果 |
+|---|---|
+| `snow-shot-linux-autostart-tests`（手工 `cl` 编译链接后运行） | **passed**；`-W4 -permissive-` 0 warning（STL4043 系 Qt5 头噪声除外） |
+| 测试抓到的真 bug | 往返用例 `/opt/100%/snow_shot` 读回 `/opt/100%%/snow_shot` ⇒ 补 `parseExec` 的 `%%` 反解 + 引号内双写 |
+| `bash scripts/syntax-check-linux-cpp.sh` | `SYNTAX OK`（覆盖面 3 → **5** 个文件）；把 `desktopentry::parseExec` 改名注入后如期 `C2039` + `C3861` + `SYNTAX FAILED` |
+| `windows-qt5-full` configure（tests 保持 OFF） | `EXIT=0`，`-- Generating done` —— 加进 `snow_shot_administrator` 的两个源文件没有破坏既有配置 |
+| `windows-qt5-full` build `snow_shot_administrator` | 5 步全绿；两个新文件在 Windows 上编的是 `#else` 兜底分支，静态库链接成功 |
+| Qt5 路线开 `SNOW_APPS_BUILD_TESTS=ON` | **仍不可用**，见下 |
+
+**验证时拆掉的一层既有阻塞（并没能拆完）**：想在 Windows 上真正配置出 `snow-shot-linux-autostart-tests`
+这个 CTest 目标，必须开 `SNOW_APPS_BUILD_TESTS=ON`，而 Qt5 路线在这个开关上是**从来没被走通过**的
+（三档 `windows-qt5-*` 全部 `BUILD_TESTS=OFF`）。依次撞到两层：
+
+1. `qt_import_plugins(... NO_DEFAULT ...)` —— `cmake/SnowQtVersionShims.cmake` 里那条垫片用的是
+   `if(NOT COMMAND qt_import_plugins)` 守卫，而 **Qt 5.15 自带 versionless 的 `qt_import_plugins`**，
+   守卫恒假、垫片根本没装；Qt 自带那版原样转发 `NO_DEFAULT` 给 `qt5_import_plugins`，后者
+   `FATAL_ERROR`。已改为**无条件覆盖**（有意的例外，理由写在文件里），因为那一版对 `NO_DEFAULT`
+   的处理是错的而不是风格差异；Qt5 的插件本来就是运行时加载，没有默认插件集可关，丢掉这个关键字
+   是语义已满足而非降级。
+2. `ant_design_qt/CMakeLists.txt` 的测试用 `$<TARGET_FILE_DIR:Qt::Core>` 拼 PATH —— Qt5 的 `Qt::Core`
+   是 INTERFACE 目标而不是 alias，生成阶段直接报 "not an executable or library"（`add_test` 共 5 处）。
+   **这一层没修**：它属于 Qt5 降级路线的测试基础设施，与本片无关，修它要改 5 处生成表达式并逐个验证。
+
+因此本片的测试目标**没有被 CMake 配置验证过**：验证分成「源文件能被 MSVC 编译并链接成静态库」
+（已做）与「测试逻辑正确」（手工 `cl` 编译链接后运行，已做）两段，CTest 接线留待 Qt5 测试基建打通后一并确认。
+
+**本片未覆盖（诚实记账）**：
+
+- **未在真实桌面会话验证**：dde（UOS 默认桌面）读 `~/.config/autostart` 的实际行为、以及它是否会在
+  用户改设置后重写该文件；GNOME/KDE 的差异。
+- **Flatpak / Snap 沙箱未检测**：沙箱里的 `$XDG_CONFIG_HOME` 被重定向，写进去的条目在宿主侧不生效，
+  而 `isSupported()` 恒 true。打包阶段（P6）如果走 Flatpak，这里需要一条显式判据。
+- **`OnlyShowIn` / `NotShowIn` / `TryExec` 不参与判定**：它们决定「这个桌面是否启动」，不是「用户是否
+  要求启动」。判成「关」会让开关和我们写下的条目自相矛盾。
+- **托盘 / 单实例 / 通知 / `screenshotnative.h` 拆分** 仍是 P4 后续 slice。单实例经查是纯 Qt
+  （`QLocalServer` + `QLockFile`，`src/app/singleinstancecoordinator.cpp` 全文件无平台条件编译），
+  在 Linux 上应当直接可用，但尚未在真机确认 socket 路径可用。
 
 ### 9.5 打包
 
