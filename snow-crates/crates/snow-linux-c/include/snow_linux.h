@@ -43,6 +43,35 @@ int snow_linux_platform_pointer_position(const SnowLinuxPlatform *platform, int3
  */
 int snow_linux_platform_set_pointer_position(SnowLinuxPlatform *platform, int32_t x, int32_t y);
 
+/* Whether a full-screen window has focus, on any monitor.
+ *
+ * Used to pause global shortcuts and hide the floating toolbar while a video,
+ * a game or a presentation owns the display. "Full screen" means the focused
+ * window's frame rectangle equals a monitor rectangle; the desktop backdrop,
+ * panels and menus are excluded, because they cover a monitor exactly without
+ * being an application.
+ *
+ * Returns 1 for yes and 0 for no -- and 0 also when the question cannot be
+ * answered (no platform, no reachable server, a destroyed window in the middle
+ * of the check). The caller cannot act differently on "no" and "unknown", and
+ * suppressing shortcuts on an unknown answer would lose the shortcut exactly
+ * when the user needs it.
+ */
+int snow_linux_platform_focused_fullscreen(const SnowLinuxPlatform *platform);
+
+/* Whether a full-screen window has focus and covers one particular head.
+ *
+ * The four coordinates describe the head in Qt's logical coordinates and
+ * `scale` is that head's device pixel ratio; they are passed in this form
+ * because Qt, not this layer, decides what a screen is. A `scale` that is not a
+ * positive finite number is treated as 1, i.e. the coordinates are taken as
+ * root pixels. Returns 1 for yes, and 0 for no or for an unanswerable question,
+ * on the same reasoning as snow_linux_platform_focused_fullscreen().
+ */
+int snow_linux_platform_focused_fullscreen_on_display(const SnowLinuxPlatform *platform, int32_t x,
+                                                      int32_t y, uint32_t width, uint32_t height,
+                                                      double scale);
+
 /* Global keyboard shortcuts, over XGrabKey.
  *
  * A grab takes the key combination away from every other client for as long as

@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：全局鼠标 backend、全屏窗口检测、托盘/自启动/单实例/通知、`screenshotnative.h` 拆分（全局快捷键已于 slice 2 完成，见 9.4.9） |
+| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：全局鼠标 backend、托盘/自启动/单实例/通知、`screenshotnative.h` 拆分（全局快捷键已于 slice 2 完成，见 9.4.9；全屏窗口检测已于 slice 3 完成，见 9.4.10） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -608,6 +608,12 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 > `grab_key` / `get_modifier_mapping` / `query_keymap`，全在已启用的 `xproto` 里），
 > 以及 `snow-linux-c` 的六个新导出 —— 没有新增 workspace 成员，也没有新增 C 依赖，
 > 所以分母不动、通过项不动，属于**纯代码增量**。
+
+> **2026-10-20 复跑（P4 slice 3 之后）**：仍是 **50/62**（每架构 25/31），失败清单逐条未变
+> （仍是那 6 个 A 类 crate × 2 架构）。本片新增的是 `snow-linux::fullscreen`（纯逻辑）与
+> `snow-linux::x11::fullscreen`（`get_property` / `query_tree` / `get_geometry` /
+> `translate_coordinates` / `get_input_focus`，全在已启用的 `xproto` 里）——
+> 没有新增 workspace 成员，也没有新增依赖，分母与通过项都不动。
 
 **(A) 需要交叉 C 编译器 —— 不是我们的代码问题（每架构 6 个）**
 
@@ -1108,6 +1114,77 @@ Windows 用 `RegisterHotKey`，macOS 用 Carbon 的 `RegisterEventHotKey`；X11 
   「已被占用」）；多布局下同一键产生多个 keycode 的实际行为；长按重复触发频率与 Windows 的差异；
   `QT_SCALE_FACTOR` 非 1 时 `inputState` 的读数（与缩放无关，但需实测确认）。
 - **全局鼠标 backend / 全屏窗口检测 / 托盘 / 自启动 / 单实例 / 通知** 仍是 P4 后续 slice。
+
+#### 9.4.10 P4 slice 3：全屏窗口检测（2026-10-20）
+
+两个产品行为依赖它：**全屏应用获焦时暂停全局快捷键**（`GlobalShortcutManager`），**全屏时收起悬浮工具条**
+（`FloatingToolbarController`）。Windows 用「前台窗口 + `DWMWA_EXTENDED_FRAME_BOUNDS` 等于某台显示器矩形」，
+macOS 用 AX 的窗口列表；X11 的等价物是「`_NET_ACTIVE_WINDOW` 的顶层框架矩形等于某台 RandR 显示器矩形」。
+
+**分层照旧，本片新增的都是「查什么 + 怎么比」的规则：**
+
+| 层 | 位置 | 平台 | 内容 |
+|---|---|---|---|
+| 判定规则 | `snow-linux/src/fullscreen.rs` | **全平台** | `covers_display`（±1px 容差）、`focused_is_fullscreen`（种类/可视图/空矩形过滤）、`logical_to_native`（Qt 逻辑坐标 × dpr）。**16 个单测在 Windows 上跑** |
+| X11 读取 | `snow-linux/src/x11/fullscreen.rs` | linux | `_NET_ACTIVE_WINDOW`（回退 `GetInputFocus`）→ 爬到 parent 为 root 的顶层 → 顶层几何 + `_NET_WM_WINDOW_TYPE` |
+| 原子复用 | `snow-linux/src/x11/window.rs` | linux | 把 `Atoms` 拆出 `TypeAtoms`（一次批量 intern），X11 拾取与全屏检测共用同一套类型原子 |
+| C ABI | `snow-linux-c` | linux | `snow_linux_platform_focused_fullscreen` / `..._on_display(x,y,w,h,scale)` |
+| 接线 | `snow_shot/src/platform/linux/focusedfullscreenwindow.cpp` | linux | 实现 `snow_shot::platform::{focusedFullscreenWindowExists, OnScreen}` |
+| CMake | `snow_shot/CMakeLists.txt` | linux | `SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES` 的 `UNIX` 分支加第二源文件；文末链接遍历加**第三条匹配器 + 自检** |
+
+九个判断（前三条任意一条错，症状都是「产品行为静默错位」而不是崩溃）：
+
+1. **桌面窗口精确覆盖显示器，所以几何相等不足以判定全屏**。`_NET_WM_WINDOW_TYPE_DESKTOP` / `DOCK`
+   平时就跟显示器一样大。若不先按类型排除，**空桌面上所有快捷键会失效**，而且屏幕上没有任何东西
+   能解释为什么 —— 这是本片最贵的一条，已写成单测 `an_empty_desktop_is_not_fullscreen`。
+2. **必须读顶层（parent == root 的祖先）的几何，不是客户区几何**。重定向窗口管理器（mutter/kwin/
+   xfwm/openbox 都是）把客户窗口嵌进自己画的框架里，框架才是用户看到的边界；读客户区会**少一圈标题栏**，
+   于是一个「最大化」窗口看起来比显示器矮一截、一个真正的全屏窗口看起来也差一点 —— 两侧都判错。
+3. **类型属性要沿祖先链往上找**。`_NET_WM_WINDOW_TYPE` 由应用设在**客户窗口**上，框架窗口没有这个属性；
+   只看顶层会把每个应用都当成 `Normal`（桌面窗口的 `DESKTOP` 也就丢了）。反过来只读焦点窗口则会在
+   焦点落在子窗口时漏掉。
+4. **比对的是「某一台显示器」，不是整个桌面**。跨两块屏铺满的窗口是最大化窗口，不是全屏；这条同时
+   让两端判据一致（Windows 也是 `MONITOR_DEFAULTTONULL` 那台的 `rcMonitor`）。
+5. **不要求 `_NET_WM_STATE_FULLSCREEN`**。Wine 下的游戏、自带尺寸的视频播放器很多不设这个属性；
+   而真正设了它的窗口管理器也会把窗口改到显示器大小 —— 也就是说几何判据已经涵盖了它。
+6. **焦点要有回退**。没有窗口管理器时 `_NET_ACTIVE_WINDOW` 可能根本不存在（属性 `type == NONE`），
+   或者存在但为 0。此时读 `GetInputFocus`，并把 `None`(0) / `PointerRoot`(1) 视为「没有窗口」——
+   这两个值是协议里的哨兵，不是窗口 id。
+7. **Qt 逻辑坐标 → 根像素的换算由 Rust 做，dpr 由调用方传**。X11 根坐标是设备像素，Qt 的逻辑坐标在缩放会话下
+   是它的一部分（9.4.8 的物理光标已经确立这个分工）。把乘法和舍入放进 `logical_to_native` 才能给
+   1.25 / 1.5 这类分数比例写单测；放在 C++ 里就只剩真机手测。
+8. **判不出来时的答案必须是「不是全屏」**。窗口可能在「读属性」和「读几何」之间被销毁（这是常态竞态），
+   此时逐请求允许失败、整体返回 `false`，而不是把错误抛给调用方去猜。答错的代价是「快捷键照常工作、
+   工具条照常显示」—— 功能仍在，只是没被抑制；反过来会是「快捷键在最需要的时候失灵」。
+9. **Wayland 会话降级为 `false`**，判据与 9.4.9 相同（`platformName() != "xcb"`）。XWayland 下 X 服务器
+   只看得见 X 客户端，焦点窗口不是用户正在看的那个应用，宁可让它答「没有全屏」。
+   *（另外两处易漏的接线：共享的 `src/platform/focusedfullscreenwindow.cpp` 里的兜底桩必须同时排除
+   `Q_OS_LINUX`，否则 Linux 上是**重复符号**；`SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES` 加文件之后，
+   文末那段「谁编译了它就得链 X11 归档」的遍历也要加匹配器，否则是**未定义符号**。）*
+
+**顺手修掉的一个真 bug（由本片自己的极端坐标测试抓到）**：`covers_display` 初版写的是
+`(lhs - rhs).abs() <= 1`。`i32::MIN` 与 `0` 相减会溢出，在 release 下绕回一个恰好在容差内的差值 ——
+两个「绝不可能相等」的矩形被判为相等。改成 `abs_diff`（`u32` 语义，永不溢出）。
+这类算术错误在正常多屏坐标下**永远跑不出来**，只有表格驱动的单测能抓到。
+
+**验证（2026-10-20，Windows + rustc 1.97.1）**：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-linux --lib` | **147 通过**（slice 2 是 131，本片 +16，全部纯逻辑） |
+| `cargo check` / `clippy --all-targets` 双架构 | 全绿，`-Dwarnings` 生效 |
+| `bash scripts/linux-cross-check.sh` 双架构 | 见 9.4.2 的复跑行 |
+| `bash scripts/syntax-check-linux-cpp.sh` | `SYNTAX OK`（默认覆盖面从 1 个文件扩到 2 个；改名注入仍如期 `C3861`） |
+| 共享桩文件的 Windows 分支 | `windows-qt5-smoke` **不编译** `snow_shot` 的源文件（它只开 `ant_design_qt` + `snow_image`），所以本片用等价的 `cl -Zs -W4 -permissive-` 单独过了 `src/platform/focusedfullscreenwindow.cpp` 的 Windows 分支：0 error 0 warning |
+
+**本片未覆盖（诚实记账）**：
+
+- **未在 X11 真机跑过**：`_NET_ACTIVE_WINDOW` 在 dde/kwin 上的刷新时机、全屏但未获焦点的窗口
+  （多屏时很常见：一块屏全屏播放、另一块屏在打字）、`--scale` 参与的布局下 Qt 逻辑坐标与根像素的
+  对应关系，都只能在 UOS 上确认。
+- **本片没有任何「按显示器」的真机证据**：`focusedFullscreenWindowOnScreen` 的容差是按单屏场景设计的，
+  跨屏混合 dpr 的落点需要真机。
+- **全局鼠标 backend / 托盘 / 自启动 / 单实例 / 通知 / `screenshotnative.h` 拆分** 仍是 P4 后续 slice。
 
 ### 9.5 打包
 

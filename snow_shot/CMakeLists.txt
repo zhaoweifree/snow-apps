@@ -1055,10 +1055,12 @@ elseif(APPLE)
         src/platform/macos/globalshortcutbackend.cpp
         src/platform/macos/focusedfullscreenwindow.mm)
 elseif(UNIX)
-    # X11 grabs; the file itself recognises a Wayland session through Qt's
-    # platform name and reports hotkeys as unsupported there.
+    # X11 grabs and the focus query behind full-screen suppression; both files
+    # recognise a Wayland session through Qt's platform name and report the
+    # feature as unavailable there.
     list(APPEND SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES
-        src/platform/linux/globalshortcutbackend.cpp)
+        src/platform/linux/globalshortcutbackend.cpp
+        src/platform/linux/focusedfullscreenwindow.cpp)
 endif()
 list(APPEND SNOW_SHOT_SETTINGS_SOURCES ${SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES})
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/presentation/components/screenshothistorypagewidget.cpp"
@@ -11498,6 +11500,7 @@ if(UNIX AND NOT APPLE)
     get_property(_snow_x11_consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
     set(_snow_x11_linked 0)
     set(_snow_hotkey_linked 0)
+    set(_snow_fullscreen_linked 0)
     foreach(_snow_target IN LISTS _snow_x11_consumers)
         get_target_property(_snow_sources ${_snow_target} SOURCES)
         if("${_snow_sources}" MATCHES "platform/physicalcursor\\.cpp")
@@ -11508,6 +11511,13 @@ if(UNIX AND NOT APPLE)
             target_link_libraries(${_snow_target} PRIVATE snow_shot_linux_platform)
             math(EXPR _snow_hotkey_linked "${_snow_hotkey_linked} + 1")
         endif()
+        # The full-screen check reaches the same archive, and it lands in more
+        # targets than the hotkey backend: the floating toolbar's detector is
+        # part of the everyday UI, not of the shortcut path.
+        if("${_snow_sources}" MATCHES "platform/linux/focusedfullscreenwindow\\.cpp")
+            target_link_libraries(${_snow_target} PRIVATE snow_shot_linux_platform)
+            math(EXPR _snow_fullscreen_linked "${_snow_fullscreen_linked} + 1")
+        endif()
     endforeach()
     if(_snow_x11_linked EQUAL 0)
         message(FATAL_ERROR
@@ -11516,5 +11526,9 @@ if(UNIX AND NOT APPLE)
     if(_snow_hotkey_linked EQUAL 0)
         message(FATAL_ERROR
             "No target compiles src/platform/linux/globalshortcutbackend.cpp, so the X11 hotkey archive would be linked into nothing. Fix the matcher above rather than deleting this check.")
+    endif()
+    if(_snow_fullscreen_linked EQUAL 0)
+        message(FATAL_ERROR
+            "No target compiles src/platform/linux/focusedfullscreenwindow.cpp, so the X11 full-screen query would be linked into nothing. Fix the matcher above rather than deleting this check.")
     endif()
 endif()

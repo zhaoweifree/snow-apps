@@ -161,6 +161,72 @@ pub unsafe extern "C" fn snow_linux_platform_set_pointer_position(
     }
 }
 
+/// Whether a full-screen window has focus, on any monitor.
+///
+/// Returns 1 for yes and 0 for no, and 0 also when the question cannot be
+/// answered: no platform, no reachable server, or the window disappearing
+/// between two requests. The caller has nothing different to do about any of
+/// those, and suppressing shortcuts on "unknown" would lose the shortcut
+/// exactly when it is needed.
+///
+/// # Safety
+///
+/// `platform` must be null or a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_platform_focused_fullscreen(
+    platform: *const SnowLinuxPlatform,
+) -> c_int {
+    if platform.is_null() {
+        return 0;
+    }
+    let Some(lock) = session() else {
+        return 0;
+    };
+    let Ok(connection) = lock.lock() else {
+        return 0;
+    };
+    match snow_linux::x11::fullscreen::focused_fullscreen_exists(&connection) {
+        Ok(true) => 1,
+        _ => 0,
+    }
+}
+
+/// Whether a full-screen window has focus and covers one particular head.
+///
+/// `x`/`y`/`width`/`height` are in Qt's logical coordinates and `scale` is that
+/// head's device pixel ratio; the conversion to root pixels happens on the Rust
+/// side so that the arithmetic that has to survive fractional scaling is
+/// covered by unit tests. A `scale` that is not a positive finite number means
+/// the caller had no ratio to offer, and the coordinates are taken as native.
+///
+/// # Safety
+///
+/// `platform` must be null or a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_platform_focused_fullscreen_on_display(
+    platform: *const SnowLinuxPlatform,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    scale: f64,
+) -> c_int {
+    if platform.is_null() {
+        return 0;
+    }
+    let Some(lock) = session() else {
+        return 0;
+    };
+    let Ok(connection) = lock.lock() else {
+        return 0;
+    };
+    let display = snow_linux::fullscreen::logical_to_native(x, y, width, height, scale);
+    match snow_linux::x11::fullscreen::focused_fullscreen_on_display(&connection, display) {
+        Ok(true) => 1,
+        _ => 0,
+    }
+}
+
 /// C-side handler for activations, plus the opaque pointer it wants back.
 ///
 /// The pointer outlives the service by contract: the caller keeps it valid until

@@ -36,7 +36,11 @@ bool focusedWindowCoversDisplay(qint64 frontmostProcessId,
                        });
 }
 
-#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+// Platforms without an implementation of their own keep the permissive answer:
+// "no full-screen window" leaves shortcuts working and the toolbar visible,
+// which is where the feature started. Linux answers the question for real, in
+// `platform/linux/focusedfullscreenwindow.cpp`.
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS) && !defined(Q_OS_LINUX)
 bool focusedFullscreenWindowOnScreen(QScreen*) {
     return false;
 }

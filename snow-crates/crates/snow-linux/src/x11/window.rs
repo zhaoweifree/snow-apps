@@ -42,22 +42,79 @@ const TRANSIENT_TYPES: [&[u8]; 7] = [
 /// property from turning a hover into a large allocation.
 const MAX_PROPERTY_ITEMS: u32 = 1024;
 
-struct Atoms {
-    client_list: u32,
+/// The interned window-type atoms, paired with their meaning.
+///
+/// Shared with the full-screen check, which has to classify the focused window
+/// for the same reason the hit test classifies its candidates: the desktop
+/// backdrop covers a monitor exactly and must never be mistaken for an
+/// application.
+pub(crate) struct TypeAtoms {
     window_type: u32,
     desktop: u32,
     dock: u32,
     transient: Vec<u32>,
 }
 
-impl Atoms {
-    fn roles(&self) -> WindowTypeRoles<'_> {
+impl TypeAtoms {
+    /// Intern every type atom in one batch.
+    ///
+    /// The requests are all written before any reply is awaited, so the set
+    /// costs one round trip instead of one per atom -- which matters because the
+    /// full-screen check runs on a timer.
+    pub(crate) fn intern(session: &X11Session) -> LinuxResult<Self> {
+        let conn = session.conn();
+        let mut names: Vec<&[u8]> = vec![
+            NET_WM_WINDOW_TYPE,
+            NET_WM_WINDOW_TYPE_DESKTOP,
+            NET_WM_WINDOW_TYPE_DOCK,
+        ];
+        names.extend(TRANSIENT_TYPES);
+
+        let mut cookies = Vec::with_capacity(names.len());
+        for name in &names {
+            cookies.push(
+                conn.intern_atom(false, name)
+                    .map_err(|error| LinuxError::backend("intern atom", error))?,
+            );
+        }
+        let mut atoms = Vec::with_capacity(cookies.len());
+        for cookie in cookies {
+            atoms.push(
+                cookie
+                    .reply()
+                    .map_err(|error| LinuxError::reply("intern atom", error))?
+                    .atom,
+            );
+        }
+
+        let mut resolved = atoms.into_iter();
+        let window_type = resolved.next().unwrap_or_default();
+        let desktop = resolved.next().unwrap_or_default();
+        let dock = resolved.next().unwrap_or_default();
+        Ok(Self {
+            window_type,
+            desktop,
+            dock,
+            transient: resolved.collect(),
+        })
+    }
+
+    pub(crate) fn window_type(&self) -> u32 {
+        self.window_type
+    }
+
+    pub(crate) fn roles(&self) -> WindowTypeRoles<'_> {
         WindowTypeRoles {
             desktop: self.desktop,
             dock: self.dock,
             transient: &self.transient,
         }
     }
+}
+
+struct Atoms {
+    client_list: u32,
+    types: TypeAtoms,
 }
 
 /// The windows the pointer may select, in bottom-to-top stacking order.
@@ -80,25 +137,15 @@ pub fn desktop_windows_for(session: &X11Session, excluded: &[u64]) -> LinuxResul
 
 fn intern_atoms(session: &X11Session) -> LinuxResult<Atoms> {
     let conn = session.conn();
-    let intern = |name: &[u8]| -> LinuxResult<u32> {
-        Ok(conn
-            .intern_atom(false, name)
-            .map_err(|error| LinuxError::backend("intern atom", error))?
-            .reply()
-            .map_err(|error| LinuxError::reply("intern atom", error))?
-            .atom)
-    };
-
-    let mut transient = Vec::with_capacity(TRANSIENT_TYPES.len());
-    for name in TRANSIENT_TYPES {
-        transient.push(intern(name)?);
-    }
+    let client_list = conn
+        .intern_atom(false, NET_CLIENT_LIST)
+        .map_err(|error| LinuxError::backend("intern atom", error))?
+        .reply()
+        .map_err(|error| LinuxError::reply("intern atom", error))?
+        .atom;
     Ok(Atoms {
-        client_list: intern(NET_CLIENT_LIST)?,
-        window_type: intern(NET_WM_WINDOW_TYPE)?,
-        desktop: intern(NET_WM_WINDOW_TYPE_DESKTOP)?,
-        dock: intern(NET_WM_WINDOW_TYPE_DOCK)?,
-        transient,
+        client_list,
+        types: TypeAtoms::intern(session)?,
     })
 }
 
@@ -169,7 +216,7 @@ fn read_window(
         .get_property(
             false,
             window,
-            atoms.window_type,
+            atoms.types.window_type,
             AtomEnum::ATOM,
             0,
             MAX_PROPERTY_ITEMS,
@@ -179,7 +226,7 @@ fn read_window(
     {
         Ok(reply) => reply
             .value32()
-            .map(|values| classify(&values.collect::<Vec<_>>(), &atoms.roles()))
+            .map(|values| classify(&values.collect::<Vec<_>>(), &atoms.types.roles()))
             .unwrap_or(WindowKind::Normal),
         // A missing type property is normal for most applications, and a
         // window that vanishes here is simply dropped from selection rather
