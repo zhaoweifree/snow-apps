@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：托盘/单实例/通知、`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；自启动 XDG autostart slice 5 → 9.4.12；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
+| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：托盘/单实例、`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；自启动 XDG autostart slice 5 → 9.4.12；桌面通知 `org.freedesktop.Notifications` slice 6 → 9.4.13；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -1360,6 +1360,73 @@ Windows/macOS 的后端**更简单**，代价是 C++ 侧共享的 `GlobalMouseGe
 - **`OnlyShowIn` / `NotShowIn` / `TryExec` 不参与判定**：它们决定「这个桌面是否启动」，不是「用户是否
   要求启动」。判成「关」会让开关和我们写下的条目自相矛盾。
 - **托盘 / 单实例 / 通知 / `screenshotnative.h` 拆分** 仍是 P4 后续 slice。单实例经查是纯 Qt
+  （`QLocalServer` + `QLockFile`，`src/app/singleinstancecoordinator.cpp` 全文件无平台条件编译），
+  在 Linux 上应当直接可用，但尚未在真机确认 socket 路径可用。
+
+#### 9.4.13 P4 slice 6：桌面通知走 `org.freedesktop.Notifications` 落地（2026-10-20）
+
+**起点与 9.4.12 同型：Linux 一直在用 Windows 那条 `#else` 分支。** `SystemTrayController` 的通知投递在
+非 macOS 上统一是 `QSystemTrayIcon::showMessage()`，也就是**经 StatusNotifier 项转手**。这有两个后果：
+桌面没有 SNI 宿主时（纯 X11 会话、部分轻量 WM）**什么都不显示**，而回调仍然 `completed({})` 报 Accepted；
+`supportsMessages()` 在 Linux 上取决于 SNI 后端自报，不是「能不能显示」的真实判据。
+
+**通知 daemon 是会话服务，与显示协议无关。** 所以这一片不需要 Wayland 分支（与采集、快捷键、全屏检测
+都不同）：`org.freedesktop.Notifications` 在 X11 和 Wayland 会话里都由同一个 daemon 提供，
+Deepin/UOS 上是 `dde-daemon` 的 notification 服务。判据只有「会话总线连得上」与「这个名字已注册」。
+
+分层（与 9.4.12 同一套切法）：
+
+| 层 | 位置 | 平台 | 内容 |
+|---|---|---|---|
+| 纯逻辑 | `snow_shot/src/platform/linux/notificationpayload.cpp` | **全平台** | 转义、urgency 字节、图标名、过期时长、`actions` 数组、`Notify` 八参数的顺序与类型。**不碰总线**，因此在 Windows 上跑单测 |
+| 总线 | `snow_shot/src/platform/linux/systemnotificationservice.cpp` | linux | `QDBusConnection::sessionBus()`、`GetCapabilities` 探测、异步 `Notify`、`ActionInvoked` / `NotificationClosed` 回执 |
+| C++ 接线 | `systemtraycontroller.cpp` 的 `#elif defined(Q_OS_LINUX)` | linux | 投递改用 daemon；仅在「后端缺失」时退回托盘 balloon |
+| 测试 | `snow_shot/tests/linux_notification_tests.cpp` | 全平台 | 纯逻辑的 30 余条断言，含参数顺序与变体类型 |
+
+七条判断（前四条错了都是**运行期**才暴露的静默失败）：
+
+1. **`Notify` 的八个参数有类型要求，写错是整条消息被拒，不是「显示得不理想」**。`replaces_id` 必须是
+   `uint`（写成 `int` 会以 `i` 上线，daemon 按内省签名 `u` 校验 ⇒ `InvalidArgs`），`expire_timeout`
+   必须是 `int`，而 `urgency` 在 `a{sv}` 里必须是**字节**（`y`），不是 int。测试因此断言的是
+   `snowMetaTypeOf()` 的类型名，而不只是值。
+2. **body 是 HTML 子集，路径里的 `&` / `<` / `>` 必须转义** ——否则 `/home/u/a&b<c>.mp4` 被当成标签碎片
+   吞掉或断行。但反转也要认：daemon 不支持 `body-markup` 时**原样发**，否则用户看到的是 `&amp;`。
+   判据来自 `GetCapabilities`，异步取一次并缓存；取不到就按「支持」处理（现网 daemon 全都支持，
+   猜错的代价只是某一处 `&` 多显示几个字符）。
+3. **只发 `default` 键、标签留空**。这既保住「点气泡本体就触发」的交互，又不必给按钮文案新增 msgid ——
+   本片一行 `tr()` 都没加，翻译目录（`catalog-dir` 那套 split/merge）不需要动。
+4. **`replaces_id` 按 action 维度记上一枚 id**：同一类通知重复出现时替换旧气泡而不是叠第二枚；
+   收到 `NotificationClosed` 就把这枚 id 忘掉（daemon 可能回收 id，继续拿它当 `replaces_id` 是错的）。
+5. **只把「后端缺失」降级到托盘**。`AccessDenied` 来自 daemon 策略或用户的勿扰状态，穿透到托盘 balloon
+   等于绕开用户意图。
+6. **托盘开关不再屏蔽通知**。`enabled` 在 Windows 上同时管「图标」和「气球」，在 Linux 上现在只管图标；
+   `activateMessage()` / `showBalloon()` 里那两道 `if (enabled)` 与 macOS 一样排除 Linux，
+   否则「关了托盘图标就收不到导出完成提示」。
+7. **`desktop-entry` hint 指向 `productId()`（`snow-shot`）**，供 daemon 找 `.desktop` 拿标题与图标。
+   该文件由 P6 安装；未安装时 daemon 退到 `app_icon`（`dialog-information` 等标准主题名），不会报错。
+
+**验证（2026-10-20，Windows + Qt 5.15.2 / Qt 6.12.0，MSVC 14.44）**：
+
+| 检查 | 结果 |
+|---|---|
+| `snow-shot-linux-notification-tests`（手工 `cl` 编译链接后运行，Qt **5.15.2**） | **passed** |
+| 同一份源与测试，手工 `cl` + Qt **6.12.0** | **passed**（需 `/Zc:__cplusplus`，Qt6 头文件硬要求） |
+| 测试抓到的真 bug | `QMetaType::name()` 在 Qt 5.15 返回**按值的 `QByteArray`**、在 Qt6 返回 `const char*`；按 `const char*` 接临时对象 ⇒ 悬垂读取，实际读到 `"Q\0\0…"`。测试改用 `SNOW_QT6` 分流 |
+| `bash scripts/syntax-check-linux-cpp.sh` | `SYNTAX OK`（覆盖面 5 → **6** 个文件，新增 `systemnotificationservice.cpp`，并给门禁补了 `QtDBus` 头目录） |
+| 托盘投递 lambda 的语法 | 单独写探针 TU（不引 ant_design）过 `-Zs`，`EXIT=0` —— `systemtraycontroller.cpp` 因 ant_design 依赖进不了门禁 |
+| `windows-qt5-full` configure | `EXIT=0`（`-- Generating done`）：新库与四处链接改动没有破坏既有配置 |
+| `windows-qt5-full` build `snow_shot_notification_payload` | 3 步全绿（MOC + 编译 + 静态库） |
+| CTest 目标本身 | **仍未经 CMake 配置验证**，原因同 9.4.12：Qt5 路线开不了 `SNOW_APPS_BUILD_TESTS`；本机唯一的 Qt6 树是 smoke 档，根本没 `add_subdirectory(snow_shot)` |
+
+**本片未覆盖（诚实记账）**：
+
+- **未在真机 daemon 上跑过**：`dde-daemon` 的实际收包、勿扰状态下的返回码、过期时长是否被尊重、
+  点击气泡是否真能回到 `ActionInvoked`。这些只能到 UOS 上验。
+- **`GetCapabilities` 存在竞态**：探测是异步的，第一枚通知可能早于答复到达，此时按「支持 markup」
+  发送。只在 body 含 `<`/`&` 且 daemon 恰不支持 markup 时有可见差异。
+- **未做 `CloseNotification`**：动作触发后依赖 daemon 自行关闭；有的 daemon 会把气泡留着。
+- **多显示器 / 锁屏 / 通知中心的历史记录** 的呈现差异未验。
+- **托盘 / 单实例 / `screenshotnative.h` 拆分** 仍是 P4 剩余 slice。单实例经查是纯 Qt
   （`QLocalServer` + `QLockFile`，`src/app/singleinstancecoordinator.cpp` 全文件无平台条件编译），
   在 Linux 上应当直接可用，但尚未在真机确认 socket 路径可用。
 

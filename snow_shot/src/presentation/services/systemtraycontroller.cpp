@@ -17,6 +17,8 @@
 #ifdef Q_OS_MACOS
 #include "snow_shot/platform/macos/systemtraymenu.h"
 #include "systemnotificationservice.h"
+#elif defined(Q_OS_LINUX)
+#include "snow_shot/platform/linux/systemnotificationservice.h"
 #endif
 
 #include "antd_icons.h"
@@ -416,6 +418,47 @@ class SystemTrayController::Impl {
                                            platform::SystemNotificationCompletion completed) {
                 native->show(request, std::move(completed));
             };
+#elif defined(Q_OS_LINUX)
+        // The freedesktop daemon, not the tray: on Linux the balloon drawn by
+        // QSystemTrayIcon travels through the StatusNotifier item, so it depends on
+        // a tray host - UOS and Deepin both provide one, a bare X11 session may not -
+        // and it reports acceptance even when nothing is displayed.
+        notifications = std::make_unique<platform::linux::SystemNotificationService>(&q);
+        using NotificationService = platform::linux::SystemNotificationService;
+        QObject::connect(notifications.get(), &NotificationService::activated, &q,
+                         [this](NotificationService::Action action, const QString& path) {
+                             if (action == NotificationService::Action::OpenAbout)
+                                 activateMessage(BalloonKind::Update, {});
+                             else if (action == NotificationService::Action::OpenRecording)
+                                 activateMessage(BalloonKind::RecordingExport, path);
+                         });
+        const QPointer<QSystemTrayIcon> trayFallbackGuard(trayIcon);
+        platform::SystemNotificationDelivery delivery =
+            [native = notifications.get(),
+             trayFallbackGuard](const platform::SystemNotificationRequest& request,
+                                platform::SystemNotificationCompletion completed) {
+                native->show(request, [request, completed, trayFallbackGuard](
+                                          platform::SystemNotificationResult result) {
+                    // Only a missing backend falls back. A denial comes from the
+                    // daemon or from the user's do-not-disturb state, and repeating
+                    // it through the tray would go around that decision.
+                    if (result.status != platform::SystemNotificationResult::Status::Unavailable ||
+                        !trayFallbackGuard || !trayFallbackGuard->isVisible() ||
+                        !QSystemTrayIcon::isSystemTrayAvailable() ||
+                        !QSystemTrayIcon::supportsMessages()) {
+                        completed(result);
+                        return;
+                    }
+                    const auto icon =
+                        request.severity == platform::SystemNotificationSeverity::Error
+                            ? QSystemTrayIcon::Critical
+                        : request.severity == platform::SystemNotificationSeverity::Warning
+                            ? QSystemTrayIcon::Warning
+                            : QSystemTrayIcon::Information;
+                    trayFallbackGuard->showMessage(request.title, request.body, icon);
+                    completed({});
+                });
+            };
 #else
         const QPointer<QSystemTrayIcon> trayGuard(trayIcon);
         platform::SystemNotificationDelivery delivery =
@@ -526,7 +569,10 @@ class SystemTrayController::Impl {
     }
 
     void activateMessage(BalloonKind kind, const QString& filePath) {
-#ifndef Q_OS_MACOS
+        // Windows raises balloons through the tray, so the tray switch governs
+        // them. macOS and Linux deliver independently of it, and a notification
+        // the user already received must still activate.
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_LINUX)
         if (!enabled)
             return;
 #endif
@@ -541,9 +587,10 @@ class SystemTrayController::Impl {
     void showBalloon(const QString& title, const QString& message,
                      QSystemTrayIcon::MessageIcon icon, BalloonKind kind,
                      const QString& filePath = {}) {
-        // Tray visibility governs only the icon/menu. macOS delivery and the actions
-        // of already delivered notifications have their own lifetime and payloads.
-#ifndef Q_OS_MACOS
+        // Tray visibility governs only the icon/menu. macOS and Linux delivery and
+        // the actions of already delivered notifications have their own lifetime
+        // and payloads, and neither is a tray balloon.
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_LINUX)
         if (enabled) {
 #endif
             lastBalloonKind = kind;
@@ -551,7 +598,7 @@ class SystemTrayController::Impl {
             trayIcon->setProperty("lastBalloonTitle", title);
             trayIcon->setProperty("lastBalloonMessage", message);
             trayIcon->setProperty("lastBalloonIcon", static_cast<int>(icon));
-#ifndef Q_OS_MACOS
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_LINUX)
         }
 #endif
         using Action = platform::SystemNotificationAction;
@@ -841,8 +888,10 @@ class SystemTrayController::Impl {
     QPointer<adqt::widgets::AdContextMenu> menu;
     QList<QPointer<adqt::widgets::AdContextMenu>> menus;
     QSystemTrayIcon* trayIcon = nullptr;
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS)
     std::unique_ptr<platform::macos::SystemNotificationService> notifications;
+#elif defined(Q_OS_LINUX)
+    std::unique_ptr<platform::linux::SystemNotificationService> notifications;
 #endif
     std::unique_ptr<SystemNotificationController> notificationDelivery;
     settings::TrayCommandManifest manifest;
