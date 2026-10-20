@@ -36,14 +36,13 @@ use std::time::Duration;
 use crossbeam_channel::{Receiver, Sender};
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::Event;
-use x11rb::protocol::xproto::{
-    ConnectionExt as _, GrabKeyRequest, GrabMode, ModMask, UngrabKeyRequest,
-};
+use x11rb::protocol::xproto::{GrabKeyRequest, GrabMode, ModMask, UngrabKeyRequest};
 use x11rb::rust_connection::RustConnection;
 
 use crate::error::LinuxResult;
-use crate::hotkey::{self, Hotkey, HotkeyModifiers};
+use crate::hotkey::{self, Hotkey};
 use crate::x11::X11Session;
+use crate::x11::keymap::{Keymap, MODIFIER_STATE_MASK, SHIFT_MASK};
 
 /// How long the worker sleeps when there is neither a command nor an event.
 const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -53,38 +52,6 @@ const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Generous for what is one round-trip to a local server, and short enough that
 /// a wedged server surfaces as "registration failed" instead of a frozen UI.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// Every modifier bit X11 defines. The high bits of `state` are buttons, which
-/// must not take part in matching a key grab.
-const MODIFIER_STATE_MASK: u16 = 0x00ff;
-
-/// Shift, which is required when a binding's keysym only lives on the shifted
-/// level of its keycode.
-const SHIFT_MASK: u16 = 0x0001;
-
-/// Lock (CapsLock). The protocol fixes this one; NumLock and ScrollLock do not
-/// have fixed masks and are read back from the server.
-const LOCK_MASK: u16 = 0x0002;
-
-/// Control, also fixed by the protocol.
-const CONTROL_MASK: u16 = 0x0004;
-
-/// `Mod1` and `Mod4`, the conventional homes of Alt and Super. Used only when
-/// the keyboard mapping does not identify them, which is the case for a layout
-/// with no Alt or Super key at all.
-const FALLBACK_ALT_MASK: u16 = 0x0008;
-const FALLBACK_META_MASK: u16 = 0x0040;
-
-const KEYSYM_ALT_L: u32 = 0xffe9;
-const KEYSYM_ALT_R: u32 = 0xffea;
-const KEYSYM_META_L: u32 = 0xffe7;
-const KEYSYM_META_R: u32 = 0xffe8;
-const KEYSYM_SUPER_L: u32 = 0xffeb;
-const KEYSYM_SUPER_R: u32 = 0xffec;
-const KEYSYM_HYPER_L: u32 = 0xffed;
-const KEYSYM_HYPER_R: u32 = 0xffee;
-const KEYSYM_NUM_LOCK: u32 = 0xff7f;
-const KEYSYM_SCROLL_LOCK: u32 = 0xff14;
 
 /// Why a binding could not be grabbed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,134 +91,6 @@ enum Command {
     Stop,
 }
 
-/// The parts of the keyboard description that turn a binding into grabs.
-struct Tables {
-    min_keycode: u8,
-    per_keycode: usize,
-    keysyms: Vec<u32>,
-    alt_mask: u16,
-    meta_mask: u16,
-    /// The lock modifiers this keyboard actually has, so a grab survives
-    /// CapsLock / NumLock / ScrollLock being on.
-    lock_masks: Vec<u16>,
-}
-
-impl Tables {
-    fn read(conn: &RustConnection) -> LinuxResult<Self> {
-        let setup = conn.setup();
-        let min_keycode = setup.min_keycode;
-        // `count` is one byte wide in the protocol: the whole keycode space is
-        // 8 bits, so the inclusive span always fits.
-        let count = setup.max_keycode - setup.min_keycode + 1;
-        let keyboard = conn
-            .get_keyboard_mapping(min_keycode, count)
-            .map_err(|err| crate::error::LinuxError::backend("reading the keyboard mapping", err))?
-            .reply()
-            .map_err(|err| crate::error::LinuxError::reply("reading the keyboard mapping", err))?;
-        let modifier = conn
-            .get_modifier_mapping()
-            .map_err(|err| crate::error::LinuxError::backend("reading the modifier mapping", err))?
-            .reply()
-            .map_err(|err| crate::error::LinuxError::reply("reading the modifier mapping", err))?;
-
-        let per_keycode = usize::from(keyboard.keysyms_per_keycode);
-        // The modifier map is one flat array of keycodes, `keycodes_per_modifier`
-        // per modifier, in mask order. A zero width would mean the server has no
-        // modifier keys at all, which is legal but useless here.
-        let mut modifier_map: Vec<Vec<u8>> = if modifier.keycodes_per_modifier() == 0 {
-            Vec::new()
-        } else {
-            modifier
-                .keycodes
-                .chunks(usize::from(modifier.keycodes_per_modifier()))
-                .map(<[u8]>::to_vec)
-                .collect()
-        };
-        modifier_map.resize(8, Vec::new());
-
-        let mask_for = |wanted: &[u32]| {
-            hotkey::modifier_mask_for(
-                &modifier_map,
-                min_keycode,
-                per_keycode,
-                &keyboard.keysyms,
-                wanted,
-            )
-        };
-        // Alt is Mod1 on every mainstream layout, but "on every mainstream
-        // layout" is an assumption, and the cost of checking is one reply that
-        // is needed anyway for the keyboard mapping.
-        let alt_mask = mask_for(&[KEYSYM_ALT_L, KEYSYM_ALT_R])
-            .or_else(|| mask_for(&[KEYSYM_META_L, KEYSYM_META_R]))
-            .unwrap_or(FALLBACK_ALT_MASK);
-        let meta_mask = mask_for(&[KEYSYM_SUPER_L, KEYSYM_SUPER_R])
-            .or_else(|| mask_for(&[KEYSYM_HYPER_L, KEYSYM_HYPER_R]))
-            .unwrap_or(FALLBACK_META_MASK);
-
-        let mut lock_masks = vec![LOCK_MASK];
-        for keysym in [KEYSYM_NUM_LOCK, KEYSYM_SCROLL_LOCK] {
-            if let Some(mask) = mask_for(&[keysym]) {
-                // A "lock" that is really the Alt or Super modifier would turn
-                // every Alt binding into a grab of Alt plus itself; skip it and
-                // accept that hotkeys will miss while that key is held.
-                if mask != alt_mask && mask != meta_mask && !lock_masks.contains(&mask) {
-                    lock_masks.push(mask);
-                }
-            }
-        }
-
-        Ok(Self {
-            min_keycode,
-            per_keycode,
-            keysyms: keyboard.keysyms,
-            alt_mask,
-            meta_mask,
-            lock_masks,
-        })
-    }
-
-    fn mask(&self, modifiers: HotkeyModifiers) -> u16 {
-        let mut mask = 0;
-        if modifiers.contains(hotkey::MODIFIER_CONTROL) {
-            mask |= CONTROL_MASK;
-        }
-        if modifiers.contains(hotkey::MODIFIER_SHIFT) {
-            mask |= SHIFT_MASK;
-        }
-        if modifiers.contains(hotkey::MODIFIER_ALT) {
-            mask |= self.alt_mask;
-        }
-        if modifiers.contains(hotkey::MODIFIER_META) {
-            mask |= self.meta_mask;
-        }
-        mask
-    }
-
-    fn keycode_matches(&self, keysym: u32) -> Vec<hotkey::KeycodeMatch> {
-        hotkey::keycode_matches(keysym, self.min_keycode, self.per_keycode, &self.keysyms)
-    }
-
-    /// Whether any keycode currently producing `keysym` is held down.
-    fn is_down(&self, conn: &RustConnection, keysym: u32) -> Option<bool> {
-        let reply = conn.query_keymap().ok()?.reply().ok()?;
-        Self::pressed_in(&reply.keys, &self.keycode_matches(keysym))
-    }
-
-    fn pressed_in(bitmap: &[u8], matches: &[hotkey::KeycodeMatch]) -> Option<bool> {
-        if bitmap.is_empty() {
-            return None;
-        }
-        for item in matches {
-            let index = usize::from(item.keycode);
-            let byte = bitmap.get(index / 8)?;
-            if (byte >> (index % 8)) & 1 != 0 {
-                return Some(true);
-            }
-        }
-        Some(false)
-    }
-}
-
 /// A running grab set, plus polling helpers for key state.
 pub struct HotkeyService {
     commands: Sender<Command>,
@@ -275,7 +114,7 @@ impl HotkeyService {
     /// shortcut being taken by another client does not disable the rest.
     pub fn start(handler: impl Fn(i32) + Send + 'static) -> LinuxResult<Self> {
         let session = X11Session::connect()?;
-        let tables = Tables::read(session.conn())?;
+        let tables = Keymap::read(session.conn())?;
         let root = session.root();
         let conn = session.into_connection();
 
@@ -366,7 +205,7 @@ impl Drop for HotkeyService {
 fn run(
     conn: RustConnection,
     root: u32,
-    tables: Tables,
+    tables: Keymap,
     handler: ActivationHandler,
     commands: Receiver<Command>,
 ) {
@@ -435,7 +274,7 @@ fn run(
 fn register(
     conn: &RustConnection,
     root: u32,
-    tables: &Tables,
+    tables: &Keymap,
     owned: &mut HashMap<i32, Vec<(u8, u16)>>,
     id: i32,
     binding: Hotkey,
@@ -458,7 +297,7 @@ fn register(
         } else {
             base
         };
-        for variant in hotkey::grab_masks(mask, &tables.lock_masks) {
+        for variant in hotkey::grab_masks(mask, tables.lock_masks()) {
             if !grabs.contains(&(item.keycode, variant)) {
                 grabs.push((item.keycode, variant));
             }

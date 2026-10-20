@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：全局鼠标 backend、托盘/自启动/单实例/通知、`screenshotnative.h` 拆分（全局快捷键已于 slice 2 完成，见 9.4.9；全屏窗口检测已于 slice 3 完成，见 9.4.10） |
+| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：托盘/自启动/单实例/通知、`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -614,6 +614,12 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 > `snow-linux::x11::fullscreen`（`get_property` / `query_tree` / `get_geometry` /
 > `translate_coordinates` / `get_input_focus`，全在已启用的 `xproto` 里）——
 > 没有新增 workspace 成员，也没有新增依赖，分母与通过项都不动。
+
+> **2026-10-20 复跑（P4 slice 4 之后）**：仍是 **50/62**（每架构 25/31），失败清单逐条未变
+> （仍是那 6 个 A 类 crate × 2 架构）。本片新增的是 `snow-linux::globalmouse`（纯逻辑）、
+> `snow-linux::x11::keymap`（从 `x11/hotkey` 提出来的表，没有引入新请求）、
+> `snow-linux::x11::globalmouse`（`grab_button` / `ungrab_button`，同样在已启用的 `xproto` 里）
+> 与 `snow-linux-c` 的五个新导出 —— 没有新增 workspace 成员，也没有新增依赖。
 
 **(A) 需要交叉 C 编译器 —— 不是我们的代码问题（每架构 6 个）**
 
@@ -1185,6 +1191,91 @@ macOS 用 AX 的窗口列表；X11 的等价物是「`_NET_ACTIVE_WINDOW` 的顶
 - **本片没有任何「按显示器」的真机证据**：`focusedFullscreenWindowOnScreen` 的容差是按单屏场景设计的，
   跨屏混合 dpr 的落点需要真机。
 - **全局鼠标 backend / 托盘 / 自启动 / 单实例 / 通知 / `screenshotnative.h` 拆分** 仍是 P4 后续 slice。
+
+#### 9.4.11 P4 slice 4：全局鼠标手势（`XGrabButton`）落地（2026-10-20）
+
+产品行为：**按住修饰键组合 + 拖鼠标按钮，就在桌面任意位置开始截图**（`GlobalMouseManager` → `dragEvent`
+→ `ScreenshotController`）。Windows 用 `WH_MOUSE_LL` 低级钩子，macOS 用 `CGEventTap`；X11 的等价物是
+**被动按钮抓取 `GrabButton`**。
+
+**本片最核心的一条结论：这个功能必须由 X 服务器做匹配，而不是由我们观测后决定。**
+
+| 方案 | 能不能「吞掉」按下 | 结论 |
+|---|---|---|
+| XInput2 raw events（`XI_RawButtonPress`） | **不能**。raw 事件按定义对投递是中立的，它只是「旁听」；应用照样收到按下并开始自己的拖拽 | 与 Windows 钩子语义不同，弃用 |
+| 记录 `XI2` 普通事件 / 轮询按钮状态 | 同上，且漏掉「按下到轮询之间」的窗口 | 弃用 |
+| **被动 `XGrabButton`（root 上，精确修饰键掩码）** | **能**。抓取期间该组合的按下只投递给本连接，其他客户端一个字节都收不到 | **采用** |
+
+代价是「匹配权」交给了服务器：**落到我们事件循环里的按下，必然是某个已配置的组合**，于是 Rust 侧不需要
+「这个按下是不是我的」这种运行期判断，也不需要 `XAllowEvents(ReplayPointer)` 回放 —— 这一片因此比
+Windows/macOS 的后端**更简单**，代价是 C++ 侧共享的 `GlobalMouseGesture` 状态机在 X11 上不参与判断
+（Windows/macOS 仍然用它）。
+
+分层：
+
+| 层 | 位置 | 平台 | 内容 |
+|---|---|---|---|
+| 规则 | `snow-linux/src/globalmouse.rs` | **全平台** | Qt 按钮 → X 按钮号、组合展开成抓取集合、歧义组合整条丢弃。**12 个单测在 Windows 上跑** |
+| 键盘表复用 | `snow-linux/src/x11/keymap.rs` | linux | 从 `x11/hotkey.rs` 提出来的 `Keymap`（键码表 + Alt/Super 掩码 + 锁掩码），快捷键与鼠标抓取共用 |
+| X11 抓取 | `snow-linux/src/x11/globalmouse.rs` | linux | `GlobalMouseService`：独立连接 + 工作线程，按下/移动/松开 → `Begin/Update/Finish`，`cancel` 只让拖拽静音 |
+| C ABI | `snow-linux-c` | linux | `snow_linux_global_mouse_{create,destroy,set_bindings,set_enabled,cancel}` |
+| 接线 | `snow_shot/src/platform/linux/globalmousebackend.cpp` | linux | `GlobalMouseBackend` 的 Linux 实现；Wayland 会话报 `Unavailable` |
+| 共享桩 | `snow_shot/src/platform/globalmousebackend.cpp` | 全平台 | `#elif defined(Q_OS_LINUX)` 分支（原本只有 Win/macOS/兜底） |
+| CMake | `snow_shot/CMakeLists.txt` | linux | `snow_shot_global_mouse` 的 `UNIX` 分支加源文件；文末 X11 链接遍历**重构成清单驱动**（见下） |
+
+七条判断（前三条错，症状同样是「行为静默错位」）：
+
+1. **Qt 的按钮枚举和 X11 的按钮号不是一回事，而且顺序相反**。Qt 是位标志 `1/2/4/8/16`（左/右/中/后退/前进），
+   X11 按协议分配顺序编号：左 1、**中 2**、**右 3**、滚轮 4–7、侧键 8/9。按位置翻译会把「右键拖拽」变成
+   「中键拖拽」，且在只有左右键的配置下完全看不出来。
+2. **`captureAvailable == false` 时必须撤掉抓取，而不是「忽略按下」**。忽略仍然吞掉了那一次点击
+   （抓取已经激活），要还回去就得回放；而撤掉抓取是零成本的。C++ 侧 `setCaptureAvailable(false)`
+   （另一次截图正在进行）就走到这条路径上。
+3. **两个动作配了同一组合时，整条丢弃**。共享的 `GlobalMouseGesture` 对歧义按下的处理是「不匹配」，
+   Windows/macOS 上应用照常收到点击；X11 若把抓取给了其中一个，同一份配置在两个平台行为不同。
+4. **锁状态变体照旧要展开**（`grab_masks`，与快捷键同一个函数）。X11 的抓取匹配是**精确**的，
+   CapsLock/NumLock 开着时 `Ctrl+左键` 的状态位多一位 —— 不展开就是「一开大写锁定，手势就失灵」。
+5. **抓取失败是正常答案，不是错误**。窗口管理器会自己抓 `Super`+拖拽之类（移动窗口），
+   `BadAccess` 在那里是预期结果；`set_bindings` 返回**成功装上的条数**，让调用方能看出「有几条没抢到」，
+   而不是让一条冲突把其余全废掉。
+6. **拖拽期间指针归本进程，指针不动的是「应用」，不是光标**。`GrabButton` 用 `pointer_mode: ASYNC`：
+   光标继续跟随鼠标移动，事件进本连接；`owner_events: false` 保证事件不回流给指针下的窗口。
+   于是拖拽过程中下层应用收不到任何鼠标事件（Windows 上它还能收到移动，只是没有拖拽语义）——
+   这是 X11 语义带来的**更强**隔离，也是它「不会意外拖到下层窗口」的原因。
+7. **`beginButtonDrag` 在 X11 上是空实现，并且写清了为什么**。这个入口服务于首页卡片的
+   「按住卡片再拖到桌面」：按下**已经**投递给本程序自己的 Qt 窗口，Qt 连接持有隐式抓取，
+   此时 `XGrabPointer` 会 `AlreadyGrabbed` 失败，移动事件继续进 Qt 窗口而不是本服务 ——
+   结果是「报一个 Begin 然后什么都没有」。正确做法是走 Qt 自己的拖拽 + `QCursor::pos()` 跟随，
+   那是另一套设计；在它落地前，卡片拖拽在 Linux 上是**明确不可用**，而不是半工作状态。
+
+**顺手做的两处结构整理**（都在本片被真实踩到）：
+
+- `x11/hotkey.rs` 里的 `Tables` 提成 `x11/keymap.rs` 的 `Keymap`。鼠标抓取需要**同一套** Alt/Super 掩码
+  与锁掩码，复制一份意味着以后修「Alt 到底在 Mod1 还是 Mod3」要改两处。
+- `snow_shot/CMakeLists.txt` 文末的「谁编译了平台源，谁就链 X11 归档」从**三条重复的 if** 重构成
+  一份清单 + 两个循环：加文件现在是一行，而「没人编译它」的 `FATAL_ERROR` 自检保留。这段逻辑在
+  Windows 上不执行（`if(UNIX AND NOT APPLE)`），所以本片用一个等价小工程做了**双向验证**：
+  四条齐 → configure 通过；抽掉一条 → `FATAL_ERROR`。
+
+**验证（2026-10-20，Windows + rustc 1.97.1）**：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-linux --lib` | **159 通过**（slice 3 是 147，本片 +12，全部纯逻辑） |
+| `cargo check` / `clippy --all-targets` 双架构 | 全绿，`-Dwarnings` 生效 |
+| `cargo fmt --check` / clang-format `--dry-run -Werror` | 干净 |
+| `bash scripts/syntax-check-linux-cpp.sh` | `SYNTAX OK`（默认覆盖面从 2 个文件扩到 3 个；把 `snow_linux_global_mouse_cancel` 改名注入后如期 `C3861` + `SYNTAX FAILED`） |
+| `windows-qt5-full` configure + `snow_shot_global_mouse` | configure `EXIT=0`；该静态库 16 步全绿（共享桩的 `#elif` 分支参与编译） |
+| `bash scripts/linux-cross-check.sh` 双架构 | 见 9.4.2 的复跑行 |
+
+**本片未覆盖（诚实记账）**：
+
+- **未在 X11 真机跑过**：`GrabButton` 在 dde/kwin 上的实际冲突情况（哪些组合已被 WM 占用）、
+  侧键（8/9）在真实鼠标上的映射、拖拽期间合成器对光标的重绘。
+- **没有「按下归属」的真机证据**：抓取确实让下层应用收不到按下的直接证据（例如在文本编辑器里
+  用同类组合拖拽），只能在 UOS 上验证。
+- **布局切换（`MappingNotify`）不刷新掩码**：与快捷键服务同一个取舍，重建服务时才重读。
+- **托盘 / 自启动 / 单实例 / 通知 / `screenshotnative.h` 拆分** 仍是 P4 后续 slice。
 
 ### 9.5 打包
 

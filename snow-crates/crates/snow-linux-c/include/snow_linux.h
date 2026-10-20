@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
@@ -148,6 +149,90 @@ void snow_linux_hotkeys_unregister(SnowLinuxHotkeys *hotkeys, int32_t registrati
  * would accept a half-finished combination.
  */
 int32_t snow_linux_hotkeys_key_down(const SnowLinuxHotkeys *hotkeys, int32_t qt_key);
+
+/* Global mouse drags, over passive XGrabButton.
+ *
+ * A grab means the server hands this client every press of that button with
+ * exactly that modifier state, and nobody else. That is the whole feature: the
+ * application under the pointer must not start a drag of its own when the
+ * chord belongs to a configured gesture.
+ *
+ * Two consequences worth knowing before using this:
+ *
+ *  - A grab can be refused. Window managers grab chords of their own, and a
+ *    refused binding simply never fires; the count returned by
+ *    snow_linux_global_mouse_set_bindings() is how the caller finds out.
+ *  - While a drag is in progress the pointer belongs to this handle. The cursor
+ *    still moves, but the application underneath does not see the button at all.
+ */
+typedef struct SnowLinuxGlobalMouse SnowLinuxGlobalMouse;
+
+/* Called on an internal worker thread, never on the caller's thread.
+ *
+ * `phase` is one of the SNOW_LINUX_DRAG_* values, `action` is the `action` field
+ * of the binding that fired, and `x`/`y` are root-window pixels. The handler
+ * must not call back into this handle: configuration calls wait for that same
+ * worker to answer.
+ */
+typedef void (*SnowLinuxGlobalMouseHandler)(int32_t phase, int32_t action, uint64_t drag_id,
+                                            int32_t x, int32_t y, void *user_data);
+
+/* Phases, in the order a drag normally reports them. */
+#define SNOW_LINUX_DRAG_BEGIN 0
+#define SNOW_LINUX_DRAG_UPDATE 1
+#define SNOW_LINUX_DRAG_FINISH 2
+/* The caller cancelled the drag; no further events follow for its id. */
+#define SNOW_LINUX_DRAG_CANCEL 3
+
+/* One configured chord.
+ *
+ * `qt_button` is a Qt::MouseButton value (1, 2, 4, 8, 16) and `modifier_bits`
+ * uses the SNOW_LINUX_MODIFIER_* bits above. Unknown buttons or bits are
+ * dropped rather than guessed at.
+ */
+typedef struct SnowLinuxMouseBinding {
+    int32_t action;
+    int32_t qt_button;
+    uint32_t modifier_bits;
+} SnowLinuxMouseBinding;
+
+/* Opens a drag service on a connection of its own.
+ *
+ * Returns NULL when no X server is reachable or its keyboard tables cannot be
+ * read. `handler` may not be NULL. The service starts disabled: nothing is
+ * grabbed until snow_linux_global_mouse_set_enabled(.., 1) says a capture can
+ * start.
+ */
+SnowLinuxGlobalMouse *snow_linux_global_mouse_create(SnowLinuxGlobalMouseHandler handler,
+                                                     void *user_data);
+
+/* Releases every grab and joins the worker. */
+void snow_linux_global_mouse_destroy(SnowLinuxGlobalMouse *mouse);
+
+/* Replaces the binding set.
+ *
+ * Returns the number of grabs the server accepted, or -1 when the worker did not
+ * answer. Fewer grabs than bindings is normal: a chord another client already
+ * holds is skipped so the remaining ones keep working.
+ */
+int32_t snow_linux_global_mouse_set_bindings(SnowLinuxGlobalMouse *mouse,
+                                             const SnowLinuxMouseBinding *bindings, size_t count);
+
+/* Turns the grabs on or off without changing the bindings.
+ *
+ * Off is the answer while a capture is already running: holding the grabs then
+ * would swallow clicks that cannot start anything. Returns the same count as
+ * above.
+ */
+int32_t snow_linux_global_mouse_set_enabled(SnowLinuxGlobalMouse *mouse, int32_t enabled);
+
+/* Stops reporting the drag `drag_id`.
+ *
+ * The button is still down, so the pointer stays grabbed until it is released;
+ * the drag just goes quiet. The caller must not expect a CANCEL phase for an id
+ * it cancelled itself.
+ */
+void snow_linux_global_mouse_cancel(SnowLinuxGlobalMouse *mouse, uint64_t drag_id);
 
 #ifdef __cplusplus
 }

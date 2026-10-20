@@ -3,9 +3,9 @@
 //! The crate is deliberately layered so that most of it stays verifiable on a
 //! developer machine that is not running Linux:
 //!
-//! * [`capture`], [`fullscreen`], [`geometry`], [`pixels`], [`pointer`], [`text`]
-//!   and [`input`]'s `keys`/`tracking` modules are pure and compile everywhere,
-//!   so their unit tests run on any host.
+//! * [`capture`], [`fullscreen`], [`geometry`], [`globalmouse`], [`hotkey`],
+//!   [`pixels`], [`pointer`], [`text`] and [`input`]'s `keys`/`tracking` modules
+//!   are pure and compile everywhere, so their unit tests run on any host.
 //! * [`session`] only inspects environment variables and therefore compiles
 //!   everywhere too.
 //! * [`x11`], [`display`], [`cursor`] and [`input::x11`] talk to an X server and
@@ -21,6 +21,7 @@ pub mod capture;
 pub mod error;
 pub mod fullscreen;
 pub mod geometry;
+pub mod globalmouse;
 pub mod hotkey;
 pub mod input;
 pub mod pixels;

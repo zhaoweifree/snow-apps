@@ -1254,6 +1254,12 @@ if(APPLE)
         "${SNOW_SHOT_APPKIT_FRAMEWORK}"
         "${SNOW_SHOT_CORE_GRAPHICS_FRAMEWORK}")
 endif()
+if(UNIX AND NOT APPLE)
+    # Passive button grabs; the file itself recognises a Wayland session through
+    # Qt's platform name and reports the feature as unavailable there. Not APPLE:
+    # `UNIX` is true there too, and this file is X11-only.
+    target_sources(snow_shot_global_mouse PRIVATE src/platform/linux/globalmousebackend.cpp)
+endif()
 target_link_libraries(snow_shot_settings PRIVATE snow_shot_global_mouse)
 snow_enable_unity_build(snow_shot_settings)
 set_source_files_properties(
@@ -11496,39 +11502,33 @@ endif()
 # the executable that links it may not, and the test hosts build the same sources
 # standalone. This runs at the very end so that every target, including those
 # declared inside the tests block above, is already in scope.
+#
+# Adding a Linux platform source to the archive means adding one line to
+# _snow_x11_platform_sources: the loop links the archive wherever one of them is
+# compiled, and a file nobody compiles fails the configure instead of sitting
+# there looking wired up.
 if(UNIX AND NOT APPLE)
+    set(_snow_x11_platform_sources
+        "src/platform/physicalcursor.cpp"
+        "src/platform/linux/globalshortcutbackend.cpp"
+        "src/platform/linux/focusedfullscreenwindow.cpp"
+        "src/platform/linux/globalmousebackend.cpp")
+    set(_snow_x11_linked "")
     get_property(_snow_x11_consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
-    set(_snow_x11_linked 0)
-    set(_snow_hotkey_linked 0)
-    set(_snow_fullscreen_linked 0)
     foreach(_snow_target IN LISTS _snow_x11_consumers)
         get_target_property(_snow_sources ${_snow_target} SOURCES)
-        if("${_snow_sources}" MATCHES "platform/physicalcursor\\.cpp")
-            target_link_libraries(${_snow_target} PRIVATE snow_shot_linux_platform)
-            math(EXPR _snow_x11_linked "${_snow_x11_linked} + 1")
-        endif()
-        if("${_snow_sources}" MATCHES "platform/linux/globalshortcutbackend\\.cpp")
-            target_link_libraries(${_snow_target} PRIVATE snow_shot_linux_platform)
-            math(EXPR _snow_hotkey_linked "${_snow_hotkey_linked} + 1")
-        endif()
-        # The full-screen check reaches the same archive, and it lands in more
-        # targets than the hotkey backend: the floating toolbar's detector is
-        # part of the everyday UI, not of the shortcut path.
-        if("${_snow_sources}" MATCHES "platform/linux/focusedfullscreenwindow\\.cpp")
-            target_link_libraries(${_snow_target} PRIVATE snow_shot_linux_platform)
-            math(EXPR _snow_fullscreen_linked "${_snow_fullscreen_linked} + 1")
+        foreach(_snow_file IN LISTS _snow_x11_platform_sources)
+            string(REPLACE "." "\\." _snow_pattern "${_snow_file}")
+            if("${_snow_sources}" MATCHES "${_snow_pattern}")
+                target_link_libraries(${_snow_target} PRIVATE snow_shot_linux_platform)
+                list(APPEND _snow_x11_linked "${_snow_file}")
+            endif()
+        endforeach()
+    endforeach()
+    foreach(_snow_file IN LISTS _snow_x11_platform_sources)
+        if(NOT _snow_file IN_LIST _snow_x11_linked)
+            message(FATAL_ERROR
+                "No target compiles ${_snow_file}, so the X11 archive would be linked into nothing. Fix the source lists rather than deleting this check.")
         endif()
     endforeach()
-    if(_snow_x11_linked EQUAL 0)
-        message(FATAL_ERROR
-            "No target compiles src/platform/physicalcursor.cpp, so the X11 archive would be linked into nothing. Fix the matcher above rather than deleting this check.")
-    endif()
-    if(_snow_hotkey_linked EQUAL 0)
-        message(FATAL_ERROR
-            "No target compiles src/platform/linux/globalshortcutbackend.cpp, so the X11 hotkey archive would be linked into nothing. Fix the matcher above rather than deleting this check.")
-    endif()
-    if(_snow_fullscreen_linked EQUAL 0)
-        message(FATAL_ERROR
-            "No target compiles src/platform/linux/focusedfullscreenwindow.cpp, so the X11 full-screen query would be linked into nothing. Fix the matcher above rather than deleting this check.")
-    endif()
 endif()

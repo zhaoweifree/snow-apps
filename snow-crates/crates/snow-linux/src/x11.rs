@@ -4,7 +4,9 @@
 //! connection setup, extension probing and error translation stay in one place.
 
 pub mod fullscreen;
+pub mod globalmouse;
 pub mod hotkey;
+pub mod keymap;
 pub mod pointer;
 pub mod shm;
 pub mod window;

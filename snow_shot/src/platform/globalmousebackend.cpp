@@ -8,6 +8,9 @@ std::unique_ptr<GlobalMouseBackend> createWindowsGlobalMouseBackend();
 #ifdef Q_OS_MACOS
 std::unique_ptr<GlobalMouseBackend> createMacOSGlobalMouseBackend();
 #endif
+#ifdef Q_OS_LINUX
+std::unique_ptr<GlobalMouseBackend> createLinuxGlobalMouseBackend();
+#endif
 
 namespace {
 class UnsupportedGlobalMouseBackend final : public GlobalMouseBackend {
@@ -32,6 +35,8 @@ std::unique_ptr<GlobalMouseBackend> createGlobalMouseBackend() {
     return createWindowsGlobalMouseBackend();
 #elif defined(Q_OS_MACOS)
     return createMacOSGlobalMouseBackend();
+#elif defined(Q_OS_LINUX)
+    return createLinuxGlobalMouseBackend();
 #else
     return std::make_unique<UnsupportedGlobalMouseBackend>();
 #endif

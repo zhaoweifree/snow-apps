@@ -30,7 +30,8 @@ export MSYS2_ARG_CONV_EXCL='*'
 
 status=0
 for file in "$REPO/snow_shot/src/platform/linux/globalshortcutbackend.cpp" \
-            "$REPO/snow_shot/src/platform/linux/focusedfullscreenwindow.cpp" "$@"; do
+            "$REPO/snow_shot/src/platform/linux/focusedfullscreenwindow.cpp" \
+            "$REPO/snow_shot/src/platform/linux/globalmousebackend.cpp" "$@"; do
     echo "=== $(basename "$file")" | tee -a "$OUT"
     cl -nologo -Zs -std:c++20 -EHsc -W4 -permissive- \
         -DWIN32 -D_WINDOWS -DQ_OS_LINUX -DUNICODE -D_UNICODE \

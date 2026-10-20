@@ -26,7 +26,9 @@ use std::ffi::{c_int, c_void};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
+use snow_linux::globalmouse::Binding;
 use snow_linux::pointer::RootPosition;
+use snow_linux::x11::globalmouse::{DragEvent, DragPhase, GlobalMouseService};
 
 /// The process-wide connection, opened the first time somebody asks for it.
 ///
@@ -401,5 +403,169 @@ pub unsafe extern "C" fn snow_linux_hotkeys_key_down(
         Some(true) => 1,
         Some(false) => 0,
         None => -1,
+    }
+}
+
+/// C-side handler for drag events, plus the opaque pointer it wants back.
+///
+/// Same contract as [`ActivationSink`]: the pointer stays valid until
+/// `snow_linux_global_mouse_destroy`, which joins the worker before returning,
+/// so the closure can never call through it afterwards.
+#[derive(Clone, Copy)]
+struct DragSink {
+    handler: extern "C" fn(i32, i32, u64, i32, i32, *mut c_void),
+    user_data: *mut c_void,
+}
+
+// SAFETY: see the type's documentation. The pair is `Copy`, never dereferenced
+// here, and its lifetime is guaranteed by the C contract on the handle.
+unsafe impl Send for DragSink {}
+
+impl DragSink {
+    fn invoke(self, phase: DragPhase, event: DragEvent) {
+        (self.handler)(
+            phase.as_i32(),
+            event.action,
+            event.id,
+            event.x,
+            event.y,
+            self.user_data,
+        );
+    }
+}
+
+/// One configured chord, as it crosses the C boundary.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SnowLinuxMouseBinding {
+    pub action: i32,
+    pub qt_button: i32,
+    pub modifier_bits: u32,
+}
+
+/// A running global-mouse service.
+pub struct SnowLinuxGlobalMouse {
+    service: GlobalMouseService,
+}
+
+/// A caller that passes more bindings than this has a bug, and guessing at a
+/// corrupted count would mean a multi-gigabyte allocation on the worker thread.
+const MAX_MOUSE_BINDINGS: usize = 64;
+
+/// Opens a drag service.
+///
+/// Returns null when no X server is reachable or the keyboard tables cannot be
+/// read; a null handler is refused as well, since a grab with nowhere to report
+/// would take a chord away from the session for no reason.
+///
+/// # Safety
+///
+/// `handler` must be a valid function pointer, and `user_data` must stay valid
+/// until the returned handle is destroyed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_global_mouse_create(
+    handler: Option<extern "C" fn(i32, i32, u64, i32, i32, *mut c_void)>,
+    user_data: *mut c_void,
+) -> *mut SnowLinuxGlobalMouse {
+    let Some(handler) = handler else {
+        return ptr::null_mut();
+    };
+    let sink = DragSink { handler, user_data };
+    let Ok(service) = GlobalMouseService::start(move |phase, event| sink.invoke(phase, event))
+    else {
+        return ptr::null_mut();
+    };
+    Box::into_raw(Box::new(SnowLinuxGlobalMouse { service }))
+}
+
+/// Releases every grab and joins the worker.
+///
+/// # Safety
+///
+/// `mouse` must be null or a pointer from [`snow_linux_global_mouse_create`] that
+/// has not already been destroyed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_global_mouse_destroy(mouse: *mut SnowLinuxGlobalMouse) {
+    if mouse.is_null() {
+        return;
+    }
+    // SAFETY: the caller's contract above says this came from `Box::into_raw` in
+    // the create function and is released exactly once.
+    drop(unsafe { Box::from_raw(mouse) });
+}
+
+/// Replaces the binding set.
+///
+/// Returns the number of grabs the server accepted, or -1 for a null handle, an
+/// absurd count, or a worker that did not answer.
+///
+/// # Safety
+///
+/// `mouse` must be null or a live handle, and `bindings` must point at `count`
+/// readable elements (it may be null when `count` is zero).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_global_mouse_set_bindings(
+    mouse: *mut SnowLinuxGlobalMouse,
+    bindings: *const SnowLinuxMouseBinding,
+    count: usize,
+) -> i32 {
+    let Some(handle) = (unsafe { mouse.as_ref() }) else {
+        return -1;
+    };
+    if count > MAX_MOUSE_BINDINGS || (count > 0 && bindings.is_null()) {
+        return -1;
+    }
+    let entries: &[SnowLinuxMouseBinding] = if count == 0 {
+        &[]
+    } else {
+        // SAFETY: the caller's contract above says `bindings` points at `count`
+        // readable elements.
+        unsafe { std::slice::from_raw_parts(bindings, count) }
+    };
+    let parsed: Vec<Binding> = entries
+        .iter()
+        .map(|entry| Binding {
+            action: entry.action,
+            qt_button: entry.qt_button,
+            modifiers: entry.modifier_bits,
+        })
+        .collect();
+    match handle.service.set_bindings(parsed) {
+        Some(installed) => i32::try_from(installed).unwrap_or(i32::MAX),
+        None => -1,
+    }
+}
+
+/// Turns the grabs on or off without changing the bindings.
+///
+/// # Safety
+///
+/// `mouse` must be null or a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_global_mouse_set_enabled(
+    mouse: *mut SnowLinuxGlobalMouse,
+    enabled: i32,
+) -> i32 {
+    let Some(handle) = (unsafe { mouse.as_ref() }) else {
+        return -1;
+    };
+    match handle.service.set_enabled(enabled != 0) {
+        Some(installed) => i32::try_from(installed).unwrap_or(i32::MAX),
+        None => -1,
+    }
+}
+
+/// Stops reporting the drag `drag_id`.
+///
+/// # Safety
+///
+/// `mouse` must be null or a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_global_mouse_cancel(
+    mouse: *mut SnowLinuxGlobalMouse,
+    drag_id: u64,
+) {
+    if let Some(handle) = unsafe { mouse.as_ref() } {
+        handle.service.cancel(drag_id);
     }
 }
