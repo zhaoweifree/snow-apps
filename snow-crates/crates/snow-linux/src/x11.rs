@@ -3,6 +3,7 @@
 //! All X11 traffic in the crate funnels through [`X11Session`] so that
 //! connection setup, extension probing and error translation stay in one place.
 
+pub mod hotkey;
 pub mod pointer;
 pub mod shm;
 pub mod window;
@@ -85,6 +86,16 @@ impl X11Session {
 
     pub fn conn(&self) -> &RustConnection {
         &self.conn
+    }
+
+    /// Hands the connection to a caller that has to own it.
+    ///
+    /// The hotkey service runs a blocking-ish event loop on its own thread, so it
+    /// needs a connection it can move into that thread. Only the unused shared
+    /// memory state is dropped along the way, and a session that has not captured
+    /// anything has none.
+    pub fn into_connection(self) -> RustConnection {
+        self.conn
     }
 
     pub fn screen(&self) -> &Screen {

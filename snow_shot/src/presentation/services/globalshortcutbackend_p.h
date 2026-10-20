@@ -15,6 +15,9 @@ namespace snow_shot::presentation {
 #ifdef Q_OS_MACOS
 [[nodiscard]] std::unique_ptr<GlobalShortcutBackend> createMacOSGlobalShortcutBackend();
 #endif
+#ifdef Q_OS_LINUX
+[[nodiscard]] std::unique_ptr<GlobalShortcutBackend> createLinuxGlobalShortcutBackend();
+#endif
 
 } // namespace snow_shot::presentation
 

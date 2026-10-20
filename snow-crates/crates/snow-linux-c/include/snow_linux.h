@@ -43,6 +43,83 @@ int snow_linux_platform_pointer_position(const SnowLinuxPlatform *platform, int3
  */
 int snow_linux_platform_set_pointer_position(SnowLinuxPlatform *platform, int32_t x, int32_t y);
 
+/* Global keyboard shortcuts, over XGrabKey.
+ *
+ * A grab takes the key combination away from every other client for as long as
+ * this handle lives. That is what makes a screenshot hotkey work while another
+ * application has focus, and it is also why a binding must never be a bare
+ * modifier key: the Rust side refuses those instead of registering them.
+ */
+typedef struct SnowLinuxHotkeys SnowLinuxHotkeys;
+
+/* Called on an internal worker thread, never on the caller's thread, with the
+ * registration id passed to snow_linux_hotkeys_register().
+ *
+ * The handler must not call back into this handle: registration waits for that
+ * same worker to answer, so a call from inside the handler would wait for
+ * itself. Post to the application thread instead.
+ */
+typedef void (*SnowLinuxHotkeyHandler)(int32_t registration_id, void *user_data);
+
+/* Modifier bits for snow_linux_hotkeys_register(). These are not X11 masks:
+ * which X11 modifiers Alt and Super occupy depends on the layout, and resolving
+ * that is the Rust side's job.
+ */
+#define SNOW_LINUX_MODIFIER_CONTROL 1u
+#define SNOW_LINUX_MODIFIER_ALT 2u
+#define SNOW_LINUX_MODIFIER_SHIFT 4u
+#define SNOW_LINUX_MODIFIER_META 8u
+
+/* snow_linux_hotkeys_register() results. */
+#define SNOW_LINUX_HOTKEY_OK 0
+/* The key is not on this keyboard, so there is nothing to grab. */
+#define SNOW_LINUX_HOTKEY_KEY_NOT_ON_KEYBOARD 1
+/* Another client -- or another registration in this handle -- holds it. */
+#define SNOW_LINUX_HOTKEY_ALREADY_IN_USE 2
+/* The server refused for another reason, or did not answer in time. */
+#define SNOW_LINUX_HOTKEY_SERVER_ERROR 3
+/* The Qt key or the modifier bits do not name a bindable combination. */
+#define SNOW_LINUX_HOTKEY_INVALID_BINDING 4
+
+/* Opens a hotkey service on a connection of its own.
+ *
+ * Returns NULL when no X server is reachable, or when the keyboard tables cannot
+ * be read. `handler` may not be NULL.
+ */
+SnowLinuxHotkeys *snow_linux_hotkeys_create(SnowLinuxHotkeyHandler handler, void *user_data);
+
+/* Releases every grab and joins the worker. */
+void snow_linux_hotkeys_destroy(SnowLinuxHotkeys *hotkeys);
+
+/* Whether a Qt key and modifier bits name a bindable combination, without
+ * contacting the server: SNOW_LINUX_HOTKEY_OK or SNOW_LINUX_HOTKEY_INVALID_BINDING.
+ *
+ * This is what the settings UI asks while the user records a shortcut. A result
+ * of OK does not promise the grab will succeed -- the key may simply not be on
+ * this keyboard -- so registration's own result is still the one to report.
+ */
+int32_t snow_linux_hotkeys_validate_binding(int32_t qt_key, uint32_t modifier_bits);
+
+/* Grabs `qt_key` with `modifier_bits`.
+ *
+ * `qt_key` is the Qt::Key value, which is stable between Qt 5 and Qt 6 for
+ * everything but two media keys; both spellings of those are accepted. Returns
+ * one of the SNOW_LINUX_HOTKEY_* codes. Re-registering an id replaces it.
+ */
+int32_t snow_linux_hotkeys_register(SnowLinuxHotkeys *hotkeys, int32_t registration_id, int32_t qt_key,
+                                    uint32_t modifier_bits);
+
+/* Releases the grabs held for `registration_id`. Unknown ids are ignored. */
+void snow_linux_hotkeys_unregister(SnowLinuxHotkeys *hotkeys, int32_t registration_id);
+
+/* Whether a key producing `qt_key` is held right now: 1 down, 0 up, -1 unknown.
+ *
+ * -1 means the worker did not answer in time. Callers must treat it as "not
+ * observable" rather than "not pressed": a shortcut picker that reads it as "up"
+ * would accept a half-finished combination.
+ */
+int32_t snow_linux_hotkeys_key_down(const SnowLinuxHotkeys *hotkeys, int32_t qt_key);
+
 #ifdef __cplusplus
 }
 #endif

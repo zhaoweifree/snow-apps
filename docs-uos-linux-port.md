@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：全局快捷键（XGrabKey）、全局鼠标 backend、全屏窗口检测、托盘/自启动/单实例/通知、`screenshotnative.h` 拆分 |
+| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：全局鼠标 backend、全屏窗口检测、托盘/自启动/单实例/通知、`screenshotnative.h` 拆分（全局快捷键已于 slice 2 完成，见 9.4.9） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -602,6 +602,12 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 > 不是通过率被稀释。A 类仍是每架构 6 个、逐条未变（`snow-ocr-process` 在两个架构上撞的都是
 > `clipper-sys` 要 `*-linux-gnu-g++`）。**新增的门禁价值**：这段 C++ 直接调用的代码以前根本
 > 不存在，现在它每次都在 Windows 上被类型检查。
+
+> **2026-10-20 复跑（P4 slice 2 之后）**：仍是 **50/62**（每架构 25/31），失败清单逐条未变。
+> 本片新增的是 `snow-linux::hotkey`（纯逻辑）与 `snow-linux::x11::hotkey`（`x11rb` 的
+> `grab_key` / `get_modifier_mapping` / `query_keymap`，全在已启用的 `xproto` 里），
+> 以及 `snow-linux-c` 的六个新导出 —— 没有新增 workspace 成员，也没有新增 C 依赖，
+> 所以分母不动、通过项不动，属于**纯代码增量**。
 
 **(A) 需要交叉 C 编译器 —— 不是我们的代码问题（每架构 6 个）**
 
@@ -1030,6 +1036,78 @@ Xlib 调用，产出的是一批**只能靠眼睛读的代码**。本片的取�
   （该 archive 的 Linux 目标连 `cargo check` 都过不去），只能到真机验。
 - **真机待验**：`XWarpPointer` 在 dde 下是否被合成的鼠标抓取拦截（拖动中 warp 的行为）、
   多屏负坐标布局下的读数、以及 `QCursor::pos()` 与 root 坐标在 `QT_SCALE_FACTOR` 非 1 时的对应关系。
+
+#### 9.4.9 P4 slice 2：全局快捷键（`XGrabKey`）落地（2026-10-20）
+
+Windows 用 `RegisterHotKey`，macOS 用 Carbon 的 `RegisterEventHotKey`；X11 的等价物是**被动键盘抓取**
+（`XGrabKey`）：在本连接持握期间，该 keycode + 该修饰键状态的按键只发给本客户端，别的应用收不到。
+没有它，截图快捷键只在窗口有焦点时有效 —— 那等于没有。
+
+**分层照旧：翻译规则压在纯 Rust 里，X11 交互在 `#[cfg(target_os = "linux")]` 之后，C++ 只做转发。**
+
+| 层 | 位置 | 平台 | 内容 |
+|---|---|---|---|
+| 翻译规则 | `snow-linux/src/hotkey.rs` | **全平台** | Qt 键 → keysym；keysym → 可用的 keycode（含隐含 Shift）；修饰键组合 → 抓取掩码集合；修饰键映射 → Alt/Super 的 X11 mask。**18 个单测在 Windows 上跑** |
+| 抓取服务 | `snow-linux/src/x11/hotkey.rs` | linux | 独立连接 + 工作线程；`register` / `unregister` / `key_down`；`KeyPress` 匹配后回调 |
+| C ABI | `snow-linux-c`（`include/snow_linux.h`） | linux | `snow_linux_hotkeys_{create,destroy,register,unregister,key_down,validate_binding}` |
+| 接线 | `snow_shot/src/platform/linux/globalshortcutbackend.cpp` | linux | `GlobalShortcutBackend` 的 Linux 实现；工厂 `createPlatformGlobalShortcutBackend()` 增 `#elif defined(Q_OS_LINUX)` |
+| CMake | `snow_shot/CMakeLists.txt` | linux | `SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES` 增 `elseif(UNIX)` 分支；文末链接遍历增一条匹配器 + **自检 `FATAL_ERROR`** |
+
+八个判断（每条都对应一个会静默出错的坑）：
+
+1. **Qt 键值 → keysym 必须自己建表，不能凭记忆**。Qt 没有公开的 keysym 反查表。本片把 Qt 侧取值
+   从 `qnamespace.h`（5.15.2 与 6.12.0 实测一致）读出、X11 侧从 xorgproto 的 `keysymdef.h` /
+   `XF86keysym.h` 读出后逐条写死。**凭记忆写的初稿错了 6 处**（`Hyper_L` 写成 `Meta_R`、
+   `MediaRecord` 指向了 `XF86Mail`、`PowerOff`/`WakeUp`/`Eject`/`ScreenSaver`/`Calculator` 全偏），
+   而这类错误的表现是「按了快捷键弹出邮件客户端」—— 不像 bug，像灵异。
+2. **Qt 5.15 把两个媒体键的常量写少了一位**：`Key_MediaPause = 0x1000085`、`Key_MediaTogglePlayPause
+   = 0x1000086`（Qt 6 已修正为 `0x01000085/86`）。Linux 发的是 Qt5，所以表里**两种拼写都接受**。
+3. **字母必须做大小写折叠**。Qt 的 `Key_A` 是 `0x41`（= `XK_A`），但 X 键盘映射把 `XK_a` 放在
+   **未按 Shift 的那一层**。只查 `0x41` 会命中 shifted 层，于是 `Ctrl+A` 被悄悄注册成
+   `Ctrl+Shift+A` —— 能注册、永远不触发。折叠到小写 keysym 才能命中 unshifted 层；
+   同理 `+` 这类字符确实在 shifted 层，此时**必须把 Shift 加进抓取掩码**。
+4. **抓取要覆盖所有锁定键组合**。`XGrabKey` 的修饰键匹配是**精确匹配**，只抓 `Control` 的话，
+   CapsLock 一开快捷键就失效。按键盘上实际存在的锁定修饰键（`Lock` + 实测到的 NumLock /
+   ScrollLock 掩码）做幂集，最多 8 个抓取。
+5. **Alt / Super 的 X11 mask 要读回来**。协议只定义 `Mod1..Mod5`，谁是谁由布局决定。从
+   `GetModifierMapping` + 键盘映射反查 `Alt_L/R`、`Super_L/R`，查不到才退回 `Mod1`/`Mod4`。
+   写死 `Mod1` 在某些布局上会「注册成功但永不触发」。
+6. **一个组合只能属于一个注册**。同一客户端对同一组合抓两次 X 是允许的，但那样一次按键会触发
+   两个动作；Windows 的第二次 `RegisterHotKey` 会返回「已被占用」，所以这里也回
+   `ALREADY_IN_USE`，让两端的提示一致。
+7. **失败必须整条回滚**。多个 keycode（多布局）时若第 3 个抓取失败而前两个留着，绑定会变成
+   「CapsLock 关着能触发、开着不能」这种「偶发」现象。失败即 ungrab 已发的全部。
+8. **回调不能直接摸 Qt**。`KeyPress` 在 Rust 工作线程上，C++ 侧用 `QMetaObject::invokeMethod`
+   投递到 Qt 线程，且以 `ActivationDispatcher` 作 context 对象 —— QObject 析构时 Qt 会丢弃
+   尚未执行的 metacall，这正是「已经投递但后端刚被销毁」这一类崩溃的解药。同理
+   `snow_linux_hotkeys_destroy` 会 join 工作线程后才返回，所以 `user_data` 不会在析构后被动到。
+
+**另外补了一道本机门禁（这是本片真正的可验证性来源）**：`src/platform/linux/*.cpp` 在 Windows 构建里
+一行都不会被编译，但它的 Qt 用法是平台中立的。于是
+`bash scripts/syntax-check-linux-cpp.sh` 用 `cl -Zs`（只做前端，不产出目标文件）
+加 `-DQ_OS_LINUX` 把这批文件过一遍 `-W4 -permissive-` 语法/类型检查。
+**反向验证过**：注入一个改名的函数调用后如期报 `C3861`，删掉即恢复 `SYNTAX OK`。
+这让「C++ 侧只能靠眼睛看」的范围缩小到只剩 ABI 与运行期行为。
+
+**验证（2026-10-20，Windows + rustc 1.97.1）**：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-linux --lib hotkey` | **18 通过**（新增，全部纯逻辑） |
+| `cargo check -p snow-linux -p snow-linux-c` 双架构 | 全绿，`-Dwarnings` 生效 |
+| `cargo clippy --all-targets` / `cargo fmt --check` | 双绿 |
+| `bash scripts/syntax-check-linux-cpp.sh` | `SYNTAX OK`（+ 反向验证会红） |
+| `bash scripts/linux-cross-check.sh` 双架构 | 见 9.4.2 的复跑行，分母再次 +0（本片没有新增 workspace 成员） |
+
+**本片未覆盖（诚实记账）**：
+
+- **Wayland 会话下不支持**：`QGuiApplication::platformName() != "xcb"` 时后端整体降级为
+  「平台不支持」，与物理光标分支同一判据。等 P6/P7 的 portal（`org.freedesktop.portal.GlobalShortcuts`）
+  再接。
+- **真机待验**：dde 是否把某些组合先截走（`XGrabKey` 会返回 `BadAccess`，此时 UI 上应显示
+  「已被占用」）；多布局下同一键产生多个 keycode 的实际行为；长按重复触发频率与 Windows 的差异；
+  `QT_SCALE_FACTOR` 非 1 时 `inputState` 的读数（与缩放无关，但需实测确认）。
+- **全局鼠标 backend / 全屏窗口检测 / 托盘 / 自启动 / 单实例 / 通知** 仍是 P4 后续 slice。
 
 ### 9.5 打包
 

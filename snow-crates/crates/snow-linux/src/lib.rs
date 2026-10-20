@@ -20,6 +20,7 @@
 pub mod capture;
 pub mod error;
 pub mod geometry;
+pub mod hotkey;
 pub mod input;
 pub mod pixels;
 pub mod pointer;

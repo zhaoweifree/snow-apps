@@ -37,6 +37,8 @@ std::unique_ptr<GlobalShortcutBackend> createPlatformGlobalShortcutBackend() {
     return createWindowsGlobalShortcutBackend();
 #elif defined(Q_OS_MACOS)
     return createMacOSGlobalShortcutBackend();
+#elif defined(Q_OS_LINUX)
+    return createLinuxGlobalShortcutBackend();
 #else
     return std::make_unique<UnsupportedGlobalShortcutBackend>();
 #endif
