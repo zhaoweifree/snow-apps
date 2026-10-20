@@ -443,6 +443,91 @@
       }
     },
     {
+      "name": "windows-qt6-base",
+      "displayName": "Windows Qt 6.12 (Ninja, vcpkg-free)",
+      "description": "Regression baseline for the Qt6 route that docs-qt5-downgrade-plan.md measures every mechanical rewrite against. This is the Qt6 twin of windows-qt5-base: same Ninja generator, same 'no toolchainFile' stance, same vcvars64-injected invocation (run with .workbuddy/run-vcvars.py, see .workbuddy/qt5-port/run-qt6-smoke.sh), and the same location-independent MSVC discovery, so a Qt5-vs-Qt6 diff is a pure source diff rather than a generator/toolchain diff. The kit is the stock Qt 6.12.0 win64_msvc2022_64 prebuilt tree installed at C:/Qt/6.12.0/msvc2022_64 (.workbuddy/qt5-port/install-qt6.py); the audited version is still pinned by scripts/qt-toolchain.json and asserted by snow_find_qt() with find_package(... EXACT), so pointing this at a different patch release fails loudly at configure time instead of silently drifting.",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_PREFIX_PATH": "C:/Qt/6.12.0/msvc2022_64",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_CXX_SCAN_FOR_MODULES": "OFF",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "SNOW_QT_MAJOR": "6",
+        "SNOW_APPS_API_BASE_URL": "http://localhost:8080",
+        "SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION": "ON",
+        "SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION": "OFF",
+        "SNOW_APPS_ENABLE_CLANG_TIDY": "OFF",
+        "SNOW_APPS_QT_STATIC": "OFF",
+        "SNOW_APPS_RELEASE_STATIC": "OFF",
+        "SNOW_APPS_PACKAGE_SNOW_SHOT": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-qt6-smoke",
+      "displayName": "Windows Qt 6.12 smoke (ant_design_qt + snow_image)",
+      "description": "Qt6-side twin of windows-qt5-smoke, and the only thing that can prove the Qt5 downgrade did not break the Qt6 branch: qt_compat.h, the two ant_design_qt coordinate helpers, the Qt6 halves of pinnedwindowplatform.cpp and languagemanager.cpp are all edited by this route and none of them are compiled by windows-qt5-*. Target set and every quality switch mirror windows-qt5-smoke exactly so the two build logs are directly comparable; STRICT_COMPILE stays OFF for the same reason (third-party warning noise would bury the real Qt6-only errors).",
+      "inherits": "windows-qt6-base",
+      "cacheVariables": {
+        "SNOW_APPS_BUILD_ANT_DESIGN_QT": "ON",
+        "SNOW_APPS_BUILD_SNOW_IMAGE": "ON",
+        "SNOW_APPS_BUILD_DRAW_ENGINE": "OFF",
+        "SNOW_APPS_BUILD_DRAW_ENGINE_DEMO": "OFF",
+        "SNOW_APPS_BUILD_IMAGE_VIEWER": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT_MINI": "OFF",
+        "SNOW_APPS_BUILD_TESTS": "OFF",
+        "SNOW_APPS_BUILD_BENCHMARKS": "OFF",
+        "SNOW_APPS_STRICT_COMPILE": "OFF",
+        "SNOW_IMAGE_PROFILE": "redistributable",
+        "SNOW_IMAGE_DEFAULT_LINKAGE": "static",
+        "SNOW_IMAGE_BUILD_STATIC": "ON",
+        "SNOW_IMAGE_BUILD_SHARED": "ON",
+        "SNOW_IMAGE_BUILD_TESTS": "OFF",
+        "SNOW_IMAGE_STRICT_COMPILE": "OFF"
+      }
+    },
+    {
+      "name": "windows-qt6-full",
+      "displayName": "Windows Qt 6.12 full application (third-party deps on)",
+      "description": "Qt6 twin of windows-qt5-full, and the only configuration that compiles the Qt6 halves of pinnedwindowplatform.cpp, screenshotpinnedwindow.cpp and languagemanager.cpp -- the three files this downgrade round edited and that windows-qt6-smoke cannot reach because it never enters snow_shot/. Same stance as its Qt5 twin: Qt comes from the standalone 6.12.0 kit, VCPKG_MANIFEST_MODE/INSTALL are OFF so configure only *finds* the tree in vcpkg_installed/ instead of silently starting hours of port builds. Disk note: a complete build tree of this preset is ~20 GB (the Qt5 twin measured 20 GB), so on a machine with ~15 GB free it is used for configure + targeted object compilation rather than a full link.",
+      "inherits": "windows-qt6-base",
+      "toolchainFile": "${sourceDir}/.tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "environment": {
+        "VCPKG_ROOT": "${sourceDir}/.tools/vcpkg"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
+        "VCPKG_MANIFEST_MODE": "OFF",
+        "VCPKG_MANIFEST_INSTALL": "OFF",
+        "SNOW_APPS_STRICT_COMPILE": "OFF",
+        "SNOW_APPS_BUILD_ANT_DESIGN_QT": "ON",
+        "SNOW_APPS_BUILD_SNOW_IMAGE": "ON",
+        "SNOW_APPS_BUILD_DRAW_ENGINE": "ON",
+        "SNOW_APPS_BUILD_DRAW_ENGINE_DEMO": "OFF",
+        "SNOW_APPS_BUILD_IMAGE_VIEWER": "OFF",
+        "SNOW_APPS_BUILD_SNOW_SHOT": "ON",
+        "SNOW_APPS_BUILD_SNOW_SHOT_MINI": "OFF",
+        "SNOW_APPS_BUILD_TESTS": "OFF",
+        "SNOW_APPS_BUILD_BENCHMARKS": "OFF",
+        "SNOW_IMAGE_PROFILE": "redistributable",
+        "SNOW_IMAGE_DEFAULT_LINKAGE": "static",
+        "SNOW_IMAGE_BUILD_STATIC": "ON",
+        "SNOW_IMAGE_BUILD_SHARED": "ON",
+        "SNOW_IMAGE_BUILD_TESTS": "OFF",
+        "SNOW_IMAGE_STRICT_COMPILE": "OFF"
+      }
+    },
+    {
       "name": "windows-qt5-base",
       "displayName": "Windows Qt 5.15 (Ninja, vcpkg-free)",
       "description": "Qt6 -> Qt5 downgrade route. Deliberately does NOT inherit windows-msvc-base, and deliberately sets no toolchainFile: that preset pins the Qt 6 kit through the vcpkg toolchain, which is the exact opposite of what this route needs. Without the toolchainFile the vcpkg manifest step never runs, so this route can be configured and compiled before the third-party dependency channel is available. Must be invoked from a vcvars64-injected environment (see .workbuddy/qt5-port/run-qt5-preset.sh): Ninja gets cl.exe from PATH, not from a toolset field.",
@@ -756,12 +841,20 @@
       ]
     },
     {
+      "name": "build-windows-qt6-smoke",
+      "configurePreset": "windows-qt6-smoke"
+    },
+    {
       "name": "build-windows-qt5-smoke",
       "configurePreset": "windows-qt5-smoke"
     },
     {
       "name": "build-windows-qt5-engine",
       "configurePreset": "windows-qt5-engine"
+    },
+    {
+      "name": "build-windows-qt6-full",
+      "configurePreset": "windows-qt6-full"
     },
     {
       "name": "build-windows-qt5-full",
