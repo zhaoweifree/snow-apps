@@ -1621,6 +1621,89 @@ manual3（清理诊断后的干净二进制）：贴图 → 识别文字 → 鼠
 第二条是 Qt5 走**运行期字符串槽查找**（Qt6 用函数指针编译期解析）时对已销毁对象的
 disconnect 告警，对象随即销毁，无功能影响。
 
+### 3.13 Qt6 基线补齐：装 6.12.0 套件，并抓出 4 个「只改 Qt5 却改坏 Qt6」的缺陷（R45）
+
+**为什么必须补**：本轮为了打通 Qt5，动了四类**同时在 Qt6 编译路径上**的东西：
+
+| 文件 | 改动 | Qt6 侧是否被 Qt5 构建覆盖 |
+|---|---|---|
+| `cmake/SnowQt.cmake` | 兼容头注入、`snow_qt_apply_compat_include` | 否（Qt5 构建只跑 Qt5 分支） |
+| `snow_shot/include/snow_shot/compat/qt_compat.h` | 大量垫片 | 否 |
+| `ant_design_qt/.../popup_geometry.cpp`、`carousel.cpp` | 坐标换算改用 `snowMapToWithinHierarchy` | 是（smoke 档） |
+| `pinnedwindowplatform.cpp` / `screenshotpinnedwindow.cpp` / `languagemanager.cpp` | Qt5 专属行为，Qt6 分支保留原逻辑 | 否（要 full 档） |
+
+没有 Qt6 基线，上表前三行等于「改完没验」。这与此前确立的判据一致：**从未被解析过的代码面 = 盲区**。
+
+**(1) 套件怎么装：官方安装器与 aqtinstall 都不通**
+
+- Qt Online Installer 需要交互登录 Qt 账号，不适合脚本化；
+- 本机唯一可得的 `aqtinstall 3.3.0` 仍按 **6.12 之前的仓库布局**拼路径
+  （`.../desktop/qt6_6120/Updates.xml`），而 Qt 6.12 改成**按架构分目录**：
+  `.../desktop/qt6_6120/qt6_6120_msvc2022_64/Updates.xml`。表现是
+  `ERROR: Failed to download checksum for the file 'Updates.xml'`，且 `list-qt --arch` 同样失败。
+- 官方预编译套件只有 `win64_msvc2022_64`（无 msvc2026 变体）；本机 toolset 是 14.44/v143，
+  与之一致（Qt5 路线也是用 msvc2019_64 套件在 v143 下编译，跨工具集链接已验证可行）。
+
+于是改成直接讲仓库协议：`scripts/install-qt6.py` 读 `Updates.xml` → 取主包
+`qt.qt6.6120.win64_msvc2022_64` 的 archive 列表 → 下载 → **校验仓库发布的 `.sha1`**
+→ `py7zr` 解压到 `C:/Qt/6.12.0/msvc2022_64`。
+
+只下项目真正需要的 4 个 archive（`qtdeclarative`/`qtdoc`/`d3dcompiler`/`opengl32sw` 不装）：
+
+| archive | 下载体积 | 用途 |
+|---|---|---|
+| `qtbase` | 40.2 MB | Core/Gui/Widgets/Network/Test/Concurrent/PrintSupport + **private headers** |
+| `qttools` | 27.4 MB | `LinguistTools`（`lrelease`/`lupdate`） |
+| `qttranslations` | 2.0 MB | `qt_zh_CN.qm`（P7 打包要用） |
+| `qtsvg` | 0.7 MB | `ant_design_qt` / `snow_shot` 图标 |
+
+装好 411 MB（解压后），`qmake -v` 报 `Qt version 6.12.0`，`scripts/install-qt6.py --check`
+七项资产全在（含 `QtCore/6.12.0/QtCore/private`、`QtWidgets` private、`Qt6LinguistToolsConfig.cmake`）。
+镜像默认清华，`--mirror https://download.qt.io` 可切官方源。
+
+**(2) 新增预设：Qt6 与 Qt5 只差一个 Qt 前缀**
+
+`windows-qt6-base` / `windows-qt6-smoke` / `windows-qt6-full`（+ 对应 build preset），
+与 `windows-qt5-*` **逐项对称**：同一个 Ninja 生成器、同样不设 `toolchainFile`
+（smoke 档 vcpkg-free）、同样 `SNOW_APPS_STRICT_COMPILE=OFF`、同样的目标集。
+入口 `.workbuddy/qt5-port/run-qt6-smoke.sh`（vcvars 注入 + `LIBCLANG_PATH` + `clang-format`，
+与 Qt5 的 `run-qt5-preset.sh` 同构）。这样 Qt5/Qt6 的编译日志可以逐行对拍，
+diff 出来的一定是源码差异，不是工具链差异。
+
+**(3) 基线第一跑就红了：4 个真缺陷**
+
+| # | 报错 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `qt_compat.h(245): error C2039: "setKeyCombination": 不是 "QKeySequence" 的成员` | Qt 6.12 的 `QtGui/qkeysequence.h` 只有 `setKey(QKeyCombination,int)` 和 4 参 `QKeyCombination` 构造，**没有** `setKeyCombination`。这段代码从没被 Qt6 编译过 | Qt6 分支改用 4 参构造（与 Qt5 分支同构，只差元素类型），且 6.0–6.12 都稳定 |
+| 2 | `qt_compat.h(1768): error C2440: 无法从 QStringConverter::Encoding 转换为 SnowStringDecoder` | `QStringDecoder(Encoding)` 是 **explicit**，`SnowStringDecoder(QStringDecoder)` 也是 explicit ⇒ 一次隐式转换序列里不能连做两次 | 显式写出内层 `QStringDecoder(...)` |
+| 3 | `checkbox.h(107): error C2061: 语法错误: 标识符 "SnowEnterEvent"` 等（70 个文件） | Qt6 构建**不注入**兼容头（原设计假设 Qt6 走原生 API），但机械改写已把业务代码改成使用垫片符号 | **Qt6 也强制注入**兼容头；Qt6 分支几乎全是原生类型的薄别名，无行为开销 |
+| 4 | `qt_compat.h(116): fatal error C1083: 无法打开包括文件 "QEnterEvent"`（`snow_shot_diagnostics`） | 注入后，QtCore-only 目标（无 QtGui include 路径）仍无条件 `#include <QEnterEvent>`；Qt5 分支早有 `__has_include` 保护，**Qt6 分支漏了** | Qt6 分支的 GUI 头改为受 `SNOW_COMPAT_HAS_GUI` 保护；`SnowEnterEvent` 在无 GUI 时退化为 `QEvent` 别名 |
+
+第 3、4 条是这次补基线的主要收获：**「兼容头只在 Qt5 注入」这个设计假设，被机械改写本身推翻了**。
+
+**(4) 结果**
+
+| 配置 | 目标数 | 结果 |
+|---|---|---|
+| `windows-qt6-smoke`（ant_design_qt + snow_image） | 148 | **全绿**，0 error 0 warning（`ant_design_qt.lib` 133 MB 链接完成） |
+| `windows-qt5-smoke` 回归（兼容头改动后） | 147 | **全绿**，0 error |
+
+**(5) full 档：本机不可行，如实记为环境限制**
+
+`windows-qt6-full` 能 configure 成功（3 min），但完整构建不可行，两条硬原因：
+
+1. **磁盘**：Qt5 full 构建树已占 **22.6 GB**，Qt6 full 首次尝试涨到 **13 GB** 时把 C 盘吃满（0 字节可用，
+   连 shell 都起不来）。qt6-full 目录已删除，C 盘恢复 12.9 GB。
+2. **snow_shot 的 autogen 依赖 Rust FFI bundle**：`snow_shot_autogen` 会拉起
+   `cargo build --package snow-shot-rust-ffi --features selected-text`，在该构建树里 **exit 101**。
+   这是既有的 Rust/Qt6 构建路径问题（与本次改动无关），修它属于另一个议题。
+
+因此 `pinnedwindowplatform.cpp` / `screenshotpinnedwindow.cpp` / `languagemanager.cpp` 的
+**Qt6 分支目前只有语义等价检查，没有编译证据**。补齐的前提是：磁盘 ≥ 40 GB，或把 Qt5 full
+构建树挪到别的盘；以及 Rust FFI 在 Qt6 full 树里能编过。工具已备好：
+`.workbuddy/qt5-port/compile-qt6-objs.py` 用 `ninja -t commands` 取该预设下**原生正确**的编译命令
+（不做 Qt5→Qt6 路径替换），只编这几个 TU，避免整树构建 —— 前置（PCH + autogen）仍是上面第 2 条。
+
 ---
 
 ## 4. 分阶段实施计划
