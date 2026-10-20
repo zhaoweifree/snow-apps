@@ -32,6 +32,14 @@ struct DirectCaptureRequest {
     DirectCaptureTarget target = DirectCaptureTarget::CurrentMonitor;
     quintptr window = 0;
     QString monitorName;
+    // Linux/X11 only: where the window named by `window` sits, in root pixels and
+    // in Qt's coordinates. The X11 backend captures the root window and has no
+    // window-level read of its own, so the rectangle to cut out has to travel with
+    // the request. The logical copy is resolved on the application thread because
+    // QScreen may only be read there; it is empty when the window straddles two
+    // heads, and the history canvas then falls back to the physical rectangle.
+    QRect windowFrame;
+    QRect windowLogicalBounds;
     QDateTime requestedAt;
     bool autoSave = false;
     bool copyFile = false;

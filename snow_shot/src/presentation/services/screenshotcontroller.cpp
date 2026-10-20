@@ -6763,6 +6763,16 @@ bool ScreenshotController::mcpBegin(const QJsonObject& options, QString* error) 
             QRectF(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
 #elif defined(Q_OS_MACOS)
         m_impl->m_mcpFocusedBounds = snow_shot::platform::screenshotFocusedWindowBounds();
+#elif defined(Q_OS_LINUX)
+        // The overlay works in logical coordinates, so the scaled rectangle is
+        // the one it needs; a window straddling two heads has no single ratio and
+        // falls back to the device-pixel rectangle, the same compromise the
+        // history canvas makes for it.
+        QRect frame;
+        QRect logicalBounds;
+        if (snow_shot::platform::screenshotFocusedWindowTarget(nullptr, &frame, &logicalBounds))
+            m_impl->m_mcpFocusedBounds =
+                logicalBounds.isEmpty() ? QRectF(frame) : QRectF(logicalBounds);
 #endif
         if (m_impl->m_mcpFocusedBounds.isEmpty()) {
             if (error)

@@ -1159,6 +1159,13 @@ class ApplicationController::Impl {
                         const auto bounds = platform::screenshotFocusedWindowBounds();
                         pixels = QSize(qCeil(bounds.width() * maximumDpr),
                                        qCeil(bounds.height() * maximumDpr));
+#elif defined(Q_OS_LINUX)
+                        // The X11 frame is already in device pixels, so there is
+                        // no ratio to apply: the budget is about how many bytes
+                        // the capture will hold, and this is that number.
+                        QRect frame;
+                        if (platform::screenshotFocusedWindowTarget(nullptr, &frame, nullptr))
+                            pixels = frame.size();
 #endif
                         if (!pixels.isEmpty()) {
                             const auto bytes = rasterBytes(pixels);

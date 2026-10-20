@@ -229,6 +229,172 @@ pub unsafe extern "C" fn snow_linux_platform_focused_fullscreen_on_display(
     }
 }
 
+/// A rectangle in root-window pixels, as it crosses the C boundary.
+///
+/// `x`/`y` may be negative: X11 positions secondary heads relative to the
+/// primary one, so a head placed above or left of primary has a negative origin.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SnowLinuxRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl From<SnowLinuxRect> for snow_linux::geometry::Rect {
+    fn from(rect: SnowLinuxRect) -> Self {
+        Self::new(rect.x, rect.y, rect.width, rect.height)
+    }
+}
+
+/// One display's share of a window capture, as it crosses the C boundary.
+///
+/// `source` is in the display's own pixel coordinates -- the captured image
+/// starts at zero -- and `destination_*` is where the slice belongs in the output
+/// image, whose size is the window frame's.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SnowLinuxCropSlice {
+    pub display_index: usize,
+    pub source: SnowLinuxRect,
+    pub destination_x: i32,
+    pub destination_y: i32,
+}
+
+/// The focused window as a capture target.
+///
+/// Writes the window id and its frame rectangle in root pixels, and returns 1.
+/// Returns 0 when nothing capturable has focus: no platform, no reachable
+/// server, nothing focused, or a desktop/panel/menu window, which covers a
+/// monitor without being an application. All five outputs must be non-null; the
+/// caller always knows where the answer would go, and a partial write would let
+/// it read the geometry of a target it did not get.
+///
+/// The rectangle is in root pixels -- device pixels -- because that is the space
+/// the captured frames are addressed in. Qt's logical coordinates differ when
+/// the session scales, and converting them is the caller's job: only it knows
+/// which screen the rectangle fell on.
+///
+/// # Safety
+///
+/// `platform` must be null or a live handle, and every output must be null or
+/// point at writable storage of the stated width.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_platform_focused_window(
+    platform: *const SnowLinuxPlatform,
+    id: *mut u32,
+    x: *mut i32,
+    y: *mut i32,
+    width: *mut u32,
+    height: *mut u32,
+) -> c_int {
+    if platform.is_null()
+        || id.is_null()
+        || x.is_null()
+        || y.is_null()
+        || width.is_null()
+        || height.is_null()
+    {
+        return 0;
+    }
+    let Some(lock) = session() else {
+        return 0;
+    };
+    let Ok(connection) = lock.lock() else {
+        return 0;
+    };
+    let Ok(Some(target)) = snow_linux::x11::windowcapture::focused_window_target(&connection)
+    else {
+        return 0;
+    };
+    // An X11 window id is 32 bits; the 64-bit form exists so the pure layer does
+    // not have to know that.
+    let Ok(window_id) = u32::try_from(target.id) else {
+        return 0;
+    };
+    // SAFETY: every pointer was checked for null above; the C contract is that
+    // they point at writable storage of the declared widths.
+    unsafe {
+        *id = window_id;
+        *x = target.frame.x;
+        *y = target.frame.y;
+        *width = target.frame.width;
+        *height = target.frame.height;
+    }
+    1
+}
+
+/// A caller that passes more displays than this has a bug, and the slice table
+/// would be sized from a corrupted count.
+const MAX_DISPLAYS: usize = 32;
+
+/// How to assemble a window capture out of the captured displays.
+///
+/// Writes up to `capacity` slices to `out` and returns the number the plan
+/// actually holds, which may be larger: a caller that guessed a capacity too
+/// small learns the size it needs instead of silently losing part of a window.
+///
+/// Returns -1 for a null `frame`, a null `displays` with a non-zero count, a
+/// null `out` with a non-zero capacity, or a count above [`MAX_DISPLAYS`].
+///
+/// Geometry only: no session is contacted, so this is the same answer whether or
+/// not an X server is reachable, and it is what a caller uses to size the output
+/// image before it knows how many heads the window touches.
+///
+/// # Safety
+///
+/// `frame` must be null or point at a readable `SnowLinuxRect`; `displays` must
+/// point at `display_count` readable elements (it may be null when the count is
+/// zero); `out` must point at `capacity` writable elements (it may be null when
+/// the capacity is zero).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_linux_window_crop_plan(
+    frame: *const SnowLinuxRect,
+    displays: *const SnowLinuxRect,
+    display_count: usize,
+    out: *mut SnowLinuxCropSlice,
+    capacity: usize,
+) -> i32 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return -1;
+    };
+    if display_count > MAX_DISPLAYS
+        || (display_count > 0 && displays.is_null())
+        || (capacity > 0 && out.is_null())
+    {
+        return -1;
+    }
+    let rects: &[SnowLinuxRect] = if display_count == 0 {
+        &[]
+    } else {
+        // SAFETY: the caller's contract above says `displays` points at
+        // `display_count` readable elements.
+        unsafe { std::slice::from_raw_parts(displays, display_count) }
+    };
+    let rects: Vec<snow_linux::geometry::Rect> = rects.iter().copied().map(Into::into).collect();
+    let plan = snow_linux::windowcapture::crop_plan((*frame).into(), &rects);
+    let written = plan.len().min(capacity);
+    for (index, slice) in plan.iter().take(written).enumerate() {
+        // SAFETY: `index` is below `written`, which is at most `capacity`, and
+        // the caller's contract says `out` holds that many writable elements.
+        unsafe {
+            *out.add(index) = SnowLinuxCropSlice {
+                display_index: slice.display_index,
+                source: SnowLinuxRect {
+                    x: slice.source.x,
+                    y: slice.source.y,
+                    width: slice.source.width,
+                    height: slice.source.height,
+                },
+                destination_x: slice.destination_x,
+                destination_y: slice.destination_y,
+            };
+        }
+    }
+    i32::try_from(plan.len()).unwrap_or(i32::MAX)
+}
+
 /// C-side handler for activations, plus the opaque pointer it wants back.
 ///
 /// The pointer outlives the service by contract: the caller keeps it valid until

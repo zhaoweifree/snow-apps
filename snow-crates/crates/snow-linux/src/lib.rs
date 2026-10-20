@@ -4,7 +4,8 @@
 //! developer machine that is not running Linux:
 //!
 //! * [`capture`], [`fullscreen`], [`geometry`], [`globalmouse`], [`hotkey`],
-//!   [`pixels`], [`pointer`], [`text`] and [`input`]'s `keys`/`tracking` modules
+//!   [`pixels`], [`pointer`], [`text`], [`window`], [`windowcapture`] and
+//!   [`input`]'s `keys`/`tracking` modules
 //!   are pure and compile everywhere, so their unit tests run on any host.
 //! * [`session`] only inspects environment variables and therefore compiles
 //!   everywhere too.
@@ -29,6 +30,7 @@ pub mod pointer;
 pub mod session;
 pub mod text;
 pub mod window;
+pub mod windowcapture;
 
 #[cfg(target_os = "linux")]
 pub mod cursor;

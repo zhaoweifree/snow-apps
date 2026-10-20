@@ -50,9 +50,11 @@ pub struct FocusedWindow {
 ///
 /// Rejects the kinds that cover a monitor without being an application: the
 /// desktop backdrop, panels and docks, and transient surfaces such as menus or
-/// notification popups.
+/// notification popups. The predicate itself lives in [`crate::window`] because
+/// the window-capture path asks the same question about the same window and must
+/// not answer it differently.
 pub fn is_fullscreen_candidate(window: &FocusedWindow) -> bool {
-    window.kind == WindowKind::Normal && window.viewable && !window.frame.is_empty()
+    crate::window::is_paintable(window.kind, window.viewable, window.frame)
 }
 
 /// Whether `window` covers `display` within [`EDGE_TOLERANCE`] on every edge.

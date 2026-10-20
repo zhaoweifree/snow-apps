@@ -73,6 +73,71 @@ int snow_linux_platform_focused_fullscreen_on_display(const SnowLinuxPlatform *p
                                                       int32_t y, uint32_t width, uint32_t height,
                                                       double scale);
 
+/* A rectangle in root-window pixels.
+ *
+ * x/y may be negative: X11 positions secondary heads relative to the primary
+ * one, so a head placed above or left of primary has a negative origin.
+ */
+typedef struct SnowLinuxRect {
+    int32_t x;
+    int32_t y;
+    uint32_t width;
+    uint32_t height;
+} SnowLinuxRect;
+
+/* The focused window, as the target of a window capture.
+ *
+ * Writes the X11 window id and its frame rectangle -- decorations included, in
+ * root pixels -- and returns 1. Returns 0 when nothing capturable has focus: no
+ * platform, no reachable server, nothing focused, or a desktop / panel / menu
+ * window, which covers a monitor without being an application. All five outputs
+ * are required: the caller always knows where the answer would go, and a partial
+ * write would let it read the geometry of a target it did not get.
+ *
+ * The rectangle is in device pixels because that is the space captured frames
+ * are addressed in. Qt's logical coordinates differ when the session scales;
+ * converting them is the caller's job, because only it knows which screen the
+ * rectangle fell on.
+ *
+ * X11 has no window-level capture of its own -- reading another window's pixels
+ * needs a Composite redirect -- so this is where a window capture starts: the
+ * frame comes back and the caller crops it out of the root capture.
+ */
+int snow_linux_platform_focused_window(const SnowLinuxPlatform *platform, uint32_t *id, int32_t *x,
+                                       int32_t *y, uint32_t *width, uint32_t *height);
+
+/* One display's share of a window capture.
+ *
+ * `source` is in the display's own pixel coordinates -- the captured image
+ * starts at zero -- and `destination_x`/`destination_y` is where the slice
+ * belongs in the output image, whose size is the window frame's.
+ */
+typedef struct SnowLinuxCropSlice {
+    size_t display_index;
+    SnowLinuxRect source;
+    int32_t destination_x;
+    int32_t destination_y;
+} SnowLinuxCropSlice;
+
+/* How to assemble a window capture out of the captured displays.
+ *
+ * Writes up to `capacity` slices and returns how many the plan actually holds,
+ * which may be larger: a caller that guessed a capacity too small learns the
+ * size it needs instead of silently losing part of a window. Returns -1 for a
+ * null `frame`, a null `displays` with a non-zero count, a null `out` with a
+ * non-zero capacity, or a count above 32.
+ *
+ * A window straddling two heads produces one slice per head, which is the case
+ * that makes this worth having: copying from a single display quietly returns
+ * half a window. A window entirely outside every display produces no slices.
+ *
+ * Geometry only -- no session is contacted -- so the answer does not depend on
+ * an X server being reachable.
+ */
+int32_t snow_linux_window_crop_plan(const SnowLinuxRect *frame, const SnowLinuxRect *displays,
+                                    size_t display_count, SnowLinuxCropSlice *out,
+                                    size_t capacity);
+
 /* Global keyboard shortcuts, over XGrabKey.
  *
  * A grab takes the key combination away from every other client for as long as

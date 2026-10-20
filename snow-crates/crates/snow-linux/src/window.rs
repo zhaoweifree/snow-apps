@@ -80,6 +80,20 @@ pub struct WindowAttributes {
     pub bounds: Rect,
 }
 
+/// Whether a window is a surface the user can name as a target on its own.
+///
+/// Two questions share this rule -- "is the focused window the full-screen
+/// application?" ([`crate::fullscreen`]) and "can the focused window be captured
+/// by itself?" ([`crate::windowcapture`]) -- because they reject exactly the same
+/// surfaces: the desktop backdrop, panels and menus cover a monitor without being
+/// an application, and a hidden window keeps its geometry while showing nothing.
+/// Keeping one function for both is what stops the two answers from drifting
+/// apart, which would show up as a capture of the desktop labelled with a window
+/// name.
+pub fn is_paintable(kind: WindowKind, viewable: bool, frame: Rect) -> bool {
+    kind == WindowKind::Normal && viewable && !frame.is_empty()
+}
+
 /// Whether a window is a pointer target at all.
 pub fn selectable(attributes: &WindowAttributes) -> bool {
     attributes.kind == WindowKind::Normal
@@ -257,6 +271,40 @@ mod tests {
                 .hit_test(50, 50)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn only_a_visible_application_window_is_paintable() {
+        assert!(is_paintable(
+            WindowKind::Normal,
+            true,
+            Rect::new(0, 0, 10, 10)
+        ));
+        assert!(!is_paintable(
+            WindowKind::Desktop,
+            true,
+            Rect::new(0, 0, 10, 10)
+        ));
+        assert!(!is_paintable(
+            WindowKind::Dock,
+            true,
+            Rect::new(0, 0, 10, 10)
+        ));
+        assert!(!is_paintable(
+            WindowKind::Transient,
+            true,
+            Rect::new(0, 0, 10, 10)
+        ));
+        assert!(!is_paintable(
+            WindowKind::Normal,
+            false,
+            Rect::new(0, 0, 10, 10)
+        ));
+        assert!(!is_paintable(
+            WindowKind::Normal,
+            true,
+            Rect::new(0, 0, 0, 10)
+        ));
     }
 
     #[test]

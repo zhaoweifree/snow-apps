@@ -36,6 +36,7 @@ export MSYS2_ARG_CONV_EXCL='*'
 status=0
 for file in "$REPO/snow_shot/src/platform/linux/globalshortcutbackend.cpp" \
             "$REPO/snow_shot/src/platform/linux/focusedfullscreenwindow.cpp" \
+            "$REPO/snow_shot/src/platform/linux/screenshotfocus.cpp" \
             "$REPO/snow_shot/src/platform/linux/globalmousebackend.cpp" \
             "$REPO/snow_shot/src/platform/linux/autostartregistration.cpp" \
             "$REPO/snow_shot/src/platform/linux/desktopentry.cpp" \
@@ -43,12 +44,18 @@ for file in "$REPO/snow_shot/src/platform/linux/globalshortcutbackend.cpp" \
             "$REPO/snow_shot/src/platform/linux/statusnotifierservice.cpp" \
             "$REPO/snow_shot/src/app/singleinstancecoordinator.cpp" \
             "$REPO/snow_shot/src/app/singleinstanceendpoint.cpp" \
+            "$REPO/snow_shot/src/presentation/capture/directcapturenative.cpp" \
             "$REPO/snow_shot/src/platform/screenshotscroll.cpp" "$@"; do
     echo "=== $(basename "$file")" | tee -a "$OUT"
     cl -nologo -Zs -std:c++20 -EHsc -W4 -permissive- \
         -DWIN32 -D_WINDOWS -DQ_OS_LINUX -DUNICODE -D_UNICODE \
         "-I$REPO_W/snow_shot/include" \
+        "-I$REPO_W/snow_shot/src/presentation/capture" \
+        "-I$REPO_W/snow_image/include" \
+        "-I$REPO_W/snow_memory/include" \
         "-I$REPO_W/snow-crates/crates/snow-linux-c/include" \
+        "-I$REPO_W/snow-crates/crates/snow-capture-c/include" \
+        "-I$REPO_W/snow-crates/crates/snow-recording-c/include" \
         "-I$QT/include" \
         "-I$QT/include/QtCore" \
         "-I$QT/include/QtDBus" \

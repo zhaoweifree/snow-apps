@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、窗口级捕获目标（9.4.16 末段：Linux 的 focused-window C ABI 未暴露）、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
+| **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -1639,10 +1639,9 @@ Windows 头，非 Windows 平台把它 include 进来连编译都过不去；而
 
 **本片未覆盖 / 留给后面**：
 
-- **Linux 的窗口级捕获目标仍然拿不到**（`request.window` / `monitorName` 为空 ⇒ 退回整屏）。
-  要补需要三步：`snow-linux` 暴露 focused-window 的 id+geometry C ABI、`screenshotfocus.h`
-  加 Linux 声明、`directcapturecontroller.cpp` 的 `#elif` 加分支。这条不是"忘了"，
-  是 P4 之后最该做的第一件事，已写进 9.4.16 与阶段表。
+- **Linux 的窗口级捕获目标当时拿不到**（`request.window` / `monitorName` 为空 ⇒ 退回整屏）。
+  已在 **9.4.17** 补上：`snow-linux` 暴露 focused-window 的 id+frame C ABI、`screenshotfocus.h`
+  加 Linux 声明、`directcapturecontroller.cpp` 的 `#elif` 加分支。
 - **X11 上窗口钩子的真实需求未验**：置顶、输入穿透（XShape）、层叠顺序在 dde 合成器下
   是否需要原生干预，只能在真机上看。现在调的是空实现，行为等同 Qt 默认。
 - **macOS 侧只做了 include 改写，没有 macOS 主机可编译**；改动是纯 include + 类型别名，
@@ -1650,6 +1649,88 @@ Windows 头，非 Windows 平台把它 include 进来连编译都过不去；而
 - **滚轮注入（Linux）** 仍是 0，返回 `Unsupported` 时用户看到的是
   `scroll_dispatch_failed` / 自动滚动自我关闭；`permission_required` 这个文案是
   Windows/mac 语境，Linux 上语义不准确，等真实现再改文案。
+
+#### 9.4.17 P4 续：Linux 窗口级捕获目标（2026-10-20）
+
+P4 收尾时留下的第一条待办。症状是"截图→当前窗口"和"截图→当前显示器"在 X11 上什么也拿不到：
+`DirectCaptureRequest::window` 和 `monitorName` 都是空，`captureDirectTarget` 在入口就返回空帧。
+
+**决定 1：X11 没有窗口级采集，接受"从整屏裁"作为语义。**
+
+`snow-capture` 的 Linux 后端拒绝 `CaptureTarget::Window`（见
+`snow-capture/src/platform/linux.rs` 顶部注释），理由成立：读别的窗口自己的 drawable 需要
+Composite redirect，否则服务器在窗口被遮挡时读到的是上次留下的帧缓冲内容。所以窗口截图的
+实现是**在根窗口采集结果上按窗口 frame 裁剪**，这也是 scrot 等工具的做法。代价写在文档里：
+被遮挡的窗口截出来就是被遮挡的样子。这条不能靠"更好的实现"绕过，要改得上 XComposite，
+那是另一片工作量。
+
+**决定 2：几何规则全放 Rust 纯逻辑，C++ 只搬字节。**
+
+`windowcapture.rs`（新增，全平台编译）有两个函数：
+`capture_target(id, &FocusedWindow)` 决定"这个聚焦窗口能不能单独截"，
+`crop_plan(frame, displays)` 决定"哪块屏的哪个矩形，贴到输出的哪个位置"。
+后者是本片真正有价值的部分：**窗口跨两块屏时，只从一块屏取会静默返回半个窗口**，
+而这是双屏用户拖窗口时最常见的状态。10 组单测在 Windows 上跑，含负坐标屏、上下排列、
+半开区间边界、退化屏、饱和坐标。
+
+"能不能单独截"这个判据**没有新写一份**，而是把 9.4.10 里"能不能算全屏应用"的那条抽到
+`window::is_paintable`，fullscreen 与 windowcapture 同时调用它 —— 两个问题拒绝的是同一批
+表面（桌面背板、面板、菜单、隐藏窗口），分成两份实现早晚会给出不一致的答案，症状是
+"截出来是桌面，标题却是窗口名"。
+
+**决定 3：一个查询吐三个答案。**
+
+`screenshotFocusedWindowTarget(quint32* id, QRect* frame, QRect* logicalBounds)`：
+id 用来做请求身份与历史记录，frame 是根窗口像素（裁剪用），logicalBounds 是 Qt 逻辑坐标
+（浮层与历史画布用）。合成一次查询而不是三个函数，因为三次读可能描述三个不同的窗口。
+`frame → logicalBounds` 的换算是**按边除**（不是按尺寸乘），与 `fullscreen::logical_to_native`
+的方向相反、规则相同；跨屏窗口没有唯一比例，此时 logicalBounds 返回空，调用方回落物理矩形
+（历史画布本来就这么兜底）。
+
+顺带把 `onX11()` / `openPlatform()` 两个 12 行助手抽进 `src/platform/linux/x11platform_p.h`
+（inline，无新增 TU），`focusedfullscreenwindow.cpp` 与新文件共用。
+
+**决定 4：`CurrentMonitor` 用 Qt 的屏幕名，不引入第二套坐标。**
+
+Win32 是 `MonitorFromPoint`，macOS 是 `display:%1`。Linux 上 `QScreen::name()` 在 xcb 下就是
+RandR output 名，也正是 `snow-capture` 报告给 Qt 的 monitor 名，所以直接把指针所在屏的名字
+填进 `monitorName` 就够了。名字对不上时不再静默返回空图，而是给出
+`No captured display matched the current monitor` —— 这条在真机上若出现，就说明两侧命名真的
+分叉了，比"截图无声失败"好查得多。
+
+**一个反向的坑**：`captureDirectTarget` 里 `nativeRequest.focused_window` 在 Linux 上**必须**
+清零。那个字段在 native 层的唯一用途是 `WindowId::from_windows_handle`，也就是 HWND；把
+X11 的 window id 递下去会走进 Win32 采集路径拿一个毫无意义的数字。因此 Linux 分支改为请求
+整屏 + 自己裁。
+
+**验证**：
+
+- `cargo test -p snow-linux`：**174 passed**（新增 `windowcapture` 10 组 + `window::is_paintable`
+  1 组）。
+- `linux-cross-check.sh` 对 `snow-linux` / `snow-linux-c` 双架构（x86_64、aarch64）**PASS**。
+  *注：不带 filter 的全仓扫会在某个 crate 上触发本机 Program Blacklist（`reg.exe`），
+  与本次改动无关，已单独记在环境约束里。*
+- `scripts/syntax-check-linux-cpp.sh` 覆盖面 10 → **12** 个文件（新增 `screenshotfocus.cpp`
+  与 `directcapturenative.cpp`），补了 `snow_image` / `snow_memory` / `snow-capture-c` /
+  `snow-recording-c` 头目录。
+- 4 个改动 TU 用 `compile_commands.json` 的真实参数复查（新脚本
+  `.workbuddy/qt5-port/check-tu.sh`）：`directcapturenative.cpp`、`directcapturecontroller.cpp`、
+  `applicationcontroller.cpp`、`screenshotcontroller.cpp` 全部 **PASS**。
+- 新脚本 `replay-tu.py` + `check-tu.sh`：从 `compile_commands.json` 取真实命令行、去掉
+  `-o` 换成 `/Zs` 再跑。比手抄命令可靠，因为 include 路径与 feature define 会随时间漂移。
+
+**本片未覆盖**：
+
+- **真机未跑**：`_NET_ACTIVE_WINDOW` 在 dde-kwin 下是否始终维护（否则走输入焦点回退，
+  而回退拿到的是**客户端**窗口，frame 会少一圈标题栏）、窗口 frame 含不含 DDE 的阴影边距、
+  裁剪路径在 SHM 采集下的耗时。
+- **`QScreen::name()` 与 RandR output 名是否真的一致**只在 Qt 源码层面推断过。不一致的表现
+  是 `No captured display matched the current monitor`，一条日志就能判定。
+- **跨屏窗口**的 history 画布位置：logicalBounds 为空 ⇒ 回落物理矩形，1x 缩放下正确，
+  带缩放时会偏，等真机确认。
+- **被遮挡的窗口**截出来是被遮挡的样子（决定 1 的直接后果），这不是 bug，但如果用户预期是
+  "干净的单窗口截图"，只能靠 XComposite 再开一片。
+- **Wayland** 全部不适用：`onX11()` 为假 ⇒ 两张表都返回 false ⇒ 行为回到"截不到"。
 
 ### 9.5 打包
 

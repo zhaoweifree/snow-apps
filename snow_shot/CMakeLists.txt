@@ -1055,12 +1055,16 @@ elseif(APPLE)
         src/platform/macos/globalshortcutbackend.cpp
         src/platform/macos/focusedfullscreenwindow.mm)
 elseif(UNIX)
-    # X11 grabs and the focus query behind full-screen suppression; both files
-    # recognise a Wayland session through Qt's platform name and report the
-    # feature as unavailable there.
+    # X11 grabs and the two focus queries: the full-screen check that suppresses
+    # shortcuts, and the framed window the direct-capture path cuts out of the
+    # root window. All of them recognise a Wayland session through Qt's platform
+    # name and report the feature as unavailable there; `x11platform_p.h` holds
+    # the two helpers they share.
     list(APPEND SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES
         src/platform/linux/globalshortcutbackend.cpp
-        src/platform/linux/focusedfullscreenwindow.cpp)
+        src/platform/linux/focusedfullscreenwindow.cpp
+        src/platform/linux/screenshotfocus.cpp
+        src/platform/linux/x11platform_p.h)
 endif()
 list(APPEND SNOW_SHOT_SETTINGS_SOURCES ${SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES})
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/presentation/components/screenshothistorypagewidget.cpp"
@@ -11630,7 +11634,12 @@ if(UNIX AND NOT APPLE)
         "src/platform/physicalcursor.cpp"
         "src/platform/linux/globalshortcutbackend.cpp"
         "src/platform/linux/focusedfullscreenwindow.cpp"
-        "src/platform/linux/globalmousebackend.cpp")
+        "src/platform/linux/screenshotfocus.cpp"
+        "src/platform/linux/globalmousebackend.cpp"
+        # The window capture is a crop of the root capture, so the file that
+        # assembles it needs the geometry helper -- and the archive that carries
+        # it -- wherever it is compiled, including the capture's own test binary.
+        "src/presentation/capture/directcapturenative.cpp")
     set(_snow_x11_linked "")
     get_property(_snow_x11_consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
     foreach(_snow_target IN LISTS _snow_x11_consumers)

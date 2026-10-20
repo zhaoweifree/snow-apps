@@ -10,6 +10,7 @@ pub mod keymap;
 pub mod pointer;
 pub mod shm;
 pub mod window;
+pub mod windowcapture;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::randr;

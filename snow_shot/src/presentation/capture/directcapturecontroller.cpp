@@ -27,6 +27,9 @@
 
 #if defined(Q_OS_WIN)
 #include <windows.h>
+#elif defined(Q_OS_LINUX)
+#include <QCursor>
+#include <QScreen>
 #endif
 
 namespace snow_shot::presentation {
@@ -278,6 +281,18 @@ void DirectCaptureController::captureFocusedWindow() {
 #ifdef Q_OS_MACOS
     request.window = platform::screenshotFocusedWindow();
 #endif
+#ifdef Q_OS_LINUX
+    // Id and rectangle from one read: X11 has no window-level capture, so the
+    // frame is what the capture path crops out of the root capture.
+    quint32 window = 0;
+    QRect frame;
+    QRect logicalBounds;
+    if (platform::screenshotFocusedWindowTarget(&window, &frame, &logicalBounds)) {
+        request.window = window;
+        request.windowFrame = frame;
+        request.windowLogicalBounds = logicalBounds;
+    }
+#endif
     m_impl->workflow.enqueue(std::move(request));
 }
 
@@ -296,6 +311,15 @@ void DirectCaptureController::captureCurrentMonitor() {
     const quint32 id = platform::screenshotDisplayAtCursor();
     if (id)
         request.monitorName = QStringLiteral("display:%1").arg(id);
+#endif
+#ifdef Q_OS_LINUX
+    // X11 has no display id to pass around, but it does name its heads: on xcb Qt
+    // reports the RandR output name, which is also what the capture backend calls
+    // the monitor. Asking Qt which screen the pointer is on is therefore the same
+    // answer the Win32 branch gets from MonitorFromPoint, without a second
+    // coordinate space.
+    if (const QScreen* screen = QGuiApplication::screenAt(QCursor::pos()))
+        request.monitorName = screen->name();
 #endif
     m_impl->workflow.enqueue(std::move(request));
 }
@@ -336,6 +360,19 @@ bool DirectCaptureController::mcpCapture(
     else
         request.monitorName =
             QStringLiteral("display:%1").arg(platform::screenshotDisplayAtCursor());
+#elif defined(Q_OS_LINUX)
+    if (request.target == DirectCaptureTarget::FocusedWindow) {
+        quint32 window = 0;
+        QRect frame;
+        QRect logicalBounds;
+        if (platform::screenshotFocusedWindowTarget(&window, &frame, &logicalBounds)) {
+            request.window = window;
+            request.windowFrame = frame;
+            request.windowLogicalBounds = logicalBounds;
+        }
+    } else if (const QScreen* screen = QGuiApplication::screenAt(QCursor::pos())) {
+        request.monitorName = screen->name();
+    }
 #endif
     if (target == QStringLiteral("monitor")) {
         request.monitorName = options.value(QStringLiteral("monitor_id")).toString();

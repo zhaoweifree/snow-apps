@@ -65,10 +65,23 @@ pub fn focused_fullscreen_on_display(session: &X11Session, display: Rect) -> Lin
 
 fn focused_fullscreen_within(session: &X11Session, displays: &[Rect]) -> LinuxResult<bool> {
     let atoms = Atoms::intern(session)?;
-    let Some(window) = focused_window(session, &atoms)? else {
+    let Some((_, window)) = focused_window(session, &atoms)? else {
         return Ok(false);
     };
     Ok(focused_is_fullscreen(Some(&window), displays))
+}
+
+/// The focused window together with the X11 id it was read from.
+///
+/// The id is what a capture request names its target by, so the window-capture
+/// path needs it and the full-screen check does not. Both go through the same
+/// read: which window is focused is a single fact, and answering it twice would
+/// let the two paths disagree about a window that changed focus in between.
+pub(crate) fn focused_window_with_id(
+    session: &X11Session,
+) -> LinuxResult<Option<(Window, FocusedWindow)>> {
+    let atoms = Atoms::intern(session)?;
+    focused_window(session, &atoms)
 }
 
 /// The atoms one check needs, interned once per call.
@@ -98,7 +111,10 @@ impl Atoms {
 }
 
 /// The focused window, or `None` when nothing usable has focus.
-fn focused_window(session: &X11Session, atoms: &Atoms) -> LinuxResult<Option<FocusedWindow>> {
+fn focused_window(
+    session: &X11Session,
+    atoms: &Atoms,
+) -> LinuxResult<Option<(Window, FocusedWindow)>> {
     let Some(active) = active_window(session, atoms.active_window)? else {
         return Ok(None);
     };
@@ -145,11 +161,14 @@ fn focused_window(session: &X11Session, atoms: &Atoms) -> LinuxResult<Option<Foc
         u32::from(geometry.height) + 2 * u32::from(geometry.border_width),
     );
 
-    Ok(Some(FocusedWindow {
-        kind: window_kind(session, &atoms.types, &chain)?,
-        viewable: attributes.map_state == MapState::VIEWABLE,
-        frame,
-    }))
+    Ok(Some((
+        top,
+        FocusedWindow {
+            kind: window_kind(session, &atoms.types, &chain)?,
+            viewable: attributes.map_state == MapState::VIEWABLE,
+            frame,
+        },
+    )))
 }
 
 /// `_NET_ACTIVE_WINDOW`, falling back to the keyboard focus.
