@@ -111,9 +111,18 @@
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #  define SNOW_QT6 1
 #  define SNOW_QT5 0
-#  define SNOW_COMPAT_HAS_ENTER_EVENT 1
-#  include <QKeyCombination>
-#  include <QEnterEvent>
+// QKeyCombination and QEnterEvent live in QtGui, which a QtCore-only target
+// (snow_shot_diagnostics is one) never gets on its include path. This header is
+// force-included into every TU, so the includes below must be gated exactly like
+// the Qt5 branch below already is -- otherwise such a target dies with
+// 'fatal error C1083: cannot open include file: QEnterEvent'.
+#  if SNOW_COMPAT_HAS_GUI
+#    define SNOW_COMPAT_HAS_ENTER_EVENT 1
+#    include <QKeyCombination>
+#    include <QEnterEvent>
+#  else
+#    define SNOW_COMPAT_HAS_ENTER_EVENT 0
+#  endif
 #  include <QLatin1StringView>
 #else
 #  define SNOW_QT6 0
@@ -231,20 +240,21 @@ using snow::compat::QKeyCombination;
 
 [[nodiscard]] inline QKeySequence snowKeySequence(const QList<QKeyCombination>& combinations)
 {
-    // A QKeySequence holds at most 4 key combinations
-    // (Qt5 exposes exactly this as QKeySequence(int, int, int, int)).
-    // Note: Qt5/Qt6 QKeySequence::count() is a NON-static member reporting how
-    // many keys that particular sequence holds, so it cannot be used here.
-    // [[maybe_unused]]: only the Qt6 branch below loops with it; the Qt5 branch
-    // relies on the 4-argument constructor instead, so /W4 would otherwise report
-    // C4189 (and SNOW_APPS_STRICT_COMPILE promotes warnings to errors).
-    [[maybe_unused]] constexpr int kSnowMaxKeySequenceLength = 4;
+    // A QKeySequence holds at most 4 key combinations, and the 4-argument
+    // constructor is the only public route on BOTH branches -- which is why the
+    // two branches differ only in the element type they feed it.
+    //
+    // Qt6 used to be written as a loop over setKeyCombination(i, ...), but that
+    // member does not exist in the Qt 6.12 headers (QtGui/qkeysequence.h exposes
+    // setKey(QKeyCombination, int) plus a four-argument QKeyCombination
+    // constructor, nothing else). Verified against C:/Qt/6.12.0/msvc2022_64.
+    // Using the constructor is also the stable route across 6.0..6.12.
 #if SNOW_QT6
-    QKeySequence sequence;
-    for (int i = 0; i < combinations.size() && i < kSnowMaxKeySequenceLength; ++i) {
-        sequence.setKeyCombination(i, combinations.at(i));
-    }
-    return sequence;
+    const auto combinationAt = [&combinations](int index) -> QKeyCombination {
+        return index < combinations.size() ? combinations.at(index)
+                                           : QKeyCombination::fromCombined(0);
+    };
+    return QKeySequence(combinationAt(0), combinationAt(1), combinationAt(2), combinationAt(3));
 #else
     // Qt5 has no usable public mutator: setKey() is private and operator[]
     // returns a plain int rvalue, so the 4-argument constructor is the only
@@ -279,7 +289,12 @@ using snow::compat::QKeyCombination;
 //    Spelling the parameter as SnowEnterEvent* lets a single override
 //    declaration be correct on both versions.
 // ---------------------------------------------------------------------------
-#if SNOW_QT6
+#if !SNOW_COMPAT_HAS_ENTER_EVENT
+// QtCore-only target: QEnterEvent is not reachable (see the include gate above).
+// No live code in such a target declares an enterEvent override, so an inert
+// alias keeps this header compilable without pulling QtGui in.
+using SnowEnterEvent = QEvent;
+#elif SNOW_QT6
 using SnowEnterEvent = QEnterEvent;
 #else
 using SnowEnterEvent = QEvent;
@@ -1765,7 +1780,12 @@ private:
 {
     const auto encoding = html ? QStringDecoder::encodingForHtml(data)
                                : QStringDecoder::encodingForData(data);
-    return SnowStringDecoder(encoding.value_or(QStringDecoder::Utf8));
+    // Two explicit conversions in a row are NOT allowed in one implicit
+    // conversion sequence: encodingForXxx() yields QStringConverter::Encoding,
+    // QStringDecoder(Encoding) is explicit, and SnowStringDecoder(QStringDecoder)
+    // is explicit too. Spell the inner conversion out instead of relying on
+    // value_or()'s result being implicitly convertible (it is not).
+    return SnowStringDecoder(QStringDecoder(encoding.value_or(QStringDecoder::Utf8)));
 }
 #else
 #  include <QTextCodec>

@@ -116,35 +116,26 @@ macro(snow_find_qt)
 
         message(STATUS "Snow Qt: Qt5 route active (${Qt5_VERSION}); Qt6-style commands shimmed.")
 
-        # 目录级强制包含兼容头：注入一次，由后续 add_subdirectory 继承，
-        # 从而避免在 112 个源文件里逐个补 #include。
-        # 兼容头自身对"非 Qt 目标"与"仅 QtCore 目标"做了 __has_include 保护，
-        # 因此对第三方（FetchContent）目标也是安全的。
-        get_property(_snow_compat_injected DIRECTORY PROPERTY SNOW_QT5_COMPAT_INJECTED)
-        if(NOT _snow_compat_injected)
-            get_property(_snow_compat_header GLOBAL PROPERTY SNOW_QT_COMPAT_HEADER)
-            if(NOT _snow_compat_header)
-                set(_snow_compat_header
-                    "${SNOW_QT_CMAKE_DIR}/../snow_shot/include/snow_shot/compat/qt_compat.h")
-                get_filename_component(_snow_compat_header "${_snow_compat_header}" ABSOLUTE)
-                set_property(GLOBAL PROPERTY SNOW_QT_COMPAT_HEADER "${_snow_compat_header}")
-            endif()
-            if(MSVC)
-                add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/FI${_snow_compat_header}>")
-            else()
-                add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-include;${_snow_compat_header}>")
-            endif()
-            set_property(DIRECTORY PROPERTY SNOW_QT5_COMPAT_INJECTED TRUE)
-            message(STATUS "Snow Qt: Qt5 compat header force-included: ${_snow_compat_header}")
-            unset(_snow_compat_header)
-        endif()
-        unset(_snow_compat_injected)
+        # 兼容头的注入在这里统一处理（见下方），Qt5/Qt6 共用同一段逻辑。
     endif()
-endmacro()
 
-# 手动把兼容头绑定到单个目标（仅当需要覆盖目录级注入时使用）。
-macro(snow_qt_apply_compat_include target)
-    if(SNOW_QT_MAJOR STREQUAL "5")
+    # ---------------------------------------------------------------------
+    # 目录级强制包含兼容头（Qt6 与 Qt5 **都**要注入）。
+    #
+    # 原先只有 Qt5 注入，假设 Qt6 走原生 API 因此不需要垫片。这个假设在机械
+    # 改写铺开之后不再成立：R9/R18/R23 等规则把业务代码改成了 `SnowEnterEvent`
+    # `snowAccentRole` `snowFontResolveMask` 这些垫片符号（仅 SnowEnterEvent 就有
+    # 70 个文件），Qt6 不注入时它们全部未定义，Qt6 基线直接编译失败。
+    #
+    # 兼容头在 Qt6 下几乎全是"原生类型的薄别名"（SnowEnterEvent = QEnterEvent 等），
+    # 注入没有行为开销；而它对"非 Qt 目标"和"仅 QtCore 目标"有 __has_include
+    # 保护，对第三方 FetchContent 目标同样安全（Qt5 路线已长期验证）。
+    #
+    # 这样两边编译的是同一份源码，Qt5/Qt6 的差异只剩头文件里的 #if 分支，
+    # 回归基线的对拍才成立。
+    # ---------------------------------------------------------------------
+    get_property(_snow_compat_injected DIRECTORY PROPERTY SNOW_QT_COMPAT_INJECTED)
+    if(NOT _snow_compat_injected)
         get_property(_snow_compat_header GLOBAL PROPERTY SNOW_QT_COMPAT_HEADER)
         if(NOT _snow_compat_header)
             set(_snow_compat_header
@@ -153,14 +144,36 @@ macro(snow_qt_apply_compat_include target)
             set_property(GLOBAL PROPERTY SNOW_QT_COMPAT_HEADER "${_snow_compat_header}")
         endif()
         if(MSVC)
-            target_compile_options(${target} PRIVATE
-                "$<$<COMPILE_LANGUAGE:CXX>:/FI${_snow_compat_header}>")
+            add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/FI${_snow_compat_header}>")
         else()
-            target_compile_options(${target} PRIVATE
-                "$<$<COMPILE_LANGUAGE:CXX>:-include;${_snow_compat_header}>")
+            add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-include;${_snow_compat_header}>")
         endif()
+        set_property(DIRECTORY PROPERTY SNOW_QT_COMPAT_INJECTED TRUE)
+        message(STATUS
+            "Snow Qt: compat header force-included (Qt${SNOW_QT_MAJOR} route): ${_snow_compat_header}")
         unset(_snow_compat_header)
     endif()
+    unset(_snow_compat_injected)
+endmacro()
+
+# 手动把兼容头绑定到单个目标（仅当需要覆盖目录级注入时使用）。
+macro(snow_qt_apply_compat_include target)
+    # 版本无关：Qt6 与 Qt5 编译的是同一份被改写过的源码，都需要垫片符号。
+    get_property(_snow_compat_header GLOBAL PROPERTY SNOW_QT_COMPAT_HEADER)
+    if(NOT _snow_compat_header)
+        set(_snow_compat_header
+            "${SNOW_QT_CMAKE_DIR}/../snow_shot/include/snow_shot/compat/qt_compat.h")
+        get_filename_component(_snow_compat_header "${_snow_compat_header}" ABSOLUTE)
+        set_property(GLOBAL PROPERTY SNOW_QT_COMPAT_HEADER "${_snow_compat_header}")
+    endif()
+    if(MSVC)
+        target_compile_options(${target} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:/FI${_snow_compat_header}>")
+    else()
+        target_compile_options(${target} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:-include;${_snow_compat_header}>")
+    endif()
+    unset(_snow_compat_header)
 endmacro()
 
 macro(snow_find_qt_private module)
