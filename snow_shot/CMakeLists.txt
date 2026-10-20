@@ -1380,6 +1380,7 @@ set(PROJECT_HEADERS
     include/snow_shot/app/applicationrestart.h
     include/snow_shot/app/updateconfirmationdialog.h
     include/snow_shot/app/singleinstancecoordinator.h
+    include/snow_shot/app/singleinstanceendpoint.h
     include/snow_shot/platform/windows/autostartregistration.h
     include/snow_shot/platform/windows/focusedfullscreenwindow.h
     include/snow_shot/platform/windows/monitorgeometry.h
@@ -1550,6 +1551,7 @@ set(PROJECT_CXX_SOURCES
     src/app/featureavailability.cpp
     src/app/main.cpp
     src/app/singleinstancecoordinator.cpp
+    src/app/singleinstanceendpoint.cpp
     src/platform/physicalcursor.cpp
     src/platform/windows/windowchrome.cpp
     src/platform/windows/windowcursorrefresh.h
@@ -2359,6 +2361,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         tests/single_instance_coordinator_tests.cpp
         include/snow_shot/app/singleinstancecoordinator.h
         src/app/singleinstancecoordinator.cpp
+        src/app/singleinstanceendpoint.cpp
     )
     target_include_directories(snow-shot-single-instance-coordinator-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -2373,6 +2376,19 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
     )
+    # Where the socket and the lock land on Linux: no bus, no filesystem, only the
+    # path arithmetic and the ownership rule, so it runs on every host.
+    add_executable(snow-shot-linux-single-instance-endpoint-tests
+        tests/linux_single_instance_endpoint_tests.cpp
+        src/app/singleinstanceendpoint.cpp)
+    target_include_directories(snow-shot-linux-single-instance-endpoint-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(snow-shot-linux-single-instance-endpoint-tests PRIVATE Qt::Core)
+    add_test(NAME snow-shot-linux-single-instance-endpoint-tests
+             COMMAND snow-shot-linux-single-instance-endpoint-tests)
+    set_tests_properties(snow-shot-linux-single-instance-endpoint-tests PROPERTIES LABELS "unit"
+        TIMEOUT 30
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
 
     add_test(NAME snow-shot-storage-boundary-check
         COMMAND ${CMAKE_COMMAND}

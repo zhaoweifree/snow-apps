@@ -7,6 +7,11 @@
 # 于是把 Q_OS_LINUX 手动塞给 MSVC，就能把「缺 include、成员名写错、签名不匹配」
 # 这类纯语法/类型问题在本机抓出来 —— 剩下真正只能由 UOS 回答的是 ABI 与运行期行为。
 #
+# 收进这个清单的不是「都在 platform/linux 下」，而是「`#if defined(Q_OS_LINUX)`
+# 里面那一半在 Windows 构建里永远不编译」的文件：单实例协调器就是这种 ——
+# 它在别的平台上也有实现，于是整个分支连语法都没人查。判据是 Q_OS_LINUX 而不是
+# Q_OS_UNIX，因为 MSVC 上定义 Q_OS_UNIX 会污染 Qt 自己的平台探测。
+#
 #   bash scripts/syntax-check-linux-cpp.sh [额外 cl 参数...]
 set -uo pipefail
 
@@ -35,7 +40,9 @@ for file in "$REPO/snow_shot/src/platform/linux/globalshortcutbackend.cpp" \
             "$REPO/snow_shot/src/platform/linux/autostartregistration.cpp" \
             "$REPO/snow_shot/src/platform/linux/desktopentry.cpp" \
             "$REPO/snow_shot/src/platform/linux/systemnotificationservice.cpp" \
-            "$REPO/snow_shot/src/platform/linux/statusnotifierservice.cpp" "$@"; do
+            "$REPO/snow_shot/src/platform/linux/statusnotifierservice.cpp" \
+            "$REPO/snow_shot/src/app/singleinstancecoordinator.cpp" \
+            "$REPO/snow_shot/src/app/singleinstanceendpoint.cpp" "$@"; do
     echo "=== $(basename "$file")" | tee -a "$OUT"
     cl -nologo -Zs -std:c++20 -EHsc -W4 -permissive- \
         -DWIN32 -D_WINDOWS -DQ_OS_LINUX -DUNICODE -D_UNICODE \
@@ -45,6 +52,7 @@ for file in "$REPO/snow_shot/src/platform/linux/globalshortcutbackend.cpp" \
         "-I$QT/include/QtCore" \
         "-I$QT/include/QtDBus" \
         "-I$QT/include/QtGui" \
+        "-I$QT/include/QtNetwork" \
         "-I$QT/include/QtWidgets" \
         "$(cygpath -w "$file")" 2>&1 | tee -a "$OUT"
     if [ "${PIPESTATUS[0]}" -ne 0 ]; then

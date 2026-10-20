@@ -1,9 +1,13 @@
 #include "snow_shot/app/singleinstancecoordinator.h"
 
+#include "snow_shot/app/singleinstanceendpoint.h"
+
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -34,6 +38,17 @@ QString instanceIdentity() {
         QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(24));
 }
 
+#if defined(Q_OS_LINUX)
+// The owner of the home directory is this user by construction, and asking Qt for it
+// keeps this translation unit free of <unistd.h> -- the Linux branch below is otherwise
+// impossible to compile anywhere but Linux, and Linux is the one host we cannot build
+// on yet. If the number ever comes back as 0 for a non-root user, the ownership check
+// refuses the shared temp directory instead of adopting one; it never adopts a
+// directory it cannot prove is ours.
+qint64 currentUserId() {
+    return static_cast<qint64>(QFileInfo(QDir::homePath()).ownerId());
+}
+#else
 QString runtimeDirectory() {
     QString path = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
     if (path.trimmed().isEmpty()) {
@@ -41,6 +56,7 @@ QString runtimeDirectory() {
     }
     return QDir::cleanPath(path);
 }
+#endif
 
 QByteArray requestPayload(const QStringList& arguments, const QString& requestId,
                           int protocolVersion) {
@@ -81,11 +97,34 @@ bool writeFrame(QLocalSocket& socket, const QByteArray& frame,
 
 SingleInstanceCoordinator::SingleInstanceCoordinator(QObject* parent) : QObject(parent) {
     const QString identity = instanceIdentity();
-    m_legacyServerName = QStringLiteral("snow-shot-") + identity;
+    const QString baseName = QStringLiteral("snow-shot-") + identity;
+#if defined(Q_OS_LINUX)
+    // A Unix domain socket needs a path. Handed a bare name, QLocalServer invents one
+    // under QDir::tempPath(): a world-writable directory that systemd-tmpfiles sweeps
+    // by age -- unlinking the socket of a process that has been sitting in the tray for
+    // ten days, after which every launch falls through to "owns the storage lock but
+    // could not be contacted" and exits. The session runtime directory has neither
+    // problem, and keeping the lock there too means one directory to inspect when
+    // something is stuck.
+    const ipc::EndpointLayout layout = ipc::socketEndpointLayout(
+        baseName, QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation),
+        QStandardPaths::writableLocation(QStandardPaths::TempLocation), currentUserId());
+    m_endpointDirectory = layout.directory;
+    m_privateEndpointDirectory = layout.privateDirectory;
+    m_endpointError = layout.error;
+    m_legacyServerName = layout.legacyEndpoint;
+    m_receiptServerName = layout.receiptEndpoint;
+    m_lockFilePath = layout.lockFilePath;
+    if (m_endpointError.isEmpty() && m_privateEndpointDirectory) {
+        qWarning("No usable session runtime directory: the single-instance socket falls back to "
+                 "%s",
+                 qPrintable(m_endpointDirectory));
+    }
+#else
+    m_legacyServerName = baseName;
     m_receiptServerName = m_legacyServerName + QStringLiteral("-v2");
-    m_lockFilePath =
-        QDir(runtimeDirectory())
-            .filePath(QStringLiteral("snow-shot-") + identity + QStringLiteral(".lock"));
+    m_lockFilePath = QDir(runtimeDirectory()).filePath(baseName + QStringLiteral(".lock"));
+#endif
 }
 
 SingleInstanceCoordinator::~SingleInstanceCoordinator() {
@@ -101,9 +140,9 @@ SingleInstanceCoordinator::acquireOrForward(const QStringList& arguments,
     if (m_primary) {
         return {SingleInstanceOutcome::Primary, {}};
     }
-    if (!QDir().mkpath(QFileInfo(m_lockFilePath).absolutePath())) {
-        return {SingleInstanceOutcome::Failed,
-                QStringLiteral("The single-instance runtime directory is unavailable")};
+    QString directoryError;
+    if (!prepareEndpointDirectory(&directoryError)) {
+        return {SingleInstanceOutcome::Failed, directoryError};
     }
     m_lock = std::make_unique<QLockFile>(m_lockFilePath);
     m_lock->setStaleLockTime(0);
@@ -176,6 +215,54 @@ bool SingleInstanceCoordinator::isPrimary() const {
 
 QString SingleInstanceCoordinator::lockFilePath() const {
     return m_lockFilePath;
+}
+
+QString SingleInstanceCoordinator::endpointName(int protocolVersion) const {
+    return protocolVersion == kReceiptProtocolVersion ? m_receiptServerName : m_legacyServerName;
+}
+
+bool SingleInstanceCoordinator::prepareEndpointDirectory(QString* error) const {
+#if defined(Q_OS_LINUX)
+    const auto fail = [error](const QString& message) {
+        if (error != nullptr)
+            *error = message;
+        return false;
+    };
+    if (!m_endpointError.isEmpty())
+        return fail(m_endpointError);
+    if (m_endpointDirectory.isEmpty()) {
+        return fail(QStringLiteral("The single-instance endpoint directory is unavailable"));
+    }
+    // mkpath() also succeeds for a directory that already exists, which is exactly the
+    // case that has to be inspected rather than trusted.
+    const bool created = !QFileInfo::exists(m_endpointDirectory);
+    if (!QDir().mkpath(m_endpointDirectory)) {
+        return fail(QStringLiteral("The single-instance endpoint directory is unavailable: ") +
+                    m_endpointDirectory);
+    }
+    const QFileInfo info(m_endpointDirectory);
+    if (!ipc::isAcceptableEndpointDirectory(true, info.isDir(), info.ownerId(), currentUserId()) ||
+        !info.isWritable()) {
+        return fail(QStringLiteral("The single-instance endpoint directory is not a writable "
+                                   "directory owned by this user: ") +
+                    m_endpointDirectory);
+    }
+    if (created) {
+        // Only the temp-directory fallback lands in a world-writable place. Close it
+        // before a socket is created inside; the session runtime directory is already
+        // owner-only and is not ours to change.
+        static_cast<void>(QFile::setPermissions(
+            m_endpointDirectory, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    }
+    return true;
+#else
+    if (!QDir().mkpath(QFileInfo(m_lockFilePath).absolutePath())) {
+        if (error != nullptr)
+            *error = QStringLiteral("The single-instance runtime directory is unavailable");
+        return false;
+    }
+    return true;
+#endif
 }
 
 void SingleInstanceCoordinator::setLaunchRequestHandler(

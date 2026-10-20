@@ -57,9 +57,9 @@ bool waitUntil(const std::function<bool()>& predicate, int timeoutMilliseconds) 
 
 QLocalServer* launchServer(single_instance::SingleInstanceCoordinator& primary,
                            int protocolVersion = 2) {
-    QString name = QFileInfo(primary.lockFilePath()).completeBaseName();
-    if (protocolVersion == 2)
-        name += QStringLiteral("-v2");
+    // Asked of the coordinator rather than rebuilt from the lock file name: on Linux the
+    // endpoint is an absolute socket path, on Windows a bare pipe name.
+    const QString name = primary.endpointName(protocolVersion);
     for (auto* server : primary.findChildren<QLocalServer*>())
         if (server->serverName() == name)
             return server;
@@ -74,7 +74,7 @@ void forwardingToLegacyPrimaryDispatchesOnce() {
     require(owner.tryLock(0), "legacy primary acquires storage ownership");
     QLocalServer legacy;
     legacy.setSocketOptions(QLocalServer::UserAccessOption);
-    require(legacy.listen(QFileInfo(identity.lockFilePath()).completeBaseName()),
+    require(legacy.listen(identity.endpointName(1)),
             "legacy primary listens on the original version-1 endpoint");
     int received = 0;
     QStringList receivedArguments;
@@ -153,7 +153,7 @@ void uncertainLegacyWriteIsNotRetried() {
     require(owner.tryLock(0), "legacy sink acquires storage ownership");
     UnresponsiveLegacyServer legacy;
     legacy.setSocketOptions(QLocalServer::UserAccessOption);
-    require(legacy.listen(QFileInfo(identity.lockFilePath()).completeBaseName()),
+    require(legacy.listen(identity.endpointName(1)),
             "legacy sink listens on the version-1 endpoint");
     QProcess secondary;
     secondary.start(QCoreApplication::applicationFilePath(),

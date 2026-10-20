@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：单实例、`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；自启动 XDG autostart slice 5 → 9.4.12；桌面通知 `org.freedesktop.Notifications` slice 6 → 9.4.13；托盘 StatusNotifierItem slice 7 → 9.4.14；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
+| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；自启动 XDG autostart slice 5 → 9.4.12；桌面通知 `org.freedesktop.Notifications` slice 6 → 9.4.13；托盘 StatusNotifierItem slice 7 → 9.4.14；单实例端点搬进会话运行时目录 slice 8 → 9.4.15；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -1426,9 +1426,7 @@ Deepin/UOS 上是 `dde-daemon` 的 notification 服务。判据只有「会话�
   发送。只在 body 含 `<`/`&` 且 daemon 恰不支持 markup 时有可见差异。
 - **未做 `CloseNotification`**：动作触发后依赖 daemon 自行关闭；有的 daemon 会把气泡留着。
 - **多显示器 / 锁屏 / 通知中心的历史记录** 的呈现差异未验。
-- **单实例 / `screenshotnative.h` 拆分** 仍是 P4 剩余 slice。单实例经查是纯 Qt
-  （`QLocalServer` + `QLockFile`，`src/app/singleinstancecoordinator.cpp` 全文件无平台条件编译），
-  在 Linux 上应当直接可用，但尚未在真机确认 socket 路径可用。
+- **`screenshotnative.h` 拆分** 仍是 P4 剩余 slice。
 
 #### 9.4.14 P4 slice 7：托盘导出 StatusNotifierItem（2026-10-20）
 
@@ -1508,6 +1506,83 @@ qAlpha/qRed/qGreen/qBlue 取出来重写，并且按 `bytesPerLine` 遍历 —�
 - **`NeedsAttention` 未使用**：`showWarningMessage` 之类的告警没有让图标闪烁/高亮，仍是普通通知。
 - **CTest 目标本身仍未进 CMake 配置验证**，原因同 slice 5/6：Qt5 路线开不了 `SNOW_APPS_BUILD_TESTS`，
   本机唯一的 Qt6 树是 smoke 档、不含 `snow_shot`。
+
+#### 9.4.15 P4 slice 8：单实例端点搬进会话运行时目录（2026-10-20）
+
+**背景**：单实例这一层本来就是纯 Qt（`QLocalServer` + `QLockFile`，`singleinstancecoordinator.cpp`
+里一个平台条件编译都没有），看起来"直接可用"。问题不在能不能编，而在**端点落在哪**：Unix 域
+socket 需要路径，而 `QLocalServer::listen()` 拿到**不带斜杠的名字**时，Qt 会自己在
+`QDir::tempPath()` 下拼一个 → Linux 上就是 `/tmp/snow-shot-<hex>`。这一条的后果全都很晚才显形：
+
+1. **`/tmp` 会被按龄清理**。`systemd-tmpfiles` 对 `/tmp` 的处理会删掉超过保留期的条目，**包括
+   socket**。主程序是 `setQuitOnLastWindowClosed(false)` 的托盘常驻进程，跑满十天之后它手里的
+   socket 文件被 unlink —— 进程还活着、还握着锁，但**新启动的实例连不上**，于是走到
+   "owns the storage lock but could not be contacted" 分支、`return 2`。用户看到的是"应用再也
+   打不开"，日志里没有任何与"托盘挂了两周"相关的线索。
+2. **多用户机器上的抢占**。`/tmp` 是 1777，名字是 `homePath|org|app` 的 SHA-256 前 24 位
+   ——可枚举。别人预先建同名 socket 后，我们的 `removeServer()` 删不掉（sticky 位），
+   `listen()` 拿到 `EADDRINUSE`，应用同样起不来。这是对常驻托盘应用的 DoS。
+3. **`PrivateTmp=`**（systemd 单元）或各种沙箱里，两次启动各自看到不同的 `/tmp`：锁在共享的
+   `$XDG_RUNTIME_DIR`（所以第二个实例确认"已经有人占着"），socket 却在各自私有的 `/tmp`
+   （所以谁也连不上）。症状与第 1 条一样。
+4. **锁和 socket 分处两地**：锁本来就在 `$XDG_RUNTIME_DIR`，socket 在 `/tmp`。出问题时要看两个
+   地方，而其中一个会被自动清掉。
+
+**做法**：把两样东西搬进同一个目录，优先 `$XDG_RUNTIME_DIR`（per-user、0700、tmpfs，没有任何
+清理器会动它），只有在它不可用时才退回 `$XDG_TMPDIR/snow-shot-<uid>`（自己建、自己 chmod 0700）。
+纯逻辑模块 `snow_shot/app/singleinstanceendpoint.{h,cpp}`（全平台，不碰文件系统）：
+
+| 决策 | 判据 |
+|---|---|
+| 目录优先级 | `runtimeLocation` 非空**且绝对** ＞ `tempLocation/snow-shot-<uid>`。相对路径按未设置处理 —— XDG 规范要求绝对路径，而 Qt 会把相对值当成"临时目录下的名字"，那是静默错位。 |
+| 锁与 socket 同目录 | `lockFilePath = directory/snow-shot-<id>.lock`，`legacyEndpoint = directory/snow-shot-<id>`，`receiptEndpoint = legacy + "-v2"`。 |
+| 路径长度 | `sun_path` 在 Linux 是 108 字节**含结尾 NUL**、BSD 系 104 ⇒ 取 103 作上限；`toUtf8().size()` 量**字节**（35 个汉字 = 105 字节，字符数完全看不出问题）。首选目录放不下就换另一个候选，两个都放不下才报错，且错误里点名的**是用户配置的那个目录**，不是他从未听说过的兜底目录。 |
+| 已有目录能不能用 | 必须是**本人的目录**：`isAcceptableEndpointDirectory(exists, isDir, ownerId, userId)`。不存在 ⇒ 我们自己建；存在但不是目录、或属主不是自己 ⇒ **拒绝启动**并报出路径。让"从不采用无法证明属于自己的目录"成为显式规则，比"能用就用"安全：否则别人在 `/tmp` 里种的目录里那个 socket 随时可以被换掉。 |
+| 谁 chmod | 只有我们自己新建的目录（即兜底路径）才 chmod 0700。`$XDG_RUNTIME_DIR` 由会话管理器建好且已是 0700，改别人的目录属无关变更。 |
+
+`singleinstancecoordinator.cpp` 里只多了一个 `#elif`-式的 `#if defined(Q_OS_LINUX)` 分支和
+`prepareEndpointDirectory()`（在创建任何文件**之前**跑），协议、receipt、legacy 降级、
+`QLockFile` 的 stale 处理全部原样不动。
+
+**两个实现细节值得记**：
+
+- **取 uid 不用 `geteuid()`，用 `QFileInfo(QDir::homePath()).ownerId()`**。原因是这个文件的
+  Linux 分支只有塞 `-DQ_OS_LINUX` 给 MSVC 才编得到，而 `<unistd.h>` 在 Windows 上不存在。
+  家目录的属主按定义就是当前用户（root 的家目录属主是 0，正好正确）。若某天它返回 0 而用户
+  不是 root，后果是**拒绝**共享临时目录而不是误用，方向是安全的。
+- **判据用 `Q_OS_LINUX` 而不是 `Q_OS_UNIX`**。macOS 也是 Unix，但 macOS 现在是能跑的、且路径
+  行为没在那边验证过；把 macOS 一起改会顺手给一个不可验证的平台换掉单实例端点。
+  代价写在这里：macOS 侧仍有"`$TMPDIR` 被清掉"的同款风险，等 macOS 排进计划时按 9.4.15 的
+  同一套规则处理。
+
+**验证**：
+
+- `tests/linux_single_instance_endpoint_tests.cpp`（纯逻辑，9 组 / 35 条断言）：优先级、
+  尾斜杠归一化、per-user 兜底、相对路径被忽略、无可用目录时报错、**字节 vs 字符**的上限、
+  首选过长自动降级、两个都过长时报错点名首选目录、属主规则四种组合。
+  手工 `cl` 编译运行：**Qt 5.15.2 passed、Qt 6.12.0 passed**。
+- **既有 700 余行单实例测试全套通过**（Windows 分支语义未变）：把它手工 moc + 编译链接后运行，
+  `EXIT=0`，覆盖 legacy 协议降级、receipt 重试、stale 锁恢复、无响应 peer、子进程转发等场景。
+- `scripts/syntax-check-linux-cpp.sh` 覆盖面 7 → **9** 个文件（新增 `singleinstancecoordinator.cpp`
+  与 `singleinstanceendpoint.cpp`），`SYNTAX OK`；补了 `QtNetwork` 头目录。
+- **门禁做了反向验证**：往 Linux 分支里注入一个成员名拼写错误，带 `-DQ_OS_LINUX` 报 1 个
+  `error C`、去掉宏报 0 个 —— 证明这条门禁真的在编译那个分支，不是空跑。
+- 用 `compile_commands.json` 里的真实编译参数对两个新旧文件做语法检查：`EXIT=0`、0 error。
+- `windows-qt5-full` configure `EXIT=0`（CMake 新增目标与源清单都被解析）。
+- 6 个改动/新增文件 clang-format 全 0 违规。
+
+**本片未覆盖**：
+
+- **真机未跑**：`$XDG_RUNTIME_DIR` 在 dde 会话里是否总有值（正常登录有；从 `systemd --user`
+  早期单元或 `sudo` 里起可能没有）、socket 实际权限位、第二次启动的转发时延。
+- **`systemd-tmpfiles` 的清理策略是按其发行版配置推断的**，没有在 UOS 上实测"十天后 socket
+  是否真被删"。这条恰恰是本片的动机，建议真机验证时用 `touch -d` 改 socket 的 mtime 再跑
+  `systemd-tmpfiles --clean` 观察。
+- **`$XDG_RUNTIME_DIR` 本身不可写 / 属主异常** 的情况只做了代码路径，没有构造环境验。
+- **P6 打包要配合**：如果 deb 的 systemd 单元设了 `PrivateTmp=`，本片之后不影响正确性
+  （socket 已不在 `/tmp`），但 `$XDG_RUNTIME_DIR` 必须在单元里可见（`--user` 单元天然有）。
+- **`QLockFile` 的跨主机语义没变**：锁文件里记 hostname，NFS 家目录上两个主机共享
+  `$XDG_RUNTIME_DIR` 是不可能的（per-machine tmpfs），所以这条在 Linux 上反而比 Windows 更安全。
 
 ### 9.5 打包
 
