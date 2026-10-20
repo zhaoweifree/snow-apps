@@ -62,7 +62,7 @@
 #include "snow_shot/presentation/settings/settingsregistry.h"
 #include "snow_shot/presentation/settings/settingsruntimesession.h"
 #include "snow_shot/platform/selectedfiles.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotfocus.h"
 #include "snow_shot/storage/applicationstorage.h"
 #include "snow_shot/storage/settingsadapters.h"
 #include "widgets/message.h"

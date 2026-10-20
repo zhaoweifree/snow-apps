@@ -9,7 +9,7 @@
 #ifdef Q_OS_MACOS
 #include "../pinned/pinnedwindowplatform.h"
 #include "../../platform/macos/windowcursorcoordinator.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #endif
 
 #include <QApplication>

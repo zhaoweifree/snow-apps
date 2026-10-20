@@ -60,7 +60,7 @@
 
 #if defined(Q_OS_MACOS)
 #include "macos_native_input.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #endif
 
 class ScreenshotFloatingToolPaletteWindowTestAccess {

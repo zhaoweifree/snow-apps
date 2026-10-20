@@ -148,7 +148,7 @@ if(APPLE)
     # Window adapters own their shared cursor dependency. Link this target instead
     # of compiling adapter sources in each executable.
     add_library(snow_shot_macos_window_platform STATIC
-        src/platform/macos/screenshotnative.mm
+        src/platform/macos/screenshotplatform.mm
         src/platform/macos/pinnedwindowplatform.mm
         src/presentation/pinned/pinnedwindowplatform.cpp)
     target_include_directories(snow_shot_macos_window_platform PRIVATE include)
@@ -1387,6 +1387,9 @@ set(PROJECT_HEADERS
     include/snow_shot/platform/windows/windowchrome.h
     include/snow_shot/platform/windowcaptureexclusion.h
     include/snow_shot/platform/physicalcursor.h
+    include/snow_shot/platform/screenshotwindow.h
+    include/snow_shot/platform/screenshotfocus.h
+    include/snow_shot/platform/screenshotscroll.h
     include/snow_shot/presentation/components/aspectratiolockbutton.h
     include/snow_shot/presentation/components/contentcardwidget.h
     include/snow_shot/presentation/components/maincontentheaderwidget.h
@@ -1553,6 +1556,7 @@ set(PROJECT_CXX_SOURCES
     src/app/singleinstancecoordinator.cpp
     src/app/singleinstanceendpoint.cpp
     src/platform/physicalcursor.cpp
+    src/platform/screenshotscroll.cpp
     src/platform/windows/windowchrome.cpp
     src/platform/windows/windowcursorrefresh.h
     src/platform/windows/scrollinput.cpp

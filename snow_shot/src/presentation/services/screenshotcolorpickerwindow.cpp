@@ -3,7 +3,7 @@
 #include "widgets/detail/top_level_popup_window.h"
 
 #include "snow_shot/presentation/screenshotgeometry.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #include "snow_shot/presentation/screenshotguidelinerendering.h"
 #include "snow_shot/presentation/styles/thememanager.h"
 #include "snow_shot/storage/applicationstorage.h"

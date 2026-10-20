@@ -2,7 +2,7 @@
 #include "snow_shot/presentation/screenshotoverlayuihost.h"
 
 #include "../capture/screenshotcaptureperfinstrumentation.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
 #include "snow_shot/presentation/components/icons/iconrenderutils.h"
 #include "snow_shot/presentation/components/icons/snowshoticons.h"

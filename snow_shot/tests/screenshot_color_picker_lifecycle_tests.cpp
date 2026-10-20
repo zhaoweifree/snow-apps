@@ -3,7 +3,7 @@
 #include "snow_shot/presentation/screenshotselectiontoolbarwidget.h"
 #include "snow_shot/presentation/screenshotcanvastoolstyles.h"
 #include "snow_shot/presentation/screenshotcanvascolorsamplerwindow.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #ifdef Q_OS_MACOS
 #import <AppKit/AppKit.h>
 #endif

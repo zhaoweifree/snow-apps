@@ -28,7 +28,7 @@
 #endif
 
 #ifdef Q_OS_MACOS
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #include <QElapsedTimer>
 #import <AppKit/AppKit.h>
 #endif

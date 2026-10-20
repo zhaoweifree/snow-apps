@@ -1,5 +1,5 @@
 #include "presentation/capture/screenshotscrollingpipeline.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotscroll.h"
 #include "snow_shot/presentation/screenshotdisplaysession.h"
 #include "snow_shot/presentation/screenshotgeometry.h"
 #include "snow_shot/presentation/screenshotoverlaycoordinator.h"

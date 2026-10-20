@@ -37,7 +37,7 @@
 #include <QWindow>
 
 #ifdef Q_OS_MACOS
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #endif
 #ifdef Q_OS_WIN
 #include <qt_windows.h>

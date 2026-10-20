@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；自启动 XDG autostart slice 5 → 9.4.12；桌面通知 `org.freedesktop.Notifications` slice 6 → 9.4.13；托盘 StatusNotifierItem slice 7 → 9.4.14；单实例端点搬进会话运行时目录 slice 8 → 9.4.15；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
+| **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、窗口级捕获目标（9.4.16 末段：Linux 的 focused-window C ABI 未暴露）、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -1583,6 +1583,73 @@ socket 需要路径，而 `QLocalServer::listen()` 拿到**不带斜杠的名字
   （socket 已不在 `/tmp`），但 `$XDG_RUNTIME_DIR` 必须在单元里可见（`--user` 单元天然有）。
 - **`QLockFile` 的跨主机语义没变**：锁文件里记 hostname，NFS 家目录上两个主机共享
   `$XDG_RUNTIME_DIR` 是不可能的（per-machine tmpfs），所以这条在 Linux 上反而比 Windows 更安全。
+
+#### 9.4.16 P4 slice 9：`screenshotnative.h` 拆成三个职责单一的头（2026-10-20）
+
+**问题不是"文件太大"，是它同时是三件不相干的事**，而且第 3 件把 Windows 头拖进了平台中立的
+include 路径：
+
+| 原 `screenshotnative.h` 里的东西 | 真实性质 | 谁实现 |
+|---|---|---|
+| 11 个 `configure*Window` / `setScreenshotInputTransparent` / `stackScreenshotWindowBelow` | 我们自己窗口的**平台适配钩子** | 只有 macOS（`screenshotplatform.mm`） |
+| `screenshotDisplayAtCursor` / `screenshotFocusedWindow` / `screenshotFocusedWindowBounds` | **"用户在哪个窗/哪块屏"查询** | 只有 macOS；Windows 的调用点直接用 Win32 |
+| `ScrollInputResult` + `screenshotScrollPermission` + `sendScreenshotScroll` | **合成滚轮事件**，真正平台中立 | macOS 原生 / Windows `SendInput` / 其余"没有" |
+
+第 3 组尤其坏：`screenshotnative.h` 第 3 行就是
+`#include "snow_shot/platform/windows/scrollinput.h"` —— 一个平台中立的头**无条件**依赖
+Windows 头，非 Windows 平台把它 include 进来连编译都过不去；而它的 `#else` 分支把
+`sendScreenshotScroll` 直接转发到 `windows::sendScrollingWheelStep`（`SendInput`），
+就算编过去了，Linux 上也是一条永远失败的路。**这正是 P4 里"非 Windows 平台滚轮捕获根本
+不存在"的隐藏形态：不是没实现，是借用了一个不存在的实现。**
+
+**做法**：
+
+- `snow_shot/platform/screenshotwindow.h` —— 11 个窗口钩子。**全平台声明**，非 macOS 是
+  `inline` 空实现。空实现是"这个平台不需要额外动作"的正确表达（Qt 的窗口 flag 已经把意图
+  说清楚了），它让共享代码以后可以无条件调用，而不必在十个调用点各写一遍 `#ifdef`。
+  **本片没有改动调用点的 `#ifdef Q_OS_MACOS`**：那些块里往往还有 `platform::macos::*`
+  的原生逻辑，摘 guard 需要 X11 侧先有实现可验，否则只是把"没做"换成"调了个空函数"。
+- `snow_shot/platform/screenshotfocus.h` —— 三个查询，**仍然只在 `Q_OS_MACOS` 下声明**。
+  这不是偷懒：Windows 的调用点走 `GetForegroundWindow()`/`MonitorFromPoint()`，给一个中立
+  声明会变成第二套没人用的问法；Linux 的机制其实已经有了（`snow-linux` 里给全屏检测写的那套
+  `parent==root` 窗口树爬升 + `translate_coordinates`），但**没有 C ABI 暴露**。宁可保持
+  macOS-only，也不放一个返回"没有窗口"的桩 —— 那会被读成"确实没有聚焦窗口"。
+- `snow_shot/platform/screenshotscroll.h` + `src/platform/screenshotscroll.cpp` —— 结果类型
+  搬到这里（`windows/scrollinput.h` 改成 `using ScrollInputResult = platform::ScrollInputResult`，
+  只保留发送者），实现按平台分派：Windows 转发 `sendScrollingWheelStep`；**Linux 返回
+  `Unsupported` 且 `screenshotScrollPermission()` 返回 false**，注释写明原因是
+  snow-linux 只**观测**滚轮、没有注入实现。返回 false 而不是 true，是为了让自动滚动第一时间
+  自我关闭，而不是拿着一串永远不生效的 `Unsupported` 空转。
+- macOS 实现文件 `screenshotnative.mm` → `screenshotplatform.mm`（`git mv`，一处 CMake 引用），
+  一个头被拆成三个之后，文件名再叫 native 只会让下一个人去 grep 一个不存在的头。
+- 24 个 include 点（14 个 `src/*.cpp`、1 个 `.mm`、9 个 `tests/`）逐个改成它真正需要的那一个头。
+  `.mm` 一律给三份：Objective-C++ 只在本机之外的 macOS 上编译，这里无法验证，宁可多 include。
+
+**验证**：
+
+- `windows-qt5-full` configure `EXIT=0`；用 `compile_commands.json` 的真实参数对 4 个受影响
+  TU（`screenshotscroll.cpp`、`scrollinput.cpp`、`screenshotscrollingcapturecontroller.cpp`、
+  `screenshotcontroller.cpp`）做 `-Zs`：全部 0 error。
+- **非 macOS 侧的 11 个空实现单独写了探针 TU**：Windows 构建里没有任何文件能在
+  `Q_OS_MACOS` 未定义时 include 到那段（所有调用点都还在 guard 里），不专门验一遍等于
+  把一段只写不编的代码合进去。探针 `-Zs`：0 error、0 warning。
+- **Linux 分支进语法门禁**：`src/platform/screenshotscroll.cpp` 加入清单（9 → **10** 文件），
+  `SYNTAX OK`。
+- 全仓 `grep screenshotnative.h` 只剩注释里一句历史说明。
+
+**本片未覆盖 / 留给后面**：
+
+- **Linux 的窗口级捕获目标仍然拿不到**（`request.window` / `monitorName` 为空 ⇒ 退回整屏）。
+  要补需要三步：`snow-linux` 暴露 focused-window 的 id+geometry C ABI、`screenshotfocus.h`
+  加 Linux 声明、`directcapturecontroller.cpp` 的 `#elif` 加分支。这条不是"忘了"，
+  是 P4 之后最该做的第一件事，已写进 9.4.16 与阶段表。
+- **X11 上窗口钩子的真实需求未验**：置顶、输入穿透（XShape）、层叠顺序在 dde 合成器下
+  是否需要原生干预，只能在真机上看。现在调的是空实现，行为等同 Qt 默认。
+- **macOS 侧只做了 include 改写，没有 macOS 主机可编译**；改动是纯 include + 类型别名，
+  风险面是"某个 `.mm`/测试少 include 了一个头"，因此 `.mm` 全部给三份。
+- **滚轮注入（Linux）** 仍是 0，返回 `Unsupported` 时用户看到的是
+  `scroll_dispatch_failed` / 自动滚动自我关闭；`permission_required` 这个文案是
+  Windows/mac 语境，Linux 上语义不准确，等真实现再改文案。
 
 ### 9.5 打包
 

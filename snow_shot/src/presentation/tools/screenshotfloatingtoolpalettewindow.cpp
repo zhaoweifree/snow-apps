@@ -17,7 +17,7 @@
 #include "widgets/popup_interaction_host.h"
 #if defined(Q_OS_MACOS)
 #include "widgets/detail/window_surface_mac_p.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #endif
 #include "widgets/select.h"
 #include "icon_renderer.h"

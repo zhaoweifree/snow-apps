@@ -16,7 +16,7 @@
 #include "recordingregioninputrouter.h"
 #include <QApplication>
 #ifdef Q_OS_MACOS
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #import <AppKit/AppKit.h>
 #endif
 #include "screenrecordingperfinstrumentation.h"

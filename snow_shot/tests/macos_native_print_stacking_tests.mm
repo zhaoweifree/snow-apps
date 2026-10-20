@@ -1,4 +1,6 @@
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
+#include "snow_shot/platform/screenshotfocus.h"
+#include "snow_shot/platform/screenshotscroll.h"
 #include "snow_shot/presentation/screenshotprintservice.h"
 #include "platform/macos/capturewindowlayers_p.h"
 

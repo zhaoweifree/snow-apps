@@ -5,7 +5,7 @@
 #include "snow_shot/presentation/screenshotencodingsettings.h"
 
 #include "directcapturenative.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotfocus.h"
 #include "camerashuttersound.h"
 #include "snow_shot/presentation/directcapturehistory.h"
 #include "snow_shot/presentation/directcaptureworkflow.h"

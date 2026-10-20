@@ -14,7 +14,7 @@
 #include <QCoreApplication>
 #include "snow_shot/platform/windows/windowchrome.h"
 #ifdef Q_OS_MACOS
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
 #endif
 #include <QGuiApplication>
 #include <QImage>

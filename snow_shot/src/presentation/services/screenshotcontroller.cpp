@@ -19,12 +19,14 @@
 #include "snow_shot/presentation/screenshottoolbarpresentationstatefactory.h"
 #include "snow_shot/app/mcp/screenshotmcpselection.h"
 #include "snow_shot/app/mcp/mcpstylepatch.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotfocus.h"
+#include "snow_shot/platform/screenshotscroll.h"
 #include <QJsonDocument>
 #include <QThread>
 #include <QSysInfo>
 #include <cmath>
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotfocus.h"
+#include "snow_shot/platform/screenshotscroll.h"
 #ifdef Q_OS_MACOS
 #include "snow_shot/platform/macos/recapturefocus.h"
 #include "snow_shot/platform/macos/applicationactivation.h"

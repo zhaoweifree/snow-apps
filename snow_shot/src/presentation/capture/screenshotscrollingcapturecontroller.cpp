@@ -21,7 +21,7 @@
 #include "scrollingstepinput.h"
 #include "scrollingsnapshotrequest.h"
 #include "scrollinghoverpreview.h"
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotscroll.h"
 #include "screenshotscrollingpipeline.h"
 #include "screenshotscrollingdiagnostics.h"
 #include <QElapsedTimer>

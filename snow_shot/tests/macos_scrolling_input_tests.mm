@@ -1,4 +1,6 @@
-#include "snow_shot/platform/screenshotnative.h"
+#include "snow_shot/platform/screenshotwindow.h"
+#include "snow_shot/platform/screenshotfocus.h"
+#include "snow_shot/platform/screenshotscroll.h"
 
 #import <AppKit/AppKit.h>
 #include <QApplication>
