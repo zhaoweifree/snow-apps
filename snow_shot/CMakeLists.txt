@@ -1120,6 +1120,16 @@ add_library(snow_shot_notification_payload STATIC
 target_include_directories(snow_shot_notification_payload PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(snow_shot_notification_payload PUBLIC Qt::Core)
+# The payload half of the Linux tray backend: the byte layout hosts expect for
+# `IconPixmap`, the tooltip structure and the plain-text conversion are
+# platform-neutral, so they are compiled - and tested - on every host rather than
+# only on the Linux builder. None of it talks to D-Bus.
+add_library(snow_shot_status_notifier_payload STATIC
+    include/snow_shot/platform/linux/statusnotifierpayload.h
+    src/platform/linux/statusnotifierpayload.cpp)
+target_include_directories(snow_shot_status_notifier_payload PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(snow_shot_status_notifier_payload PUBLIC Qt::Core Qt::Gui)
 if(APPLE)
     add_library(snow_shot_system_notifications STATIC
         src/platform/macos/systemnotificationservice.h
@@ -1155,6 +1165,18 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(snow_shot_system_notifications PUBLIC Qt::Core
         snow_shot_notification_payload
         PRIVATE Qt::DBus)
+    # The StatusNotifierItem that stands in for QSystemTrayIcon wherever the
+    # platform plugin's tray is not what the desktop sees. Built next to the
+    # notification backend because it is the same kind of thing: a session-bus
+    # object that survives a display-protocol change.
+    add_library(snow_shot_status_notifier STATIC
+        include/snow_shot/platform/linux/statusnotifierservice.h
+        src/platform/linux/statusnotifierservice.cpp)
+    target_include_directories(snow_shot_status_notifier PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(snow_shot_status_notifier PUBLIC Qt::Core Qt::Gui
+        snow_shot_status_notifier_payload
+        PRIVATE Qt::DBus)
 endif()
 add_library(snow_shot_administrator STATIC
     include/snow_shot/platform/linux/autostartregistration.h
@@ -1187,6 +1209,13 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow_shot_notification_payload)
     add_test(NAME snow-shot-linux-notification-tests COMMAND snow-shot-linux-notification-tests)
     set_tests_properties(snow-shot-linux-notification-tests PROPERTIES LABELS "unit" TIMEOUT 30
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+    # The tray payload again needs no bus: it is byte order, entity decoding and
+    # the two predicates that decide when our own item is exported at all.
+    add_executable(snow-shot-linux-tray-tests tests/linux_tray_tests.cpp)
+    target_link_libraries(snow-shot-linux-tray-tests PRIVATE snow_shot_status_notifier_payload)
+    add_test(NAME snow-shot-linux-tray-tests COMMAND snow-shot-linux-tray-tests)
+    set_tests_properties(snow-shot-linux-tray-tests PROPERTIES LABELS "unit" TIMEOUT 30
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
     add_executable(snow-shot-shell-image-launch-tests tests/shell_image_launch_tests.cpp)
     target_include_directories(snow-shot-shell-image-launch-tests PRIVATE include)
@@ -1767,10 +1796,12 @@ endif()
 
 target_link_libraries(snow_shot PRIVATE snow_shot_system_notification_controller)
 if(UNIX AND NOT APPLE)
-    # Freedesktop notifications. Linked from the executable rather than from the
-    # tray controller's translation unit, so the tray test and the tray benchmark
-    # - which both compile that file standalone - have to link it too.
-    target_link_libraries(snow_shot PRIVATE snow_shot_system_notifications)
+    # Freedesktop notifications and the StatusNotifierItem. Linked from the
+    # executable rather than from the tray controller's translation unit, so the
+    # tray test and the tray benchmark - which both compile that file standalone -
+    # have to link them too.
+    target_link_libraries(snow_shot PRIVATE snow_shot_system_notifications
+        snow_shot_status_notifier)
 endif()
 if(APPLE)
     target_link_libraries(snow_shot PRIVATE ${SNOW_SELECTED_FILES_LIBRARIES})
@@ -3161,9 +3192,9 @@ if(SNOW_SHOT_BUILD_TESTS)
 
     if(UNIX AND NOT APPLE)
         # This test compiles systemtraycontroller.cpp standalone, so on Linux it
-        # carries the same notification backend the executable links.
+        # carries the same tray and notification backends the executable links.
         target_link_libraries(snow-shot-system-tray-controller-tests PRIVATE
-            snow_shot_system_notifications)
+            snow_shot_system_notifications snow_shot_status_notifier)
     endif()
 
     if(APPLE)
@@ -10768,9 +10799,9 @@ if(SNOW_SHOT_BUILD_BENCHMARKS)
         snow_draw_engine_qt_canvas ant_design_qt Qt::Widgets)
     if(UNIX AND NOT APPLE)
         # Compiles systemtraycontroller.cpp standalone, so it needs the Linux
-        # notification backend exactly like the executable does.
+        # tray and notification backends exactly like the executable does.
         target_link_libraries(snow-shot-skin-surface-performance-benchmark PRIVATE
-            snow_shot_system_notifications)
+            snow_shot_system_notifications snow_shot_status_notifier)
     endif()
     if(APPLE)
         target_sources(snow-shot-skin-surface-performance-benchmark PRIVATE

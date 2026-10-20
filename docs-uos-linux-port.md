@@ -431,7 +431,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
-| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：托盘/单实例、`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；自启动 XDG autostart slice 5 → 9.4.12；桌面通知 `org.freedesktop.Notifications` slice 6 → 9.4.13；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
+| **P4 C++ 平台层** *(进行中)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**已起步（slice 1）**：`snow-linux-c` 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。**剩余**：单实例、`screenshotnative.h` 拆分（全局快捷键 slice 2 → 9.4.9；全屏窗口检测 slice 3 → 9.4.10；全局鼠标手势 slice 4 → 9.4.11；自启动 XDG autostart slice 5 → 9.4.12；桌面通知 `org.freedesktop.Notifications` slice 6 → 9.4.13；托盘 StatusNotifierItem slice 7 → 9.4.14；首页卡片拖拽在 X11 上明确不实现，理由见 9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
@@ -1426,9 +1426,88 @@ Deepin/UOS 上是 `dde-daemon` 的 notification 服务。判据只有「会话�
   发送。只在 body 含 `<`/`&` 且 daemon 恰不支持 markup 时有可见差异。
 - **未做 `CloseNotification`**：动作触发后依赖 daemon 自行关闭；有的 daemon 会把气泡留着。
 - **多显示器 / 锁屏 / 通知中心的历史记录** 的呈现差异未验。
-- **托盘 / 单实例 / `screenshotnative.h` 拆分** 仍是 P4 剩余 slice。单实例经查是纯 Qt
+- **单实例 / `screenshotnative.h` 拆分** 仍是 P4 剩余 slice。单实例经查是纯 Qt
   （`QLocalServer` + `QLockFile`，`src/app/singleinstancecoordinator.cpp` 全文件无平台条件编译），
   在 Linux 上应当直接可用，但尚未在真机确认 socket 路径可用。
+
+#### 9.4.14 P4 slice 7：托盘导出 StatusNotifierItem（2026-10-20）
+
+**问题**：托盘从头到尾是 `QSystemTrayIcon`。Qt 5 的托盘实现不在 `QtWidgets` 里，而在**平台插件**
+里：`xcb` 插件带一个 `StatusNotifierItem`，并且在有 XEmbed 管理器时还能退回 XEmbed。于是：
+
+- Wayland 会话（Qt5 `wayland` 插件）**没有**任何托盘后端，`show()` 是空操作；
+- 跑在 XWayland 里时图标"存在"，但它属于 XWayland 的那棵 X 树，合成器的面板看不到；
+- 而主程序是 `QApplication::setQuitOnLastWindowClosed(false)`。托盘不见了，用户关掉主窗口后
+  进程还在、却没有入口 —— 这不是"少一个图标"，是把应用弄丢了。
+
+**做法**：自己导出 `org.kde.StatusNotifierItem`。这个对象是**会话总线**上的，跟显示协议无关，
+理由和 slice 6 完全一样 —— 也就是它天生在 X11 与 Wayland 上同时可用。
+
+**分层**（沿用 slice 5/6 的切法）
+
+| 层 | 文件 | 平台 |
+|---|---|---|
+| 纯逻辑 | `platform/linux/statusnotifierpayload.cpp` | 全平台（不碰总线，Windows 跑单测） |
+| 总线 | `platform/linux/statusnotifierservice.cpp` | linux（QtDBus 对象导出） |
+| 接线 | `systemtraycontroller.cpp` 的 `#elif Q_OS_LINUX` | linux |
+| 测试 | `tests/linux_tray_tests.cpp`（34 条断言） | 全平台 |
+
+**何时才导出，写成纯函数 + 断言**：`needsStatusNotifierItem(platformTrayAvailable,
+waylandSession) = !platformTrayAvailable || waylandSession`。也就是**平台插件看不见就不用了它**，
+其余情况交给插件（同一个进程两个图标比没有图标更糟）。第二条判据 `isWaylandSession(WAYLAND_DISPLAY,
+XDG_SESSION_TYPE)`：`XDG_SESSION_TYPE` 优先 —— `WAYLAND_DISPLAY` 会跟着从 Wayland 会话里启动的
+XWayland 客户端一起活下来，只看它会把 x11 会话误判成 Wayland。
+
+**图标必须逐字节重排**。`IconPixmap` 的类型是 `a(iiay)`：ARGB32、**网络字节序**（A,R,G,B 依次）。
+`QImage::Format_ARGB32` 在任何目标平台上都是 host byte order 的 `0xAARRGGBB`，所以每个像素都要按
+qAlpha/qRed/qGreen/qBlue 取出来重写，并且按 `bytesPerLine` 遍历 —— 外部缓冲、子图这类 stride 大于
+`width * 4` 的图像不能直接 `memcpy`，否则之后每一行都错位。预乘也不做：宿主自己合成，Qt 自己的托盘
+同样发直通 alpha。
+
+**菜单走 `/NO_DBUSMENU`**。`Menu` 属性填 `/NO_DBUSMENU`，宿主于是调 `ContextMenu` 方法，我们把
+`AdContextMenu`（换肤菜单，不是 `QMenu`）弹在指针处。代价写在明处：只认 D-Bus 菜单、完全不理
+`ContextMenu` 的宿主会**没有右键菜单**。选这个是因为另一条路要放弃菜单皮肤、把每一项翻译成
+`com.canonical.dbusmenu` 的 label/icon-name/toggle-state，那等于把设置菜单做两套。
+
+**面板晚于应用启动是常态**，所以注册不是"构造时试一次"：先看
+`org.kde.StatusNotifierWatcher` 在不在，不在就订阅 `NameOwnerChanged` 等它出现；出现后补注册。
+注册参数用 `baseService()`（唯一名）而不是对象路径 —— Qt 与 GTK 的既有实现都发这个形态，宿主对它的
+测试覆盖最多。
+
+**验证（2026-10-20，Windows + Qt 5.15.2 / Qt 6.12.0，MSVC 14.44）**
+
+| 检查 | 结果 |
+|---|---|
+| `snow-shot-linux-tray-tests`（手工 `cl` 编译运行，Qt **5.15.2**） | **passed**（34 条断言） |
+| 同一份源与测试，Qt **6.12.0** | **passed** |
+| 测试抓到的真问题 | `QImage(w,h,ARGB32)` 的未写像素是**分配器残留**，不是 0 —— 判据必须 `fill()` 后再断言，否则"逐行紧凑"这条会随机失败 |
+| 判据修正 | `one</p><p>two` 是**两个**边界 ⇒ 两个换行（HTML 渲染本来也是空一行）。一开始按一个换行断言，是测试错了不是实现错了 |
+| `moc` 解析头文件 | `MOC_EXIT=0`，生成的 `qt_metacall` 里出现 `qRegisterMetaType<QVector<…IconPixmap>>()`；moc 产物再过 `-Zs` 也 `EXIT=0` |
+| `bash scripts/syntax-check-linux-cpp.sh` | `SYNTAX OK`（覆盖面 6 → **7** 个文件） |
+| 接线 lambda 的语法 | 探针 TU（`-DQ_OS_LINUX`，不引 ant_design）过 `-Zs`，`EXIT=0` |
+| `systemtraycontroller.cpp` 的 **Windows 分支** | 用 `compile_commands.json` 里的真实编译命令 + `-Zs` 跑，`EXIT=0`（0 error）—— 重构出 `showContextMenu()` / `applyToolTip()` 后原语义未变 |
+| `windows-qt5-full` configure | `EXIT=0` |
+| `windows-qt5-full` build `snow_shot_status_notifier_payload` | 5 步全绿（MOC + 编译 + 静态库） |
+| 六个改动/新增文件 clang-format | 全部 0 违规 |
+
+**本片未覆盖（诚实记账）**
+
+- **D-Bus 线上签名没有任何离线验证**。这条不是懒，是**没有路**：`QDBusMetaType::typeToSignature`
+  在 Qt 5.15 对**任何**用户类型都返回空串 —— 用一个最小案例（`struct Simple { int; QString; }` +
+  `qDBusRegisterMetaType`）单独复核过，先初始化 `QDBusConnection` 也一样。Qt5 只在真正 marshal
+  时推导签名，而 marshal 需要连接；本机没有会话总线。于是 `(iiay)` / `(sa(iiay)ss)` 是否被宿主接受，
+  只能到真机用 `busctl --user introspect` / `gdbus introspect` 看。**我们与 Qt 自己的
+  `qdbustrayicon.cpp` 用的是同一套写法**（`Q_PROPERTY` + `qDBusRegisterMetaType`），这是当前能拿到的
+  最强保证。
+- **真机一个都没跑**：`dde-dock` 是否显示、左/中/右键是否分别触发 `Activate`/`SecondaryActivate`/
+  `ContextMenu`、图标尺寸是否被采纳（我们发 16/22/24/32/48/64）、tooltip 的标题/副标题排版。
+- **`dde` 的右键菜单**：如果它只渲染 D-Bus 菜单而不调 `ContextMenu`，右键就是空的（见上文取舍）。
+  这一条要优先验，验不出来就得补 `com.canonical.dbusmenu`。
+- **watcher 重启后的状态**：已订阅 `NameOwnerChanged` 并会补注册，但"宿主重启时正在弹的菜单"、
+  "重启后 `Status` 回到 `Active` 是否需要重发 `NewStatus`"未验。
+- **`NeedsAttention` 未使用**：`showWarningMessage` 之类的告警没有让图标闪烁/高亮，仍是普通通知。
+- **CTest 目标本身仍未进 CMake 配置验证**，原因同 slice 5/6：Qt5 路线开不了 `SNOW_APPS_BUILD_TESTS`，
+  本机唯一的 Qt6 树是 smoke 档、不含 `snow_shot`。
 
 ### 9.5 打包
 

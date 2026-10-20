@@ -18,6 +18,8 @@
 #include "snow_shot/platform/macos/systemtraymenu.h"
 #include "systemnotificationservice.h"
 #elif defined(Q_OS_LINUX)
+#include "snow_shot/platform/linux/statusnotifierpayload.h"
+#include "snow_shot/platform/linux/statusnotifierservice.h"
 #include "snow_shot/platform/linux/systemnotificationservice.h"
 #endif
 
@@ -401,8 +403,8 @@ class SystemTrayController::Impl {
         }
         q.setObjectName(QStringLiteral("systemTrayController"));
         trayIcon->setObjectName(QStringLiteral("snowShotSystemTrayIcon"));
-        trayIcon->setToolTip(app::edition::isMini ? app::edition::productName()
-                                                  : QStringLiteral("SnowShot"));
+        applyToolTip(app::edition::isMini ? app::edition::productName()
+                                          : QStringLiteral("SnowShot"));
 #ifdef Q_OS_MACOS
         notifications = std::make_unique<platform::macos::SystemNotificationService>(&q);
         using NotificationService = platform::macos::SystemNotificationService;
@@ -505,15 +507,7 @@ class SystemTrayController::Impl {
                              } else if (reason == QSystemTrayIcon::MiddleClick) {
                                  dispatchClickAction(middleClickAction);
                              } else if (reason == QSystemTrayIcon::Context) {
-                                 if (menu && menu->isPopupVisible())
-                                     return;
-                                 auto* popup = createMenu();
-#ifdef Q_OS_MACOS
-                                 platform::macos::showSystemTrayMenu(trayIcon, popup);
-#else
-                                 popup->popupAt(
-                                     systemTrayMenuPosition(trayIcon->geometry(), QCursor::pos()));
-#endif
+                                 showContextMenu();
                              }
                          });
 #ifndef Q_OS_MACOS
@@ -534,6 +528,77 @@ class SystemTrayController::Impl {
         for (const auto& popup : menus)
             delete popup.data();
     }
+
+    /// Opens the menu for the tray icon, anchoring it to the icon when the
+    /// pointer is elsewhere (keyboard activation) and to the pointer otherwise.
+    void showContextMenu() {
+        if (menu && menu->isPopupVisible())
+            return;
+        auto* popup = createMenu();
+#ifdef Q_OS_MACOS
+        platform::macos::showSystemTrayMenu(trayIcon, popup);
+#else
+        popup->popupAt(systemTrayMenuPosition(trayIcon->geometry(), QCursor::pos()));
+#endif
+    }
+
+    /// Keeps the tooltip text for the platform bits that do not take it directly.
+    void applyToolTip(const QString& text) {
+        tooltipText = text;
+        trayIcon->setToolTip(text);
+#ifdef Q_OS_LINUX
+        if (statusNotifier)
+            statusNotifier->setToolTip(text);
+#endif
+    }
+
+#ifdef Q_OS_LINUX
+    /// Exports this process as a StatusNotifierItem when the platform plugin
+    /// cannot provide a tray the desktop will actually see.
+    ///
+    /// QSystemTrayIcon is backed by the `xcb` platform plugin, so a Wayland
+    /// session has no tray at all, and inside XWayland the item exists but the
+    /// compositor's panel never sees it. The freedesktop item is a session-bus
+    /// object, which is why it survives the display-protocol change - the same
+    /// argument as for the notification backend next door.
+    void ensureStatusNotifierItem() {
+        if (statusNotifier)
+            return;
+        const auto waylandDisplay = qgetenv("WAYLAND_DISPLAY");
+        const auto sessionType = qgetenv("XDG_SESSION_TYPE");
+        if (!platform::linux::tray::needsStatusNotifierItem(
+                QSystemTrayIcon::isSystemTrayAvailable(),
+                platform::linux::tray::isWaylandSession(waylandDisplay, sessionType))) {
+            return;
+        }
+        auto item = std::make_unique<platform::linux::StatusNotifierService>(&q);
+        item->setTitle(app::edition::productName());
+        item->setActivationHandler([this](platform::linux::tray::Activation activation) {
+            switch (activation) {
+            case platform::linux::tray::Activation::Primary:
+                dispatchClickAction(leftClickAction);
+                break;
+            case platform::linux::tray::Activation::Secondary:
+                dispatchClickAction(middleClickAction);
+                break;
+            case platform::linux::tray::Activation::Context:
+                showContextMenu();
+                break;
+            }
+        });
+        item->setIcon(currentIcon);
+        item->setToolTip(tooltipText);
+        item->setStatus(platform::linux::tray::ItemStatus::Active);
+        // A panel that appears after the application started registers the item
+        // late; the platform icon shown in the meantime has to go, or the process
+        // ends up with two icons - the second one invisible on Wayland.
+        item->setRegistrationHandler([this](bool registered) {
+            if (registered && trayIcon->isVisible())
+                trayIcon->hide();
+        });
+        statusNotifier = std::move(item);
+    }
+#endif
 
     adqt::widgets::AdContextMenu* createMenu() {
         if (menu)
@@ -776,7 +841,13 @@ class SystemTrayController::Impl {
 
     void retranslateUi() {
         if (app::edition::isMini)
-            trayIcon->setToolTip(app::edition::productName());
+            applyToolTip(app::edition::productName());
+#ifdef Q_OS_LINUX
+        // The item's title is the translated product name; the tooltip above
+        // covers the other half of what a host shows on hover.
+        if (statusNotifier)
+            statusNotifier->setTitle(app::edition::productName());
+#endif
         for (const settings::SettingsTrayMenuGroupDefinition& group : groups) {
             for (const settings::SettingsTrayMenuOptionDefinition& option : group.options) {
                 if (QAction* action = actions.value(option.id)) {
@@ -873,6 +944,11 @@ class SystemTrayController::Impl {
         icon.setIsMask(false);
 #endif
         trayIcon->setIcon(icon);
+        currentIcon = icon;
+#ifdef Q_OS_LINUX
+        if (statusNotifier)
+            statusNotifier->setIcon(icon);
+#endif
         trayIcon->setProperty("resolvedIconSource", resolvedSource);
         trayIcon->setProperty("customIconCacheHits",
                               QVariant::fromValue<qulonglong>(iconCache.hitCount()));
@@ -888,9 +964,15 @@ class SystemTrayController::Impl {
     QPointer<adqt::widgets::AdContextMenu> menu;
     QList<QPointer<adqt::widgets::AdContextMenu>> menus;
     QSystemTrayIcon* trayIcon = nullptr;
+    /// What was last handed to `trayIcon`, so a backend created later (the
+    /// StatusNotifierItem, which only exists once the tray is shown) starts from
+    /// the current icon instead of a blank one.
+    QIcon currentIcon;
+    QString tooltipText;
 #if defined(Q_OS_MACOS)
     std::unique_ptr<platform::macos::SystemNotificationService> notifications;
 #elif defined(Q_OS_LINUX)
+    std::unique_ptr<platform::linux::StatusNotifierService> statusNotifier;
     std::unique_ptr<platform::linux::SystemNotificationService> notifications;
 #endif
     std::unique_ptr<SystemNotificationController> notificationDelivery;
@@ -961,9 +1043,24 @@ void SystemTrayController::setGroupManager(PinnedWindowGroupManager* groupManage
 void SystemTrayController::show() {
     if (!m_impl->enabled) {
         m_impl->trayIcon->hide();
+#ifdef Q_OS_LINUX
+        if (m_impl->statusNotifier)
+            m_impl->statusNotifier->setStatus(platform::linux::tray::ItemStatus::Passive);
+#endif
         return;
     }
     m_impl->updateIcon();
+#ifdef Q_OS_LINUX
+    m_impl->ensureStatusNotifierItem();
+    if (m_impl->statusNotifier) {
+        m_impl->statusNotifier->setStatus(platform::linux::tray::ItemStatus::Active);
+        // A registered item is what the desktop shows. The QSystemTrayIcon would
+        // be a second icon for the same process at best - inside XWayland a
+        // duplicate on an X11 panel, and on a Wayland session an invisible one.
+        if (m_impl->statusNotifier->isRegistered())
+            return;
+    }
+#endif
     m_impl->trayIcon->show();
 }
 
@@ -971,6 +1068,12 @@ void SystemTrayController::hide() {
     if (m_impl->menu)
         m_impl->menu->dismissPopup();
     m_impl->trayIcon->hide();
+#ifdef Q_OS_LINUX
+    // The item stays registered: hiding the tray icon is a status change, not a
+    // teardown, so showing it again does not re-register with the panel.
+    if (m_impl->statusNotifier)
+        m_impl->statusNotifier->setStatus(platform::linux::tray::ItemStatus::Passive);
+#endif
 }
 
 void SystemTrayController::showCaptureMessage(const QString& message, bool warning) {
