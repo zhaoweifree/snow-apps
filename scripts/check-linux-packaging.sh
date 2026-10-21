@@ -74,3 +74,9 @@ echo "=== qt private module pairing"
 # Every `${SNOW_QT_NS}::<Module>Private` link needs a `snow_find_qt_private(Module)`
 # in the same CMakeLists: on Qt5 that call is what creates the target (9.6.11).
 "$python_command" scripts/check-qt-private-modules.py
+
+echo
+echo "=== linux dependency pins"
+# The imath/openexr/libwebp pins are *copies* of vcpkg builtin ports (CI has no
+# clone). A stale copy compiles an old API against a newer snow_image (9.6.12).
+"$python_command" scripts/check-linux-deps-pins.py

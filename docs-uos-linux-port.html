@@ -4741,6 +4741,11 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 <code>
 <td><code>gates</code> ✅ / <code>build</code> ❌</td>
 <td>翻译目录那关过了；卡在 <code>ant_design_qt/CMakeLists.txt:106</code> 与 <code>snow_shot/CMakeLists.txt:10577</code>：<code>Target links to: Qt5::GuiPrivate</code> —— 缺的不是代码是<strong>私有头</strong>，见 9.6.11</td>
 </tr>
+<tr>
+<td>10（<code>2eab250d</code>）</td>
+<td><code>gates</code> ✅ / <strong><code>Configure</code> ✅</strong> / <code>build</code> ❌</td>
+<td><strong>整棵树的 Linux + Qt5 配置第一次走通</strong>；<code>Build</code> 在 7 秒内倒，<code>snow_image</code> 的 EXR/WebP 各报一处 API 不存在 —— 发行版版本比 vcpkg 的 pin 老一代，见 9.6.12</td>
+</tr>
 </tbody>
 </table>
 <p><strong>run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug</strong>，不是缺包。Qt5 装在自定义前缀时
@@ -4955,6 +4960,78 @@ CMake Error at snow_shot/CMakeLists.txt:10577 (target_link_libraries):
 <code>target_link_libraries(... ${SNOW_QT_NS}::&lt;M&gt;Private)</code> 的，同一文件必须调用 <code>snow_find_qt_private(&lt;M&gt;)</code>
 —— 因为 Qt5 上"目标存在"完全取决于那次调用。当前 3 个文件（<code>ant_design_qt</code> / <code>snow_image_viewer</code> /
 <code>snow_shot</code>）都配对；拿掉一处调用即报红。</p>
+<h4>9.6.12 run 10：Configure 通了，Build 倒在"发行版版本太老"（2026-10-21）</h4>
+<p>run 10（<code>2eab250d</code>）是这一片的分水岭：<strong><code>: Configure</code> 第一次整棵绿</strong>（4.1 秒），
+<code>-- Snow Qt: Qt5 private includes for Gui applied to this directory: …/QtGui/5.15.13;…/5.15.13/QtGui</code>
+也在日志里 —— 9.6.11 那条路真的通了。接着 <code>Build</code> 7 秒就停：</p>
+<pre><code>snow_image/src/codecs/exr_codec.cpp:82: error: 'int64_t MemoryIStream::size()' marked 'override',
+                                               but does not override
+snow_image/src/codecs/exr_codec.cpp:886: error: no matching function for call to
+                                               'Imf_3_1::OpaqueAttribute::OpaqueAttribute(const char*, long int, const std::byte*)'
+snow_image/src/codecs/webp_codec.cpp:1489: error: 'WebPAnimEncoderSetChunk' was not declared in this scope
+</code></pre>
+<p><strong>这不是"缺包"，是版本代差</strong>。代码是对着 vcpkg 的 pin 写的：</p>
+<table>
+<thead>
+<tr>
+<th>库</th>
+<th>vcpkg（Windows 用的）</th>
+<th>Ubuntu 24.04</th>
+<th>UOS 20（目标机）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OpenEXR</td>
+<td>3.4.9</td>
+<td>3.1.5（<code>size()</code> 签名不同、<code>OpaqueAttribute</code> 无三参构造）</td>
+<td>2.5（连异常命名空间都不一样）</td>
+</tr>
+<tr>
+<td>Imath</td>
+<td>3.2.2</td>
+<td>3.1.1</td>
+<td>无独立包</td>
+</tr>
+<tr>
+<td>libwebp</td>
+<td>1.6.0</td>
+<td>1.3.2（无 <code>WebPAnimEncoderSetChunk</code>）</td>
+<td>0.6（没有动画编码器）</td>
+</tr>
+</tbody>
+</table>
+<p>9.6.9 定的「固定版本本地编」原本只针对「发行版没有 CONFIG 包」那一批；这里把同一条规则
+<strong>显式扩展</strong>到「版本不足 / API 不兼容」：判据仍是产品要求本身 —— 目标机 UOS 20 上这两个库比
+24.04 还老，靠"适配老 API"永远到不了能发货的状态，只能自己带版本。</p>
+<p><code>scripts/build-linux-deps.sh</code> 新增三个 builder（<code>imath</code> → <code>openexr</code> → <code>libwebp</code>，顺序即依赖）：</p>
+<ul>
+<li>选项照抄 portfile：OpenEXR 关掉 tools/examples/testing；libwebp 只留三个库
+  （<code>WEBP_BUILD_LIBWEBPMUX=ON</code> + 其余工具全 OFF + <code>CMAKE_DISABLE_FIND_PACKAGE_SDL=ON</code>）。</li>
+<li><strong>两处刻意不一致</strong>，都写进注释：① port 用
+  <code>-DCMAKE_REQUIRE_FIND_PACKAGE_libdeflate=ON</code>，这边不跟 —— 前缀里已经有 compat 模式的
+  zlib-ng，那才是 Windows 侧的压缩后端；② libwebp 的 <code>0002-cmake-config.patch</code> 只改
+  <code>WebP_LIBRARIES</code> 这个 vcpkg 专用变量，本项目链的是上游自己的
+  <code>WebP::webp</code> / <code>WebP::webpdemux</code> / <code>WebP::libwebpmux</code>，不需要打。</li>
+<li>OpenEXR 额外传 <code>-DCMAKE_PREFIX_PATH="$prefix"</code>，否则它会拿系统 3.1 的 Imath 头配自己的 3.4 库。</li>
+<li>判据：装完必须存在 <code>ImathConfig.cmake</code> / <code>OpenEXRConfig.cmake</code> / <code>WebPConfig.cmake</code>。</li>
+</ul>
+<p><strong>pin 的出处问题</strong>：<code>zlib</code>、<code>minizip-ng</code> 的版本与校验和是从 overlay port 现场读的，不会漂；
+但 <code>imath</code>/<code>openexr</code>/<code>libwebp</code> 的 port 在 <code>.tools/vcpkg</code> 这个 vcpkg 克隆里，<strong>CI 上没有</strong>，
+所以只能把 pin 抄进脚本。抄写就会过期，于是配一条门禁 <code>scripts/check-linux-deps-pins.py</code>：</p>
+<ul>
+<li>在<strong>这台机器</strong>上把抄来的 <code>_version</code> / <code>_sha512</code> 与 <code>.tools/vcpkg/ports/&lt;port&gt;</code> 逐字段比对
+  （当前三条全 ok）；没有克隆时打印一行 skip 并返回 0 —— 它本质是工作站检查。</li>
+<li>同一条门禁还查管线：<code>for library in …</code> 里每个名字都要有 <code>build_&lt;name&gt;()</code> 与 version+sha512，
+  反向也查（有 builder 却不在循环里 = 这个库永远不会被构建）。<strong>这一类"写了却没接进循环"
+  是本仓库第一次出现的假绿形态</strong>：脚本照旧成功，只是少装一个库，然后在 configure 时报"找不到包"。</li>
+<li>反向验证：把 <code>openexr_version</code> 改成 <code>3.4.8</code> ⇒ 报 <code>script pins version '3.4.8' but port 'openexr' is '3.4.9'</code>。</li>
+</ul>
+<p><strong>下一个红灯大概率是 libjxl</strong>：vcpkg 是 <code>0.11.2</code>（overlay port），24.04 是 <code>0.7.0</code>，
+而 0.7 → 0.11 的编码器 API 是重写过的；<code>libheif</code> 也从 <code>1.21.2</code> 对 <code>1.17.6</code>。两者都还没动手，
+理由和这一片一路的做法一致：等 CI 报出<strong>具体哪个符号</strong>，再决定是自己带版本还是适配。
+另外 configure 里那条 <code>libz.so.1 in /usr/lib/… may be hidden by files in &lt;prefix&gt;/lib</code> 的警告仍在，
+它就是 9.6.9 留给打包决定的那个"运行时链接谁"。</p>
 <hr>
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

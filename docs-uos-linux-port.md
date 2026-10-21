@@ -2829,6 +2829,7 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 7（`60302201`） | `gates` ✅ / `build` ❌ | `SnowShotTranslationRelease.cmake:59`：找不到 `zh_CN` 的 stock-dialog 目录，报的路径是 `/usr/lib/translations` —— **一个在 Debian 系上根本不存在的目录**，见下 |
 | 8（`7fe30ad0`） | `gates` ✅ / `build` ❌ | `SnowQtVersionShims.cmake:58 (include)`：找不到 `ant_design_qt/SnowQt5InstallPaths.cmake` —— **上一片自己新写的代码**，`CMAKE_CURRENT_LIST_DIR` 在函数体里指向调用方，见 9.6.10 |
 | 9（`7f42249d`） | `gates` ✅ / `build` ❌ | 翻译目录那关过了；卡在 `ant_design_qt/CMakeLists.txt:106` 与 `snow_shot/CMakeLists.txt:10577`：`Target links to: Qt5::GuiPrivate` —— 缺的不是代码是**私有头**，见 9.6.11 |
+| 10（`2eab250d`） | `gates` ✅ / **`Configure` ✅** / `build` ❌ | **整棵树的 Linux + Qt5 配置第一次走通**；`Build` 在 7 秒内倒，`snow_image` 的 EXR/WebP 各报一处 API 不存在 —— 发行版版本比 vcpkg 的 pin 老一代，见 9.6.12 |
 
 **run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug**，不是缺包。Qt5 装在自定义前缀时
 `Qt5Core_DIR` 是 `<prefix>/lib/cmake/Qt5Core`，`../../../bin` 正好是 `<prefix>/bin`；但发行版的同名文件
@@ -3024,6 +3025,61 @@ CMake Error at snow_shot/CMakeLists.txt:10577 (target_link_libraries):
 `target_link_libraries(... ${SNOW_QT_NS}::<M>Private)` 的，同一文件必须调用 `snow_find_qt_private(<M>)`
 —— 因为 Qt5 上"目标存在"完全取决于那次调用。当前 3 个文件（`ant_design_qt` / `snow_image_viewer` /
 `snow_shot`）都配对；拿掉一处调用即报红。
+
+#### 9.6.12 run 10：Configure 通了，Build 倒在"发行版版本太老"（2026-10-21）
+
+run 10（`2eab250d`）是这一片的分水岭：**`: Configure` 第一次整棵绿**（4.1 秒），
+`-- Snow Qt: Qt5 private includes for Gui applied to this directory: …/QtGui/5.15.13;…/5.15.13/QtGui`
+也在日志里 —— 9.6.11 那条路真的通了。接着 `Build` 7 秒就停：
+
+```
+snow_image/src/codecs/exr_codec.cpp:82: error: 'int64_t MemoryIStream::size()' marked 'override',
+                                               but does not override
+snow_image/src/codecs/exr_codec.cpp:886: error: no matching function for call to
+                                               'Imf_3_1::OpaqueAttribute::OpaqueAttribute(const char*, long int, const std::byte*)'
+snow_image/src/codecs/webp_codec.cpp:1489: error: 'WebPAnimEncoderSetChunk' was not declared in this scope
+```
+
+**这不是"缺包"，是版本代差**。代码是对着 vcpkg 的 pin 写的：
+
+| 库 | vcpkg（Windows 用的） | Ubuntu 24.04 | UOS 20（目标机） |
+|---|---|---|---|
+| OpenEXR | 3.4.9 | 3.1.5（`size()` 签名不同、`OpaqueAttribute` 无三参构造） | 2.5（连异常命名空间都不一样） |
+| Imath | 3.2.2 | 3.1.1 | 无独立包 |
+| libwebp | 1.6.0 | 1.3.2（无 `WebPAnimEncoderSetChunk`） | 0.6（没有动画编码器） |
+
+9.6.9 定的「固定版本本地编」原本只针对「发行版没有 CONFIG 包」那一批；这里把同一条规则
+**显式扩展**到「版本不足 / API 不兼容」：判据仍是产品要求本身 —— 目标机 UOS 20 上这两个库比
+24.04 还老，靠"适配老 API"永远到不了能发货的状态，只能自己带版本。
+
+`scripts/build-linux-deps.sh` 新增三个 builder（`imath` → `openexr` → `libwebp`，顺序即依赖）：
+
+- 选项照抄 portfile：OpenEXR 关掉 tools/examples/testing；libwebp 只留三个库
+  （`WEBP_BUILD_LIBWEBPMUX=ON` + 其余工具全 OFF + `CMAKE_DISABLE_FIND_PACKAGE_SDL=ON`）。
+- **两处刻意不一致**，都写进注释：① port 用
+  `-DCMAKE_REQUIRE_FIND_PACKAGE_libdeflate=ON`，这边不跟 —— 前缀里已经有 compat 模式的
+  zlib-ng，那才是 Windows 侧的压缩后端；② libwebp 的 `0002-cmake-config.patch` 只改
+  `WebP_LIBRARIES` 这个 vcpkg 专用变量，本项目链的是上游自己的
+  `WebP::webp` / `WebP::webpdemux` / `WebP::libwebpmux`，不需要打。
+- OpenEXR 额外传 `-DCMAKE_PREFIX_PATH="$prefix"`，否则它会拿系统 3.1 的 Imath 头配自己的 3.4 库。
+- 判据：装完必须存在 `ImathConfig.cmake` / `OpenEXRConfig.cmake` / `WebPConfig.cmake`。
+
+**pin 的出处问题**：`zlib`、`minizip-ng` 的版本与校验和是从 overlay port 现场读的，不会漂；
+但 `imath`/`openexr`/`libwebp` 的 port 在 `.tools/vcpkg` 这个 vcpkg 克隆里，**CI 上没有**，
+所以只能把 pin 抄进脚本。抄写就会过期，于是配一条门禁 `scripts/check-linux-deps-pins.py`：
+
+- 在**这台机器**上把抄来的 `_version` / `_sha512` 与 `.tools/vcpkg/ports/<port>` 逐字段比对
+  （当前三条全 ok）；没有克隆时打印一行 skip 并返回 0 —— 它本质是工作站检查。
+- 同一条门禁还查管线：`for library in …` 里每个名字都要有 `build_<name>()` 与 version+sha512，
+  反向也查（有 builder 却不在循环里 = 这个库永远不会被构建）。**这一类"写了却没接进循环"
+  是本仓库第一次出现的假绿形态**：脚本照旧成功，只是少装一个库，然后在 configure 时报"找不到包"。
+- 反向验证：把 `openexr_version` 改成 `3.4.8` ⇒ 报 `script pins version '3.4.8' but port 'openexr' is '3.4.9'`。
+
+**下一个红灯大概率是 libjxl**：vcpkg 是 `0.11.2`（overlay port），24.04 是 `0.7.0`，
+而 0.7 → 0.11 的编码器 API 是重写过的；`libheif` 也从 `1.21.2` 对 `1.17.6`。两者都还没动手，
+理由和这一片一路的做法一致：等 CI 报出**具体哪个符号**，再决定是自己带版本还是适配。
+另外 configure 里那条 `libz.so.1 in /usr/lib/… may be hidden by files in <prefix>/lib` 的警告仍在，
+它就是 9.6.9 留给打包决定的那个"运行时链接谁"。
 
 
 

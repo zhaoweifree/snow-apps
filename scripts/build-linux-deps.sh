@@ -15,9 +15,13 @@
 #   * minizip-ng -- `snow_shot` links `MINIZIP::minizip-ng`; Ubuntu's `minizip`
 #     is zlib's project, not this one;
 #   * onnxruntime -- the OCR process needs it, and the port document already
-#     says Linux takes Microsoft's prebuilt CPU build rather than building it.
+#     says Linux takes Microsoft's prebuilt CPU build rather than building it;
+#   * Imath + OpenEXR -- the EXR codec is written against the 3.4 API, 24.04
+#     ships 3.1.5 and UOS 20 ships 2.5 (neither compiles);
+#   * libwebp -- the animation codec calls `WebPAnimEncoderSetChunk()`, absent
+#     from 24.04's 1.3.2 and from UOS 20's 0.6.
 #
-# Windows/macOS get all five through `cmake/vcpkg-overlay-ports/` or the
+# Windows/macOS get all of them through `cmake/vcpkg-overlay-ports/` or the
 # manifest baseline.
 #
 # Importing vcpkg on Linux to solve that is the option this script exists to
@@ -30,6 +34,10 @@
 # out of the port's `vcpkg.json` (version) and `portfile.cmake` (SHA512), so
 # bumping the port bumps Linux too, and the checksum proves the archive is the
 # same one vcpkg fetches. Libraries with no overlay port carry their own pin.
+# `imath` / `openexr` / `libwebp` do have ports, but they are vcpkg *builtin*
+# ports living in the `.tools/vcpkg` clone, which CI does not have -- so they
+# carry a copy of the pin here and `scripts/check-linux-deps-pins.py` compares
+# that copy against the clone on a workstation and fails when they drift.
 #
 # To add one: pin version + sha512, write a `build_<name>` that ends with the
 # assertion that proves the *consumer* will find it (its CMake config file, its
@@ -417,7 +425,150 @@ CONFIG
     stamp onnxruntime "${version}-${arch}"
 }
 
-for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime; do
+# --- Imath + OpenEXR --------------------------------------------------------
+# OpenEXR on 24.04 is not merely "a bit old": `snow_image/src/codecs/exr_codec.cpp`
+# is written against the 3.4 API -- `MemoryIStream::size()` overrides
+# `IStream::size()`, and opaque attributes are built with
+# `OpaqueAttribute(typeName, size, data)` -- while 24.04 ships 3.1.5 (neither
+# compiles) and UOS 20 ships 2.5 (different core headers entirely). So the whole
+# EXR codec is built here at the version the Windows build uses.
+#
+# Pins are copied verbatim from `.tools/vcpkg/ports/{openexr,imath}`: same
+# version, same SHA512, same archive URL shape as `vcpkg_from_github`, so the
+# bytes are identical. `scripts/check-linux-deps-pins.py` re-reads the ports on
+# this workstation and fails when they drift apart.
+imath_version="3.2.2"
+imath_sha512="492a624e4c0b59685d1ea58a3c2c63ddb4ba5ab9177c7d2a1b7e80be95d38ce02c74fafd2fe0982f7d21e5e75c938cc24a33a12d827dec32727cb8dcd5066450"
+
+openexr_version="3.4.9"
+openexr_sha512="785496d9b749f2272c108262796abde7ec40f7c328bb91cde9d7ffecf0670826399233aa7bf0db881f0b07748c78660e49b1ca5511fadd0dfe1d9d7bd1fb0f93"
+
+build_imath() {
+    local version="$imath_version"
+    local url archive work build config
+
+    if stamped imath "$version"; then
+        echo "== imath ${version}: up to date"
+        return 0
+    fi
+    echo "== imath ${version}"
+
+    url="https://github.com/AcademySoftwareFoundation/Imath/archive/refs/tags/v${version}.tar.gz"
+    archive="${src_dir}/imath-${version}.tar.gz"
+    work="${build_root}/imath-${version}"
+    build="${work}/cmake-build"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$imath_sha512"
+    unpack "$archive" "${work}/src"
+
+    configure_build_install "${work}/src" "$build" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTING=OFF \
+        -DIMATH_INSTALL_PKG_CONFIG=ON \
+        -DIMATH_INSTALL_SYM_LINK=OFF
+
+    config="$(find "${prefix}" -name 'ImathConfig.cmake' -print -quit)"
+    [[ -n "$config" ]] || die "imath installed no CMake config package"
+    stamp imath "$version"
+}
+
+build_openexr() {
+    local version="$openexr_version"
+    local url archive work build config
+
+    if stamped openexr "$version"; then
+        echo "== openexr ${version}: up to date"
+        return 0
+    fi
+    echo "== openexr ${version}"
+
+    url="https://github.com/AcademySoftwareFoundation/openexr/archive/refs/tags/v${version}.tar.gz"
+    archive="${src_dir}/openexr-${version}.tar.gz"
+    work="${build_root}/openexr-${version}"
+    build="${work}/cmake-build"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$openexr_sha512"
+    unpack "$archive" "${work}/src"
+
+    # `CMAKE_PREFIX_PATH` is what makes it find the Imath installed one step
+    # above; without it OpenEXR would either fail or silently use the system
+    # 3.1 headers alongside its own 3.4 library. The vcpkg port additionally
+    # forces libdeflate (`CMAKE_REQUIRE_FIND_PACKAGE_libdeflate=ON`); this side
+    # deliberately does not -- the prefix already carries zlib-ng in compat
+    # mode, which is the compression backend Windows uses.
+    configure_build_install "${work}/src" "$build" \
+        -DCMAKE_PREFIX_PATH="${prefix}" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_WEBSITE=OFF \
+        -DOPENEXR_BUILD_EXAMPLES=OFF \
+        -DOPENEXR_BUILD_TOOLS=OFF \
+        -DOPENEXR_INSTALL_TOOLS=OFF \
+        -DOPENEXR_INSTALL_PKG_CONFIG=ON
+
+    # `snow_image/CMakeLists.txt` asks for `OpenEXR::OpenEXR`; that target only
+    # exists if the config package was installed.
+    config="$(find "${prefix}" -name 'OpenEXRConfig.cmake' -print -quit)"
+    [[ -n "$config" ]] || die "openexr installed no CMake config package"
+    stamp openexr "$version"
+}
+
+# --- libwebp ----------------------------------------------------------------
+# Same class of problem as OpenEXR, one API older: `webp_codec.cpp` calls
+# `WebPAnimEncoderSetChunk()`, which 24.04's libwebp 1.3.2 does not declare (and
+# UOS 20's 0.6 has no animation encoder at all). Windows uses 1.6.0.
+#
+# The vcpkg port patches `WebPConfig.cmake.in`, but only its legacy
+# `WebP_LIBRARIES` variable (absolute vcpkg paths); the imported targets this
+# project links -- `WebP::webp`, `WebP::webpdemux`, `WebP::libwebpmux` -- are
+# upstream's own, so the patches are not needed here.
+libwebp_version="1.6.0"
+libwebp_sha512="298e0ad4c09392213baf5abb69d330c6203b618800073fe2df91d01d35034197c5d3e29a74573b06971473c52c74514f0e6e0f6c8162f923e2dd15cb1a692aef"
+
+build_libwebp() {
+    local version="$libwebp_version"
+    local url archive work build config
+
+    if stamped libwebp "$version"; then
+        echo "== libwebp ${version}: up to date"
+        return 0
+    fi
+    echo "== libwebp ${version}"
+
+    url="https://github.com/webmproject/libwebp/archive/refs/tags/v${version}.tar.gz"
+    archive="${src_dir}/libwebp-${version}.tar.gz"
+    work="${build_root}/libwebp-${version}"
+    build="${work}/cmake-build"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$libwebp_sha512"
+    unpack "$archive" "${work}/src"
+
+    # Only the three libraries are wanted; the tools would drag in SDL, png
+    # helpers and a CLI surface nobody ships.
+    configure_build_install "${work}/src" "$build" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DWEBP_BUILD_LIBWEBPMUX=ON \
+        -DWEBP_ENABLE_SIMD=ON \
+        -DWEBP_BUILD_ANIM_UTILS=OFF \
+        -DWEBP_BUILD_CWEBP=OFF \
+        -DWEBP_BUILD_DWEBP=OFF \
+        -DWEBP_BUILD_EXTRAS=OFF \
+        -DWEBP_BUILD_GIF2WEBP=OFF \
+        -DWEBP_BUILD_IMG2WEBP=OFF \
+        -DWEBP_BUILD_VWEBP=OFF \
+        -DWEBP_BUILD_WEBPINFO=OFF \
+        -DWEBP_BUILD_WEBPMUX=OFF \
+        -DCMAKE_DISABLE_FIND_PACKAGE_SDL=ON
+
+    config="$(find "${prefix}" -name 'WebPConfig.cmake' -print -quit)"
+    [[ -n "$config" ]] || die "libwebp installed no CMake config package"
+    stamp libwebp "$version"
+}
+
+for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime imath openexr libwebp; do
     if ! selected "$library"; then
         continue
     fi
@@ -428,6 +579,9 @@ for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime; do
         lunasvg) build_lunasvg >"$log" 2>&1 || { cat "$log"; die "lunasvg build failed (log: ${log})"; } ;;
         minizip-ng) build_minizip_ng >"$log" 2>&1 || { cat "$log"; die "minizip-ng build failed (log: ${log})"; } ;;
         onnxruntime) build_onnxruntime >"$log" 2>&1 || { cat "$log"; die "onnxruntime install failed (log: ${log})"; } ;;
+        imath) build_imath >"$log" 2>&1 || { cat "$log"; die "imath build failed (log: ${log})"; } ;;
+        openexr) build_openexr >"$log" 2>&1 || { cat "$log"; die "openexr build failed (log: ${log})"; } ;;
+        libwebp) build_libwebp >"$log" 2>&1 || { cat "$log"; die "libwebp build failed (log: ${log})"; } ;;
     esac
     echo "   $(tail -n 1 "$log")"
 done
