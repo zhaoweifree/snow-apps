@@ -142,6 +142,7 @@ del{color:var(--fg-soft)}
 <li><a href="#9-3-需改动的-cmakelists-关键点">9.3 需改动的 CMakeLists 关键点</a></li>
 <li><a href="#9-4-rust-构建">9.4 Rust 构建</a></li>
 <li><a href="#9-5-打包">9.5 打包</a></li>
+<li><a href="#9-6-p7-slice-1-linux-ci-2026-10-21">9.6 P7 slice 1：Linux CI（2026-10-21）</a></li>
 </ul>
 </li>
 <li><a href="#10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</a>
@@ -239,8 +240,8 @@ del{color:var(--fg-soft)}
 <td>Rust <code>snow-capture</code> / <code>snow-cursor</code></td>
 <td>低</td>
 <td>—</td>
-<td><strong>已完成 X11 部分</strong></td>
-<td>采集与光标走 X11（见 9.4.3），经 MIT-SHM 零拷贝读像素（见 9.4.7）；PipeWire / portal 仍缺</td>
+<td><strong>X11 完成，Wayland 半程</strong></td>
+<td>采集与光标走 X11（见 9.4.3），经 MIT-SHM 零拷贝读像素（见 9.4.7）、Damage 跳帧与多屏区域脏矩形（见 9.4.19 / 9.4.21）；Wayland 侧 portal 握手已落地（见 9.4.20），<strong>PipeWire 帧消费仍缺</strong>，故 Wayland 会话明确拒绝采集而不是交出错图</td>
 </tr>
 <tr>
 <td>Rust 输入钩子 / 键帽渲染</td>
@@ -436,7 +437,7 @@ fn unsupported_error() -&gt; CaptureError {
 <tr>
 <td>UIA/MSAA 元素拾取</td>
 <td><code>snow-ui-selector/src/windows/*</code>、<code>snow-selected-text/src/platform/windows/*</code></td>
-<td><strong>X11 窗口树 —— 已落地窗口级</strong>：<code>snow-linux/src/window.rs</code>（纯逻辑）+ <code>snow-linux/src/x11/window.rs</code>（见 9.4.6）。控件级仍需 AT-SPI2 (D-Bus)；跨进程读选中文字（<code>snow-selected-text</code>）同样仍缺</td>
+<td><strong>X11 窗口树 —— 已落地窗口级</strong>：<code>snow-linux/src/window.rs</code>（纯逻辑）+ <code>snow-linux/src/x11/window.rs</code>（见 9.4.6）。<strong>跨进程取选中文字已落地 PRIMARY selection</strong>（见 9.4.22）；<strong>AT-SPI2 已接进 <code>snow-selected-text</code></strong>（<code>snow-atspi</code> crate，见 9.4.25/9.4.26）：控件级文本 + 选中矩形 + 按 <code>_NET_WM_PID</code> 定位应用，PRIMARY 作退路。<strong>控件级拾取已接进 <code>snow-ui-selector</code></strong>（见 9.4.27）：<code>Component.GetAccessibleAtPoint</code> 点命中下探，返回「控件→…→窗口」路径，读不到时回退窗口矩形</td>
 </tr>
 <tr>
 <td>全局键鼠钩子</td>
@@ -835,12 +836,12 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <tr>
 <td><strong>新增</strong></td>
 <td><code>snow_shot/resources/linux/*.desktop</code>、图标</td>
-<td>应用入口、右键菜单</td>
+<td>应用入口、右键菜单。<strong>已落</strong>（见 9.5.1/9.5.2）：入口放在 <code>snow_shot/packaging/linux/</code>；图标复用 <code>resources/app-icon.{svg,ico}</code>，PNG 尺寸由 <code>scripts/gen-linux-icons.py</code> 从 ico 抽出</td>
 </tr>
 <tr>
 <td><strong>新增</strong></td>
-<td><code>cmake/SnowShotLinuxPackage.cmake</code></td>
-<td>CPack DEB/AppImage</td>
+<td><code>cmake/SnowShotLinuxPackage.cmake</code>、<code>cmake/SnowShotAppImage.cmake</code></td>
+<td>CPack DEB / AppDir + <code>appimagetool</code></td>
 </tr>
 </tbody>
 </table>
@@ -857,7 +858,12 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <tr>
 <td><strong>新增</strong></td>
 <td><code>snow-crates/crates/snow-linux/</code></td>
-<td>替代 <code>snow-macos</code> 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。<strong>已建</strong>：<code>geometry</code>/<code>pixels</code>/<code>session</code>/<code>capture</code>/<code>window</code>/<code>pointer</code>（纯逻辑，任何平台可单测）+ <code>input::{keys,tracking}</code>（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ <code>text::{font,raster}</code>（纯逻辑：字体发现 + 键帽光栅化，<code>ab_glyph</code>/<code>ttf-parser</code>）+ <code>x11</code>/<code>display</code>/<code>cursor</code>/<code>input::x11</code>/<code>x11::{window,shm,pointer}</code>（X11，<code>x11rb</code> 纯 Rust 实现）。待补：PipeWire/Wayland capture、evdev 退路。<strong>音频按决策 4 不做</strong></td>
+<td>替代 <code>snow-macos</code> 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。<strong>已建</strong>：<code>geometry</code>/<code>pixels</code>/<code>session</code>/<code>capture</code>/<code>damage</code>/<code>window</code>/<code>pointer</code>（纯逻辑，任何平台可单测）+ <code>input::{keys,tracking}</code>（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ <code>text::{font,raster}</code>（纯逻辑：字体发现 + 键帽光栅化，<code>ab_glyph</code>/<code>ttf-parser</code>）+ <code>portal::{deadline,...}</code>（纯逻辑：portal 请求路径、版本门控、应答判定、流列表解析、握手顺序）+ <code>x11</code>/<code>display</code>/<code>cursor</code>/<code>input::x11</code>/<code>x11::{window,shm,damage,pointer}</code>（X11，<code>x11rb</code>）+ <code>portal::dbus</code>（session bus，<code>zbus</code>）。<strong>AT-SPI2 不在这里</strong>：9.4.25 曾落在 <code>a11y</code>，9.4.26 抽成独立 crate <code>snow-atspi</code>（两个 C archive 都是它的消费者，其中 <code>snow-selected-text</code> 刻意不依赖本 crate）。待补：PipeWire 帧消费、evdev 退路。<strong>音频按决策 4 不做</strong></td>
+</tr>
+<tr>
+<td><strong>新增</strong></td>
+<td><code>snow-crates/crates/snow-atspi/</code></td>
+<td>AT-SPI2 访问层，只依赖 <code>zbus</code>（且仅 Linux）：<code>lib.rs</code> 纯逻辑（<code>ObjectRef</code>/空 bus name 继承、state 值、字符↔字节、<code>choose_selection</code>、<code>Bounds</code>、有界且有期限的 BFS、按 pid 找应用；单测在 Windows 上跑）+ <code>bus.rs</code> 传输（<code>org.a11y.Bus.GetAddress</code> → 第二条连接 → <code>GetChildren</code>/<code>GetState</code>/<code>GetText</code>/<code>GetRangeExtents</code>）。见 9.4.25（能力）与 9.4.26（抽离与接线）。<strong>独立成 crate 的理由</strong>：<code>snow-selected-text-c</code> 与 <code>snow-ui-selector-c</code> 是两个 archive，前者刻意不依赖 <code>snow-linux</code>，一份实现才不会漂移</td>
 </tr>
 <tr>
 <td><strong>新增</strong></td>
@@ -867,7 +873,7 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <tr>
 <td><strong>新增</strong></td>
 <td><code>snow-crates/crates/snow-capture/src/platform/linux.rs</code></td>
-<td><strong>X11 已落地</strong>（<code>LinuxBackend</code> + <code>X11Capturer</code>，见 9.4.3）：显示器枚举 / 主屏 / <code>MonitorLayout</code> / <code>inspect_target</code> + 全屏与区域采集。待补：PipeWire + XDG portal（Wayland）、X11 Damage 脏矩形、XShm 零拷贝</td>
+<td><strong>X11 已落地</strong>（<code>LinuxBackend</code> + <code>X11Capturer</code>，见 9.4.3）：显示器枚举 / 主屏 / <code>MonitorLayout</code> / <code>inspect_target</code> + 全屏与区域采集；XShm 零拷贝（9.4.7）；Damage 跳帧与脏矩形（9.4.19）；区域采集只读子矩形（9.4.23）；<strong>Wayland 会话按 <code>capture_plan</code> 明确拒绝</strong>（9.4.20）。待补：PipeWire 帧消费（portal 会话协商已落地）</td>
 </tr>
 <tr>
 <td><strong>新增</strong></td>
@@ -882,12 +888,12 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <tr>
 <td><strong>新增</strong></td>
 <td><code>snow-crates/crates/snow-ui-selector/src/linux.rs</code></td>
-<td><strong>窗口级已落地</strong>（见 9.4.6）：X11 窗口树 + <code>_NET_CLIENT_LIST</code>，<code>ElementRegionService</code> 在 Linux 上导出，<code>snow-ui-selector-c</code> 恢复可编译。控件级仍需 AT-SPI2（D-Bus）——未实现，<code>HitTestMode::UiElement</code> 与 <code>Window</code> 目前返回同一个窗口矩形</td>
+<td><strong>窗口级已落地</strong>（见 9.4.6）：X11 窗口树 + <code>_NET_CLIENT_LIST</code>，<code>ElementRegionService</code> 在 Linux 上导出，<code>snow-ui-selector-c</code> 恢复可编译。<strong>控件级已落地</strong>（见 9.4.27）：<code>HitTestMode::UiElement</code> 经 <code>snow-atspi</code> 的点命中下降返回「控件→…→窗口」；读不到时回退窗口矩形（<code>HitTestMode::Window</code> 语义）</td>
 </tr>
 <tr>
 <td><strong>新增</strong></td>
 <td><code>snow-crates/crates/snow-selected-text/src/platform/linux/</code></td>
-<td>AT-SPI2（D-Bus）取选中文本 + PRIMARY selection。未开始</td>
+<td><strong>X11 PRIMARY selection 已落地</strong>（见 9.4.22）：<code>selection.rs</code>（纯逻辑：目标优先级、<code>INCR</code> 判据、解码、上限）+ <code>platform/linux/{selection,source}.rs</code>（传输与活动窗口识别）。被动读、零注入 ⇒ <code>clipboard_status</code> 恒 <code>Unchanged</code>。<strong>AT-SPI2 已接线</strong>（见 9.4.26）：先读焦点控件的 <code>Text</code> 选中（带矩形），没有才退回 PRIMARY；<code>method</code> 报真正答话的那条路。待补：真机验证</td>
 </tr>
 <tr>
 <td><strong>修改</strong></td>
@@ -1006,7 +1012,7 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <tbody>
 <tr>
 <td>屏幕采集（Wayland）</td>
-<td><code>pipewire-rs</code>（<code>libspa</code>）、<code>ashpd</code> 或 <code>zbus</code>（xdg-desktop-portal ScreenCast）</td>
+<td><code>zbus</code>（xdg-desktop-portal ScreenCast，<strong>已引入：v6，协商层见 9.4.20</strong>）、<code>pipewire-rs</code>（<code>libspa</code>，帧消费，未引入）</td>
 </tr>
 <tr>
 <td>屏幕采集（X11）</td>
@@ -1035,7 +1041,10 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 </tbody>
 </table>
 <blockquote>
-<p>目前上述依赖<strong>一个都没有</strong>（<code>Cargo.lock</code> 中无 <code>nix</code>/<code>wayland</code>/<code>x11rb</code>/<code>pipewire</code>/<code>zbus</code>）。</p>
+<p>已有：<code>x11rb</code>（X11 全栈）、<code>zbus</code>（portal 协商）、<code>ab_glyph</code>/<code>ttf-parser</code>（文字）、<code>memmap2</code>（MIT-SHM）。
+仍缺：<code>pipewire-rs</code>（Wayland 帧消费）、<code>nix</code>/<code>libc</code>、<code>evdev</code>、<code>atspi</code>。
+注意 <code>zbus</code> 6 的两处破坏性变化：<code>zvariant</code> 并入 <code>zbus::wire</code>（<code>Value</code> → <code>Variant</code>），blocking API 被移除，
+同步接送只能 <code>zbus::block_on</code> 驱动 future。</p>
 </blockquote>
 <hr>
 <h2 id="6-系统调用-硬件差异适配对照表">6. 系统调用 / 硬件差异适配对照表</h2>
@@ -1053,7 +1062,7 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <td>屏幕采集</td>
 <td>DXGI Duplication / WGC</td>
 <td>ScreenCaptureKit</td>
-<td><strong>X11 <code>GetImage</code> + MIT-SHM —— 已落地</strong>（见 9.4.3 / 9.4.7）；<strong>PipeWire</strong>（Wayland）仍缺</td>
+<td><strong>X11 <code>GetImage</code> + MIT-SHM —— 已落地</strong>（见 9.4.3 / 9.4.7）；Wayland 的 portal <strong>协商</strong>已落地（见 9.4.20），<strong>PipeWire 帧消费仍缺</strong> ⇒ Wayland 明确拒绝采集</td>
 </tr>
 <tr>
 <td>窗口采集</td>
@@ -1212,7 +1221,7 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <tr>
 <td>P0</td>
 <td><code>snow-capture/src/convert/simd_x86.rs</code> ↔ 新增 <code>simd_neon.rs</code></td>
-<td>像素格式转换热路径，影响采集帧率</td>
+<td>像素格式转换热路径，影响采集帧率。<strong>已完成（9.4.18）</strong>：六个 BGRA→RGBA 入口全部有 NEON 版本，两个架构共用同一张 <code>BGRA_TO_RGBA_SHUFFLE</code>；AArch64 不提供 NT store，<code>_nt_*</code> 别名普通内核</td>
 </tr>
 <tr>
 <td>P1</td>
@@ -1282,31 +1291,31 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <td><strong>P3 Rust 平台后端</strong> <em>(进行中)</em></td>
 <td>补齐 L2/L3 平台能力</td>
 <td><code>snow-linux</code> crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking</td>
-<td><code>cargo test -p snow-capture</code> 在 UOS 通过；能截到主屏。<strong>已达成（slice 1–6）</strong>：<code>snow-linux</code>（X11 会话 / RandR / 光标 / <code>GetImage</code> 解码 / XInput2 输入观测 / <code>ab_glyph</code> 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ <code>snow-cursor</code> Linux 后端 + <code>snow-capture</code> X11 后端 + <code>snow-recording-effects</code> 键鼠观测与键帽渲染 + <code>snow-ui-selector</code> Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。<strong>剩余</strong>：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（<strong>音频按决策 4 不做</strong>）</td>
+<td><code>cargo test -p snow-capture</code> 在 UOS 通过；能截到主屏。<strong>已达成（slice 1–15）</strong>：<code>snow-linux</code>（X11 会话 / RandR / 光标 / <code>GetImage</code> 解码 / XInput2 输入观测 / <code>ab_glyph</code> 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ <code>snow-capture</code> 多屏区域脏矩形（9.4.21）+ <code>snow-cursor</code> Linux 后端 + <code>snow-capture</code> X11 后端 + <code>snow-recording-effects</code> 键鼠观测与键帽渲染 + <code>snow-ui-selector</code> Linux 窗口级 provider + <code>snow-selected-text</code> X11 PRIMARY selection（9.4.22）+ X11 区域采集只读子矩形（9.4.23）+ X11 采集的 <code>record_stage_timings</code> 真正产出（9.4.24）+ AT-SPI2 访问层（9.4.25）+ AT-SPI2 抽成 <code>snow-atspi</code> 并接进 <code>snow-selected-text</code>（9.4.26）+ AT-SPI2 点命中接进 <code>snow-ui-selector</code> 的控件级拾取（9.4.27），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。<strong>剩余</strong>：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）（<strong>音频按决策 4 不做</strong>）</td>
 </tr>
 <tr>
-<td><strong>P4 C++ 平台层</strong> <em>(进行中)</em></td>
+<td><strong>P4 C++ 平台层</strong> <em>(代码面完成，待真机)</em></td>
 <td>主程序平台层</td>
 <td><code>snow_shot/src/platform/linux/*</code>；3 个 dispatcher 增分支；<code>screenshotnative.h</code> 重构</td>
-<td>截图→标注→贴图闭环在 X11 会话可用。<strong>已起步（slice 1）</strong>：<code>snow-linux-c</code> 平台桥建立 + 物理光标 X11 落地（见 9.4.8）。<strong>剩余</strong>：全局快捷键（XGrabKey）、全局鼠标 backend、全屏窗口检测、托盘/自启动/单实例/通知、<code>screenshotnative.h</code> 拆分</td>
+<td>截图→标注→贴图闭环在 X11 会话可用。<strong>全部 slice 已落代码（slice 1–9）</strong>：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、<code>screenshotnative.h</code> 三分（9.4.16）、窗口级捕获目标（9.4.17）。<strong>剩余全部是只能在 UOS 上回答的问题</strong>：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条）</td>
 </tr>
 <tr>
-<td><strong>P5 双架构 + SIMD</strong></td>
+<td><strong>P5 双架构 + SIMD</strong> <em>(进行中)</em></td>
 <td>arm64 可用可跑</td>
 <td>NEON 内核；<code>SnowSimd.cmake</code> aarch64 分支</td>
-<td>飞腾真机截屏成功，帧率 ≥ 目标准</td>
+<td>飞腾真机截屏成功，帧率 ≥ 目标准。<strong>slice 1 已落代码</strong>：<code>snow-capture</code> 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），<code>--all-features</code> 在非 Windows 上恢复可编译。<strong>剩余</strong>：§7.2 的 P1/P2 项（<code>raster.cpp</code> CRC32C、<code>snow_canvas_filter_*_avx2</code>、拼接/录制/OCR 标量容忍）、真机性能数字</td>
 </tr>
 <tr>
-<td><strong>P6 打包与系统集成</strong></td>
+<td><strong>P6 打包与系统集成</strong> <em>(进行中)</em></td>
 <td>可交付安装包</td>
 <td><code>cmake/SnowShotLinuxPackage.cmake</code>；<code>.desktop</code>；deb + AppImage</td>
-<td>双架构 deb 在 UOS 20/Deepin 23 安装并可启动</td>
+<td>双架构 deb 在 UOS 20/Deepin 23 安装并可启动。<strong>slice 1 已落代码</strong>：deb（CPack DEB + <code>dpkg-shlibdeps</code> 依赖推导 + 五架构映射）、<code>.desktop</code>、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。<strong>slice 2 已落代码</strong>：7 个尺寸的 hicolor PNG（从 <code>app-icon.ico</code> 抽取）、AppImage（<code>cmake/SnowShotAppImage.cmake</code> + <code>AppRun</code> + <code>snow-shot-appimage</code> 目标）、门禁扩到 101 项（9.5.2）。<strong>剩余</strong>：真机 <code>dpkg -i</code> 与两个 freedesktop 校验器、AppImage 真机 <code>--appimage-extract</code> 与 FUSE 验证、真机性能数字</td>
 </tr>
 <tr>
-<td><strong>P7 硬化与 CI</strong></td>
+<td><strong>P7 硬化与 CI</strong> <em>(进行中)</em></td>
 <td>稳定与回归</td>
 <td>Wayland 会话适配；CI 增 Linux job</td>
-<td>双会话（X11/Wayland）功能对等；关键用例回归通过</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>剩余</strong>：Linux 侧第三方库来源未定（9.6.9：zlib-ng / libjpeg-turbo 3.1 / lunasvg / minizip-ng / onnxruntime 等发行版无 CONFIG 包）、AppImage 进 CI、PipeWire 帧消费</td>
 </tr>
 </tbody>
 </table>
@@ -1322,13 +1331,26 @@ sudo apt install -y qtbase5-dev qt5-qmake qttools5-dev-tools libqt5svg5-dev
 # 图形/输入/媒体
 sudo apt install -y libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
     libfontconfig1-dev libfreetype6-dev libharfbuzz-dev \
-    libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev libxrecord1-dev \
+    libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev \
     libpipewire-0.3-dev libpulse-dev libasound2-dev libdbus-1-dev libegl1-mesa-dev
 # 图像/编解码
 sudo apt install -y libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
     libheif-dev libjxl-dev zlib1g-dev libtinyxml2-dev
 # 可选：OCR
 sudo apt install -y libopencv-dev
+</code></pre>
+<p><strong>CMake 不能用发行版自带的那个。</strong> 根 <code>CMakeLists.txt</code> 是 <code>cmake_minimum_required(VERSION 4.2)</code>，
+<code>CMakePresets.json</code> 里也写着同一个下限；而 Ubuntu 24.04 自带 3.28.3、UOS 20（Debian 10）自带 3.13，
+<strong>两者的 preset 读取器都会直接拒绝这个文件</strong>：</p>
+<pre><code>CMake Error: Could not read presets from ...:
+Error: @4,14: &quot;cmakeMinimumRequired&quot; major version 4 must be less than 3
+</code></pre>
+<p>注意这条错误发生在 <strong><code>cmake --preset</code> 读文件的时候</strong>，一行项目代码都还没被解析，所以换
+<code>-S/-B</code> 手动传参也一样过不去（<code>CMakeLists.txt</code> 自己也会在 <code>cmake_minimum_required</code> 处失败）。
+装法（不碰系统包管理器，两种架构通用）：</p>
+<pre><code class="language-bash">python3 -m venv ~/.local/cmake &amp;&amp; ~/.local/cmake/bin/pip install &quot;cmake&gt;=4.2&quot;
+export PATH=&quot;$HOME/.local/cmake/bin:$PATH&quot;   # 先于 /usr/bin/cmake
+cmake --version                              # 必须是 4.2+
 </code></pre>
 <h3 id="9-2-cmake-preset-已落地-不再是草案">9.2 CMake preset（已落地，不再是草案）</h3>
 <p>以下预设已写入仓库根 <code>CMakePresets.json</code>（对应上面 §8 的 <strong>P2</strong>，可直接用）：</p>
@@ -1510,6 +1532,21 @@ C 层用不到）。A 类仍是每架构 6 个、逐条未变（<code>snow-ocr-p
 不是通过率被稀释。A 类仍是每架构 6 个、逐条未变（<code>snow-ocr-process</code> 在两个架构上撞的都是
 <code>clipper-sys</code> 要 <code>*-linux-gnu-g++</code>）。<strong>新增的门禁价值</strong>：这段 C++ 直接调用的代码以前根本
 不存在，现在它每次都在 Windows 上被类型检查。</p>
+<p><strong>2026-10-20 复跑（P4 slice 2 之后）</strong>：仍是 <strong>50/62</strong>（每架构 25/31），失败清单逐条未变。
+本片新增的是 <code>snow-linux::hotkey</code>（纯逻辑）与 <code>snow-linux::x11::hotkey</code>（<code>x11rb</code> 的
+<code>grab_key</code> / <code>get_modifier_mapping</code> / <code>query_keymap</code>，全在已启用的 <code>xproto</code> 里），
+以及 <code>snow-linux-c</code> 的六个新导出 —— 没有新增 workspace 成员，也没有新增 C 依赖，
+所以分母不动、通过项不动，属于<strong>纯代码增量</strong>。</p>
+<p><strong>2026-10-20 复跑（P4 slice 3 之后）</strong>：仍是 <strong>50/62</strong>（每架构 25/31），失败清单逐条未变
+（仍是那 6 个 A 类 crate × 2 架构）。本片新增的是 <code>snow-linux::fullscreen</code>（纯逻辑）与
+<code>snow-linux::x11::fullscreen</code>（<code>get_property</code> / <code>query_tree</code> / <code>get_geometry</code> /
+<code>translate_coordinates</code> / <code>get_input_focus</code>，全在已启用的 <code>xproto</code> 里）——
+没有新增 workspace 成员，也没有新增依赖，分母与通过项都不动。</p>
+<p><strong>2026-10-20 复跑（P4 slice 4 之后）</strong>：仍是 <strong>50/62</strong>（每架构 25/31），失败清单逐条未变
+（仍是那 6 个 A 类 crate × 2 架构）。本片新增的是 <code>snow-linux::globalmouse</code>（纯逻辑）、
+<code>snow-linux::x11::keymap</code>（从 <code>x11/hotkey</code> 提出来的表，没有引入新请求）、
+<code>snow-linux::x11::globalmouse</code>（<code>grab_button</code> / <code>ungrab_button</code>，同样在已启用的 <code>xproto</code> 里）
+与 <code>snow-linux-c</code> 的五个新导出 —— 没有新增 workspace 成员，也没有新增依赖。</p>
 </blockquote>
 <p><strong>(A) 需要交叉 C 编译器 —— 不是我们的代码问题（每架构 6 个）</strong></p>
 <table>
@@ -1610,13 +1647,13 @@ C 层用不到）。A 类仍是每架构 6 个、逐条未变（<code>snow-ocr-p
 <td>解码</td>
 <td><code>snow-linux/src/capture.rs</code></td>
 <td><strong>全平台</strong></td>
-<td><code>ImageLayout</code> / <code>ChannelMask</code> / <code>decode_into</code>：掩码驱动的通用解码 + 原生 BGRX 快路径；14 个单测<strong>在 Windows 上跑</strong></td>
+<td><code>ImageLayout</code> / <code>ChannelMask</code> / <code>decode_into</code> / <code>decode_window_into</code>：掩码驱动的通用解码 + 原生 BGRX 快路径 + 按目标 stride 写子窗口（9.4.23）；单测<strong>在 Windows 上跑</strong></td>
 </tr>
 <tr>
 <td>接线</td>
 <td><code>snow-capture/src/platform/linux.rs</code></td>
 <td>linux</td>
-<td><code>CaptureBackend</code>（枚举 / 主屏 / 布局 / inspect）+ <code>MonitorCapturer</code>（<code>capture</code>、<code>set_output_pixel_format</code>）</td>
+<td><code>CaptureBackend</code>（枚举 / 主屏 / 布局 / inspect）+ <code>MonitorCapturer</code>（<code>capture</code>、<code>capture_region_into</code>、<code>set_output_pixel_format</code>）</td>
 </tr>
 </tbody>
 </table>
@@ -2080,9 +2117,10 @@ advance 都比 Latin 的 <code>M</code> 宽（能区分「量了回退字体」�
 <ul>
 <li><strong>Damage 脏矩形</strong>：<code>is_duplicate</code> 仍恒为 false，录制器无法跳过未变化的帧。Damage 是纯协议
   （<code>x11rb</code> 的 <code>damage</code> 特性，零 C），但"根窗口的 Damage 在无 Composite 重定向时是否覆盖
-  遮挡变化"必须真机确认，属独立 slice。</li>
+  遮挡变化"必须真机确认，属独立 slice。<strong>—— 已由 9.4.19 落地（含合成器前置判据与心跳兜底）。</strong></li>
 <li><strong>窗口采集</strong>：仍 <code>BackendUnavailable</code>。读别的窗口像素需要 Composite 重定向，而<strong>有合成器运行时
-  重定向会被拒（BadAccess）</strong>，届时要走合成器的截图 portal 或从根图像裁剪。这是设计决策，不是补丁。</li>
+  重定向会被拒（BadAccess）</strong>，届时要走合成器的截图 portal 或从根图像裁剪。这是设计决策，不是补丁。
+  <strong>—— Wayland 侧已由 9.4.20 打通到"拿到流描述"为止，帧消费与窗口源选择仍缺。</strong></li>
 <li><strong>合成器的 <code>XCompositeNameWindowPixmap</code> 路径</strong>、<code>XShmPutImage</code>（本工程不往屏幕写像素，用不到）。</li>
 <li><strong>真机待验</strong>：UOS 20 / Deepin 23 上 <code>CreateSegment</code> 的可用率、1440p 下每帧耗时与 CPU 占用
   相对 <code>GetImage</code> 的实际差距。</li>
@@ -2211,14 +2249,2491 @@ Xlib 调用，产出的是一批<strong>只能靠眼睛读的代码</strong>。�
 <li><strong>真机待验</strong>：<code>XWarpPointer</code> 在 dde 下是否被合成的鼠标抓取拦截（拖动中 warp 的行为）、
   多屏负坐标布局下的读数、以及 <code>QCursor::pos()</code> 与 root 坐标在 <code>QT_SCALE_FACTOR</code> 非 1 时的对应关系。</li>
 </ul>
+<h4>9.4.9 P4 slice 2：全局快捷键（<code>XGrabKey</code>）落地（2026-10-20）</h4>
+<p>Windows 用 <code>RegisterHotKey</code>，macOS 用 Carbon 的 <code>RegisterEventHotKey</code>；X11 的等价物是<strong>被动键盘抓取</strong>
+（<code>XGrabKey</code>）：在本连接持握期间，该 keycode + 该修饰键状态的按键只发给本客户端，别的应用收不到。
+没有它，截图快捷键只在窗口有焦点时有效 —— 那等于没有。</p>
+<p><strong>分层照旧：翻译规则压在纯 Rust 里，X11 交互在 <code>#[cfg(target_os = "linux")]</code> 之后，C++ 只做转发。</strong></p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>平台</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>翻译规则</td>
+<td><code>snow-linux/src/hotkey.rs</code></td>
+<td><strong>全平台</strong></td>
+<td>Qt 键 → keysym；keysym → 可用的 keycode（含隐含 Shift）；修饰键组合 → 抓取掩码集合；修饰键映射 → Alt/Super 的 X11 mask。<strong>18 个单测在 Windows 上跑</strong></td>
+</tr>
+<tr>
+<td>抓取服务</td>
+<td><code>snow-linux/src/x11/hotkey.rs</code></td>
+<td>linux</td>
+<td>独立连接 + 工作线程；<code>register</code> / <code>unregister</code> / <code>key_down</code>；<code>KeyPress</code> 匹配后回调</td>
+</tr>
+<tr>
+<td>C ABI</td>
+<td><code>snow-linux-c</code>（<code>include/snow_linux.h</code>）</td>
+<td>linux</td>
+<td><code>snow_linux_hotkeys_{create,destroy,register,unregister,key_down,validate_binding}</code></td>
+</tr>
+<tr>
+<td>接线</td>
+<td><code>snow_shot/src/platform/linux/globalshortcutbackend.cpp</code></td>
+<td>linux</td>
+<td><code>GlobalShortcutBackend</code> 的 Linux 实现；工厂 <code>createPlatformGlobalShortcutBackend()</code> 增 <code>#elif defined(Q_OS_LINUX)</code></td>
+</tr>
+<tr>
+<td>CMake</td>
+<td><code>snow_shot/CMakeLists.txt</code></td>
+<td>linux</td>
+<td><code>SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES</code> 增 <code>elseif(UNIX)</code> 分支；文末链接遍历增一条匹配器 + <strong>自检 <code>FATAL_ERROR</code></strong></td>
+</tr>
+</tbody>
+</table>
+<p>八个判断（每条都对应一个会静默出错的坑）：</p>
+<ol>
+<li><strong>Qt 键值 → keysym 必须自己建表，不能凭记忆</strong>。Qt 没有公开的 keysym 反查表。本片把 Qt 侧取值
+   从 <code>qnamespace.h</code>（5.15.2 与 6.12.0 实测一致）读出、X11 侧从 xorgproto 的 <code>keysymdef.h</code> /
+   <code>XF86keysym.h</code> 读出后逐条写死。<strong>凭记忆写的初稿错了 6 处</strong>（<code>Hyper_L</code> 写成 <code>Meta_R</code>、
+   <code>MediaRecord</code> 指向了 <code>XF86Mail</code>、<code>PowerOff</code>/<code>WakeUp</code>/<code>Eject</code>/<code>ScreenSaver</code>/<code>Calculator</code> 全偏），
+   而这类错误的表现是「按了快捷键弹出邮件客户端」—— 不像 bug，像灵异。</li>
+<li><strong>Qt 5.15 把两个媒体键的常量写少了一位</strong>：<code>Key_MediaPause = 0x1000085</code>、<code>Key_MediaTogglePlayPause
+   = 0x1000086</code>（Qt 6 已修正为 <code>0x01000085/86</code>）。Linux 发的是 Qt5，所以表里<strong>两种拼写都接受</strong>。</li>
+<li><strong>字母必须做大小写折叠</strong>。Qt 的 <code>Key_A</code> 是 <code>0x41</code>（= <code>XK_A</code>），但 X 键盘映射把 <code>XK_a</code> 放在
+   <strong>未按 Shift 的那一层</strong>。只查 <code>0x41</code> 会命中 shifted 层，于是 <code>Ctrl+A</code> 被悄悄注册成
+   <code>Ctrl+Shift+A</code> —— 能注册、永远不触发。折叠到小写 keysym 才能命中 unshifted 层；
+   同理 <code>+</code> 这类字符确实在 shifted 层，此时<strong>必须把 Shift 加进抓取掩码</strong>。</li>
+<li><strong>抓取要覆盖所有锁定键组合</strong>。<code>XGrabKey</code> 的修饰键匹配是<strong>精确匹配</strong>，只抓 <code>Control</code> 的话，
+   CapsLock 一开快捷键就失效。按键盘上实际存在的锁定修饰键（<code>Lock</code> + 实测到的 NumLock /
+   ScrollLock 掩码）做幂集，最多 8 个抓取。</li>
+<li><strong>Alt / Super 的 X11 mask 要读回来</strong>。协议只定义 <code>Mod1..Mod5</code>，谁是谁由布局决定。从
+   <code>GetModifierMapping</code> + 键盘映射反查 <code>Alt_L/R</code>、<code>Super_L/R</code>，查不到才退回 <code>Mod1</code>/<code>Mod4</code>。
+   写死 <code>Mod1</code> 在某些布局上会「注册成功但永不触发」。</li>
+<li><strong>一个组合只能属于一个注册</strong>。同一客户端对同一组合抓两次 X 是允许的，但那样一次按键会触发
+   两个动作；Windows 的第二次 <code>RegisterHotKey</code> 会返回「已被占用」，所以这里也回
+   <code>ALREADY_IN_USE</code>，让两端的提示一致。</li>
+<li><strong>失败必须整条回滚</strong>。多个 keycode（多布局）时若第 3 个抓取失败而前两个留着，绑定会变成
+   「CapsLock 关着能触发、开着不能」这种「偶发」现象。失败即 ungrab 已发的全部。</li>
+<li><strong>回调不能直接摸 Qt</strong>。<code>KeyPress</code> 在 Rust 工作线程上，C++ 侧用 <code>QMetaObject::invokeMethod</code>
+   投递到 Qt 线程，且以 <code>ActivationDispatcher</code> 作 context 对象 —— QObject 析构时 Qt 会丢弃
+   尚未执行的 metacall，这正是「已经投递但后端刚被销毁」这一类崩溃的解药。同理
+   <code>snow_linux_hotkeys_destroy</code> 会 join 工作线程后才返回，所以 <code>user_data</code> 不会在析构后被动到。</li>
+</ol>
+<p><strong>另外补了一道本机门禁（这是本片真正的可验证性来源）</strong>：<code>src/platform/linux/*.cpp</code> 在 Windows 构建里
+一行都不会被编译，但它的 Qt 用法是平台中立的。于是
+<code>bash scripts/syntax-check-linux-cpp.sh</code> 用 <code>cl -Zs</code>（只做前端，不产出目标文件）
+加 <code>-DQ_OS_LINUX</code> 把这批文件过一遍 <code>-W4 -permissive-</code> 语法/类型检查。
+<strong>反向验证过</strong>：注入一个改名的函数调用后如期报 <code>C3861</code>，删掉即恢复 <code>SYNTAX OK</code>。
+这让「C++ 侧只能靠眼睛看」的范围缩小到只剩 ABI 与运行期行为。</p>
+<p><strong>验证（2026-10-20，Windows + rustc 1.97.1）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-linux --lib hotkey</code></td>
+<td><strong>18 通过</strong>（新增，全部纯逻辑）</td>
+</tr>
+<tr>
+<td><code>cargo check -p snow-linux -p snow-linux-c</code> 双架构</td>
+<td>全绿，<code>-Dwarnings</code> 生效</td>
+</tr>
+<tr>
+<td><code>cargo clippy --all-targets</code> / <code>cargo fmt --check</code></td>
+<td>双绿</td>
+</tr>
+<tr>
+<td><code>bash scripts/syntax-check-linux-cpp.sh</code></td>
+<td><code>SYNTAX OK</code>（+ 反向验证会红）</td>
+</tr>
+<tr>
+<td><code>bash scripts/linux-cross-check.sh</code> 双架构</td>
+<td>见 9.4.2 的复跑行，分母再次 +0（本片没有新增 workspace 成员）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>本片未覆盖（诚实记账）</strong>：</p>
+<ul>
+<li><strong>Wayland 会话下不支持</strong>：<code>QGuiApplication::platformName() != "xcb"</code> 时后端整体降级为
+  「平台不支持」，与物理光标分支同一判据。等 P6/P7 的 portal（<code>org.freedesktop.portal.GlobalShortcuts</code>）
+  再接。</li>
+<li><strong>真机待验</strong>：dde 是否把某些组合先截走（<code>XGrabKey</code> 会返回 <code>BadAccess</code>，此时 UI 上应显示
+  「已被占用」）；多布局下同一键产生多个 keycode 的实际行为；长按重复触发频率与 Windows 的差异；
+  <code>QT_SCALE_FACTOR</code> 非 1 时 <code>inputState</code> 的读数（与缩放无关，但需实测确认）。</li>
+<li><strong>全局鼠标 backend / 全屏窗口检测 / 托盘 / 自启动 / 单实例 / 通知</strong> 仍是 P4 后续 slice。</li>
+</ul>
+<h4>9.4.10 P4 slice 3：全屏窗口检测（2026-10-20）</h4>
+<p>两个产品行为依赖它：<strong>全屏应用获焦时暂停全局快捷键</strong>（<code>GlobalShortcutManager</code>），<strong>全屏时收起悬浮工具条</strong>
+（<code>FloatingToolbarController</code>）。Windows 用「前台窗口 + <code>DWMWA_EXTENDED_FRAME_BOUNDS</code> 等于某台显示器矩形」，
+macOS 用 AX 的窗口列表；X11 的等价物是「<code>_NET_ACTIVE_WINDOW</code> 的顶层框架矩形等于某台 RandR 显示器矩形」。</p>
+<p><strong>分层照旧，本片新增的都是「查什么 + 怎么比」的规则：</strong></p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>平台</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>判定规则</td>
+<td><code>snow-linux/src/fullscreen.rs</code></td>
+<td><strong>全平台</strong></td>
+<td><code>covers_display</code>（±1px 容差）、<code>focused_is_fullscreen</code>（种类/可视图/空矩形过滤）、<code>logical_to_native</code>（Qt 逻辑坐标 × dpr）。<strong>16 个单测在 Windows 上跑</strong></td>
+</tr>
+<tr>
+<td>X11 读取</td>
+<td><code>snow-linux/src/x11/fullscreen.rs</code></td>
+<td>linux</td>
+<td><code>_NET_ACTIVE_WINDOW</code>（回退 <code>GetInputFocus</code>）→ 爬到 parent 为 root 的顶层 → 顶层几何 + <code>_NET_WM_WINDOW_TYPE</code></td>
+</tr>
+<tr>
+<td>原子复用</td>
+<td><code>snow-linux/src/x11/window.rs</code></td>
+<td>linux</td>
+<td>把 <code>Atoms</code> 拆出 <code>TypeAtoms</code>（一次批量 intern），X11 拾取与全屏检测共用同一套类型原子</td>
+</tr>
+<tr>
+<td>C ABI</td>
+<td><code>snow-linux-c</code></td>
+<td>linux</td>
+<td><code>snow_linux_platform_focused_fullscreen</code> / <code>..._on_display(x,y,w,h,scale)</code></td>
+</tr>
+<tr>
+<td>接线</td>
+<td><code>snow_shot/src/platform/linux/focusedfullscreenwindow.cpp</code></td>
+<td>linux</td>
+<td>实现 <code>snow_shot::platform::{focusedFullscreenWindowExists, OnScreen}</code></td>
+</tr>
+<tr>
+<td>CMake</td>
+<td><code>snow_shot/CMakeLists.txt</code></td>
+<td>linux</td>
+<td><code>SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES</code> 的 <code>UNIX</code> 分支加第二源文件；文末链接遍历加<strong>第三条匹配器 + 自检</strong></td>
+</tr>
+</tbody>
+</table>
+<p>九个判断（前三条任意一条错，症状都是「产品行为静默错位」而不是崩溃）：</p>
+<ol>
+<li><strong>桌面窗口精确覆盖显示器，所以几何相等不足以判定全屏</strong>。<code>_NET_WM_WINDOW_TYPE_DESKTOP</code> / <code>DOCK</code>
+   平时就跟显示器一样大。若不先按类型排除，<strong>空桌面上所有快捷键会失效</strong>，而且屏幕上没有任何东西
+   能解释为什么 —— 这是本片最贵的一条，已写成单测 <code>an_empty_desktop_is_not_fullscreen</code>。</li>
+<li><strong>必须读顶层（parent == root 的祖先）的几何，不是客户区几何</strong>。重定向窗口管理器（mutter/kwin/
+   xfwm/openbox 都是）把客户窗口嵌进自己画的框架里，框架才是用户看到的边界；读客户区会<strong>少一圈标题栏</strong>，
+   于是一个「最大化」窗口看起来比显示器矮一截、一个真正的全屏窗口看起来也差一点 —— 两侧都判错。</li>
+<li><strong>类型属性要沿祖先链往上找</strong>。<code>_NET_WM_WINDOW_TYPE</code> 由应用设在<strong>客户窗口</strong>上，框架窗口没有这个属性；
+   只看顶层会把每个应用都当成 <code>Normal</code>（桌面窗口的 <code>DESKTOP</code> 也就丢了）。反过来只读焦点窗口则会在
+   焦点落在子窗口时漏掉。</li>
+<li><strong>比对的是「某一台显示器」，不是整个桌面</strong>。跨两块屏铺满的窗口是最大化窗口，不是全屏；这条同时
+   让两端判据一致（Windows 也是 <code>MONITOR_DEFAULTTONULL</code> 那台的 <code>rcMonitor</code>）。</li>
+<li><strong>不要求 <code>_NET_WM_STATE_FULLSCREEN</code></strong>。Wine 下的游戏、自带尺寸的视频播放器很多不设这个属性；
+   而真正设了它的窗口管理器也会把窗口改到显示器大小 —— 也就是说几何判据已经涵盖了它。</li>
+<li><strong>焦点要有回退</strong>。没有窗口管理器时 <code>_NET_ACTIVE_WINDOW</code> 可能根本不存在（属性 <code>type == NONE</code>），
+   或者存在但为 0。此时读 <code>GetInputFocus</code>，并把 <code>None</code>(0) / <code>PointerRoot</code>(1) 视为「没有窗口」——
+   这两个值是协议里的哨兵，不是窗口 id。</li>
+<li><strong>Qt 逻辑坐标 → 根像素的换算由 Rust 做，dpr 由调用方传</strong>。X11 根坐标是设备像素，Qt 的逻辑坐标在缩放会话下
+   是它的一部分（9.4.8 的物理光标已经确立这个分工）。把乘法和舍入放进 <code>logical_to_native</code> 才能给
+   1.25 / 1.5 这类分数比例写单测；放在 C++ 里就只剩真机手测。</li>
+<li><strong>判不出来时的答案必须是「不是全屏」</strong>。窗口可能在「读属性」和「读几何」之间被销毁（这是常态竞态），
+   此时逐请求允许失败、整体返回 <code>false</code>，而不是把错误抛给调用方去猜。答错的代价是「快捷键照常工作、
+   工具条照常显示」—— 功能仍在，只是没被抑制；反过来会是「快捷键在最需要的时候失灵」。</li>
+<li><strong>Wayland 会话降级为 <code>false</code></strong>，判据与 9.4.9 相同（<code>platformName() != "xcb"</code>）。XWayland 下 X 服务器
+   只看得见 X 客户端，焦点窗口不是用户正在看的那个应用，宁可让它答「没有全屏」。
+   <em>（另外两处易漏的接线：共享的 <code>src/platform/focusedfullscreenwindow.cpp</code> 里的兜底桩必须同时排除
+   <code>Q_OS_LINUX</code>，否则 Linux 上是</em><em>重复符号</em><em>；<code>SNOW_SHOT_GLOBAL_SHORTCUT_SOURCES</code> 加文件之后，
+   文末那段「谁编译了它就得链 X11 归档」的遍历也要加匹配器，否则是</em><em>未定义符号</em><em>。）</em></li>
+</ol>
+<p><strong>顺手修掉的一个真 bug（由本片自己的极端坐标测试抓到）</strong>：<code>covers_display</code> 初版写的是
+<code>(lhs - rhs).abs() &lt;= 1</code>。<code>i32::MIN</code> 与 <code>0</code> 相减会溢出，在 release 下绕回一个恰好在容差内的差值 ——
+两个「绝不可能相等」的矩形被判为相等。改成 <code>abs_diff</code>（<code>u32</code> 语义，永不溢出）。
+这类算术错误在正常多屏坐标下<strong>永远跑不出来</strong>，只有表格驱动的单测能抓到。</p>
+<p><strong>验证（2026-10-20，Windows + rustc 1.97.1）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-linux --lib</code></td>
+<td><strong>147 通过</strong>（slice 2 是 131，本片 +16，全部纯逻辑）</td>
+</tr>
+<tr>
+<td><code>cargo check</code> / <code>clippy --all-targets</code> 双架构</td>
+<td>全绿，<code>-Dwarnings</code> 生效</td>
+</tr>
+<tr>
+<td><code>bash scripts/linux-cross-check.sh</code> 双架构</td>
+<td>见 9.4.2 的复跑行</td>
+</tr>
+<tr>
+<td><code>bash scripts/syntax-check-linux-cpp.sh</code></td>
+<td><code>SYNTAX OK</code>（默认覆盖面从 1 个文件扩到 2 个；改名注入仍如期 <code>C3861</code>）</td>
+</tr>
+<tr>
+<td>共享桩文件的 Windows 分支</td>
+<td><code>windows-qt5-smoke</code> <strong>不编译</strong> <code>snow_shot</code> 的源文件（它只开 <code>ant_design_qt</code> + <code>snow_image</code>），所以本片用等价的 <code>cl -Zs -W4 -permissive-</code> 单独过了 <code>src/platform/focusedfullscreenwindow.cpp</code> 的 Windows 分支：0 error 0 warning</td>
+</tr>
+</tbody>
+</table>
+<p><strong>本片未覆盖（诚实记账）</strong>：</p>
+<ul>
+<li><strong>未在 X11 真机跑过</strong>：<code>_NET_ACTIVE_WINDOW</code> 在 dde/kwin 上的刷新时机、全屏但未获焦点的窗口
+  （多屏时很常见：一块屏全屏播放、另一块屏在打字）、<code>--scale</code> 参与的布局下 Qt 逻辑坐标与根像素的
+  对应关系，都只能在 UOS 上确认。</li>
+<li><strong>本片没有任何「按显示器」的真机证据</strong>：<code>focusedFullscreenWindowOnScreen</code> 的容差是按单屏场景设计的，
+  跨屏混合 dpr 的落点需要真机。</li>
+<li><strong>全局鼠标 backend / 托盘 / 自启动 / 单实例 / 通知 / <code>screenshotnative.h</code> 拆分</strong> 仍是 P4 后续 slice。</li>
+</ul>
+<h4>9.4.11 P4 slice 4：全局鼠标手势（<code>XGrabButton</code>）落地（2026-10-20）</h4>
+<p>产品行为：<strong>按住修饰键组合 + 拖鼠标按钮，就在桌面任意位置开始截图</strong>（<code>GlobalMouseManager</code> → <code>dragEvent</code>
+→ <code>ScreenshotController</code>）。Windows 用 <code>WH_MOUSE_LL</code> 低级钩子，macOS 用 <code>CGEventTap</code>；X11 的等价物是
+<strong>被动按钮抓取 <code>GrabButton</code></strong>。</p>
+<p><strong>本片最核心的一条结论：这个功能必须由 X 服务器做匹配，而不是由我们观测后决定。</strong></p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>能不能「吞掉」按下</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>XInput2 raw events（<code>XI_RawButtonPress</code>）</td>
+<td><strong>不能</strong>。raw 事件按定义对投递是中立的，它只是「旁听」；应用照样收到按下并开始自己的拖拽</td>
+<td>与 Windows 钩子语义不同，弃用</td>
+</tr>
+<tr>
+<td>记录 <code>XI2</code> 普通事件 / 轮询按钮状态</td>
+<td>同上，且漏掉「按下到轮询之间」的窗口</td>
+<td>弃用</td>
+</tr>
+<tr>
+<td><strong>被动 <code>XGrabButton</code>（root 上，精确修饰键掩码）</strong></td>
+<td><strong>能</strong>。抓取期间该组合的按下只投递给本连接，其他客户端一个字节都收不到</td>
+<td><strong>采用</strong></td>
+</tr>
+</tbody>
+</table>
+<p>代价是「匹配权」交给了服务器：<strong>落到我们事件循环里的按下，必然是某个已配置的组合</strong>，于是 Rust 侧不需要
+「这个按下是不是我的」这种运行期判断，也不需要 <code>XAllowEvents(ReplayPointer)</code> 回放 —— 这一片因此比
+Windows/macOS 的后端<strong>更简单</strong>，代价是 C++ 侧共享的 <code>GlobalMouseGesture</code> 状态机在 X11 上不参与判断
+（Windows/macOS 仍然用它）。</p>
+<p>分层：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>平台</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>规则</td>
+<td><code>snow-linux/src/globalmouse.rs</code></td>
+<td><strong>全平台</strong></td>
+<td>Qt 按钮 → X 按钮号、组合展开成抓取集合、歧义组合整条丢弃。<strong>12 个单测在 Windows 上跑</strong></td>
+</tr>
+<tr>
+<td>键盘表复用</td>
+<td><code>snow-linux/src/x11/keymap.rs</code></td>
+<td>linux</td>
+<td>从 <code>x11/hotkey.rs</code> 提出来的 <code>Keymap</code>（键码表 + Alt/Super 掩码 + 锁掩码），快捷键与鼠标抓取共用</td>
+</tr>
+<tr>
+<td>X11 抓取</td>
+<td><code>snow-linux/src/x11/globalmouse.rs</code></td>
+<td>linux</td>
+<td><code>GlobalMouseService</code>：独立连接 + 工作线程，按下/移动/松开 → <code>Begin/Update/Finish</code>，<code>cancel</code> 只让拖拽静音</td>
+</tr>
+<tr>
+<td>C ABI</td>
+<td><code>snow-linux-c</code></td>
+<td>linux</td>
+<td><code>snow_linux_global_mouse_{create,destroy,set_bindings,set_enabled,cancel}</code></td>
+</tr>
+<tr>
+<td>接线</td>
+<td><code>snow_shot/src/platform/linux/globalmousebackend.cpp</code></td>
+<td>linux</td>
+<td><code>GlobalMouseBackend</code> 的 Linux 实现；Wayland 会话报 <code>Unavailable</code></td>
+</tr>
+<tr>
+<td>共享桩</td>
+<td><code>snow_shot/src/platform/globalmousebackend.cpp</code></td>
+<td>全平台</td>
+<td><code>#elif defined(Q_OS_LINUX)</code> 分支（原本只有 Win/macOS/兜底）</td>
+</tr>
+<tr>
+<td>CMake</td>
+<td><code>snow_shot/CMakeLists.txt</code></td>
+<td>linux</td>
+<td><code>snow_shot_global_mouse</code> 的 <code>UNIX</code> 分支加源文件；文末 X11 链接遍历<strong>重构成清单驱动</strong>（见下）</td>
+</tr>
+</tbody>
+</table>
+<p>七条判断（前三条错，症状同样是「行为静默错位」）：</p>
+<ol>
+<li><strong>Qt 的按钮枚举和 X11 的按钮号不是一回事，而且顺序相反</strong>。Qt 是位标志 <code>1/2/4/8/16</code>（左/右/中/后退/前进），
+   X11 按协议分配顺序编号：左 1、<strong>中 2</strong>、<strong>右 3</strong>、滚轮 4–7、侧键 8/9。按位置翻译会把「右键拖拽」变成
+   「中键拖拽」，且在只有左右键的配置下完全看不出来。</li>
+<li><strong><code>captureAvailable == false</code> 时必须撤掉抓取，而不是「忽略按下」</strong>。忽略仍然吞掉了那一次点击
+   （抓取已经激活），要还回去就得回放；而撤掉抓取是零成本的。C++ 侧 <code>setCaptureAvailable(false)</code>
+   （另一次截图正在进行）就走到这条路径上。</li>
+<li><strong>两个动作配了同一组合时，整条丢弃</strong>。共享的 <code>GlobalMouseGesture</code> 对歧义按下的处理是「不匹配」，
+   Windows/macOS 上应用照常收到点击；X11 若把抓取给了其中一个，同一份配置在两个平台行为不同。</li>
+<li><strong>锁状态变体照旧要展开</strong>（<code>grab_masks</code>，与快捷键同一个函数）。X11 的抓取匹配是<strong>精确</strong>的，
+   CapsLock/NumLock 开着时 <code>Ctrl+左键</code> 的状态位多一位 —— 不展开就是「一开大写锁定，手势就失灵」。</li>
+<li><strong>抓取失败是正常答案，不是错误</strong>。窗口管理器会自己抓 <code>Super</code>+拖拽之类（移动窗口），
+   <code>BadAccess</code> 在那里是预期结果；<code>set_bindings</code> 返回<strong>成功装上的条数</strong>，让调用方能看出「有几条没抢到」，
+   而不是让一条冲突把其余全废掉。</li>
+<li><strong>拖拽期间指针归本进程，指针不动的是「应用」，不是光标</strong>。<code>GrabButton</code> 用 <code>pointer_mode: ASYNC</code>：
+   光标继续跟随鼠标移动，事件进本连接；<code>owner_events: false</code> 保证事件不回流给指针下的窗口。
+   于是拖拽过程中下层应用收不到任何鼠标事件（Windows 上它还能收到移动，只是没有拖拽语义）——
+   这是 X11 语义带来的<strong>更强</strong>隔离，也是它「不会意外拖到下层窗口」的原因。</li>
+<li><strong><code>beginButtonDrag</code> 在 X11 上是空实现，并且写清了为什么</strong>。这个入口服务于首页卡片的
+   「按住卡片再拖到桌面」：按下<strong>已经</strong>投递给本程序自己的 Qt 窗口，Qt 连接持有隐式抓取，
+   此时 <code>XGrabPointer</code> 会 <code>AlreadyGrabbed</code> 失败，移动事件继续进 Qt 窗口而不是本服务 ——
+   结果是「报一个 Begin 然后什么都没有」。正确做法是走 Qt 自己的拖拽 + <code>QCursor::pos()</code> 跟随，
+   那是另一套设计；在它落地前，卡片拖拽在 Linux 上是<strong>明确不可用</strong>，而不是半工作状态。</li>
+</ol>
+<p><strong>顺手做的两处结构整理</strong>（都在本片被真实踩到）：</p>
+<ul>
+<li><code>x11/hotkey.rs</code> 里的 <code>Tables</code> 提成 <code>x11/keymap.rs</code> 的 <code>Keymap</code>。鼠标抓取需要<strong>同一套</strong> Alt/Super 掩码
+  与锁掩码，复制一份意味着以后修「Alt 到底在 Mod1 还是 Mod3」要改两处。</li>
+<li><code>snow_shot/CMakeLists.txt</code> 文末的「谁编译了平台源，谁就链 X11 归档」从<strong>三条重复的 if</strong> 重构成
+  一份清单 + 两个循环：加文件现在是一行，而「没人编译它」的 <code>FATAL_ERROR</code> 自检保留。这段逻辑在
+  Windows 上不执行（<code>if(UNIX AND NOT APPLE)</code>），所以本片用一个等价小工程做了<strong>双向验证</strong>：
+  四条齐 → configure 通过；抽掉一条 → <code>FATAL_ERROR</code>。</li>
+</ul>
+<p><strong>验证（2026-10-20，Windows + rustc 1.97.1）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-linux --lib</code></td>
+<td><strong>159 通过</strong>（slice 3 是 147，本片 +12，全部纯逻辑）</td>
+</tr>
+<tr>
+<td><code>cargo check</code> / <code>clippy --all-targets</code> 双架构</td>
+<td>全绿，<code>-Dwarnings</code> 生效</td>
+</tr>
+<tr>
+<td><code>cargo fmt --check</code> / clang-format <code>--dry-run -Werror</code></td>
+<td>干净</td>
+</tr>
+<tr>
+<td><code>bash scripts/syntax-check-linux-cpp.sh</code></td>
+<td><code>SYNTAX OK</code>（默认覆盖面从 2 个文件扩到 3 个；把 <code>snow_linux_global_mouse_cancel</code> 改名注入后如期 <code>C3861</code> + <code>SYNTAX FAILED</code>）</td>
+</tr>
+<tr>
+<td><code>windows-qt5-full</code> configure + <code>snow_shot_global_mouse</code></td>
+<td>configure <code>EXIT=0</code>；该静态库 16 步全绿（共享桩的 <code>#elif</code> 分支参与编译）</td>
+</tr>
+<tr>
+<td><code>bash scripts/linux-cross-check.sh</code> 双架构</td>
+<td>见 9.4.2 的复跑行</td>
+</tr>
+</tbody>
+</table>
+<p><strong>本片未覆盖（诚实记账）</strong>：</p>
+<ul>
+<li><strong>未在 X11 真机跑过</strong>：<code>GrabButton</code> 在 dde/kwin 上的实际冲突情况（哪些组合已被 WM 占用）、
+  侧键（8/9）在真实鼠标上的映射、拖拽期间合成器对光标的重绘。</li>
+<li><strong>没有「按下归属」的真机证据</strong>：抓取确实让下层应用收不到按下的直接证据（例如在文本编辑器里
+  用同类组合拖拽），只能在 UOS 上验证。</li>
+<li><strong>布局切换（<code>MappingNotify</code>）不刷新掩码</strong>：与快捷键服务同一个取舍，重建服务时才重读。</li>
+<li><strong>托盘 / 自启动 / 单实例 / 通知 / <code>screenshotnative.h</code> 拆分</strong> 仍是 P4 后续 slice。</li>
+</ul>
+<h4>9.4.12 P4 slice 5：自启动走 XDG autostart 落地（2026-10-20）</h4>
+<p><strong>起点是一处假成功。</strong> <code>platform::windows::AutoStartRegistration</code> 的每个函数都有非 Windows 兜底：
+<code>isSupported()</code> 返回 false，于是设置页的开关<strong>灰掉</strong>；而 <code>reconcileStartupMode()</code> 的 <code>#else</code> 分支返回
+<code>{true, false, {}}</code> —— 「成功」但一个字节都没写。后者是本项目反复强调的那种缺陷：调用方看到成功，
+用户看到开关是灰的，中间没有任何一处说实话。</p>
+<p><strong>XDG autostart 是这里唯一可用的基线。</strong> 一个 <code>.desktop</code> 文件放在 <code>$XDG_CONFIG_HOME/autostart/</code>
+（默认 <code>~/.config/autostart/</code>），桌面会话登录时读它。系统级对应 <code>$XDG_CONFIG_DIRS/autostart</code>
+（默认 <code>/etc/xdg/autostart</code>），<strong>同名时用户级优先</strong>。这里没有 Windows 那种「一个注册表值就是全部状态」
+的单一位置：用户级文件、系统级文件、<code>Hidden</code> 键三者共同决定实际行为，所以判断「是否启用」必须三处一起看。</p>
+<p>分层：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>平台</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>纯逻辑</td>
+<td><code>snow_shot/src/platform/linux/desktopentry.cpp</code></td>
+<td><strong>全平台</strong></td>
+<td><code>Exec</code> 转义与反解、条目生成、键读取、启用判定。<strong>零文件系统访问</strong>，因此在 Windows 上跑单测</td>
+</tr>
+<tr>
+<td>文件与目录</td>
+<td><code>snow_shot/src/platform/linux/autostartregistration.cpp</code></td>
+<td>linux</td>
+<td><code>$XDG_CONFIG_HOME</code> 解析、系统级扫描、<code>QSaveFile</code> 原子写、快照/回滚、<code>reconcile</code></td>
+</tr>
+<tr>
+<td>C++ 接线</td>
+<td><code>main.cpp</code> / <code>settingsbackend.cpp</code> / <code>settingscatalog.cpp</code></td>
+<td>linux</td>
+<td>启动对账、开关读写、条目文案与可见性</td>
+</tr>
+<tr>
+<td>测试</td>
+<td><code>snow_shot/tests/linux_autostart_tests.cpp</code></td>
+<td>全平台</td>
+<td>纯逻辑的 20 余条断言，含「写→读」闭环</td>
+</tr>
+</tbody>
+</table>
+<p>六条判断（前四条错了都是静默错位）：</p>
+<ol>
+<li><strong><code>Exec</code> 有两层转义，顺序不能反</strong>。规范说 string 层的转义「在 quoting 规则之前应用」，于是：
+   字面反斜杠在引号参数里要写 <strong>四个</strong>；字面 <code>$</code> 要写 <code>\$</code>。写少一层，路径里的反斜杠就会被
+   shell 层吃掉一位。</li>
+<li><strong><code>%%</code> 是字面百分号，而且引号内也成立</strong>。本条是本片测试自己抓出来的：初版按「引号内不展开
+   field code，所以引号内的 <code>%</code> 不必双写」处理，结果往返失败 —— 读回来多一个 <code>%</code>。
+   <code>%%</code> 属于<strong>转义</strong>而不是<strong>展开</strong>，规范对转义没有引号内例外。</li>
+<li><strong>禁用时不能只删自己的文件</strong>。如果打包时装了系统级条目，删掉用户级文件等于让系统级那条重新生效 ——
+   用户点了「关」，重启后照样自启。规范的解法是写一个 <code>Hidden=true</code> 的存根把同名条目遮住。</li>
+<li><strong><code>X-GNOME-Autostart-enabled=false</code> 也必须认</strong>。GNOME 的「启动应用程序」面板禁用时写这个键而<strong>不</strong>写
+   <code>Hidden</code>。不认它，用户在面板里关掉、我们的开关还显示「开」。</li>
+<li><strong>文件名跟 <code>productId()</code> 走，不跟显示名走</strong>。文件名同时是「覆盖哪条系统级条目」的身份，
+   用翻译过的显示名意味着切换语言就换了要遮的文件。</li>
+<li><strong>比较「参数列表」而不是「文本」</strong>。<code>matchesExpectedEntry()</code> 先用 <code>parseExec()</code> 反解再比 argv：
+   打包者用不同但等价的引号写法时，不会每次启动都被判不匹配而重写。</li>
+</ol>
+<p><strong>顺手修的两处 Linux 产品缺陷</strong>（都是本片接线时才暴露的）：</p>
+<ul>
+<li>设置项文案原样写着「Start Snow Shot in the background when <strong>Windows starts</strong>」——<code>autoStartItem()</code> 的
+  <code>#else</code> 分支是 Windows 专用，被 Linux 借用。现改为三分支，Linux 用「登录桌面后启动」。</li>
+<li>「Launch as administrator」与「Restart as administrator」两项在 Linux 上仍会构建出来：桌面会话没有提权
+  概念，它们只能永远灰着，附带一句「需要 Administrators 组成员资格」的 Windows 解释。现改为只在
+  Windows 构建；<code>switchEnabled</code> 同时对该 binding 返回 false，避免陈旧调用落到无意义的操作上。</li>
+</ul>
+<p><strong>验证（2026-10-20，Windows + Qt 5.15.2 / MSVC 14.44）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snow-shot-linux-autostart-tests</code>（手工 <code>cl</code> 编译链接后运行）</td>
+<td><strong>passed</strong>；<code>-W4 -permissive-</code> 0 warning（STL4043 系 Qt5 头噪声除外）</td>
+</tr>
+<tr>
+<td>测试抓到的真 bug</td>
+<td>往返用例 <code>/opt/100%/snow_shot</code> 读回 <code>/opt/100%%/snow_shot</code> ⇒ 补 <code>parseExec</code> 的 <code>%%</code> 反解 + 引号内双写</td>
+</tr>
+<tr>
+<td><code>bash scripts/syntax-check-linux-cpp.sh</code></td>
+<td><code>SYNTAX OK</code>（覆盖面 3 → <strong>5</strong> 个文件）；把 <code>desktopentry::parseExec</code> 改名注入后如期 <code>C2039</code> + <code>C3861</code> + <code>SYNTAX FAILED</code></td>
+</tr>
+<tr>
+<td><code>windows-qt5-full</code> configure（tests 保持 OFF）</td>
+<td><code>EXIT=0</code>，<code>-- Generating done</code> —— 加进 <code>snow_shot_administrator</code> 的两个源文件没有破坏既有配置</td>
+</tr>
+<tr>
+<td><code>windows-qt5-full</code> build <code>snow_shot_administrator</code></td>
+<td>5 步全绿；两个新文件在 Windows 上编的是 <code>#else</code> 兜底分支，静态库链接成功</td>
+</tr>
+<tr>
+<td>Qt5 路线开 <code>SNOW_APPS_BUILD_TESTS=ON</code></td>
+<td><strong>仍不可用</strong>，见下</td>
+</tr>
+</tbody>
+</table>
+<p><strong>验证时拆掉的一层既有阻塞（并没能拆完）</strong>：想在 Windows 上真正配置出 <code>snow-shot-linux-autostart-tests</code>
+这个 CTest 目标，必须开 <code>SNOW_APPS_BUILD_TESTS=ON</code>，而 Qt5 路线在这个开关上是<strong>从来没被走通过</strong>的
+（三档 <code>windows-qt5-*</code> 全部 <code>BUILD_TESTS=OFF</code>）。依次撞到两层：</p>
+<ol>
+<li><code>qt_import_plugins(... NO_DEFAULT ...)</code> —— <code>cmake/SnowQtVersionShims.cmake</code> 里那条垫片用的是
+   <code>if(NOT COMMAND qt_import_plugins)</code> 守卫，而 <strong>Qt 5.15 自带 versionless 的 <code>qt_import_plugins</code></strong>，
+   守卫恒假、垫片根本没装；Qt 自带那版原样转发 <code>NO_DEFAULT</code> 给 <code>qt5_import_plugins</code>，后者
+   <code>FATAL_ERROR</code>。已改为<strong>无条件覆盖</strong>（有意的例外，理由写在文件里），因为那一版对 <code>NO_DEFAULT</code>
+   的处理是错的而不是风格差异；Qt5 的插件本来就是运行时加载，没有默认插件集可关，丢掉这个关键字
+   是语义已满足而非降级。</li>
+<li><code>ant_design_qt/CMakeLists.txt</code> 的测试用 <code>$&lt;TARGET_FILE_DIR:Qt::Core&gt;</code> 拼 PATH —— Qt5 的 <code>Qt::Core</code>
+   是 INTERFACE 目标而不是 alias，生成阶段直接报 "not an executable or library"（<code>add_test</code> 共 5 处）。
+   <strong>这一层没修</strong>：它属于 Qt5 降级路线的测试基础设施，与本片无关，修它要改 5 处生成表达式并逐个验证。</li>
+</ol>
+<p>因此本片的测试目标<strong>没有被 CMake 配置验证过</strong>：验证分成「源文件能被 MSVC 编译并链接成静态库」
+（已做）与「测试逻辑正确」（手工 <code>cl</code> 编译链接后运行，已做）两段，CTest 接线留待 Qt5 测试基建打通后一并确认。</p>
+<p><strong>本片未覆盖（诚实记账）</strong>：</p>
+<ul>
+<li><strong>未在真实桌面会话验证</strong>：dde（UOS 默认桌面）读 <code>~/.config/autostart</code> 的实际行为、以及它是否会在
+  用户改设置后重写该文件；GNOME/KDE 的差异。</li>
+<li><strong>Flatpak / Snap 沙箱未检测</strong>：沙箱里的 <code>$XDG_CONFIG_HOME</code> 被重定向，写进去的条目在宿主侧不生效，
+  而 <code>isSupported()</code> 恒 true。打包阶段（P6）如果走 Flatpak，这里需要一条显式判据。</li>
+<li><strong><code>OnlyShowIn</code> / <code>NotShowIn</code> / <code>TryExec</code> 不参与判定</strong>：它们决定「这个桌面是否启动」，不是「用户是否
+  要求启动」。判成「关」会让开关和我们写下的条目自相矛盾。</li>
+<li><strong>托盘 / 单实例 / 通知 / <code>screenshotnative.h</code> 拆分</strong> 仍是 P4 后续 slice。单实例经查是纯 Qt
+  （<code>QLocalServer</code> + <code>QLockFile</code>，<code>src/app/singleinstancecoordinator.cpp</code> 全文件无平台条件编译），
+  在 Linux 上应当直接可用，但尚未在真机确认 socket 路径可用。</li>
+</ul>
+<h4>9.4.13 P4 slice 6：桌面通知走 <code>org.freedesktop.Notifications</code> 落地（2026-10-20）</h4>
+<p><strong>起点与 9.4.12 同型：Linux 一直在用 Windows 那条 <code>#else</code> 分支。</strong> <code>SystemTrayController</code> 的通知投递在
+非 macOS 上统一是 <code>QSystemTrayIcon::showMessage()</code>，也就是<strong>经 StatusNotifier 项转手</strong>。这有两个后果：
+桌面没有 SNI 宿主时（纯 X11 会话、部分轻量 WM）<strong>什么都不显示</strong>，而回调仍然 <code>completed({})</code> 报 Accepted；
+<code>supportsMessages()</code> 在 Linux 上取决于 SNI 后端自报，不是「能不能显示」的真实判据。</p>
+<p><strong>通知 daemon 是会话服务，与显示协议无关。</strong> 所以这一片不需要 Wayland 分支（与采集、快捷键、全屏检测
+都不同）：<code>org.freedesktop.Notifications</code> 在 X11 和 Wayland 会话里都由同一个 daemon 提供，
+Deepin/UOS 上是 <code>dde-daemon</code> 的 notification 服务。判据只有「会话总线连得上」与「这个名字已注册」。</p>
+<p>分层（与 9.4.12 同一套切法）：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>平台</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>纯逻辑</td>
+<td><code>snow_shot/src/platform/linux/notificationpayload.cpp</code></td>
+<td><strong>全平台</strong></td>
+<td>转义、urgency 字节、图标名、过期时长、<code>actions</code> 数组、<code>Notify</code> 八参数的顺序与类型。<strong>不碰总线</strong>，因此在 Windows 上跑单测</td>
+</tr>
+<tr>
+<td>总线</td>
+<td><code>snow_shot/src/platform/linux/systemnotificationservice.cpp</code></td>
+<td>linux</td>
+<td><code>QDBusConnection::sessionBus()</code>、<code>GetCapabilities</code> 探测、异步 <code>Notify</code>、<code>ActionInvoked</code> / <code>NotificationClosed</code> 回执</td>
+</tr>
+<tr>
+<td>C++ 接线</td>
+<td><code>systemtraycontroller.cpp</code> 的 <code>#elif defined(Q_OS_LINUX)</code></td>
+<td>linux</td>
+<td>投递改用 daemon；仅在「后端缺失」时退回托盘 balloon</td>
+</tr>
+<tr>
+<td>测试</td>
+<td><code>snow_shot/tests/linux_notification_tests.cpp</code></td>
+<td>全平台</td>
+<td>纯逻辑的 30 余条断言，含参数顺序与变体类型</td>
+</tr>
+</tbody>
+</table>
+<p>七条判断（前四条错了都是<strong>运行期</strong>才暴露的静默失败）：</p>
+<ol>
+<li><strong><code>Notify</code> 的八个参数有类型要求，写错是整条消息被拒，不是「显示得不理想」</strong>。<code>replaces_id</code> 必须是
+   <code>uint</code>（写成 <code>int</code> 会以 <code>i</code> 上线，daemon 按内省签名 <code>u</code> 校验 ⇒ <code>InvalidArgs</code>），<code>expire_timeout</code>
+   必须是 <code>int</code>，而 <code>urgency</code> 在 <code>a{sv}</code> 里必须是<strong>字节</strong>（<code>y</code>），不是 int。测试因此断言的是
+   <code>snowMetaTypeOf()</code> 的类型名，而不只是值。</li>
+<li><strong>body 是 HTML 子集，路径里的 <code>&amp;</code> / <code>&lt;</code> / <code>&gt;</code> 必须转义</strong> ——否则 <code>/home/u/a&amp;b&lt;c&gt;.mp4</code> 被当成标签碎片
+   吞掉或断行。但反转也要认：daemon 不支持 <code>body-markup</code> 时<strong>原样发</strong>，否则用户看到的是 <code>&amp;amp;</code>。
+   判据来自 <code>GetCapabilities</code>，异步取一次并缓存；取不到就按「支持」处理（现网 daemon 全都支持，
+   猜错的代价只是某一处 <code>&amp;</code> 多显示几个字符）。</li>
+<li><strong>只发 <code>default</code> 键、标签留空</strong>。这既保住「点气泡本体就触发」的交互，又不必给按钮文案新增 msgid ——
+   本片一行 <code>tr()</code> 都没加，翻译目录（<code>catalog-dir</code> 那套 split/merge）不需要动。</li>
+<li><strong><code>replaces_id</code> 按 action 维度记上一枚 id</strong>：同一类通知重复出现时替换旧气泡而不是叠第二枚；
+   收到 <code>NotificationClosed</code> 就把这枚 id 忘掉（daemon 可能回收 id，继续拿它当 <code>replaces_id</code> 是错的）。</li>
+<li><strong>只把「后端缺失」降级到托盘</strong>。<code>AccessDenied</code> 来自 daemon 策略或用户的勿扰状态，穿透到托盘 balloon
+   等于绕开用户意图。</li>
+<li><strong>托盘开关不再屏蔽通知</strong>。<code>enabled</code> 在 Windows 上同时管「图标」和「气球」，在 Linux 上现在只管图标；
+   <code>activateMessage()</code> / <code>showBalloon()</code> 里那两道 <code>if (enabled)</code> 与 macOS 一样排除 Linux，
+   否则「关了托盘图标就收不到导出完成提示」。</li>
+<li><strong><code>desktop-entry</code> hint 指向 <code>productId()</code>（<code>snow-shot</code>）</strong>，供 daemon 找 <code>.desktop</code> 拿标题与图标。
+   该文件由 P6 安装；未安装时 daemon 退到 <code>app_icon</code>（<code>dialog-information</code> 等标准主题名），不会报错。</li>
+</ol>
+<p><strong>验证（2026-10-20，Windows + Qt 5.15.2 / Qt 6.12.0，MSVC 14.44）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snow-shot-linux-notification-tests</code>（手工 <code>cl</code> 编译链接后运行，Qt <strong>5.15.2</strong>）</td>
+<td><strong>passed</strong></td>
+</tr>
+<tr>
+<td>同一份源与测试，手工 <code>cl</code> + Qt <strong>6.12.0</strong></td>
+<td><strong>passed</strong>（需 <code>/Zc:__cplusplus</code>，Qt6 头文件硬要求）</td>
+</tr>
+<tr>
+<td>测试抓到的真 bug</td>
+<td><code>QMetaType::name()</code> 在 Qt 5.15 返回<strong>按值的 <code>QByteArray</code></strong>、在 Qt6 返回 <code>const char*</code>；按 <code>const char*</code> 接临时对象 ⇒ 悬垂读取，实际读到 <code>"Q\0\0…"</code>。测试改用 <code>SNOW_QT6</code> 分流</td>
+</tr>
+<tr>
+<td><code>bash scripts/syntax-check-linux-cpp.sh</code></td>
+<td><code>SYNTAX OK</code>（覆盖面 5 → <strong>6</strong> 个文件，新增 <code>systemnotificationservice.cpp</code>，并给门禁补了 <code>QtDBus</code> 头目录）</td>
+</tr>
+<tr>
+<td>托盘投递 lambda 的语法</td>
+<td>单独写探针 TU（不引 ant_design）过 <code>-Zs</code>，<code>EXIT=0</code> —— <code>systemtraycontroller.cpp</code> 因 ant_design 依赖进不了门禁</td>
+</tr>
+<tr>
+<td><code>windows-qt5-full</code> configure</td>
+<td><code>EXIT=0</code>（<code>-- Generating done</code>）：新库与四处链接改动没有破坏既有配置</td>
+</tr>
+<tr>
+<td><code>windows-qt5-full</code> build <code>snow_shot_notification_payload</code></td>
+<td>3 步全绿（MOC + 编译 + 静态库）</td>
+</tr>
+<tr>
+<td>CTest 目标本身</td>
+<td><strong>仍未经 CMake 配置验证</strong>，原因同 9.4.12：Qt5 路线开不了 <code>SNOW_APPS_BUILD_TESTS</code>；本机唯一的 Qt6 树是 smoke 档，根本没 <code>add_subdirectory(snow_shot)</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>本片未覆盖（诚实记账）</strong>：</p>
+<ul>
+<li><strong>未在真机 daemon 上跑过</strong>：<code>dde-daemon</code> 的实际收包、勿扰状态下的返回码、过期时长是否被尊重、
+  点击气泡是否真能回到 <code>ActionInvoked</code>。这些只能到 UOS 上验。</li>
+<li><strong><code>GetCapabilities</code> 存在竞态</strong>：探测是异步的，第一枚通知可能早于答复到达，此时按「支持 markup」
+  发送。只在 body 含 <code>&lt;</code>/<code>&amp;</code> 且 daemon 恰不支持 markup 时有可见差异。</li>
+<li><strong>未做 <code>CloseNotification</code></strong>：动作触发后依赖 daemon 自行关闭；有的 daemon 会把气泡留着。</li>
+<li><strong>多显示器 / 锁屏 / 通知中心的历史记录</strong> 的呈现差异未验。</li>
+<li><strong><code>screenshotnative.h</code> 拆分</strong> 仍是 P4 剩余 slice。</li>
+</ul>
+<h4>9.4.14 P4 slice 7：托盘导出 StatusNotifierItem（2026-10-20）</h4>
+<p><strong>问题</strong>：托盘从头到尾是 <code>QSystemTrayIcon</code>。Qt 5 的托盘实现不在 <code>QtWidgets</code> 里，而在<strong>平台插件</strong>
+里：<code>xcb</code> 插件带一个 <code>StatusNotifierItem</code>，并且在有 XEmbed 管理器时还能退回 XEmbed。于是：</p>
+<ul>
+<li>Wayland 会话（Qt5 <code>wayland</code> 插件）<strong>没有</strong>任何托盘后端，<code>show()</code> 是空操作；</li>
+<li>跑在 XWayland 里时图标"存在"，但它属于 XWayland 的那棵 X 树，合成器的面板看不到；</li>
+<li>而主程序是 <code>QApplication::setQuitOnLastWindowClosed(false)</code>。托盘不见了，用户关掉主窗口后
+  进程还在、却没有入口 —— 这不是"少一个图标"，是把应用弄丢了。</li>
+</ul>
+<p><strong>做法</strong>：自己导出 <code>org.kde.StatusNotifierItem</code>。这个对象是<strong>会话总线</strong>上的，跟显示协议无关，
+理由和 slice 6 完全一样 —— 也就是它天生在 X11 与 Wayland 上同时可用。</p>
+<p><strong>分层</strong>（沿用 slice 5/6 的切法）</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>文件</th>
+<th>平台</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>纯逻辑</td>
+<td><code>platform/linux/statusnotifierpayload.cpp</code></td>
+<td>全平台（不碰总线，Windows 跑单测）</td>
+</tr>
+<tr>
+<td>总线</td>
+<td><code>platform/linux/statusnotifierservice.cpp</code></td>
+<td>linux（QtDBus 对象导出）</td>
+</tr>
+<tr>
+<td>接线</td>
+<td><code>systemtraycontroller.cpp</code> 的 <code>#elif Q_OS_LINUX</code></td>
+<td>linux</td>
+</tr>
+<tr>
+<td>测试</td>
+<td><code>tests/linux_tray_tests.cpp</code>（34 条断言）</td>
+<td>全平台</td>
+</tr>
+</tbody>
+</table>
+<p><strong>何时才导出，写成纯函数 + 断言</strong>：<code>needsStatusNotifierItem(platformTrayAvailable,
+waylandSession) = !platformTrayAvailable || waylandSession</code>。也就是<strong>平台插件看不见就不用了它</strong>，
+其余情况交给插件（同一个进程两个图标比没有图标更糟）。第二条判据 <code>isWaylandSession(WAYLAND_DISPLAY,
+XDG_SESSION_TYPE)</code>：<code>XDG_SESSION_TYPE</code> 优先 —— <code>WAYLAND_DISPLAY</code> 会跟着从 Wayland 会话里启动的
+XWayland 客户端一起活下来，只看它会把 x11 会话误判成 Wayland。</p>
+<p><strong>图标必须逐字节重排</strong>。<code>IconPixmap</code> 的类型是 <code>a(iiay)</code>：ARGB32、<strong>网络字节序</strong>（A,R,G,B 依次）。
+<code>QImage::Format_ARGB32</code> 在任何目标平台上都是 host byte order 的 <code>0xAARRGGBB</code>，所以每个像素都要按
+qAlpha/qRed/qGreen/qBlue 取出来重写，并且按 <code>bytesPerLine</code> 遍历 —— 外部缓冲、子图这类 stride 大于
+<code>width * 4</code> 的图像不能直接 <code>memcpy</code>，否则之后每一行都错位。预乘也不做：宿主自己合成，Qt 自己的托盘
+同样发直通 alpha。</p>
+<p><strong>菜单走 <code>/NO_DBUSMENU</code></strong>。<code>Menu</code> 属性填 <code>/NO_DBUSMENU</code>，宿主于是调 <code>ContextMenu</code> 方法，我们把
+<code>AdContextMenu</code>（换肤菜单，不是 <code>QMenu</code>）弹在指针处。代价写在明处：只认 D-Bus 菜单、完全不理
+<code>ContextMenu</code> 的宿主会<strong>没有右键菜单</strong>。选这个是因为另一条路要放弃菜单皮肤、把每一项翻译成
+<code>com.canonical.dbusmenu</code> 的 label/icon-name/toggle-state，那等于把设置菜单做两套。</p>
+<p><strong>面板晚于应用启动是常态</strong>，所以注册不是"构造时试一次"：先看
+<code>org.kde.StatusNotifierWatcher</code> 在不在，不在就订阅 <code>NameOwnerChanged</code> 等它出现；出现后补注册。
+注册参数用 <code>baseService()</code>（唯一名）而不是对象路径 —— Qt 与 GTK 的既有实现都发这个形态，宿主对它的
+测试覆盖最多。</p>
+<p><strong>验证（2026-10-20，Windows + Qt 5.15.2 / Qt 6.12.0，MSVC 14.44）</strong></p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snow-shot-linux-tray-tests</code>（手工 <code>cl</code> 编译运行，Qt <strong>5.15.2</strong>）</td>
+<td><strong>passed</strong>（34 条断言）</td>
+</tr>
+<tr>
+<td>同一份源与测试，Qt <strong>6.12.0</strong></td>
+<td><strong>passed</strong></td>
+</tr>
+<tr>
+<td>测试抓到的真问题</td>
+<td><code>QImage(w,h,ARGB32)</code> 的未写像素是<strong>分配器残留</strong>，不是 0 —— 判据必须 <code>fill()</code> 后再断言，否则"逐行紧凑"这条会随机失败</td>
+</tr>
+<tr>
+<td>判据修正</td>
+<td><code>one&lt;/p&gt;&lt;p&gt;two</code> 是<strong>两个</strong>边界 ⇒ 两个换行（HTML 渲染本来也是空一行）。一开始按一个换行断言，是测试错了不是实现错了</td>
+</tr>
+<tr>
+<td><code>moc</code> 解析头文件</td>
+<td><code>MOC_EXIT=0</code>，生成的 <code>qt_metacall</code> 里出现 <code>qRegisterMetaType&lt;QVector&lt;…IconPixmap&gt;&gt;()</code>；moc 产物再过 <code>-Zs</code> 也 <code>EXIT=0</code></td>
+</tr>
+<tr>
+<td><code>bash scripts/syntax-check-linux-cpp.sh</code></td>
+<td><code>SYNTAX OK</code>（覆盖面 6 → <strong>7</strong> 个文件）</td>
+</tr>
+<tr>
+<td>接线 lambda 的语法</td>
+<td>探针 TU（<code>-DQ_OS_LINUX</code>，不引 ant_design）过 <code>-Zs</code>，<code>EXIT=0</code></td>
+</tr>
+<tr>
+<td><code>systemtraycontroller.cpp</code> 的 <strong>Windows 分支</strong></td>
+<td>用 <code>compile_commands.json</code> 里的真实编译命令 + <code>-Zs</code> 跑，<code>EXIT=0</code>（0 error）—— 重构出 <code>showContextMenu()</code> / <code>applyToolTip()</code> 后原语义未变</td>
+</tr>
+<tr>
+<td><code>windows-qt5-full</code> configure</td>
+<td><code>EXIT=0</code></td>
+</tr>
+<tr>
+<td><code>windows-qt5-full</code> build <code>snow_shot_status_notifier_payload</code></td>
+<td>5 步全绿（MOC + 编译 + 静态库）</td>
+</tr>
+<tr>
+<td>六个改动/新增文件 clang-format</td>
+<td>全部 0 违规</td>
+</tr>
+</tbody>
+</table>
+<p><strong>本片未覆盖（诚实记账）</strong></p>
+<ul>
+<li><strong>D-Bus 线上签名没有任何离线验证</strong>。这条不是懒，是<strong>没有路</strong>：<code>QDBusMetaType::typeToSignature</code>
+  在 Qt 5.15 对<strong>任何</strong>用户类型都返回空串 —— 用一个最小案例（<code>struct Simple { int; QString; }</code> +
+  <code>qDBusRegisterMetaType</code>）单独复核过，先初始化 <code>QDBusConnection</code> 也一样。Qt5 只在真正 marshal
+  时推导签名，而 marshal 需要连接；本机没有会话总线。于是 <code>(iiay)</code> / <code>(sa(iiay)ss)</code> 是否被宿主接受，
+  只能到真机用 <code>busctl --user introspect</code> / <code>gdbus introspect</code> 看。<strong>我们与 Qt 自己的
+  <code>qdbustrayicon.cpp</code> 用的是同一套写法</strong>（<code>Q_PROPERTY</code> + <code>qDBusRegisterMetaType</code>），这是当前能拿到的
+  最强保证。</li>
+<li><strong>真机一个都没跑</strong>：<code>dde-dock</code> 是否显示、左/中/右键是否分别触发 <code>Activate</code>/<code>SecondaryActivate</code>/
+  <code>ContextMenu</code>、图标尺寸是否被采纳（我们发 16/22/24/32/48/64）、tooltip 的标题/副标题排版。</li>
+<li><strong><code>dde</code> 的右键菜单</strong>：如果它只渲染 D-Bus 菜单而不调 <code>ContextMenu</code>，右键就是空的（见上文取舍）。
+  这一条要优先验，验不出来就得补 <code>com.canonical.dbusmenu</code>。</li>
+<li><strong>watcher 重启后的状态</strong>：已订阅 <code>NameOwnerChanged</code> 并会补注册，但"宿主重启时正在弹的菜单"、
+  "重启后 <code>Status</code> 回到 <code>Active</code> 是否需要重发 <code>NewStatus</code>"未验。</li>
+<li><strong><code>NeedsAttention</code> 未使用</strong>：<code>showWarningMessage</code> 之类的告警没有让图标闪烁/高亮，仍是普通通知。</li>
+<li><strong>CTest 目标本身仍未进 CMake 配置验证</strong>，原因同 slice 5/6：Qt5 路线开不了 <code>SNOW_APPS_BUILD_TESTS</code>，
+  本机唯一的 Qt6 树是 smoke 档、不含 <code>snow_shot</code>。</li>
+</ul>
+<h4>9.4.15 P4 slice 8：单实例端点搬进会话运行时目录（2026-10-20）</h4>
+<p><strong>背景</strong>：单实例这一层本来就是纯 Qt（<code>QLocalServer</code> + <code>QLockFile</code>，<code>singleinstancecoordinator.cpp</code>
+里一个平台条件编译都没有），看起来"直接可用"。问题不在能不能编，而在<strong>端点落在哪</strong>：Unix 域
+socket 需要路径，而 <code>QLocalServer::listen()</code> 拿到<strong>不带斜杠的名字</strong>时，Qt 会自己在
+<code>QDir::tempPath()</code> 下拼一个 → Linux 上就是 <code>/tmp/snow-shot-&lt;hex&gt;</code>。这一条的后果全都很晚才显形：</p>
+<ol>
+<li><strong><code>/tmp</code> 会被按龄清理</strong>。<code>systemd-tmpfiles</code> 对 <code>/tmp</code> 的处理会删掉超过保留期的条目，<strong>包括
+   socket</strong>。主程序是 <code>setQuitOnLastWindowClosed(false)</code> 的托盘常驻进程，跑满十天之后它手里的
+   socket 文件被 unlink —— 进程还活着、还握着锁，但<strong>新启动的实例连不上</strong>，于是走到
+   "owns the storage lock but could not be contacted" 分支、<code>return 2</code>。用户看到的是"应用再也
+   打不开"，日志里没有任何与"托盘挂了两周"相关的线索。</li>
+<li><strong>多用户机器上的抢占</strong>。<code>/tmp</code> 是 1777，名字是 <code>homePath|org|app</code> 的 SHA-256 前 24 位
+   ——可枚举。别人预先建同名 socket 后，我们的 <code>removeServer()</code> 删不掉（sticky 位），
+   <code>listen()</code> 拿到 <code>EADDRINUSE</code>，应用同样起不来。这是对常驻托盘应用的 DoS。</li>
+<li><strong><code>PrivateTmp=</code></strong>（systemd 单元）或各种沙箱里，两次启动各自看到不同的 <code>/tmp</code>：锁在共享的
+   <code>$XDG_RUNTIME_DIR</code>（所以第二个实例确认"已经有人占着"），socket 却在各自私有的 <code>/tmp</code>
+   （所以谁也连不上）。症状与第 1 条一样。</li>
+<li><strong>锁和 socket 分处两地</strong>：锁本来就在 <code>$XDG_RUNTIME_DIR</code>，socket 在 <code>/tmp</code>。出问题时要看两个
+   地方，而其中一个会被自动清掉。</li>
+</ol>
+<p><strong>做法</strong>：把两样东西搬进同一个目录，优先 <code>$XDG_RUNTIME_DIR</code>（per-user、0700、tmpfs，没有任何
+清理器会动它），只有在它不可用时才退回 <code>$XDG_TMPDIR/snow-shot-&lt;uid&gt;</code>（自己建、自己 chmod 0700）。
+纯逻辑模块 <code>snow_shot/app/singleinstanceendpoint.{h,cpp}</code>（全平台，不碰文件系统）：</p>
+<table>
+<thead>
+<tr>
+<th>决策</th>
+<th>判据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>目录优先级</td>
+<td><code>runtimeLocation</code> 非空<strong>且绝对</strong> ＞ <code>tempLocation/snow-shot-&lt;uid&gt;</code>。相对路径按未设置处理 —— XDG 规范要求绝对路径，而 Qt 会把相对值当成"临时目录下的名字"，那是静默错位。</td>
+</tr>
+<tr>
+<td>锁与 socket 同目录</td>
+<td><code>lockFilePath = directory/snow-shot-&lt;id&gt;.lock</code>，<code>legacyEndpoint = directory/snow-shot-&lt;id&gt;</code>，<code>receiptEndpoint = legacy + "-v2"</code>。</td>
+</tr>
+<tr>
+<td>路径长度</td>
+<td><code>sun_path</code> 在 Linux 是 108 字节<strong>含结尾 NUL</strong>、BSD 系 104 ⇒ 取 103 作上限；<code>toUtf8().size()</code> 量<strong>字节</strong>（35 个汉字 = 105 字节，字符数完全看不出问题）。首选目录放不下就换另一个候选，两个都放不下才报错，且错误里点名的<strong>是用户配置的那个目录</strong>，不是他从未听说过的兜底目录。</td>
+</tr>
+<tr>
+<td>已有目录能不能用</td>
+<td>必须是<strong>本人的目录</strong>：<code>isAcceptableEndpointDirectory(exists, isDir, ownerId, userId)</code>。不存在 ⇒ 我们自己建；存在但不是目录、或属主不是自己 ⇒ <strong>拒绝启动</strong>并报出路径。让"从不采用无法证明属于自己的目录"成为显式规则，比"能用就用"安全：否则别人在 <code>/tmp</code> 里种的目录里那个 socket 随时可以被换掉。</td>
+</tr>
+<tr>
+<td>谁 chmod</td>
+<td>只有我们自己新建的目录（即兜底路径）才 chmod 0700。<code>$XDG_RUNTIME_DIR</code> 由会话管理器建好且已是 0700，改别人的目录属无关变更。</td>
+</tr>
+</tbody>
+</table>
+<p><code>singleinstancecoordinator.cpp</code> 里只多了一个 <code>#elif</code>-式的 <code>#if defined(Q_OS_LINUX)</code> 分支和
+<code>prepareEndpointDirectory()</code>（在创建任何文件<strong>之前</strong>跑），协议、receipt、legacy 降级、
+<code>QLockFile</code> 的 stale 处理全部原样不动。</p>
+<p><strong>两个实现细节值得记</strong>：</p>
+<ul>
+<li><strong>取 uid 不用 <code>geteuid()</code>，用 <code>QFileInfo(QDir::homePath()).ownerId()</code></strong>。原因是这个文件的
+  Linux 分支只有塞 <code>-DQ_OS_LINUX</code> 给 MSVC 才编得到，而 <code>&lt;unistd.h&gt;</code> 在 Windows 上不存在。
+  家目录的属主按定义就是当前用户（root 的家目录属主是 0，正好正确）。若某天它返回 0 而用户
+  不是 root，后果是<strong>拒绝</strong>共享临时目录而不是误用，方向是安全的。</li>
+<li><strong>判据用 <code>Q_OS_LINUX</code> 而不是 <code>Q_OS_UNIX</code></strong>。macOS 也是 Unix，但 macOS 现在是能跑的、且路径
+  行为没在那边验证过；把 macOS 一起改会顺手给一个不可验证的平台换掉单实例端点。
+  代价写在这里：macOS 侧仍有"<code>$TMPDIR</code> 被清掉"的同款风险，等 macOS 排进计划时按 9.4.15 的
+  同一套规则处理。</li>
+</ul>
+<p><strong>验证</strong>：</p>
+<ul>
+<li><code>tests/linux_single_instance_endpoint_tests.cpp</code>（纯逻辑，9 组 / 35 条断言）：优先级、
+  尾斜杠归一化、per-user 兜底、相对路径被忽略、无可用目录时报错、<strong>字节 vs 字符</strong>的上限、
+  首选过长自动降级、两个都过长时报错点名首选目录、属主规则四种组合。
+  手工 <code>cl</code> 编译运行：<strong>Qt 5.15.2 passed、Qt 6.12.0 passed</strong>。</li>
+<li><strong>既有 700 余行单实例测试全套通过</strong>（Windows 分支语义未变）：把它手工 moc + 编译链接后运行，
+  <code>EXIT=0</code>，覆盖 legacy 协议降级、receipt 重试、stale 锁恢复、无响应 peer、子进程转发等场景。</li>
+<li><code>scripts/syntax-check-linux-cpp.sh</code> 覆盖面 7 → <strong>9</strong> 个文件（新增 <code>singleinstancecoordinator.cpp</code>
+  与 <code>singleinstanceendpoint.cpp</code>），<code>SYNTAX OK</code>；补了 <code>QtNetwork</code> 头目录。</li>
+<li><strong>门禁做了反向验证</strong>：往 Linux 分支里注入一个成员名拼写错误，带 <code>-DQ_OS_LINUX</code> 报 1 个
+  <code>error C</code>、去掉宏报 0 个 —— 证明这条门禁真的在编译那个分支，不是空跑。</li>
+<li>用 <code>compile_commands.json</code> 里的真实编译参数对两个新旧文件做语法检查：<code>EXIT=0</code>、0 error。</li>
+<li><code>windows-qt5-full</code> configure <code>EXIT=0</code>（CMake 新增目标与源清单都被解析）。</li>
+<li>6 个改动/新增文件 clang-format 全 0 违规。</li>
+</ul>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>真机未跑</strong>：<code>$XDG_RUNTIME_DIR</code> 在 dde 会话里是否总有值（正常登录有；从 <code>systemd --user</code>
+  早期单元或 <code>sudo</code> 里起可能没有）、socket 实际权限位、第二次启动的转发时延。</li>
+<li><strong><code>systemd-tmpfiles</code> 的清理策略是按其发行版配置推断的</strong>，没有在 UOS 上实测"十天后 socket
+  是否真被删"。这条恰恰是本片的动机，建议真机验证时用 <code>touch -d</code> 改 socket 的 mtime 再跑
+  <code>systemd-tmpfiles --clean</code> 观察。</li>
+<li><strong><code>$XDG_RUNTIME_DIR</code> 本身不可写 / 属主异常</strong> 的情况只做了代码路径，没有构造环境验。</li>
+<li><strong>P6 打包要配合</strong>：如果 deb 的 systemd 单元设了 <code>PrivateTmp=</code>，本片之后不影响正确性
+  （socket 已不在 <code>/tmp</code>），但 <code>$XDG_RUNTIME_DIR</code> 必须在单元里可见（<code>--user</code> 单元天然有）。</li>
+<li><strong><code>QLockFile</code> 的跨主机语义没变</strong>：锁文件里记 hostname，NFS 家目录上两个主机共享
+  <code>$XDG_RUNTIME_DIR</code> 是不可能的（per-machine tmpfs），所以这条在 Linux 上反而比 Windows 更安全。</li>
+</ul>
+<h4>9.4.16 P4 slice 9：<code>screenshotnative.h</code> 拆成三个职责单一的头（2026-10-20）</h4>
+<p><strong>问题不是"文件太大"，是它同时是三件不相干的事</strong>，而且第 3 件把 Windows 头拖进了平台中立的
+include 路径：</p>
+<table>
+<thead>
+<tr>
+<th>原 <code>screenshotnative.h</code> 里的东西</th>
+<th>真实性质</th>
+<th>谁实现</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>11 个 <code>configure*Window</code> / <code>setScreenshotInputTransparent</code> / <code>stackScreenshotWindowBelow</code></td>
+<td>我们自己窗口的<strong>平台适配钩子</strong></td>
+<td>只有 macOS（<code>screenshotplatform.mm</code>）</td>
+</tr>
+<tr>
+<td><code>screenshotDisplayAtCursor</code> / <code>screenshotFocusedWindow</code> / <code>screenshotFocusedWindowBounds</code></td>
+<td><strong>"用户在哪个窗/哪块屏"查询</strong></td>
+<td>只有 macOS；Windows 的调用点直接用 Win32</td>
+</tr>
+<tr>
+<td><code>ScrollInputResult</code> + <code>screenshotScrollPermission</code> + <code>sendScreenshotScroll</code></td>
+<td><strong>合成滚轮事件</strong>，真正平台中立</td>
+<td>macOS 原生 / Windows <code>SendInput</code> / 其余"没有"</td>
+</tr>
+</tbody>
+</table>
+<p>第 3 组尤其坏：<code>screenshotnative.h</code> 第 3 行就是
+<code>#include "snow_shot/platform/windows/scrollinput.h"</code> —— 一个平台中立的头<strong>无条件</strong>依赖
+Windows 头，非 Windows 平台把它 include 进来连编译都过不去；而它的 <code>#else</code> 分支把
+<code>sendScreenshotScroll</code> 直接转发到 <code>windows::sendScrollingWheelStep</code>（<code>SendInput</code>），
+就算编过去了，Linux 上也是一条永远失败的路。<strong>这正是 P4 里"非 Windows 平台滚轮捕获根本
+不存在"的隐藏形态：不是没实现，是借用了一个不存在的实现。</strong></p>
+<p><strong>做法</strong>：</p>
+<ul>
+<li><code>snow_shot/platform/screenshotwindow.h</code> —— 11 个窗口钩子。<strong>全平台声明</strong>，非 macOS 是
+  <code>inline</code> 空实现。空实现是"这个平台不需要额外动作"的正确表达（Qt 的窗口 flag 已经把意图
+  说清楚了），它让共享代码以后可以无条件调用，而不必在十个调用点各写一遍 <code>#ifdef</code>。
+  <strong>本片没有改动调用点的 <code>#ifdef Q_OS_MACOS</code></strong>：那些块里往往还有 <code>platform::macos::*</code>
+  的原生逻辑，摘 guard 需要 X11 侧先有实现可验，否则只是把"没做"换成"调了个空函数"。</li>
+<li><code>snow_shot/platform/screenshotfocus.h</code> —— 三个查询，<strong>仍然只在 <code>Q_OS_MACOS</code> 下声明</strong>。
+  这不是偷懒：Windows 的调用点走 <code>GetForegroundWindow()</code>/<code>MonitorFromPoint()</code>，给一个中立
+  声明会变成第二套没人用的问法；Linux 的机制其实已经有了（<code>snow-linux</code> 里给全屏检测写的那套
+  <code>parent==root</code> 窗口树爬升 + <code>translate_coordinates</code>），但<strong>没有 C ABI 暴露</strong>。宁可保持
+  macOS-only，也不放一个返回"没有窗口"的桩 —— 那会被读成"确实没有聚焦窗口"。</li>
+<li><code>snow_shot/platform/screenshotscroll.h</code> + <code>src/platform/screenshotscroll.cpp</code> —— 结果类型
+  搬到这里（<code>windows/scrollinput.h</code> 改成 <code>using ScrollInputResult = platform::ScrollInputResult</code>，
+  只保留发送者），实现按平台分派：Windows 转发 <code>sendScrollingWheelStep</code>；<strong>Linux 返回
+  <code>Unsupported</code> 且 <code>screenshotScrollPermission()</code> 返回 false</strong>，注释写明原因是
+  snow-linux 只<strong>观测</strong>滚轮、没有注入实现。返回 false 而不是 true，是为了让自动滚动第一时间
+  自我关闭，而不是拿着一串永远不生效的 <code>Unsupported</code> 空转。</li>
+<li>macOS 实现文件 <code>screenshotnative.mm</code> → <code>screenshotplatform.mm</code>（<code>git mv</code>，一处 CMake 引用），
+  一个头被拆成三个之后，文件名再叫 native 只会让下一个人去 grep 一个不存在的头。</li>
+<li>24 个 include 点（14 个 <code>src/*.cpp</code>、1 个 <code>.mm</code>、9 个 <code>tests/</code>）逐个改成它真正需要的那一个头。
+  <code>.mm</code> 一律给三份：Objective-C++ 只在本机之外的 macOS 上编译，这里无法验证，宁可多 include。</li>
+</ul>
+<p><strong>验证</strong>：</p>
+<ul>
+<li><code>windows-qt5-full</code> configure <code>EXIT=0</code>；用 <code>compile_commands.json</code> 的真实参数对 4 个受影响
+  TU（<code>screenshotscroll.cpp</code>、<code>scrollinput.cpp</code>、<code>screenshotscrollingcapturecontroller.cpp</code>、
+  <code>screenshotcontroller.cpp</code>）做 <code>-Zs</code>：全部 0 error。</li>
+<li><strong>非 macOS 侧的 11 个空实现单独写了探针 TU</strong>：Windows 构建里没有任何文件能在
+  <code>Q_OS_MACOS</code> 未定义时 include 到那段（所有调用点都还在 guard 里），不专门验一遍等于
+  把一段只写不编的代码合进去。探针 <code>-Zs</code>：0 error、0 warning。</li>
+<li><strong>Linux 分支进语法门禁</strong>：<code>src/platform/screenshotscroll.cpp</code> 加入清单（9 → <strong>10</strong> 文件），
+  <code>SYNTAX OK</code>。</li>
+<li>全仓 <code>grep screenshotnative.h</code> 只剩注释里一句历史说明。</li>
+</ul>
+<p><strong>本片未覆盖 / 留给后面</strong>：</p>
+<ul>
+<li><strong>Linux 的窗口级捕获目标当时拿不到</strong>（<code>request.window</code> / <code>monitorName</code> 为空 ⇒ 退回整屏）。
+  已在 <strong>9.4.17</strong> 补上：<code>snow-linux</code> 暴露 focused-window 的 id+frame C ABI、<code>screenshotfocus.h</code>
+  加 Linux 声明、<code>directcapturecontroller.cpp</code> 的 <code>#elif</code> 加分支。</li>
+<li><strong>X11 上窗口钩子的真实需求未验</strong>：置顶、输入穿透（XShape）、层叠顺序在 dde 合成器下
+  是否需要原生干预，只能在真机上看。现在调的是空实现，行为等同 Qt 默认。</li>
+<li><strong>macOS 侧只做了 include 改写，没有 macOS 主机可编译</strong>；改动是纯 include + 类型别名，
+  风险面是"某个 <code>.mm</code>/测试少 include 了一个头"，因此 <code>.mm</code> 全部给三份。</li>
+<li><strong>滚轮注入（Linux）</strong> 仍是 0，返回 <code>Unsupported</code> 时用户看到的是
+  <code>scroll_dispatch_failed</code> / 自动滚动自我关闭；<code>permission_required</code> 这个文案是
+  Windows/mac 语境，Linux 上语义不准确，等真实现再改文案。</li>
+</ul>
+<h4>9.4.17 P4 续：Linux 窗口级捕获目标（2026-10-20）</h4>
+<p>P4 收尾时留下的第一条待办。症状是"截图→当前窗口"和"截图→当前显示器"在 X11 上什么也拿不到：
+<code>DirectCaptureRequest::window</code> 和 <code>monitorName</code> 都是空，<code>captureDirectTarget</code> 在入口就返回空帧。</p>
+<p><strong>决定 1：X11 没有窗口级采集，接受"从整屏裁"作为语义。</strong></p>
+<p><code>snow-capture</code> 的 Linux 后端拒绝 <code>CaptureTarget::Window</code>（见
+<code>snow-capture/src/platform/linux.rs</code> 顶部注释），理由成立：读别的窗口自己的 drawable 需要
+Composite redirect，否则服务器在窗口被遮挡时读到的是上次留下的帧缓冲内容。所以窗口截图的
+实现是<strong>在根窗口采集结果上按窗口 frame 裁剪</strong>，这也是 scrot 等工具的做法。代价写在文档里：
+被遮挡的窗口截出来就是被遮挡的样子。这条不能靠"更好的实现"绕过，要改得上 XComposite，
+那是另一片工作量。</p>
+<p><strong>决定 2：几何规则全放 Rust 纯逻辑，C++ 只搬字节。</strong></p>
+<p><code>windowcapture.rs</code>（新增，全平台编译）有两个函数：
+<code>capture_target(id, &amp;FocusedWindow)</code> 决定"这个聚焦窗口能不能单独截"，
+<code>crop_plan(frame, displays)</code> 决定"哪块屏的哪个矩形，贴到输出的哪个位置"。
+后者是本片真正有价值的部分：<strong>窗口跨两块屏时，只从一块屏取会静默返回半个窗口</strong>，
+而这是双屏用户拖窗口时最常见的状态。10 组单测在 Windows 上跑，含负坐标屏、上下排列、
+半开区间边界、退化屏、饱和坐标。</p>
+<p>"能不能单独截"这个判据<strong>没有新写一份</strong>，而是把 9.4.10 里"能不能算全屏应用"的那条抽到
+<code>window::is_paintable</code>，fullscreen 与 windowcapture 同时调用它 —— 两个问题拒绝的是同一批
+表面（桌面背板、面板、菜单、隐藏窗口），分成两份实现早晚会给出不一致的答案，症状是
+"截出来是桌面，标题却是窗口名"。</p>
+<p><strong>决定 3：一个查询吐三个答案。</strong></p>
+<p><code>screenshotFocusedWindowTarget(quint32* id, QRect* frame, QRect* logicalBounds)</code>：
+id 用来做请求身份与历史记录，frame 是根窗口像素（裁剪用），logicalBounds 是 Qt 逻辑坐标
+（浮层与历史画布用）。合成一次查询而不是三个函数，因为三次读可能描述三个不同的窗口。
+<code>frame → logicalBounds</code> 的换算是<strong>按边除</strong>（不是按尺寸乘），与 <code>fullscreen::logical_to_native</code>
+的方向相反、规则相同；跨屏窗口没有唯一比例，此时 logicalBounds 返回空，调用方回落物理矩形
+（历史画布本来就这么兜底）。</p>
+<p>顺带把 <code>onX11()</code> / <code>openPlatform()</code> 两个 12 行助手抽进 <code>src/platform/linux/x11platform_p.h</code>
+（inline，无新增 TU），<code>focusedfullscreenwindow.cpp</code> 与新文件共用。</p>
+<p><strong>决定 4：<code>CurrentMonitor</code> 用 Qt 的屏幕名，不引入第二套坐标。</strong></p>
+<p>Win32 是 <code>MonitorFromPoint</code>，macOS 是 <code>display:%1</code>。Linux 上 <code>QScreen::name()</code> 在 xcb 下就是
+RandR output 名，也正是 <code>snow-capture</code> 报告给 Qt 的 monitor 名，所以直接把指针所在屏的名字
+填进 <code>monitorName</code> 就够了。名字对不上时不再静默返回空图，而是给出
+<code>No captured display matched the current monitor</code> —— 这条在真机上若出现，就说明两侧命名真的
+分叉了，比"截图无声失败"好查得多。</p>
+<p><strong>一个反向的坑</strong>：<code>captureDirectTarget</code> 里 <code>nativeRequest.focused_window</code> 在 Linux 上<strong>必须</strong>
+清零。那个字段在 native 层的唯一用途是 <code>WindowId::from_windows_handle</code>，也就是 HWND；把
+X11 的 window id 递下去会走进 Win32 采集路径拿一个毫无意义的数字。因此 Linux 分支改为请求
+整屏 + 自己裁。</p>
+<p><strong>验证</strong>：</p>
+<ul>
+<li><code>cargo test -p snow-linux</code>：<strong>174 passed</strong>（新增 <code>windowcapture</code> 10 组 + <code>window::is_paintable</code>
+  1 组）。</li>
+<li><code>linux-cross-check.sh</code> 对 <code>snow-linux</code> / <code>snow-linux-c</code> 双架构（x86_64、aarch64）<strong>PASS</strong>。
+  <em>注：不带 filter 的全仓扫会在某个 crate 上触发本机 Program Blacklist（<code>reg.exe</code>），
+  与本次改动无关，已单独记在环境约束里。</em></li>
+<li><code>scripts/syntax-check-linux-cpp.sh</code> 覆盖面 10 → <strong>12</strong> 个文件（新增 <code>screenshotfocus.cpp</code>
+  与 <code>directcapturenative.cpp</code>），补了 <code>snow_image</code> / <code>snow_memory</code> / <code>snow-capture-c</code> /
+  <code>snow-recording-c</code> 头目录。</li>
+<li>4 个改动 TU 用 <code>compile_commands.json</code> 的真实参数复查（新脚本
+  <code>.workbuddy/qt5-port/check-tu.sh</code>）：<code>directcapturenative.cpp</code>、<code>directcapturecontroller.cpp</code>、
+  <code>applicationcontroller.cpp</code>、<code>screenshotcontroller.cpp</code> 全部 <strong>PASS</strong>。</li>
+<li>新脚本 <code>replay-tu.py</code> + <code>check-tu.sh</code>：从 <code>compile_commands.json</code> 取真实命令行、去掉
+  <code>-o</code> 换成 <code>/Zs</code> 再跑。比手抄命令可靠，因为 include 路径与 feature define 会随时间漂移。</li>
+</ul>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>真机未跑</strong>：<code>_NET_ACTIVE_WINDOW</code> 在 dde-kwin 下是否始终维护（否则走输入焦点回退，
+  而回退拿到的是<strong>客户端</strong>窗口，frame 会少一圈标题栏）、窗口 frame 含不含 DDE 的阴影边距、
+  裁剪路径在 SHM 采集下的耗时。</li>
+<li><strong><code>QScreen::name()</code> 与 RandR output 名是否真的一致</strong>只在 Qt 源码层面推断过。不一致的表现
+  是 <code>No captured display matched the current monitor</code>，一条日志就能判定。</li>
+<li><strong>跨屏窗口</strong>的 history 画布位置：logicalBounds 为空 ⇒ 回落物理矩形，1x 缩放下正确，
+  带缩放时会偏，等真机确认。</li>
+<li><strong>被遮挡的窗口</strong>截出来是被遮挡的样子（决定 1 的直接后果），这不是 bug，但如果用户预期是
+  "干净的单窗口截图"，只能靠 XComposite 再开一片。</li>
+<li><strong>Wayland</strong> 全部不适用：<code>onX11()</code> 为假 ⇒ 两张表都返回 false ⇒ 行为回到"截不到"。</li>
+</ul>
+<h4>9.4.18 P5 slice 1：NEON 像素转换内核（2026-10-21）</h4>
+<p>P5 的第一项（§7.2 表里唯一的 P0）是 <code>snow-capture/src/convert/simd_x86.rs</code> 的 NEON 对应物。
+结论先说：<strong>这不是 2000 行的移植，是 200 行</strong>。原因是 x86 那六个 BGRA 内核的语义可以一句话
+说完——"对每个 16 字节块查一张 16 项字节表，需要时再把 alpha 位置 OR 成 0xFF"——而 AArch64
+的 <code>TBL</code>（<code>vqtbl1q_u8</code>）与 <code>pshufb</code> 是同一个操作、同一个越界约定（索引 ≥ 16 读作 0，而表里
+所有索引都在 <code>0..=15</code>）。所以 <code>simd_neon.rs</code> 与 <code>ssse3_bgra_core</code> 结构完全一致：4 块主循环、
+4 像素次级循环、标量尾巴。</p>
+<p><strong>决定 1：表只有一份，两个架构都读它。</strong> <code>scalar::BGRA_TO_RGBA_SHUFFLE</code> 是唯一真值来源，
+NEON 与 SSSE3 都用 <code>vld1q_u8</code> / <code>_mm_loadu_si128</code> 加载它，<strong>不是各自抄一份</strong>。理由很实际：
+本机不能跑 AArch64，如果两边各写一份，颜色映射错了只会在一台机器上复现，排查成本是一天。</p>
+<p><strong>决定 2：AArch64 没有 NT store，<code>_nt_*</code> 直接别名普通内核。</strong> <code>STNP</code> 只支持寄存器对
+（16 字节），且 Rust 没有对应 intrinsic；盲写没跑过的内联汇编比别名更危险。所以
+<code>convert_bgra_to_rgba_neon_nt_*</code> 三个入口都存在、都调普通内核，<strong>写在这里而不是静默降级</strong>，
+dispatch 表在两边形状一致，调用方不需要长 <code>cfg</code> 分支。</p>
+<p><strong>决定 3：没有"NEON 之下的档位"。</strong> ARMv8-A 强制 Advanced SIMD，所以 x86 的四档
+（AVX-512/AVX2/SSSE3/标量）在 AArch64 上只有一档。<code>neon_available()</code> 保留只是为了 dispatch
+读起来与 x86 一致，它恒为真。</p>
+<p><strong>决定 4：f16/HDR 的 NEON 不做，因为 Linux 没有消费者。</strong> f16→sRGB 那条路是给 DXGI HDR
+回读用的；X11 采集只有 8 位。等将来有 Wayland/HDR 采集再谈，现在写就是没有验收标准的代码。</p>
+<p><strong>验证链（本机不能执行 AArch64，所以链条要写清楚）</strong>：</p>
+<ol>
+<li><code>cargo check --target aarch64-unknown-linux-gnu</code>（默认 + <code>--all-features</code>）<strong>PASS</strong>；
+   <code>cargo build --target aarch64-unknown-linux-gnu --lib</code>（真做 LLVM 代码生成，53s）<strong>PASS</strong>
+   —— 这一条比 <code>check</code> 强得多，intrinsic 的类型/约束错误在这一步才会暴露。</li>
+<li><strong>读汇编</strong>：两个 const 实例（<code>neon_bgra_core::&lt;false&gt;</code> / <code>&lt;true&gt;</code>）里各有 <strong>6 条</strong>
+   <code>tbl v?.16b, { v?.16b }, v?.16b</code>（4 块主循环 + 4 像素循环，与设计一致）；
+   <code>orr v?.4s, #255, lsl #24</code> <strong>只出现在 opaque 实例</strong>（另一个是 0 条）——说明
+   <code>FORCE_OPAQUE_ALPHA</code> 的常量折叠没有把掩码丢掉。</li>
+<li><strong>表字节在 aarch64 rlib 里</strong>：按 <code>02 01 00 03 06 05 04 07 0a 09 08 0b 0e 0d 0c 0f</code>
+   二进制搜，命中。</li>
+<li>新增 3 个本机测试：表语义 == 逐像素 <code>swap_bgra_to_rgba</code>；<strong>ssse3 内核 == 标量</strong>
+   （1..=70 像素，覆盖两条循环与尾巴）；<strong>被 dispatch 选中的内核 == 标量</strong>（同样 1..=70）。
+   最后一条就是 AArch64 上 NEON 的验收测试，一到真机自动生效。</li>
+<li><strong>反向验证</strong>：把表里第 0 个像素改成恒等映射 ⇒ 上面第 1、2 条测试立刻失败。
+   记一个反直觉现象：<code>selected_bgra_kernel_matches_scalar</code> 在<strong>本机仍然通过</strong>，因为本机的
+   选中内核是 AVX-512，它不读这张常量表——这正是为什么要单独写一条直接打 ssse3 的测试。</li>
+</ol>
+<p><strong>顺带修掉一个真 bug</strong>：<code>--all-features</code>（<code>stage-timing</code>）在非 Windows 上根本编译不过。
+先是 3 个错（<code>qpc_duration_between</code> / <code>qpc_ticks_to_duration</code> 只有 <code>#[cfg(windows)]</code> 定义
+却被无条件 re-export、<code>OnceLock</code> 未使用），修完又露出 6 个 dead-code 错（<code>StageScope</code> /
+<code>attach_stage_timings</code> / <code>stage_recording</code> / <code>pixel_counters::readback</code> 在 Linux 上没有调用者）。
+处置：QPC 两个 helper 的 re-export 加 <code>cfg(windows)</code>；记录器 API 用<strong>作用域明确的</strong>
+<code>#[cfg_attr(not(windows), allow(dead_code))]</code> + 注释说明这部分 recorder API 只有 Windows
+调用者，而不是删代码（删了会打断全部 Windows 调用方）。<strong>后续修正</strong>：当时注释写的
+"X11 后端只记 checkpoint，不开 scope"确实是 X11 后端的真实状态，但那是缺口而不是设计——
+9.4.24 让 X11 也开 scope 后，只剩 <code>stage_mark</code> / QPC helper / <code>stage_recording</code> 仍为
+Windows 专有。P7 的 CI 一定会跑 <code>--all-features</code>，
+这条不通就是红。</p>
+<p><strong>CMake 侧不改，理由写进 <code>SnowSimd.cmake</code> 顶部</strong>：AArch64 上 NEON 是基线，不需要
+<code>-march=armv8-a+simd</code>（加上反而把基线钉回 v8.0，丢掉 v8.2 的 dot-product/FP16）；
+真正需要开关的地方在 Rust 的 <code>#[target_feature(enable = "neon")]</code>。现存 C++ <code>*_avx2.cpp</code>
+每个 TU 都被 <code>#if defined(__x86_64__) || ...</code> 包住，aarch64 上编译成 <code>return false</code> 桩，
+调用方回落标量。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>NEON 从未在 ARM 上执行</strong>：上面链条里最弱的一环就是"<code>TBL</code> 语义按 ARM ARM 推断"。
+  到真机的第一条命令是 <code>cargo test -p snow-capture convert::</code> 与 <code>--all-features</code> 各跑一遍。</li>
+<li><strong>没有性能数字</strong>：<code>snow-capture</code> 的 <code>conversion_hot_path</code> bench 需要真机；标量 vs NEON 的
+  差距在 X11 8 位路径上可能被 SHM 采集掩盖。</li>
+<li><strong>C++ 侧没有 NEON 内核</strong>：<code>snow_image/src/raster.cpp</code> 的硬件 CRC32C 仍只认 <code>_M_X64</code>
+  （AArch64 有 CRC32 指令，属 §7.2 的 P1）、<code>snow_canvas_filter_*_avx2.cpp</code> 在 aarch64 上
+  整体退化标量（属 P1/P2）。</li>
+<li><strong>f16/HDR 全链</strong>（见决定 4）。</li>
+</ul>
+<h4>9.4.19 P3 slice 7：X11 Damage 脏矩形（2026-10-21）</h4>
+<p>9.4.7 把 X11 采集做到零拷贝（MIT-SHM），但那解决的是"每帧要拷多少"，没解决"这一帧要不要采"。
+本片之前 <code>is_duplicate</code> 恒为 false、<code>dirty_rects</code> 恒为空 ⇒ 录制时桌面完全静止，后端照样每帧
+<code>ShmGetImage</code> 一次、编码器照样全帧重编。Damage 扩展就是这两件事的答案：根窗口告诉客户端
+"自上次以来哪些区域被画过"。</p>
+<p><strong>决定 1：只有合成器在跑时才信这个答案。</strong> 没有合成器时，应用窗口直接画在屏幕上，根窗口的
+Damage 只覆盖它自己的壁纸——此时"没有变化"的答案会让录制<strong>冻结</strong>，比慢一点糟得多。判据是
+<code>_NET_WM_CM_S&lt;n&gt;</code> 这个 selection 有没有 owner（该 selection 的存在意义就是"每屏只能有一个
+合成器"）。检查不通过就 <code>Ok(None)</code>，后端行为与 9.4.7 完全一致。这是<strong>设计取舍，不是补丁</strong>：
+宁可在无合成器的老会话上退化成"每帧都采"，也不要在那种会话上跳帧。</p>
+<p><strong>决定 2：两条捷径都有保质期。</strong> Damage 漏报的途径不止一条（合成器直接把画面翻到硬件
+overlay、驱动丢报、合成器中途退出），而漏报的表现是画面卡住不动。所以：</p>
+<table>
+<thead>
+<tr>
+<th>保证</th>
+<th>默认</th>
+<th>触发后</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>心跳：最久多久必须真读一次服务器</td>
+<td>500 ms</td>
+<td>即使"没有变化"也采一帧</td>
+</tr>
+<tr>
+<td>全帧刷新：最久多久必须给出一帧无脏矩形的完整帧</td>
+<td>2 s</td>
+<td>即使知道改哪儿也当全帧发</td>
+</tr>
+</tbody>
+</table>
+<p>两者的作用不同：心跳防"画面冻住"，全帧刷新防"部分编码的参考帧一路错下去"（编码器只有在
+手里有完整参考帧时才能安全地只重编局部）。它们都是 <code>Duration</code> 参数，不写死。</p>
+<p><strong>决定 3：合并只许变大。</strong> <code>localize</code> 的顺序是"裁到目标 → 平移到目标本地坐标 → 合并相接的
+矩形 → 超过 16 块就标 truncated"。合并用的是<strong>包围盒</strong>，会连带重编两块之间没变的像素——这是
+故意的：少报一块变了的地方，屏幕上就永久留下错误；多报一块，只是多编几个块。同理
+truncated 的答案一律当全帧，因为"精确到可用的短列表"这时根本不存在。</p>
+<p><strong>决定 4：跳帧要调用方担保缓冲区的来历。</strong> 只有 <code>capture_with_history_hint(.., true)</code> 并且
+<code>last_extent.is_some()</code>（已经交付过至少一帧自己的输出）时才可能返回 <code>is_duplicate</code>。普通的
+<code>capture()</code> 永不跳帧，并且会把累积的 Damage 丢掉——否则下一次带提示的调用会拿到"自创建以来
+的全部变化"这种无界积压。</p>
+<p><strong>决定 5：跳过的帧要睡。</strong> 没有变化时服务器是<strong>立即</strong>回答的，不休的话采集循环会以几千次/
+秒的频率做 <code>DamageSubtract</code> 往返。暂停时长由 <code>set_target_fps</code> 给的目标帧率算出（未设置时
+16 ms ≈ 62 Hz，钳在 2–33 ms）。这也是为什么 <code>set_target_fps</code> 在这一片才被实现：真采集的
+节奏由会话决定，只有跳帧需要后端自己撑住时间。</p>
+<p><strong>决定 6：协议调用失败就丢掉 tracker，不重试。</strong> 能失败的原因（合成器重启、damage 对象被
+销毁）都不是"下一帧会好"的类型；每帧重试等于每帧白付一次往返。丢掉之后行为回到"每帧都读"，
+并且<strong>不会</strong>在会话中途重建——重建的成本是一串握手，收益是不可预期的。</p>
+<p><strong>验证链（本机没有 X server，所以要说清楚证明了什么、没证明什么）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-linux --lib</code></td>
+<td><strong>192 通过</strong>（9.4.18 后是 174，本片 +18 全在 <code>damage</code>）</td>
+</tr>
+<tr>
+<td><code>cargo check -p {snow-linux,snow-capture} --target {x86_64,aarch64}-unknown-linux-gnu</code></td>
+<td>双架构全绿</td>
+</tr>
+<tr>
+<td><code>cargo check -p snow-capture --lib --all-features</code></td>
+<td>绿（P5 修过的那条不回归）</td>
+</tr>
+<tr>
+<td><code>cargo fmt --check</code> + <code>cargo clippy -D warnings</code>（host 与 linux 目标各一遍）</td>
+<td>绿</td>
+</tr>
+<tr>
+<td>反向验证 4 点</td>
+<td>心跳判据取反 ⇒ 2 failed；全帧刷新判据改成永不成立 ⇒ 1 failed；<code>localize</code> 去掉裁剪 ⇒ 2 failed；<code>touches</code> 恒 false ⇒ 3 failed</td>
+</tr>
+</tbody>
+</table>
+<p>反向验证本身有个坑值得记：<strong><code>-D warnings</code> 会让"删掉一行"这种变异变成编译错误</strong>（删了心跳
+分支后 <code>since_capture</code> 变成未使用变量），于是测试根本没跑、输出为空，看起来像"注入没被执行"。
+能编译的变异（取反比较符、把条件改成永假、让 <code>touches</code> 返回一个恒假但仍读参数的表达式）才是
+有效的注入方式。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>从未在真 X server 上跑过</strong>。上面证明的是"几何与决策正确、双架构类型正确"，<code>DamageSubtract</code>
+  ↔ <code>FetchRegion</code> 的往返、<code>_NET_WM_CM_S0</code> 在 dde-kwin 下是否真被持有、有无合成器时根窗口
+  Damage 的实际覆盖面，全部要真机。到真机的判断方法：开一次录制，比较"静止桌面"与"拖窗口"
+  两种情况的 CPU 占用——静止时明显更低说明跳帧真的生效；接着让一个播放器全屏放视频，确认画面
+  不卡（心跳兜住了漏报）；最后 <code>kill</code> 掉合成器再录一次，画面必须照旧跟手（此时 <code>compositor_running</code>
+  的那次检查已经发生过了，兜底的是 500 ms 心跳）。<strong>没有计数器能直接看"这一帧是跳过的还是采的"</strong>
+  —— 这一片的可观测性只有间接证据，加计数器属下一片。</li>
+<li>~~<strong>多屏区域路径会丢掉脏矩形</strong>~~：<code>capture_session</code> 的区域内回退路径把 <code>dirty_rects</code> 硬编码成
+  空，所以部分编码只在"单个显示器整屏"这条路径上生效。<strong>已在 9.4.21 修掉</strong>（裁剪 + 平移，
+  目标偏移仍由 <code>append_exact_sample_damage</code> 加一次）。</li>
+<li><strong>不用 Damage 事件唤醒</strong>：现在是"每帧同步 subtract + 取区域"，靠 16 ms 轮询。改成阻塞等
+  <code>DamageNotify</code> 能把静止时 CPU 再压一个量级，但阻塞会挡住取消（会话要能随时停下），属于
+  单独一片。</li>
+<li><strong>光标移动不是 root damage</strong>：X 把光标叠在根窗口<strong>之上</strong>而不是画进去，所以纯鼠标移动的一帧
+  会被判成重复。对当前架构是对的（光标由 <code>snow-cursor</code> 单独合成），但如果将来把光标画进帧里，
+  这个判据必须一起改。</li>
+<li>真机性能数字（跳帧省下的 CPU、部分编码省下的码率）。</li>
+</ul>
+<h4>9.4.20 P3 slice 8：Wayland portal 会话协商（2026-10-21）</h4>
+<p>Wayland 不给任何客户端屏幕像素。唯一受支持的路径是经 <code>xdg-desktop-portal</code> 的 <code>ScreenCast</code>
+接口向合成器申请一条 PipeWire 流，而"申请"本身是一串三次调用、异步应答、带版本特性的握手。
+这一片做的是这串握手，<strong>不做</strong>帧消费。</p>
+<p><strong>先说这一片修掉的一个真实错误行为。</strong> 此前 <code>snow-capture</code> 的 Linux 后端无条件连 X11：在
+Wayland 会话里 XWayland 会导出 <code>DISPLAY</code>，于是 <code>X11Session::connect()</code> 成功、<code>GetImage</code> 返回
+真实像素——只不过那是 XWayland 根窗口的像素，只包含 X 客户端。截图"成功"了，内容是一张几乎
+空白的桌面，而且<strong>下游没有任何地方能把它和真空白区分开</strong>。所以本片在 <code>X11Capturer::new</code> 里
+加了一道判据：不是 <code>CapturePlan::X11Root</code> 就返回 <code>BackendUnavailable</code> 并带上具体原因。宁可
+明确失败，也不要交付一张看起来正常的错图。</p>
+<p><strong>决定 1：把"判断"和"管道"分开，管道先不写。</strong> <code>portal</code> 模块里纯逻辑部分（路径构造、版本门控、
+应答判定、流列表解析、握手顺序）在 Windows 上跑单测；真正的 D-Bus 调用在 <code>portal::dbus</code>，
+只有 <code>cfg(target_os = "linux")</code> 才编译。中间的缝是一个 <code>PortalTransport</code> trait——正因为有它，
+"三次调用的顺序""版本门控""取消发生在哪一步"这些真会出错的判断都能用假 transport 测，而不用
+先让 portal 跑起来。这与 9.4.7 的 MIT-SHM、9.4.19 的 Damage 是同一套切法。</p>
+<p><strong>决定 2：Wayland 会话永远不返回 <code>X11Root</code>。</strong> 这是本片唯一的硬不变量，也是唯一写成
+"无论 portal 探测结果如何"的判据（探测到 0/1/6 或干脆没有，都不得回落）。XWayland 让
+<code>DISPLAY</code> 看起来可用，这是本片存在的全部理由。</p>
+<p><strong>决定 3：版本不够就报错，不静默丢选项。</strong> portal 对不认识的选项是忽略而不是拒绝，所以
+"v1 上请求 <code>cursor_mode</code>"会握手成功、行为却不是调用方要的；<code>restore_token</code> 更糟——它被丢掉时
+用户每次都要重新授权，而日志里一个字都没有。<code>select_sources_options</code> 因此返回
+<code>UnsupportedOption { option, found, needed }</code> 而不是少塞一个键。版本锚点（<code>cursor_mode</code> v2、
+<code>restore_token</code>/<code>persist_mode</code> v4、流属性 <code>source_type</code> v3、<code>pipewire-serial</code> v6）取自上游
+接口文档 v6。</p>
+<p><strong>决定 4：先订阅再调用，且允许 portal 换路径。</strong> 应答不是方法返回值，而是 <code>Request</code> 对象上的
+<code>Response</code> 信号。路径可由 <code>sender + handle_token</code> 预先算出（<code>request_path</code>：去掉 unique name
+的前导 <code>:</code>、<code>.</code> 换 <code>_</code>），所以订阅能发生在调用之前——否则快到没有对话框的 <code>CreateSession</code>
+会赢下这场竞争。但 token 只是"请求"：方法返回的对象路径才是权威，两者不一致时按返回值重新
+订阅，而不是判失败（部分旧版 portal 会自己挑路径）。</p>
+<p><strong>决定 5：取消不是错误。</strong> <code>Response</code> code 1 是"用户关掉了对话框"，把它当失败上报会诱导上层
+重试，而重试只会再弹一次对话框。code 0/1 之外的码保留原始数字（<code>Denied { code }</code>），不折叠成
+"失败"——portal 将来新增码时那个数字本身是信息。</p>
+<p><strong>决定 6：请求 <code>cursor_mode = Embedded</code>。</strong> Wayland 下客户端拿不到权威指针位置（<code>XQueryPointer</code>
+读的是 XWayland 自己那份副本），所以"隐藏光标、我们画"这条路不存在。Embedded 让合成器把指针
+画进帧里，恰好一次。等 <code>cursor_mode = Metadata</code>（位置随流元数据下发）落地，才轮到录制器自己
+渲染高亮——那需要消费 PipeWire metadata，属后续。</p>
+<p><strong>决定 7：自己写超时组合器。</strong> zbus 6 的超时是 crate 内部 API，且 6.0 起<strong>移除了 blocking
+API</strong>（<code>zvariant</code> 也被并入 <code>zbus::wire</code>，<code>Value</code> 改名 <code>Variant</code>），所以同步接送必须
+<code>zbus::block_on</code> 驱动 future。<code>Response</code> 可能永远不来（portal 中途崩掉），而调用方是同步的
+<code>capture()</code>、没东西可取消，因此在 future 内部加边界：<code>portal::deadline::timeout_after</code>，
+一个 50 行的 waker+线程组合器，不依赖具体 runtime，也能在 Windows 上单测。默认 120 s——那是
+一个人在看对话框，不是网络超时。</p>
+<p><strong>另一个协议陷阱</strong>：<code>CreateSession</code> 结果里的 <code>session_handle</code> 声明是 <code>o</code>，实际是 <code>s</code>（上游
+承认的历史实现错误），所以两种都接受，并且要求它真的以 <code>/</code> 开头。</p>
+<p><strong>验证链（本机没有 D-Bus，所以要说清楚证明了什么、没证明什么）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-linux --lib</code></td>
+<td>192 → <strong>219 通过</strong>（本片 +27：<code>portal</code> 23 + <code>portal::deadline</code> 4）</td>
+</tr>
+<tr>
+<td><code>cargo check -p {snow-linux,snow-capture} --target {x86_64,aarch64}-unknown-linux-gnu</code></td>
+<td>双架构全绿（<code>portal::dbus</code> 首次进编译）</td>
+</tr>
+<tr>
+<td><code>cargo check -p {snow-linux,snow-capture} --all-features</code></td>
+<td>绿</td>
+</tr>
+<tr>
+<td><code>cargo fmt --check</code> + <code>cargo clippy -D warnings</code>（host 与 linux 目标各一遍）</td>
+<td>绿</td>
+</tr>
+<tr>
+<td>反向验证 5 点</td>
+<td>sender 改写符号 <code>.</code>→<code>-</code> ⇒ 1 failed；Wayland 允许回落 <code>X11Root</code> ⇒ 2 failed；版本门控放松一档 ⇒ 2 failed；取消当成功 ⇒ 1 failed；deadline 恒 Ready ⇒ 2 failed</td>
+</tr>
+</tbody>
+</table>
+<p>反向验证的两点都改成"能编译的变异"：<code>sender.replace('.', "_")</code> 改字符而不删行，<code>capture_plan</code>
+里<strong>加</strong>一条 <code>Wayland if portal_version.is_none() =&gt; X11Root</code> 的守卫（它同时证明那条不变量测试
+是真的在测不变量，而不是恰好没覆盖到），<code>deadline</code> 的 <code>if state.fired</code> 改 <code>if true</code>。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong><code>portal::dbus</code> 从未执行过</strong>。本机没有 session bus、没有 portal，证明的只是"双架构类型正确"。
+  到真机的第一条命令：<code>WAYLAND_DISPLAY=wayland-0 XDG_SESSION_TYPE=wayland &lt;binary&gt; --probe</code>，
+  先看非交互探测能不能拿到版本号；再看 <code>negotiate_screencast</code> 能否弹出授权框并拿到 <code>streams</code>。
+  最可能的第一处失败是 <code>a{sv}</code> 的序列化形态（<code>HashMap&lt;String, Variant&gt;</code> 是否真按 <code>a{sv}</code> 落线），
+  这也是它被单独放在一层的原因：改这一层不牵动任何已测逻辑。</li>
+<li><strong>帧消费不存在</strong>：<code>negotiate</code> 返回的 <code>ScreenCastStream</code>（node id / size / position）目前没有
+  消费者，<code>OpenPipeWireRemote</code> 也没调用。所以 <code>capture_plan</code> 对"Wayland + 有 portal"返回的是
+  <code>PortalCaptureUnimplemented</code>，而不是"可用"。这条分支是这一片最诚实的一行代码。</li>
+<li><strong><code>restore_token</code> 无处持久化</strong>：拿到了但没有存储位置（配置 schema 属 C++ 侧），所以每次仍会
+  弹框。<code>persist_mode</code> 同理没被请求。</li>
+<li><strong>多流未处理</strong>：<code>multiple = false</code>，但仍接受多流应答（不硬性要求 1 条）。真的出现多流时
+  调用方要自己决定是拼接还是取第一条，本片不替它决定。</li>
+<li><strong>会话生命周期绑在连接上</strong>：<code>PortalSession</code> 拿着 <code>BusTransport</code>，drop 即断开、portal 随即
+  关闭会话。这是有意的，但也意味着帧消费必须把 <code>PortalSession</code> 活着带到不需要为止。</li>
+<li><strong>探测有代价</strong>：Wayland 下每次创建 capturer 都会走一次属性读取（3 s 上限）。X11 会话完全不
+  碰 portal——<code>session_plan</code> 里那条 <code>if session.is_wayland()</code> 就是为此。</li>
+</ul>
+<h4>9.4.21 P3 slice 9：区域内回退路径保留脏矩形（2026-10-21）</h4>
+<p>9.4.19 留下的第一条明确缺口：<strong>多屏区域采集的脏矩形被丢掉</strong>。<code>capture_session</code> 的区域内回退
+路径（<code>capture_region_into</code> 返回 <code>None</code> 时走"整屏采集 + CPU 贴图"）把 <code>dirty_rects</code> 硬编码成
+空列表。后果是整条链上"部分编码"只在<strong>单个显示器整屏</strong>这一种情形生效：多屏区域录制每帧都
+报"变了，但不知道变了哪儿"，编码器退化成全帧刷新。而 X11 后端根本没有实现
+<code>capture_region_into</code>，所以<strong>Linux 的多屏区域录制 100% 走这条回退路径</strong> —— 这个缺口恰好落在
+最常用的场景上。</p>
+<p><strong>修法不是"把监视器的脏矩形直接抄过来"，而是先裁后移。</strong> <code>CaptureBlitRegion</code> 是 1:1 的裁剪
+加放置（<code>src_*</code> 取源窗口，<code>dst_*</code> 放到输出位置，不缩放），所以每个监视器脏矩形要：裁到
+<code>[src_x, src_x+width) × [src_y, src_y+height)</code>，再减去 <code>src_x/src_y</code> 变成"相对被拷贝窗口"的
+坐标。落在窗口外的矩形<strong>丢弃</strong>——它描述的是这一帧输出里根本不存在的像素，报上去会让编码器
+去刷新从未变过的区域。</p>
+<p><strong>目标偏移只许加一次，这是本片最容易错的地方。</strong> <code>append_exact_sample_damage</code> 在聚合时已经给
+每个矩形加过 <code>blit.dst_x/dst_y</code>（对加速路径和回退路径一视同仁，因为后端返回的脏矩形一律是
+<strong>目标本地</strong>坐标）。如果裁剪函数自己也加一遍，双屏右侧那块会被报成 <code>x=3850</code> 而不是 <code>1930</code>。
+第一版就是这么写的，端到端测试当场抓到（<code>left: 9, right: 5</code>）——<strong>纯函数单测全绿而端到端红</strong>，
+因为单测里 <code>dst_x</code> 写的是 0。这条教训比修法本身值得记：涉及两套坐标系时，单测必须让两套
+坐标系取不同值，否则等于没测。第二版专门加了 <code>blit_damage_leaves_the_destination_offset_to_the_caller</code>，
+用一个 <code>dst_x = 1920</code> 的监视器把这条不变量钉住。</p>
+<p><strong>空集语义必须保持原样。</strong> 回退路径里"监视器报了重复帧"和"监视器说变了但给不出位置"是两件事：
+前者 <code>is_duplicate = true</code> 且空列表 ⇒ 这一路没有贡献；后者 <code>is_duplicate = false</code> 且空列表
+⇒ <code>append_exact_sample_damage</code> 把整个聚合清空并标记不精确 ⇒ 全帧刷新。裁剪函数对空输入返回
+空，不发明矩形，正是为了不打乱这个判据。</p>
+<p>验证：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-capture --lib</code></td>
+<td>283 → <strong>291 通过</strong>（+6 纯函数、+2 端到端）</td>
+</tr>
+<tr>
+<td><code>--all-features</code></td>
+<td>299 通过（+8）</td>
+</tr>
+<tr>
+<td>双架构 <code>check</code>（x86_64 / aarch64）</td>
+<td>绿</td>
+</tr>
+<tr>
+<td><code>check-rust.sh snow-capture</code>（fmt + clippy <code>-D warnings</code>，host 与 linux 目标）</td>
+<td>绿</td>
+</tr>
+<tr>
+<td>反向验证 3 点</td>
+<td>调用点改回 <code>Vec::new()</code> ⇒ 两个端到端测试都红；裁剪换成 <code>max</code>（过度上报）⇒ 4 个纯函数测试红；目标偏移加两次 ⇒ 端到端 + 不变量测试都红</td>
+</tr>
+</tbody>
+</table>
+<p>端到端用的是"两台并排 8×8 监视器、区域横跨接缝、后端没有加速区域路径"的假后端，两台监视器
+故意把脏矩形放在不同偏移，这样两侧的目标偏移一旦搞混就必然对不上。第二个端到端用例把区域
+只放在右侧监视器上，验证左侧的脏矩形被丢掉而不是被平移进输出。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li>仍然<strong>没有真机</strong>。证明的是"坐标系换算与裁剪正确 + 双架构类型正确"，不是"UOS 上多屏录制
+  码率真的降了"。到真机的判据同上：录一段双屏区域，静止时看编码器输出的帧大小是否接近 0。</li>
+<li><strong><code>capture_region_into</code> 仍然只有 Windows 实现</strong>。X11 后端本可以直写输出帧（它有
+  <code>capture_image(rect)</code>，天然支持子矩形），但那是"省一次 memcpy"，与本片的"省一次全帧编码"
+  不是同一件事，属另一片。</li>
+<li><strong><code>capture_desktop_region_into</code> 同理</strong>：单显示器整屏区域的那条快路径仍只有 Windows 后端实现，
+  Linux 上它返回 <code>None</code> 后落到本片修好的回退路径。</li>
+<li>脏矩形仍然<strong>不做合并</strong>：两个监视器各报一块，聚合里就是两块。编码器侧的合并策略不在这一层，
+  本片不替它决定。</li>
+</ul>
+<h4>9.4.22 P3 slice 10：X11 PRIMARY selection 取选中文字（2026-10-21）</h4>
+<p><code>snow-selected-text</code> 原先只有 <code>platform/{windows,macos}</code>，Linux 上 <code>SelectedTextService::new()</code>
+恒 <code>UnsupportedPlatform</code> ⇒ C++ 的 <code>SelectedTextTranslationController</code> 在 Linux 上永远走失败分支
+（"划词翻译"整个功能缺失）。§4.2 里这一行写的就是"AT-SPI2（D-Bus）+ PRIMARY selection，未开始"。</p>
+<p><strong>PRIMARY 不是剪贴板，这决定整片形态。</strong> X11 上被选中文字的规范位置就是 PRIMARY selection：
+owner 发布、任何客户端可读。所以 Linux 路径<strong>不注入按键、不开剪贴板、不拍快照、不需要恢复</strong>，
+<code>clipboard_status</code> 恒 <code>Unchanged</code>，<code>CaptureStrategy::Clipboard</code> 直接报 <code>Unsupported</code>（那意味着
+往一个本进程无法校验的窗口里合成 Ctrl+C，与 Windows/macOS 的"有快照可回滚"完全不是一件事）。
+<code>NativeControl</code> 同样 <code>Unsupported</code>：X11 核心协议没有控件级文本，那需要 AT-SPI2。</p>
+<p><strong>方法字段不能借 stage 名凑数。</strong> <code>policy::acquire</code> 原先直接把"哪个 stage 跑成功了"写进
+<code>method</code>，Linux 上会把 PRIMARY 报成 <code>Accessibility(1)</code> —— 一个可机读字段说了假话。新增
+<code>RetrievalMethod::Primary = 4</code> 并给 <code>Backend</code> 加 <code>passive_method()</code>（默认 <code>Accessibility</code>，
+X11 后端的 <code>mod.rs</code> 覆写）。<strong>strategy 与 method 是两个轴</strong>：strategy 是"要哪一段"，
+显式 <code>Accessibility</code> 在 Linux 上照样报 <code>Primary</code>，因为报的是实际用了什么。C ABI 同步加
+<code>SNOW_SELECTED_TEXT_PRIMARY</code>（纯增量；C++ 侧只读 text/error，不看 method）。</p>
+<p><strong>目标协商</strong>：先问 <code>TARGETS</code>，按 <code>UTF8_STRING</code> &gt; <code>text/plain;charset=utf-8</code> &gt; <code>STRING</code>
+(ISO 8859-1) &gt; <code>TEXT</code> 取；owner 拒答 <code>TARGETS</code>（<code>xterm</code> 一类）就逐个试，一次拒绝只花一个
+<code>ConvertSelection</code> 往返。<strong><code>COMPOUND_TEXT</code> 故意不问</strong>：它是依赖 locale 的复合编码，没有 Xlib
+的转换器就只能自己瞎猜，猜错就是乱码 —— 只提供它的 owner 报 <code>Unsupported</code>，不吐脏数据。</p>
+<p><strong>本片最容易写错的一行是判据顺序。</strong> <code>INCR</code> 公告回来时 <code>format</code> 是 <strong>32</strong>、值是 32 位长度估计，
+所以 <code>fetch_step</code> 里"先判 <code>format == 8</code>"会把所有大传输当场判成 <code>MalformedData</code>。纯函数把这条
+顺序固定下来，单测名字就叫 <code>incr_announcement_is_recognised_before_the_format_check</code>，反向验证
+时正是把这条判断移到最前面来制造红。</p>
+<p><strong><code>GetProperty</code> 的 offset 单位是 4 字节，不是字节</strong>，且非末尾回复可能不足一个单位 ⇒
+<code>next_offset</code> 除 4 后 <code>max(1)</code>，否则破坏性的 owner 能让读取原地打转。长度上限在
+<code>append_chunk</code> <strong>拷贝之前</strong>检查，伪造的 owner 无法逼出超过 <code>max_text_bytes</code> 的分配。</p>
+<p><strong>超时靠自己盯</strong>：<code>RustConnection</code> 在连接时就把 socket 设成非阻塞，<code>poll_for_event()</code> 不会阻塞，
+所以 <code>SelectionNotify</code>/<code>PropertyNotify</code> 的等待是 1 ms 粒度的轮询 + deadline 判定。X server 自己的
+reply（<code>GetProperty</code> 等）走 cookie 的阻塞等待 —— 那部分只能假定 server 活着，否则任何 X 客户端
+都会卡死。</p>
+<p><strong>源应用识别是尽力而为，永不失败。</strong> <code>_NET_ACTIVE_WINDOW</code> → <code>_NET_WM_PID</code>（最多向上走 3 层，
+防一些 WM 把 frame 报成活动窗口）→ <code>/proc/&lt;pid&gt;/exe</code>（去掉内核在二进制被就地替换后追加的
+<code>" (deleted)"</code> 后缀，自更新正好会触发）。<strong>裸 X（无 WM）没有 <code>_NET_ACTIVE_WINDOW</code>，但 PRIMARY
+照样读得到</strong>，所以 <code>capture_source()</code> 返回 <code>Ok</code>，字段各自降级为 None/0/空串 —— 若照 Windows 的
+写法在这里返回 <code>NoForegroundWindow</code>，等于把"能读的文字"变成"报错"。</p>
+<p>分层照铁律切：纯逻辑在 <code>snow-selected-text/src/selection.rs</code>（<code>cfg(any(target_os="linux", test))</code>，
+16 个单测在 Windows 上跑），传输在 <code>src/platform/linux/{selection,source}.rs</code>（只
+<code>cfg(target_os="linux")</code>）。依赖只加 <code>x11rb</code>（<code>default-features = false</code>，零扩展特性），
+<strong>刻意不引 <code>snow-linux</code></strong> —— 这条路径只需要 xproto，而 <code>snow-selected-text-c</code> 是独立 archive，
+多引会把它的依赖面撑到 zbus/ab_glyph/ttf-parser，失去"独立 archive 只依赖纯 Rust 小集合"的意义。</p>
+<p>Wayland：<code>WAYLAND_DISPLAY</code> 有而 <code>DISPLAY</code> 空 ⇒ <code>UnsupportedPlatform</code>。PRIMARY 在 Wayland 归合成器，
+只有焦点客户端能读，本进程作为后台请求方没有合法路径。</p>
+<p>验证：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-selected-text --lib</code></td>
+<td>33 → <strong>50 通过</strong>（+16 纯函数、+1 policy 映射），另有 1 个默认忽略的真机用例</td>
+</tr>
+<tr>
+<td><code>cargo test -p snow-selected-text -p snow-selected-text-c</code></td>
+<td>50 + 6 通过</td>
+</tr>
+<tr>
+<td>双架构 <code>check</code>（x86_64 / aarch64）</td>
+<td><code>checked=4 failures=0</code></td>
+</tr>
+<tr>
+<td>fmt + clippy <code>-D warnings</code>（host 与 linux 目标、<code>--all-targets</code>）</td>
+<td>绿</td>
+</tr>
+<tr>
+<td>反向验证 5 点</td>
+<td>全红：判据顺序对调、NUL 裁尾改判空格、忽略 TARGETS 列表、passive 段自报 stage 名、长度上限失效</td>
+</tr>
+</tbody>
+</table>
+<p>反向验证脚本 <code>.workbuddy/uos-port/reverse-verify-primary.py</code> 里踩到一个值得记的坑：<code>copy2</code>
+恢复文件会带回<strong>更旧</strong>的 mtime，cargo 于是信任上一次变异编译出的产物，下一次跑出来的是变异结果
+而不是恢复后的结果。恢复后必须 <code>os.utime(path, None)</code>。这也说明"某次反向验证是红的"必须配合
+"恢复后确实绿"一起看，否则可能两边都在看同一份过期二进制。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong><code>platform::linux::*</code> 一行都没在真机跑过。</strong> 未验证：<code>ConvertSelection</code> → <code>SelectionNotify</code>
+  往返、INCR 的 <code>PropertyNotify</code> 逐块取、真实 owner 的 <code>TARGETS</code> 应答格式、
+  <code>_NET_ACTIVE_WINDOW</code>/<code>_NET_WM_PID</code>、裸 X（无 WM）、Xwayland 下 PRIMARY 是否真通、以及
+  dde-kwin 桌面下 GTK/Qt 应用发布的主选择内容。到真机的判据：开一个编辑器选中一段中文，
+  跑 <code>cargo run -p snow-selected-text --example selected_text</code>，看拿到的字与选中一致。</li>
+<li><strong><code>TARGETS</code> 的 32 位列表按本机字节序解释</strong>（<code>from_ne_bytes</code>）。X 握手声明的是客户端字节序，
+  且 x11rb-protocol 自身也只按小端解析属性，两者同源；只有 owner 用非 32 位格式写 <code>TARGETS</code> 时
+  才退化成逐个目标试（行为正确，只是多几个往返）。</li>
+<li><strong>只有 PRIMARY，没有控件级/AT-SPI2</strong>：<code>native_focus</code> 恒 <code>None</code>，<code>bounds</code> 恒空。想要"选中文字的
+  屏幕矩形"（翻译气泡定位用）必须走 AT-SPI2，本片不涉及。</li>
+<li><strong>不重连</strong>：一次抓取失败不会重建连接；X 连接整个断掉后该进程后续请求全是 <code>NativeApi</code>，
+  与 Win/macOS 的固定 worker 同构（<code>SelectedTextService</code> 的 <code>OnceLock</code> 也不重试）。</li>
+<li><strong>C++ 侧未接线验证</strong>：<code>snow_rust_ffi</code> 在 Linux 目标仍不能 <code>cargo check</code>（9.4.2 A 类），
+  打开 <code>selected-text</code> feature 后能不能链接只能到真机验。</li>
+<li><strong><code>snow-selected-text-c/tests</code> 的独立 C/C++ 消费者</strong>没有为新常量补用例（它不读 method）。</li>
+</ul>
+<h4>9.4.23 P3 slice 11：X11 区域采集只读子矩形（2026-10-21）</h4>
+<p><strong>问题</strong>：<code>snow-capture</code> 的区域采集走 <code>MonitorCapturer::capture_region_into</code>，Linux 后端没实现
+⇒ 落回默认的"整屏采集 + <code>copy_region_rgba</code> 裁剪"。2560x1440 的显示器上截一块 300x200 的区域，
+要服务器写 14 MB 进共享段、本地再逐行拷 14 MB，最后留下 240 KB。<code>GetImage</code> 一直支持子矩形；
+挡路的是<strong>解码端要求目标缓冲区尺寸恰好等于图像尺寸</strong>，所以不能直接往更大的帧里写。</p>
+<p><strong>三层改动</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>文件</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>纯逻辑</td>
+<td><code>snow-linux/src/capture.rs</code></td>
+<td><code>ImageLayout::decode_window_into</code>（按目标 stride 写入指定窗口）+ <code>region_read_rect</code>（blit → 根窗口矩形，或拒绝）+ <code>OutputWindow</code>/<code>RegionBlit</code></td>
+</tr>
+<tr>
+<td>传输</td>
+<td><code>snow-linux/src/x11.rs</code></td>
+<td><code>RawImage::decode_window_into</code> 转调</td>
+</tr>
+<tr>
+<td>后端</td>
+<td><code>snow-capture/src/platform/linux.rs</code></td>
+<td><code>capture_region_into</code> → <code>read_region_into</code>：只 <code>GetImage</code> 子矩形，脏矩形照旧来自 Damage</td>
+</tr>
+</tbody>
+</table>
+<p><strong>四个关键决策</strong>：</p>
+<ol>
+<li><strong>解码按下标窗口写，而不是先解到临时缓冲再逐行拷</strong>。<code>decode_into</code> 因此退化成
+   <code>decode_window_into(…, OutputWindow::full(w, h), …)</code>，快慢两条路共用同一份行循环——否则
+   就会出现"全帧解码"和"窗口解码"两份实现，其中一份的正确性没人测。</li>
+<li><strong>拒绝比聪明便宜</strong>。<code>region_read_rect</code> 对四类输入直接返回 <code>None</code>（交给既有的整屏回退：
+   它慢但不坏）：窗口不在根窗口内、窗口超出它所属的帧、目标放不下、协议字段放不下
+   （<code>i16</code> 原点 / <code>u16</code> 尺寸）。<strong>窗口一半在屏外不在这里做平移</strong>——那种情况下回退路径的
+   钳位语义才与 <code>capture_target_info</code> 报的矩形一致。</li>
+<li><strong>跳帧要三个条件，不是一个</strong>。<code>destination_has_history</code>（调用方担保缓冲里是这一块的上一帧）
+   ∧ <code>last_window == (这次窗口, 这次尺寸)</code>（上次读的<strong>就是这块</strong>）∧ Damage 说 Skip。
+   缺第三条会把"另一块区域没变"当成"这块没变"，把别的区域的像素留在目标里。</li>
+<li><strong>区域尺寸不能用 <code>last_extent</code> 记</strong>。同一个 capturer 实例既服务区域读、也服务整屏回退
+   （回退正是本片 <code>None</code> 时跑的那条路），共用一个 extent 会让每次切换都命中
+   <code>ResolutionChanged</code>。所以另开 <code>last_window: Option&lt;(Rect, (u32, u32))&gt;</code>。</li>
+</ol>
+<p><strong>顺带修掉一个已存在的红</strong>：<code>tests/screenshot_stage_timing_smoke.rs</code> 自 <code>f93b1402</code>
+（加 <code>CaptureBackendKind::X11</code>）起<strong>编译不过</strong>——两处 <code>match</code> 非穷尽。它 <code>#![cfg(windows)]</code>，
+Linux CI 上编译成空 crate 所以一直没暴露，只在本机 <code>cargo test --all-features</code> 撞到。本片补上
+<code>X11</code> 分支。<strong>注意</strong>：能编译之后该文件里三个用例在本机是红的（<code>stage timings missing on
+captured frame</code>，DXGI/WGC/GDI 各一），与本片无关、待单独查——它们是唯一能发现"计时没挂上"
+的测试，此前一直没被跑过。</p>
+<p><strong>验证</strong>：<code>cargo test -p snow-linux --lib</code> 219 → <strong>232</strong>（+13：窗口解码 7、区域矩形 6）；
+<code>snow-capture --all-features</code> 299 lib 用例全绿；双架构 <code>cargo check</code> 8/8 PASS；
+<code>fmt</code> + <code>clippy</code>（host 与 linux 目标、<code>--all-targets</code>、<code>-D warnings</code>）绿；反向验证 6 点全红。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>真机一行没跑</strong>：<code>capture_region_into</code> 的整条路径（<code>GetImage</code> 子矩形 → 窗口解码 →
+  目标帧）只做过类型检查。判据：UOS 上框选一块区域截图，与整屏路径的同一区域逐像素比对，
+  并确认 <code>dirty_rects</code> 与整屏路径一致。</li>
+<li><strong><code>ShmGetImage</code> 的子矩形尺寸推导</strong>未变（<code>shm_segment_size</code> 按请求矩形算），但"同一次会话里
+  从大矩形切到小矩形"（段只增不减）只在代码上成立，没有真机往返验证。</li>
+<li><strong>多个区域共享一个 capturer</strong>：<code>last_window</code> 是单槽，来回切换两块区域的 <code>capture_region_into</code>
+  会一直读（不跳帧），行为正确但没有为它专门做多槽缓存。</li>
+</ul>
+<h4>9.4.24 P3 slice 12：X11 采集计时真的产出，阶段名不再漂移（2026-10-21）</h4>
+<p>上一片的"待单独查"就是这一片。查下来是两个互不相干的洞，恰好都在"计时"这条线上：</p>
+<ol>
+<li><strong><code>record_stage_timings</code> 在 Linux 上是句空承诺</strong>。<code>X11Capturer</code> 既没实现
+   <code>set_record_stage_timings</code>（走的是 trait 默认的 no-op），也从不 <code>StageScope::enter</code>，
+   于是每个 marker 都是空转、<code>stage_timings</code> 恒为空。更糟的是 session 侧照旧把
+   <code>capture_duration</code> 填上（<code>stamp_captured_frame</code>），帧上就出现"总耗时 8 ms、明细 0 项"——
+   消费方分不清"没测"和"没耗时"。</li>
+<li><strong>Windows 的冒烟测试自带一份阶段名前缀白名单</strong>，而它是<strong>唯一</strong>枚举阶段名的地方。
+   <code>653a4102</code> 给分配器加了 <code>buffer.allocate</code> / <code>buffer.writable_reuse</code>，白名单没跟上 ⇒
+   DXGI/WGC/GDI 三个用例一起红。它 <code>#![cfg(windows)]</code>，Linux CI 上编译成空 crate；本机也只在
+   <code>--features stage-timing</code> 时才构建，所以红着没人看见。</li>
+</ol>
+<p><strong>改动</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>文件</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>契约（唯一来源）</td>
+<td><code>snow-capture/src/timing.rs</code></td>
+<td><code>BACKEND_STAGE_PREFIXES</code>（<code>dxgi./wgc./gdi./x11.</code>）+ <code>AGNOSTIC_STAGE_PREFIXES</code>（<code>readback./buffer.</code>）+ <code>is_known_stage</code></td>
+</tr>
+<tr>
+<td>门禁（跨平台）</td>
+<td><code>timing.rs</code> 的 <code>tests</code></td>
+<td>扫 <code>src/**/*.rs</code> 里所有 <code>stage_mark</code> / <code>stage_record</code> / <code>stage_record_since</code> 的<strong>字面量</strong>，断言每个都落在已声明家族内；跳过 <code>timing/</code> 自身（那里有 <code>stage.one</code> 这类测试夹具）</td>
+</tr>
+<tr>
+<td>后端</td>
+<td><code>snow-capture/src/platform/linux.rs</code></td>
+<td><code>record_stage_timings</code> 字段 + <code>set_record_stage_timings</code>；<code>capture</code> / <code>capture_with_history_hint</code> 开头 <code>StageScope::enter</code>、结尾 <code>attach_stage_timings</code>；新增 <code>x11.sys.get_image</code>、<code>x11.decode</code>、<code>x11.damage_drain</code>、<code>x11.skip_hold</code> 四个阶段</td>
+</tr>
+<tr>
+<td>冒烟</td>
+<td><code>tests/screenshot_stage_timing_smoke.rs</code></td>
+<td>前缀判据改用 <code>AGNOSTIC_STAGE_PREFIXES</code>；新增"明细里必须同时出现 <code>buffer.*</code>"的断言</td>
+</tr>
+</tbody>
+</table>
+<p><strong>五个关键决策</strong>：</p>
+<ol>
+<li><strong><code>buffer.*</code> 是诊断明细，不是可加桶</strong>。GDI 的 <code>readback.frame_alloc</code> 量的正是
+   <code>frame.prepare_for_overwrite(...)</code> 这一段，而它内部就 <code>stage_record("buffer.allocate")</code>——
+   两者相加会把同一段微秒数两遍。所以 <code>buffer.</code> 进 <code>AGNOSTIC_STAGE_PREFIXES</code>、<strong>不进</strong>
+   <code>primary_stages</code>。新增的那条断言把这件事钉住：明细里必须<strong>同时</strong>有 <code>readback.frame_alloc</code>
+   与 <code>buffer.*</code>，否则说明 scope 没覆盖到帧交接。</li>
+<li><strong>白名单放进库，不留在测试里</strong>。名字的<strong>产生方</strong>（<code>frame.rs</code>、各后端）与<strong>校验方</strong>（冒烟
+   测试）必须共享同一份声明，否则下一个家族照样能溜过去。测试自己只保留一条更严的判据：
+   "本后端前缀必须匹配"——<code>dxgi.</code> 出现在 WGC 的明细里仍然要红。</li>
+<li><strong>用源码扫描补上 <code>#![cfg(windows)]</code> 的盲区</strong>。Windows-only 测试在 Linux CI 里是空 crate，
+   这是本轮两个洞里唯一"没人看着"的那个。扫 <code>src/</code> 是全平台、全 feature 组合都跑的判据，
+   而且它扫的正是人写阶段名的方式（字面量）。</li>
+<li><strong>Linux 的 region 路径刻意不开 scope</strong>。<code>CaptureSampleMetadata</code> 没有 timings 字段，
+   开一个再把结果丢掉只是骗自己。</li>
+<li><strong>跳帧的 <code>duplicate_hold</code> 要记成 <code>x11.skip_hold</code></strong>。"跳过一帧"和"真读一帧"耗时相当，
+   本身就是策略问题的信号；不测出来就只能靠猜。</li>
+</ol>
+<p><strong>验证</strong>：<code>snow-capture --all-features</code> lib 299 → <strong>302</strong>（+3 计时契约用例）；
+<code>--features stage-timing</code> 的 4 个冒烟用例 3 红 1 绿 → <strong>全绿</strong>；双架构 <code>cargo check</code> 8/8 PASS；
+<code>clippy</code>（host <code>--all-targets --all-features</code>，x64/arm64 linux <code>--lib</code> 的两种 feature 组合）绿；
+反向验证 <strong>5/5 红、2/2 基线绿</strong>（<code>.workbuddy/uos-port/reverse-verify-stage-timing.py</code>）。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>Linux 的计时只在类型层面成立</strong>。没有 X server 就没有 <code>capture</code>，<code>x11.*</code> 四个阶段一次都没
+  被真正记录过。真机判据：UOS 上开 <code>record_stage_timings</code> 抓一帧，断言明细非空、
+  <code>x11.sys.get_image + x11.decode + buffer.allocate ≤ capture_duration</code>。</li>
+<li><strong>源码扫描是文本级判据</strong>：认 <code>stage_record("...")</code> 的写法，认不出通过常量间接传入的名字
+  （当前代码里没有这种写法）。</li>
+<li><strong>脚本自身的坑</strong>：本片的反向验证脚本第一次运行时被沙箱 <code>SIGTERM</code> 打断，Python 的 <code>finally</code>
+  没执行，于是 <code>BACKEND_STAGE_PREFIXES</code> 留在"缺 <code>x11.</code>"的变异状态；下一次运行把两个用例报成
+  <code>pattern occurs 0 times</code>——看着像"找不到目标"，实际是<strong>上一次的变异没被撤销</strong>。现在脚本启动
+  时先扫 <code>*.revbak</code> 自动恢复，并且把最贵的用例放在第一位（要杀就趁还没改过任何文件）。</li>
+</ul>
+<h4>9.4.25 P3 slice 13：AT-SPI2 —— 控件级文本与选中矩形的地基（2026-10-21）</h4>
+<p>9.4.22 的 PRIMARY 读得到字，但<strong>拿不到那段字画在屏幕的哪儿</strong>：<code>native_focus</code> 恒 <code>None</code>、<code>bounds</code>
+恒空，翻译气泡只能跟着鼠标走。控件级文本同理。X11 核心协议里没有控件树，那在 AT-SPI2 里——
+一条<strong>独立于 session bus</strong> 的 D-Bus 连接，每个 toolkit 在它上面发布自己的控件树。</p>
+<p>本片只做 <code>snow-linux</code> 这一层，<strong>不接线</strong> <code>snow-selected-text</code>（理由在末段，那是一个要先定的架构问题）。</p>
+<blockquote>
+<p>注：本片的模块路径在 9.4.26 已搬到独立 crate <code>snow-atspi</code>（<code>lib.rs</code> + <code>bus.rs</code>），
+<code>snow-linux::a11y</code> 不再存在。下面按<strong>当时落地的位置</strong>记录，能力描述不变。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>平台</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>纯逻辑</td>
+<td><code>snow-linux/src/a11y/mod.rs</code></td>
+<td><strong>全平台</strong></td>
+<td><code>ObjectRef</code>（含空 bus name 继承）、state 值、<code>char_range_to_byte_range</code>、<code>choose_selection</code>、<code>extents_to_rect</code>、<code>clamp_text</code>、有界 BFS <code>find_focused</code>、<code>match_app_by_pid</code>；单测<strong>在 Windows 上跑</strong></td>
+</tr>
+<tr>
+<td>传输</td>
+<td><code>snow-linux/src/a11y/bus.rs</code></td>
+<td>linux</td>
+<td><code>org.a11y.Bus.GetAddress</code> → 第二条连接；<code>GetConnectionUnixProcessID</code> 把 X11 的 pid 对到 a11y 应用；<code>GetChildren</code>/<code>GetState</code>/<code>GetInterfaces</code> 走树；<code>GetNSelections</code>/<code>GetSelection</code>/<code>GetText</code>/<code>GetRangeExtents</code> 读选中</td>
+</tr>
+</tbody>
+</table>
+<p><strong>七个关键决策</strong>：</p>
+<ol>
+<li><strong><code>GetText</code> 的偏移是字符，不是字节。</strong> 它们是 UCS-4 码点，而 Rust 字符串按字节索引：
+   ASCII 上两者一致，中文上完全不是一回事，<code>&amp;text[1..2]</code> 直接在非边界处 panic。
+   两端策略刻意不对称 —— <code>end</code> 越界<strong>钳位</strong>（toolkit 先算后读，中间文本可能变了，读到前缀仍有用），
+   <code>start</code> 越界<strong>拒绝</strong>（说明两边对"文本是什么"的认知已经分叉，返回空串会被误读成"没选中"）。</li>
+<li><strong>空 bus name 表示"与父对象同一条连接"。</strong> 规范允许子引用省略它，把它当字面空串就会把下一次调用
+   发给总线守护进程——那个对象既不在 accessibility bus 上，也不可能实现 <code>Text</code>。</li>
+<li><strong><code>GetState</code> 返回的是枚举值列表，不是位掩码。</strong> 它回 <code>au</code>，里面是会下标的 <code>AtspiStateType</code>。
+   写成 <code>states &amp; (1 &lt;&lt; FOCUSED)</code> 既编译又运行，只是永远为假。</li>
+<li><strong>找焦点是有界 BFS，而且 <code>FOCUSED</code> 不等于"这段是文本"。</strong> 窗口框、按钮、列表行都会报 <code>FOCUSED</code>。
+   所以先找"<code>FOCUSED</code> ∧ 实现 <code>org.a11y.atspi.Text</code>"的节点并立刻返回，第一个"只有 <code>FOCUSED</code>"的
+   只留作兜底。用 BFS 而不是 DFS：先看见窗口层，别把预算花在一条陈旧分支上。
+   <code>DEFUNCT</code> 剪枝（子树已被 toolkit 抛弃），环用 visited 挡住（<code>Parent</code> 指回上面、同一子节点报两次
+   都真实存在）；预算 256 次访问 / 深度 24，每次访问至少一次往返，所以它必须有界。</li>
+<li><strong>定位应用靠 pid，而 pid 只能问总线守护进程。</strong> <code>org.a11y.atspi.Accessible</code> <strong>没有</strong> <code>GetProcessId</code>
+   这种东西（<code>Application</code> 接口也没有），所以：X11 <code>_NET_WM_PID</code> 拿到 pid，对每个应用的 bus name 调
+   <code>org.freedesktop.DBus.GetConnectionUnixProcessID</code> 比对。<code>pid == 0</code> / <code>u32::MAX</code> 一律<strong>不匹配</strong>——
+   否则"未知"会变成"匹配到另一个同样未知的应用"，比读不到更糟。</li>
+<li><strong>超时交给连接，不用 <code>portal::deadline</code>。</strong> <code>timeout_after</code> 每次调用起一个线程；portal 一个会话只调
+   几次，这里一次抓取是几百次调用。改用 <code>Builder::method_timeout(500ms)</code>：到期由 zbus 自己的运行时
+   让 future 返回 <code>TimedOut</code>，不需要时零成本。</li>
+<li><strong>单次调用失败 = "没有"，不是"中止"。</strong> 树里大半控件根本没实现 <code>Text</code>，问它们的选中必然失败，
+   而那个失败与应用无关。所以读取返回 <code>Option</code>，只有 <code>AccessibilityBus::connect</code> 报错——"没有
+   accessibility bus"是调用方必须知道的事实（它要退回 PRIMARY）。</li>
+</ol>
+<p><strong>本片查出来的四个硬事实</strong>（凭记忆写必然错，都对着 <code>at-spi2-core</code> 的 XML / 头文件核过）：</p>
+<table>
+<thead>
+<tr>
+<th>事实</th>
+<th>凭记忆会写成</th>
+<th>实际</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AtspiStateType</code> 的 <code>SHOWING</code></td>
+<td>30</td>
+<td><strong>25</strong>（30 是 <code>VISIBLE</code>）；<code>FOCUSED = 12</code>、<code>DEFUNCT = 6</code>、<code>SELECTABLE_TEXT = 38</code></td>
+</tr>
+<tr>
+<td>取状态的方法名</td>
+<td><code>GetStateSet</code></td>
+<td><strong><code>GetState</code></strong>（社区文档两种写法都有，XML 里只有 <code>GetState</code>）</td>
+</tr>
+<tr>
+<td>应用 pid 从哪来</td>
+<td><code>Accessible.GetProcessId</code></td>
+<td>不存在，只能问 <code>org.freedesktop.DBus</code></td>
+</tr>
+<tr>
+<td><code>org.a11y.Bus</code> 的位置</td>
+<td>记不清</td>
+<td><code>org.a11y.Bus</code> 服务、<code>/org/a11y/bus</code> 路径、只有 <code>GetAddress</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>验证</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-linux --lib</code></td>
+<td>232 → <strong>259 通过</strong>（+27 纯逻辑用例）</td>
+</tr>
+<tr>
+<td>双架构 <code>cargo check</code>（x86_64 / aarch64）</td>
+<td><code>checked=4 failures=0</code></td>
+</tr>
+<tr>
+<td>跨目标 <code>clippy --lib --tests -D warnings</code></td>
+<td>绿</td>
+</tr>
+<tr>
+<td>fmt + host <code>clippy --all-targets --all-features</code></td>
+<td>绿</td>
+</tr>
+<tr>
+<td>反向验证</td>
+<td><strong>11/11 红、2/2 基线绿</strong>（<code>.workbuddy/uos-port/reverse-verify-a11y.py</code>）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>本片顺手补上的一条判据</strong>：<code>cargo check --lib</code> <strong>不编译 <code>#[cfg(test)]</code></strong>，所以 <code>bus.rs</code> 里那三个单测
+在 Linux 目标上一次都没被看过一眼；<code>--lib --tests</code> 才把 lib 的 test target 编进去。已用"往测试里塞一个
+类型错误、确认跨目标检查失败"反向证实（否则这条判据本身也是自说自话）。这和 9.4.24 里"源码扫描补
+<code>#![cfg(windows)]</code> 盲区"是同一类问题：<strong>只在某个 cfg 下存在的代码，需要一个真的会看它的检查。</strong></p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>整条传输路径一行没跑</strong>：<code>GetAddress</code>、<code>GetConnectionUnixProcessID</code>、<code>GetChildren</code> 的 <code>(so)</code> 解码、
+  <code>GetSelection</code> 的 <code>ii</code> 解码（两个独立出参 vs 一个 <code>(iiii)</code> 结构，靠 zvariant 的元组解码统一）、
+  <code>GetRangeExtents</code> 的坐标系（0 = 屏幕）、只提供 <code>Text</code> 但不实现 <code>Component</code> 的控件。真机判据：
+  UOS 上开一个编辑器选中一段中文，走 <code>read_selection</code> 看文本与矩形都与选中一致。</li>
+<li><strong>没接线</strong>：<code>snow-selected-text</code> 仍只读 PRIMARY，<code>bounds</code> 仍空。接线要先回答一个架构问题 ——
+  9.4.22 明确让 <code>snow-selected-text</code> <strong>不依赖</strong> <code>snow-linux</code>（<code>snow-selected-text-c</code> 是独立 archive，
+  多引会把 <code>ab_glyph</code>/<code>ttf-parser</code> 拖进它的依赖面），而 AT-SPI2 需要 <code>zbus</code>。三个选项：
+  ① 在 <code>snow-selected-text</code> 里复制一份 a11y（两份实现，必然漂移）；② 引入 <code>snow-linux</code>（依赖面撑大）；
+  ③ 把这一层抽成独立的 <code>snow-atspi</code> crate（只依赖 <code>zbus</code>，两个消费者都引）。<strong>推荐 ③</strong>，
+  它同时满足"独立 archive 只依赖纯 Rust 小集合"和"一份实现"。</li>
+<li><strong>一个应用多条连接时取第一个 pid 匹配</strong>；Qt 应用常有"主连接 + 辅助连接"两个 bus name。</li>
+<li><strong>某个 toolkit 若违反规范按字节报偏移，本层察觉不到</strong>：解码后的字符串与偏移对不上时，
+  <code>clamp_text</code> 与 <code>get_text</code> 都只会给出错误但合法的切片。只能在真机上按"中文选中"验。</li>
+<li><strong><code>GetText</code> 的传输量不受控</strong>：上限 <code>MAX_TEXT_BYTES</code>（64 KiB）是在<strong>收到之后</strong>截断，
+  真正的防护是"只请求应用自己报的那个区间"。</li>
+</ul>
+<h4>9.4.26 P3 slice 14：AT-SPI2 抽成 <code>snow-atspi</code> 并接进 <code>snow-selected-text</code>（2026-10-21）</h4>
+<p>9.4.25 把 AT-SPI2 写完了，但没接线 —— 它落在 <code>snow-linux::a11y</code>，而 <code>snow-selected-text</code> 刻意不依赖
+<code>snow-linux</code>（<code>snow-selected-text-c</code> 是独立 archive，多引会把 <code>ab_glyph</code>/<code>ttf-parser</code> 拖进依赖面）。
+那一节给了三个选项，推荐的是 ③ 抽独立 crate。本片按 ③ 执行，并完成接线。</p>
+<table>
+<thead>
+<tr>
+<th>动作</th>
+<th>位置</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>搬</td>
+<td><code>snow-linux/src/a11y/{mod,bus}.rs</code> → <code>snow-atspi/src/{lib,bus}.rs</code></td>
+<td><code>git mv</code>，纯逻辑与传输原样迁移；<code>Rect</code> 换成自带的 <code>Bounds</code>，<code>LinuxError</code> 换成自带 <code>AtspiError</code>（一个不透明 message：这一层所有错误对调用方都是同一件事——"这条路不可用"）</td>
+</tr>
+<tr>
+<td>新</td>
+<td><code>snow-atspi</code> 的 <code>WalkLimits::deadline</code></td>
+<td>访问预算只管<strong>工作量</strong>，不管<strong>时间</strong>（见下文第 6 条）</td>
+</tr>
+<tr>
+<td>新</td>
+<td><code>snow-selected-text/src/selection.rs</code> 的 <code>choose_answer</code> / <code>accessibility_answered</code></td>
+<td>两条路的取舍。放在这个文件是因为它"无需连接即可判定"，于是在 Windows 上可单测</td>
+</tr>
+<tr>
+<td>改</td>
+<td><code>platform/linux/mod.rs</code></td>
+<td>先 AT-SPI2（带矩形），没有才读 PRIMARY；<code>method</code> 报真正答话的那条路</td>
+</tr>
+</tbody>
+</table>
+<p><strong>七个关键判断</strong>：</p>
+<ol>
+<li><strong><code>snow-atspi</code> 是普通依赖，不是 Linux-only 依赖。</strong> crate 根是平台中立逻辑，只有 <code>bus.rs</code> 挂在
+   <code>target_os = "linux"</code> 上。这样 <code>snow-selected-text</code> 的<strong>路线判定与矩形换算</strong>能在 Windows 上单测 ——
+   它们正好是这次唯一真正会判错的地方。代价是 Windows 构建也会编这 900 行零依赖代码，值。</li>
+<li><strong>AT-SPI2 有文本就赢，即使 PRIMARY 也有。</strong> 前者说的是"焦点窗口里焦点控件自己的选中"，后者是
+   会话级的"最后被选过的"（可能属于另一个应用）。两者<strong>永不相加</strong>：一致时它们是同一段文本，相加就是
+   报两遍。</li>
+<li><strong>空答案不是答案。</strong> 零宽选中（光标停着）、刚重排过还没实现的控件都回空文本。让它压住 PRIMARY，
+   就把"能读"变成"没选中"。所以 <code>choose_answer</code> 用 <code>filter(has_text)</code> 而不是 <code>is_some()</code>；
+   <code>accessibility_answered</code> 与它共用 <code>has_text</code> 这一个谓词，两处不会分叉。
+   （反向验证里这两条是两个独立用例：把 <code>is_some</code> 当答案 → 红；把空的 PRIMARY 当答案 → 红。）</li>
+<li><strong><code>method</code> 必须报真正答话的那条路。</strong> <code>Backend::passive_method(&amp;self)</code> 在阶段<strong>跑完之后</strong>才被问，
+   答案不可能是参数，所以 <code>Worker</code> 用 <code>Cell&lt;RetrievalMethod&gt;</code> 记下 passive 阶段实际用的那条。
+   陈旧值读不到：整个阶段是 <code>&amp;mut self</code>，<code>passive_method</code> 只在同一个 <code>acquire</code> 里紧跟其后被调一次。</li>
+<li><strong>AT-SPI2 只拿阶段预算的头 350 ms，PRIMARY 留 250 ms。</strong> 阶段总预算 600 ms。AT-SPI2 是增强，
+   PRIMARY 是保底，保底不能先被饿死。AT-SPI2 答话时干脆<strong>不读</strong> PRIMARY —— 那几趟往返只会确认同一段字。</li>
+<li><strong>一次调用的超时 × 访问次数 ≠ 阶段预算。</strong> <code>Builder::method_timeout(500ms)</code> 只管单次调用，
+   256 次访问 × 500 ms = 128 s，而阶段预算是 600 ms。所以 <code>WalkLimits</code> 加 <code>deadline</code>，
+   <code>find_focused</code> 每次访问<strong>前</strong>查一次；<code>applications</code>（枚举桌面应用，数量不受控）同理。
+   判据是 <code>an_expired_deadline_stops_the_walk_before_it_reads</code>：期限已过时<strong>一次调用都不发</strong>
+   （断言 <code>tree.reads == 0</code>），而不是"发了才发现晚了"。</li>
+<li><strong>顺手补上 session 连接的期限。</strong> <code>GetAddress</code> 走的是 session 连接，原先用 <code>Connection::session()</code>
+   建，没有 <code>method_timeout</code>，是整个 crate 里唯一无人看守的调用。改成
+   <code>Builder::session().method_timeout(CALL_TIMEOUT)</code>。</li>
+</ol>
+<p><strong>验证</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-atspi</code></td>
+<td><strong>28 通过</strong>（27 个跟着模块搬来 + 1 个新期限用例）</td>
+</tr>
+<tr>
+<td><code>cargo test -p snow-selected-text</code></td>
+<td>50 → <strong>56 通过</strong>（+6 路线选择用例）</td>
+</tr>
+<tr>
+<td><code>cargo test -p snow-linux --lib</code></td>
+<td>259 → <strong>232</strong>（27 个随模块搬走，不是被删）</td>
+</tr>
+<tr>
+<td>双架构 <code>cargo check</code>（x86_64 / aarch64）</td>
+<td><code>checked=10 failures=0</code>（<code>snow-atspi</code>、<code>snow-linux</code>、<code>snow-linux-c</code>、<code>snow-selected-text</code>、<code>snow-selected-text-c</code>）</td>
+</tr>
+<tr>
+<td>跨目标 <code>clippy --lib --tests -D warnings</code></td>
+<td>绿</td>
+</tr>
+<tr>
+<td>fmt + host <code>clippy --all-targets --all-features</code></td>
+<td>绿</td>
+</tr>
+<tr>
+<td>反向验证</td>
+<td><strong>18/18 红、0 只崩编译、2/2 基线绿</strong>（<code>.workbuddy/uos-port/reverse-verify-a11y.py</code>）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>反向验证脚本这一片暴露了自己的一个假门禁</strong>：某个用例的变异（把 <code>bounds</code> 直接置空）让
+<code>desktop_rect</code> 变成死函数，于是"红"来自 <code>-Dwarnings</code> 的 <code>dead_code</code>，而不是断言。脚本原先把它计成
+RED —— <strong>编译失败比断言失败证明得少</strong>，它可能说明这条变异根本不是行为性的。现在单列 <code>WEAK</code>
+且不计入通过数；那条用例也改成了 <code>filter(|_| false)</code>（保留函数在用，只丢数据）。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>整条传输仍未在真机跑过一次</strong>（同 9.4.25）。真机判据：UOS 上开 gedit 选中一段中文，走
+  <code>capture</code> 看 <code>text</code> 与选中一致、<code>ranges[0].bounds</code> 落在选区上、<code>method</code> 为 <code>Accessibility</code>(1)；
+  再关掉 <code>at-spi2-core</code>，同一操作应仍能拿到文本而 <code>method</code> 变成 <code>Primary</code>(4)、<code>bounds</code> 为空。</li>
+<li><strong>连接握手没有期限。</strong> <code>Builder::build()</code> 的 socket 握手不吃 <code>method_timeout</code>，而连接是在首次抓取时
+  才建的。所以进程内第一个请求可能超出 600 ms 阶段预算（只有一次）。没量过，也不打算在这个片里加
+  看门狗线程 —— 那会比问题本身贵。</li>
+<li><strong>应用枚举被 <code>deadline</code> 截断时，"不在列表里"和"不存在"不可区分</strong>：结果都是"这次没找到"，退到 PRIMARY。</li>
+<li><strong><code>native_focus</code> 仍恒 <code>None</code>。</strong> AT-SPI2 没有整数控件 id 这种东西；<code>bounds</code> 已经覆盖了它原本的
+  主要用途（气泡定位），留 <code>None</code> 比编一个假 id 诚实。</li>
+<li><strong><code>snow-ui-selector</code> 的控件级拾取没做</strong>：<code>snow-atspi</code> 已经把需要的东西备好了，但那边要改的是
+  <code>HitTestMode::UiElement</code> 的返回结构与 C ABI，属另一片。<strong>已在 9.4.27 补上</strong>（结论：C ABI 不用改，
+  <code>path</code> 本来就是「最内层在前」的矩形链）。</li>
+</ul>
+<h4>9.4.27 P3 slice 15：控件级拾取——点命中下降接进 <code>snow-ui-selector</code>（2026-10-21）</h4>
+<p>9.4.25/9.4.26 让选中文字有了矩形，但 <code>HitTestMode::UiElement</code> 在 Linux 上仍只回一个窗口矩形
+（9.4.6 的窗口级 provider 把两种模式答成一件事）。本片把控件级接上：指针落点进去，一路
+<code>Component.GetAccessibleAtPoint</code> 下探到最内层控件。</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>纯逻辑</td>
+<td><code>snow-atspi/src/lib.rs</code></td>
+<td><code>ComponentSource</code>（<code>child_at_point</code> + <code>extents</code>）、<code>descend_to_point</code>（有界下降）、<code>Bounds::{contains,contains_rect,is_empty}</code>、<code>hit_path</code>（链→路径）；单测在 Windows 上跑</td>
+</tr>
+<tr>
+<td>传输</td>
+<td><code>snow-atspi/src/bus.rs</code></td>
+<td><code>AccessibilityBus::point_path(pid, point, window, deadline)</code>：按 pid 找应用 → 下降 → 读 extents → <code>hit_path</code></td>
+</tr>
+<tr>
+<td>数据</td>
+<td><code>snow-linux/src/{window.rs,x11/window.rs}</code></td>
+<td><code>WindowAttributes.pid</code> / <code>WindowInfo.pid</code>：读 <code>_NET_WM_PID</code>（可上溯 8 层），0 视为"没有"</td>
+</tr>
+<tr>
+<td>接线</td>
+<td><code>snow-ui-selector/src/linux.rs</code></td>
+<td><code>HitTestMode::UiElement</code> 先发窗口矩形再走 AT-SPI2；后者答话就换成控件链，否则留窗口矩形。<code>HitTestMode::Window</code> 不变</td>
+</tr>
+</tbody>
+</table>
+<p><strong>七个关键判断</strong>：</p>
+<ol>
+<li><strong>点命中要下探，不要扫描。</strong> 找焦点只能 BFS（没有任何接口能"问焦点"），但找落点可以：
+   <code>GetAccessibleAtPoint</code> 让工具包自己往下指。六层树 = 六次调用，而不是最多 256 次访问。
+   代价是<strong>信任</strong>工具包——某个控件在自己身上回"这里什么都没有"，下降就早停一层，
+   拿到的是祖先的矩形；那正是窗口级回退会给的答案，所以失败模式是"粗"而不是"错"。</li>
+<li><strong><code>GetAccessibleAtPoint</code> 回 <code>(so)</code>，<code>GetChildren</code> 回 <code>a(so)</code>。</strong> 两者在 Rust 里都能解码成元组，
+   用错的哪一个只会在运行时解码失败。已用签名断言把 <code>(so)</code> 钉进 <code>bus.rs</code> 的测试。</li>
+<li><strong>下降有三个终止条件</strong>：null 引用、已经见过的引用、深度/期限。第二条不是防御性编程：
+   好几个工具包在叶子节点上回<strong>自己</strong>，没有 seen-set 会一直撞到深度上限，24 次往返白跑。
+   这里只查 <code>max_depth</code> 不查 <code>max_visits</code>——每一层正好一次调用，两个预算其实是同一个数。</li>
+<li><strong>矩形要过三道关</strong>：含这个点、落在窗口内、与已接受的内层矩形嵌套且不重复。
+   其中"零尺寸"这一关<strong>故意没有单独写</strong>：<code>(0, 0, 0, 0)</code> 不含任何点，<code>contains</code> 已经挡掉了。
+   本片先写了那行守卫，反向验证里那条变异<strong>保持绿</strong>才发现它是任何输入都走不到的代码——
+   一个走不到的守卫比没有守卫更糟，它让人以为有保护。已删，理由写在函数文档里。</li>
+<li><strong>窗口永远在路径末尾，且只出现一次。</strong> 窗口不含这个点 ⇒ 返回<strong>空路径</strong>而不是窗口：
+   那说明调用方拿去命中测试的快照已经过期，硬报窗口等于把这个事实藏起来。</li>
+<li><strong>pid 是两棵树唯一的接头。</strong> <code>_NET_WM_PID</code> 在客户窗口上（<code>_NET_CLIENT_LIST</code> 给的正是它），
+   少数窗管会把它复制到自己的框上，所以向上找、上限 8 层。<strong>0 一律当"没有"</strong>：
+   否则一个没上报 pid 的窗口会配上一个同样没上报的应用，比读不到更糟。</li>
+<li><strong>预算来自调用方，不是常量。</strong> <code>QueryControl.budget</code> 是 168 ms（前景）/ 1500 ms（精修），
+   与 Windows provider 的遍历预算同一个数。配合 AT-SPI2 每调用 500 ms 的超时，
+   真正的上界是 <code>budget</code>，而不是"每次调用都很短"。</li>
+</ol>
+<p><strong>验证</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cargo test -p snow-atspi</code></td>
+<td>28 → <strong>47 通过</strong>（+19：8 个下降用例 + 11 个路径/几何用例；另在既有签名用例里补了 <code>(so)</code>）</td>
+</tr>
+<tr>
+<td><code>cargo test -p snow-linux --lib</code></td>
+<td>232 → <strong>233 通过</strong>（+1 pid 随窗口传递）</td>
+</tr>
+<tr>
+<td><code>cargo test -p snow-ui-selector --lib</code></td>
+<td><strong>50 通过</strong>，无回归（Linux provider 在 Windows 上不编译，见下）</td>
+</tr>
+<tr>
+<td>双架构 <code>cargo check</code>（x86_64 / aarch64）</td>
+<td><code>checked=14 failures=0</code></td>
+</tr>
+<tr>
+<td>跨目标 <code>clippy --lib --tests -D warnings</code></td>
+<td>绿</td>
+</tr>
+<tr>
+<td>fmt + host <code>clippy --all-targets --all-features</code></td>
+<td>绿</td>
+</tr>
+<tr>
+<td>反向验证</td>
+<td><strong>34/34 红、0 只崩编译、3/3 基线绿</strong>（<code>.workbuddy/uos-port/reverse-verify-a11y.py</code>，覆盖 3 个文件 3 个 crate）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>这一片又一次被反向验证改掉了一个断言</strong>：<code>contains_rect</code> 的"空矩形被任何矩形包含"那条规则，
+最初的用例用的是原点处的空矩形——算术上不带那条守卫也成立，于是变异保持绿。改成<strong>屏幕外</strong>的空
+矩形（<code>(500,500,0,0)</code>）才真正钉住"空即真"。同一类问题的第三次：<strong>判据必须能让目标规则自己产生
+差别</strong>，否则它测的是别的规则。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong><code>snow-ui-selector/src/linux.rs</code> 一行都没被执行过</strong>：它在 <code>#[cfg(target_os = "linux")]</code> 之后，
+  Windows 上连编译都没有，Linux 上也没有自动化测试跑过它。跨目标 <code>check</code> 只证明它<strong>编译</strong>。
+  真正的判据在真机：UOS 上悬停在一个 gedit 的按钮上，<code>count</code> 应为 ≥2（按钮 + 窗口），
+  <code>rects[0]</code> 落在按钮上；关掉 at-spi2-core 后同一位置 <code>count</code> 应为 1 且是窗口矩形。</li>
+<li><strong>整条传输仍未在真机跑过一次</strong>（同 9.4.25/9.4.26）：<code>GetAccessibleAtPoint</code> 的 <code>(so)</code> 解码、
+  <code>GetExtents</code> 的屏幕坐标系、Qt/GTK 各自下降几层，都没有实测数据。</li>
+<li><strong><code>progress</code> 会在每次查询里先发一次窗口矩形</strong>：叠加层会先画窗口再换成控件。这是有意的
+  （慢工具包不至于什么都不显示），但没有量过它对叠加层刷新频率的影响。</li>
+<li><strong>连接只尝试一次</strong>：<code>bus_attempted</code> 一旦置真就不再重连。无障碍总线在会话中途重启的话，
+  这个 service 实例剩下的生命里都会退回窗口级。service 是<strong>每会话</strong>创建的，影响面有限，
+  但 <code>release_cache</code> 会把它清掉，属于"知道但不修"。</li>
+<li><strong>多显示器负坐标只做了单位换算</strong>：<code>Bounds</code> 是 i32 桌面坐标，<code>SelectionRect</code>/<code>ElementRect</code>
+  各自是 f64 / i32 像素，目前只在纯函数层验过符号不被夹掉，没有在双头布局上真机验过。</li>
+</ul>
 <h3 id="9-5-打包">9.5 打包</h3>
-<pre><code class="language-cmake"># cmake/SnowShotLinuxPackage.cmake（新增）
-set(CPACK_GENERATOR &quot;DEB;External&quot;)
-set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE &quot;amd64&quot;)   # 或 arm64
-set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    &quot;libqt5widgets5, libqt5svg5, libqt5network5, libpipewire-0.3-0, libpulse0&quot;)
+<h4>9.5.1 P6 slice 1：deb + freedesktop 集成（2026-10-21）</h4>
+<p><strong>决定 1：<code>Depends</code> 交给 <code>dpkg-shlibdeps</code>，不手写。</strong> 本节原来那张草稿写死了
+<code>libqt5widgets5, libqt5svg5, libqt5network5, libpipewire-0.3-0, libpulse0</code> —— 这是猜的。
+链接线一改（多挂一个 Qt 模块、接上 PipeWire、换掉音频后端）它就过期，而症状是<strong>装得上、
+起不来</strong>（<code>error while loading shared libraries</code>），且只在恰好没装那一套库的机器上复现。
+改成 <code>CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON</code>：CPack 对暂存目录里的 ELF 跑 <code>dpkg-shlibdeps</code>，从
+实际 <code>NEEDED</code> 反推依赖。代价是打包机需要 <code>dpkg-dev</code> + <code>file</code>，交叉打包 arm64 时还要让它能读
+目标架构的 ELF。</p>
+<p><strong>决定 2：架构名显式映射，未知架构必须失败。</strong> dpkg 只认 <code>amd64</code>/<code>arm64</code>/<code>loong64</code>/
+<code>mips64el</code>/<code>riscv64</code>。把 <code>x86_64</code> 写进 <code>Architecture:</code> 的包在任何机器上都装不上，而
+<code>dpkg -i</code> 的报错完全看不出原因。<code>snow_shot_linux_debian_architecture()</code> 做这层映射（顺带
+兜住信创侧可能出现的 loongarch64 / mips64el / riscv64），不认识的处理器名直接 <code>FATAL_ERROR</code>。</p>
+<p><strong>决定 3：模块只赋值，不 <code>include(CPack)</code>。</strong> <code>include(CPack)</code> 留在根 <code>CMakeLists.txt</code>。
+这样 <code>cmake -P</code> 能在没有工具链的机器上把整段配置真跑一遍 —— 否则这个模块只会在 Linux
+configure 时被解析，又是一块盲区。</p>
+<p><strong>决定 4：三个名字必须同源。</strong></p>
+<table>
+<thead>
+<tr>
+<th>出现在哪里</th>
+<th>值</th>
+<th>来源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>入口文件名</td>
+<td><code>snow-shot.desktop</code></td>
+<td><code>app::edition::productId()</code></td>
+</tr>
+<tr>
+<td><code>Icon=</code></td>
+<td><code>snow-shot</code></td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>StartupWMClass=</code></td>
+<td><code>snow_shot</code></td>
+<td><code>app::edition::applicationName()</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>文件名不是装饰：<code>AutoStartRegistration</code> 写自启动覆盖和 <code>Hidden=true</code> 隐藏桩时都按
+  <code>&lt;productId&gt;.desktop</code> 找文件。包里叫 <code>Snow Shot.desktop</code> 的话，用户会看到两个互相矛盾的条目
+  （一个进菜单、一个管自启动），且后者的"已启用"状态与系统菜单的勾选对不上。</li>
+<li>图标不复制：install 时 <code>RENAME</code> 成 <code>snow-shot.svg</code>。同一份 <code>app-icon.svg</code> 也是 Windows
+  <code>.ico</code> 的来源，复制一份就等着两边漂移。</li>
+<li>另给 <code>main.cpp</code> 补 <code>QGuiApplication::setDesktopFileName()</code>：没有它，合成器只按 WM_CLASS
+  匹配窗口，从 dock 启动会在固定图标旁多出一个无图标槽位，运行中的实例也不会点亮自己的图标。</li>
+</ul>
+<p><strong>决定 5：NSIS 分支从 <code>NOT APPLE</code> 收紧到 <code>WIN32</code>。</strong> 原来那个条件是"Windows + Linux"，
+在 Linux 上开 <code>SNOW_APPS_PACKAGE_SNOW_SHOT</code> 会去调 NSIS —— 一个在 Linux 上不存在的生成器。
+Linux 现在走自己的模块。</p>
+<p><strong>验证（本机可跑，不需要 Linux）</strong>：<code>bash scripts/check-linux-packaging.sh</code>，两半。</p>
+<ul>
+<li><code>cmake -P scripts/check-linux-packaging.cmake</code>：7 个处理器名映射、未知处理器必须拒绝
+  （子进程比对退出码）、25 个 <code>CPACK_*</code> 变量、把 <code>CMAKE_SYSTEM_PROCESSOR</code> 换成 aarch64 再跑
+  一遍、三个安装输入既存在<strong>又真的被 <code>install()</code> 引用</strong>（只放文件不装是死重量）、入口必需键。</li>
+<li><code>scripts/check-linux-freedesktop.py</code>：编码（BOM/CRLF）、<code>[Desktop Entry]</code> 必需键、无字段码、
+  <code>TryExec</code>/<code>StartupWMClass</code>/<code>Icon</code> 与 <code>edition.h</code> 一致、Categories 含主分类且分号收尾、
+  XML 良构、AppStream 必需元素，以及通用校验器做不到的跨文件一致性
+  （<code>productId</code> ↔ 文件名 ↔ <code>Icon</code> ↔ <code>launchable</code> ↔ <code>provides/binary</code> ↔ <code>SNOW_SHOT_VERSION</code>
+  ↔ release 版本 ↔ install 的 <code>RENAME</code> 名）。</li>
+<li>合计 <strong>43 项</strong>检查，全绿。</li>
+<li><strong>反向验证</strong>：删掉 <code>Categories=</code> ⇒ 4 项 FAIL；把 aarch64 映射成 <code>x86_64</code> ⇒ cmake 退出 1、
+  3 项 FAIL；把 metainfo 的 release 版本改成 1.2.7 ⇒ 跨文件检查 FAIL。</li>
+<li><code>main.cpp</code> 的 <code>setDesktopFileName</code> 在 <code>#ifdef Q_OS_LINUX</code> 里，Windows 构建编不到、Linux
+  语法门禁也覆盖不到（<code>main.cpp</code> 其余部分是 Windows-only）⇒ 专门写探针 TU，Qt 5.15.2 与
+  Qt 6.12.0 各编一遍，两个 <code>EXIT=0</code>。</li>
+<li><code>windows-qt5-full</code> configure <code>EXIT=0</code>。</li>
+</ul>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>deb 从未真正生成</strong>：Windows 上没有 <code>dpkg-deb</code> / <code>dpkg-shlibdeps</code>。<code>dpkg-shlibdeps</code> 算出来
+  的 <code>Depends</code> 实际内容、包体积、<code>/usr</code> 布局能否被 UOS 的软件中心索引，只能在 Linux 上答。</li>
+<li><code>desktop-file-validate</code> / <code>appstreamcli validate</code> 没跑过：本机没有这两个工具，脚本是按规范
+  重写的子集。到真机的第一条命令就是这两个。</li>
+<li>图标只有 scalable 一份，没有多尺寸 PNG。dde-dock / dde-launcher 的某些版本对 SVG 支持不全，
+  可能显示模糊或取不到图。→ <strong>已由 9.5.2 补齐</strong>（7 个 hicolor 尺寸）。</li>
+<li>AppImage 未做（下一片）；<code>.desktop</code> 未做翻译以外的本地化（名称与 GenericName 的 zh_CN 已给）。
+  → <strong>AppImage 已由 9.5.2 落代码</strong>；本地化仍缺。</li>
+</ul>
+<p>产出（Linux 上）：</p>
+<pre><code>snow-shot_1.2.8_amd64.deb        # 或 _arm64.deb，文件名由 CPACK_DEBIAN_FILE_NAME=DEB-DEFAULT 决定
+/usr/bin/snow_shot
+/usr/share/applications/snow-shot.desktop
+/usr/share/metainfo/snow-shot.metainfo.xml
+/usr/share/icons/hicolor/scalable/apps/snow-shot.svg
 </code></pre>
-<p>产出：<code>snow-shot_&lt;ver&gt;_amd64.deb</code>、<code>snow-shot_&lt;ver&gt;_arm64.deb</code>，附 <code>.desktop</code> 与图标。</p>
+<h4>9.5.2 P6 slice 2：多尺寸图标 + AppImage（2026-10-21）</h4>
+<p><strong>决定 1：位图图标从 <code>app-icon.ico</code> 里抽，不在构建期光栅化 SVG。</strong></p>
+<p>freedesktop 的图标查找<strong>不会</strong>从 <code>scalable/</code> 回退到固定尺寸以外的路径 —— 反过来说，
+<code>Icon=snow-shot</code> 在 XFCE 面板、dde-dock、以及多数 AppImage 启动器里只查
+<code>hicolor/&lt;size&gt;x&lt;size&gt;/apps/</code>，一个只有 <code>scalable/</code> 的包在那些位置显示通用占位图。
+所以固定尺寸 PNG 不是可选项。</p>
+<p>问题是怎么产出。构建期用 <code>rsvg-convert</code> / Inkscape / ImageMagick 光栅化看起来最"干净"，
+实际是给每个发行版构建根引入一个不保证存在的工具依赖，而且<strong>产出取决于碰巧装了哪个渲染器</strong>
+（librsvg 与 Inkscape 对同一份 SVG 的抗锯齿、渐变插值都不同）。而 <code>app-icon.ico</code> 里本来就
+躺着设计师导出的九个尺寸位图，每个都是<strong>完整的 PNG 数据流</strong>（<code>struct</code> 解析就能确认，见
+<code>scripts/gen-linux-icons.py</code> 的 <code>read_ico</code>）—— 于是"生成"退化成字节拷贝：零工具依赖、
+零渲染差异、可逐字节复现。</p>
+<ul>
+<li>只装 hicolor 规范列出的尺寸：<code>16/24/32/48/64/128/256</code>。源里还有 20 与 40，
+  没有任何桌面环境按目录名查它们，装进去只是让 <code>dpkg -L</code> 变长。</li>
+<li>512 缺失，由同一份 scalable SVG 覆盖（两个目录并存是规范的正常形态）。</li>
+<li>脚本带 <code>--check</code>：把工作区与 ico <strong>逐字节</strong>比对，并核对每个 PNG 的 IHDR 边长与所在目录名一致。
+  改 ico 不重跑脚本 ⇒ 门禁 FAIL，不会出现"七个尺寸里有一个是上一版"这种只在视觉上朦胧的现象。</li>
+<li><code>read_ico</code> 遇到非 PNG 压缩的条目直接退出，而不是跳过：老式 32bpp DIB 条目要变成合法 PNG
+  需要一个解码器加一个编码器，静默少处理一个尺寸比报错危险得多。</li>
+<li>CMake 侧用 <code>file(GLOB)</code> 枚举目录（安装规则跟随文件系统），"数量对不对"交给门禁断言，
+  不用 GLOB 做判据。</li>
+</ul>
+<p><strong>决定 2：AppImage 不做成 CPack 生成器，而是 AppDir + <code>appimagetool</code>。</strong></p>
+<p>CPack 没有 AppImage 生成器。可选的两条路：<code>cpack -G External</code> 挂一个自定义脚本，
+或者干脆自己 stage 一个 AppDir 再调 <code>appimagetool</code>。选后者 —— <code>External</code> 那条要把
+"先 <code>cmake --install</code> 到临时前缀、再造 AppDir 根布局"这套逻辑塞进 CPack 的脚本钩子里，
+换来的只是一层间接；而 AppDir 布局本身就是我们要验的东西，摊开写更好审。</p>
+<p>模块照 P6 slice 1 的切法再分一层：</p>
+<table>
+<thead>
+<tr>
+<th>函数</th>
+<th>性质</th>
+<th>谁能跑</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snow_shot_appimage_architecture()</code></td>
+<td>纯映射</td>
+<td><code>cmake -P</code>（本机门禁实测）</td>
+</tr>
+<tr>
+<td><code>snow_shot_appimage_layout()</code></td>
+<td>纯计算</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>snow_shot_add_appimage_target()</code></td>
+<td>建 target、调 <code>appimagetool</code></td>
+<td>只有真 configure + Linux</td>
+</tr>
+</tbody>
+</table>
+<p><strong>决定 3：AppImage 只做 x86_64 / aarch64，loong64 与 riscv64 显式拒绝。</strong></p>
+<p><code>appimagetool</code> 内嵌的 type-2 runtime 只有 x86_64 / i686 / armhf / aarch64 四个。给
+loong64 生成一个没人能执行的文件，比在 configure 期 <code>FATAL_ERROR</code> 并提示"用 deb"糟糕得多。
+门禁对 <code>sparc64</code> / <code>loongarch64</code> / <code>riscv64</code> 各跑一次子进程，断言退出码非零。</p>
+<p><strong>决定 4：<code>AppRun</code> 里三件事必须自己修，<code>exec</code> 必须真的 exec。</strong></p>
+<p>AppImage 把树挂到一个运行时才决定的路径上，装好的系统里那套隐式约定全部失效：</p>
+<table>
+<thead>
+<tr>
+<th>补什么</th>
+<th>不补的症状</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>QT_PLUGIN_PATH=$APPDIR/usr/plugins</code></td>
+<td><code>this application failed to start because no Qt platform plugin could be initialized</code></td>
+</tr>
+<tr>
+<td><code>LD_LIBRARY_PATH=$APPDIR/usr/lib</code></td>
+<td>只能用宿主库；宿主 Qt 版本不对就起不来</td>
+</tr>
+<tr>
+<td><code>XDG_DATA_DIRS</code> 前置 <code>$APPDIR/usr/share</code></td>
+<td>我们装的图标与 AppStream 文件永远查不到</td>
+</tr>
+<tr>
+<td><code>exec</code>（而不是等子进程）</td>
+<td>托盘与 portal 的 bus 归属挂在包装进程的 pid 上，窗口被算到错误的 <code>.desktop</code></td>
+</tr>
+</tbody>
+</table>
+<p>另外三条容易踩的：</p>
+<ul>
+<li><strong><code>QT_QPA_PLATFORM_PLUGIN_PATH</code> 明确不设</strong>。它是已废弃的单插件覆盖项，设了会盖住
+  <code>QT_PLUGIN_PATH</code> 里除 xcb 之外的一切（图像格式、iconengine 全部失效）。门禁只认
+  <strong>赋值行</strong>，不认注释里出现这个词 —— 脚本里正好有一段解释为什么不设它。</li>
+<li><strong><code>APPDIR</code> 要自己兜底</strong>。AppImage 运行时导出它，但解包后的 AppDir（<code>--appimage-extract</code>
+  之后、以及打包过程中）没有，<code>readlink -f "$0"</code> 才能把符号链接的 <code>AppRun</code> 解析到 AppDir。</li>
+<li><strong><code>APPIMAGE_EXTRACT_AND_RUN=1</code></strong>。没有 FUSE（容器、CI runner）时 <code>appimagetool</code> 不启动，
+  除非告诉它解包自己的 runtime 再跑。</li>
+<li><strong><code>.DirIcon</code></strong> 缺了不会报错，只会让文件管理器里的缩略图空白。</li>
+</ul>
+<p><strong>决定 5：<code>INSTALL_RPATH=$ORIGIN/../lib</code>，但不 <code>INSTALL_RPATH_USE_LINK_PATH</code>。</strong></p>
+<p><code>AppRun</code> 的 <code>LD_LIBRARY_PATH</code> 已经够用，RPATH 是绕开 <code>AppRun</code> 直接用 AppDir 里二进制时的
+第二道保险。关掉 <code>USE_LINK_PATH</code> 是必须的：开着会把<strong>构建机上</strong>的库路径（vcpkg / Qt 安装
+目录的绝对路径）写进 RPATH，那台机器之外的路径不存在，等于往二进制里塞噪声。</p>
+<p><strong>验证（本机可跑，不需要 Linux）</strong>：<code>bash scripts/check-linux-packaging.sh</code>，三段 <strong>101 项</strong>全绿。</p>
+<ul>
+<li><code>cmake -P scripts/check-linux-packaging.cmake</code>（原 43 项 → 含新段）：appimage 架构映射
+  4 组、三个不支持处理器必须拒绝（子进程退出码）、文件名 / AppDir 前缀 / 根图标名、
+  根 CMakeLists 真的调用了 <code>snow_shot_add_appimage_target()</code>。</li>
+<li><code>scripts/check-linux-freedesktop.py</code>：新增 hicolor 树非空、PNG 文件名与 <code>Icon=</code> 同名。</li>
+<li><code>scripts/gen-linux-icons.py --check</code>：7 个尺寸与 ico 逐字节一致 + IHDR 边长与目录名一致。</li>
+<li><code>scripts/check-linux-appimage.py</code>（新，18 项）：<code>AppRun</code> 无 CRLF / 无 BOM / POSIX shebang、
+  git 索引里是 <code>100755</code>、<code>sh -n</code> 与 <code>bash -n</code> 双解析、三个 export、废弃变量未被赋值、
+  <code>APPDIR</code> 兜底、<code>exec</code> 唯一且指向 <code>usr/bin/snow_shot</code>、模块对 AppRun / <code>ARCH</code> /
+  <code>APPIMAGE_EXTRACT_AND_RUN</code> / <code>.DirIcon</code> 的引用、根 CMakeLists 的 option 门控。</li>
+<li><strong>反向验证（5 点，全部命中）</strong>：</li>
+<li>删 <code>48x48/…/snow-shot.png</code> ⇒ cmake 段 <code>FAIL missing hicolor icon</code> + 退出非零；</li>
+<li>把 <code>64x64</code> 截断到 100 字节 ⇒ <code>FAIL out of sync</code>（cmake 段的 PNG 签名检查<strong>不</strong>报错，
+    因为前 8 字节还在 —— 两处判据互补，这正是为什么要两个都留）；</li>
+<li><code>AppRun</code> 注入 CRLF ⇒ <code>FAIL has no CRLF</code> + <code>FAIL POSIX shebang</code>；</li>
+<li>删掉 <code>export QT_PLUGIN_PATH=</code> 行 ⇒ <code>FAIL exports QT_PLUGIN_PATH</code>；</li>
+<li><code>git update-index --chmod=-x</code> ⇒ <code>FAIL executable in the git index: mode is 100644</code>。</li>
+<li><code>windows-qt5-full</code> configure <code>EXIT=0</code>（<code>Configuring done</code> / <code>Generating done</code>）。</li>
+</ul>
+<p><strong>一个值得记住的判据盲区</strong>：CRLF 的 <code>AppRun</code> 在 <code>sh -n</code> / <code>bash -n</code> 下<strong>语法检查照样通过</strong>
+——坏的是内核读 shebang 那一步（<code>bad interpreter: /bin/sh^M</code>）。语法门禁抓不到，必须单独比对
+字节。这类"工具说没问题、运行环境说不"的检查，和 9.5.1 里 lrelease 对 <code>unfinished</code> 沉默是
+同一类坑。</p>
+<p><strong>本片未覆盖</strong>：</p>
+<ul>
+<li><strong>AppImage 从未真正生成</strong>：Windows 上没有 <code>appimagetool</code>。<code>snow_shot_add_appimage_target()</code>
+  的每一条 <code>COMMAND</code> 都只在 Linux 上执行过 —— 这是本片最大的盲区，和 P5 的 NEON 同性质
+  （语法正确 ≠ 跑过）。</li>
+<li><strong><code>cmake --install --prefix</code> 与 <code>CPACK_PACKAGING_INSTALL_PREFIX=/usr</code> 的交互未验</strong>：
+  AppDir 用的是 <code>--prefix &lt;AppDir&gt;/usr</code>，CPack 用的是 <code>/usr</code>，两者靠命令行参数各自生效，
+  但真机上是否如预期（尤其 <code>CMAKE_INSTALL_DATADIR</code> 的展开）只能实测。</li>
+<li><strong><code>AppRun</code> 的三条 export 在真机是否足够</strong>：Qt5 的 xcb 插件还依赖 <code>libxcb-*</code> 一族，这些
+  是宿主提供的（AppImage 打不进 glibc 那一层，见附录 A.2），真机上缺哪个只能看
+  <code>QT_DEBUG_PLUGINS=1</code> 的输出。</li>
+<li>20x20 / 40x40 未安装（判断为无用目录），如果真机上发现某个面板确实查 20x20，加进
+  <code>HICOLOR_SIZES</code> 重跑脚本即可 —— 代价是十行改动加一次提交。</li>
+<li><code>.desktop</code> 的 <code>X-AppImage-Version</code>、<code>appimagetool</code> 的 <code>--updateinformation</code>（zsync 通道）
+  未做：前者要有发布通道才谈得上，后者依赖托管地址。</li>
+</ul>
+<p>产出（Linux 上，<code>-DSNOW_APPS_PACKAGE_APPIMAGE=ON</code>）：</p>
+<pre><code>snow-shot-1.2.8-x86_64.AppImage       # 或 -aarch64
+&lt;build&gt;/appimage/snow_shot-1.2.8-x86_64.AppDir/   # 落盘中间产物，可直接跑
+├── AppRun                            # 0755，POSIX sh
+├── snow-shot.desktop                 # 与 usr/share/applications 里同名同内容
+├── snow-shot.png                     # 256x256，名字与 Icon= 一致
+├── .DirIcon -&gt; snow-shot.png
+└── usr/{bin,lib,plugins,share/...}
+</code></pre>
+<h3 id="9-6-p7-slice-1-linux-ci-2026-10-21">9.6 P7 slice 1：Linux CI（2026-10-21）</h3>
+<p>P6 剩下的每一条都是"只能在 Linux 上回答"。这台机器上能做的最后一件事，就是把那些问题变成
+一个每天都会跑的 job。</p>
+<h4>9.6.1 为什么分成三段，而不是一个 build job</h4>
+<table>
+<thead>
+<tr>
+<th>job</th>
+<th>跑什么</th>
+<th>需要工具链</th>
+<th>定位</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gates</code></td>
+<td><code>scripts/check-linux-packaging.sh</code>（118 项）+ <code>cargo test -p snow-linux -p snow-capture --all-features</code> + 双 Linux 目标 <code>cargo check</code></td>
+<td>否</td>
+<td><strong>PR 必过</strong>。这一段的每一条在本机 Windows 上都已经跑绿过，所以红了就是改动错了，不是环境缺东西</td>
+</tr>
+<tr>
+<td arm64 x64_="x64,"><code>build</code> ×</td>
+<td>apt 装 §9.1 依赖 → <code>cmake --preset</code> → build → ctest → <code>cpack</code> → 拆包校验 → <code>dpkg-deb -x</code> + 两个 freedesktop 校验器</td>
+<td>是</td>
+<td><strong>唯一真正编译 aarch64 C++ 的地方</strong></td>
+</tr>
+<tr>
+<td>AppImage</td>
+<td>—</td>
+<td>—</td>
+<td>刻意不做，理由见 9.6.3</td>
+</tr>
+</tbody>
+</table>
+<p>把 <code>gates</code> 独立出来的理由不是速度，是<strong>归因</strong>：一个同时装 Qt、编 Rust、跑打包校验的 job 红了，
+第一眼分不清是代码错还是环境错。分开之后，<code>gates</code> 绿而 <code>build</code> 红，几乎必然是"这棵树第一次
+真的在 Linux 上编"这类问题；两边都红，才先看 <code>gates</code>。</p>
+<h4>9.6.2 <code>build</code> 补掉的盲区</h4>
+<p>这是本移植里第一次有东西能真正回答下面这些问题：</p>
+<ol>
+<li><strong>aarch64 C++ 到底编不编得过</strong>。§7.3 那条结论（本机没有 aarch64 C++ 编译器 ⇒
+   <code>#if defined(__aarch64__)</code> 里的代码从未被解析）在这里终结 —— 不是靠人审，是靠
+   <code>ubuntu-24.04-arm</code> 上的一次 <code>cmake --build</code>。</li>
+<li><strong><code>--all-features</code> 在 Linux 上是否还是好的</strong>。P5 slice 1 修过一次（<code>stage-timing</code> 的 QPC
+   re-export 与 dead-code），修完就没有任何东西持续验证它；现在 <code>gates</code> 每次 PR 都跑。</li>
+<li><strong><code>dpkg-shlibdeps</code> 算出来的 <code>Depends</code> 到底是什么</strong>。§9.5.1 决定 1 的整个论证建立在
+   "它从 ELF 的 NEEDED 反推"上，但从没看过输出。job 里 <code>dpkg-deb -f "$deb" Depends</code> 打出来，
+   并且断言里面有 <code>libqt5</code> —— 如果 <code>Depends</code> 是空的（<code>SHLIBDEPS</code> 没生效），这一步会红。</li>
+<li><strong>两个 freedesktop 校验器</strong>。<code>desktop-file-validate</code> 与 <code>appstreamcli validate --no-net</code>
+   —— §9.5.1 说"到真机的第一条命令就是这两个"，现在它们在 CI 里，而 <code>/dev/null</code> 不是它们的
+   输出终点：非零退出就是 job 失败。</li>
+<li><strong><code>.deb</code> 的实际布局</strong>。不只是"文件存在"，而是 <code>dpkg-deb -c</code> 的输出里逐条 grep：
+   <code>/usr/bin/snow_shot</code>、入口、metainfo、<strong>七个 hicolor 尺寸加 scalable</strong>。这一步把 9.5.2 的
+   图标决定从"仓库里有这七个文件"变成"包里真的有这七个文件"。</li>
+<li><strong><code>Architecture:</code> 与 runner 一致</strong>。矩阵里 x64 对应 <code>amd64</code>、arm64 对应 <code>arm64</code>，
+   job 把 <code>dpkg-deb -f Architecture</code> 读回来 <code>grep -qx</code>。架构名映射错了（P6 slice 1 的正向/
+   反向验证覆盖的是函数，这里覆盖的是产物）。</li>
+</ol>
+<h4>9.6.3 为什么 AppImage 不在这一片里</h4>
+<p><code>appimagetool</code> 不是发行版包，要从第三方 release 下载。<strong>那个 URL 在本机无法验证</strong> —— 写进
+workflow 意味着第一次跑很可能是 404，而 404 会把 <code>build</code> job 真正的编译错误盖掉。先让
+<code>build</code> 绿一次，再往里加 AppImage。这是"宁可少一条路径，不要一条会把别的失败伪装的路径"。</p>
+<h4>9.6.4 门禁：<code>scripts/check-linux-ci-workflow.py</code>（17 项）</h4>
+<p>workflow 是仓库里唯一"推送之前没人解析"的文件。它的问题读起来全是合法 YAML：</p>
+<ul>
+<li><strong>preset 名拼错</strong>。<code>cmake --preset</code> 用的都是 <code>${{ matrix.preset }}</code>，真实名字只在 matrix 段
+  出现一次。门禁把 matrix 里的 <code>preset</code> / <code>build-preset</code> 逐个对照 <code>CMakePresets.json</code> 校验，
+  并断言 configure preset 不是 <code>hidden</code>（隐藏的不能按名配置）。</li>
+<li><strong><code>gates</code> job 里根本没有调门禁脚本</strong>。job 存在、脚本存在、两者之间没有连线 —— 这种"看起来
+  有 CI"的状态最难发现。门禁断言 <code>gates</code> 的 <code>run:</code> 里确实出现
+  <code>scripts/check-linux-packaging.sh</code>。</li>
+<li><strong>漏 <code>timeout-minutes</code></strong>。一次挂住的 Qt configure 会烧满 GitHub 六小时预算。</li>
+<li><strong>runner 与架构对不上</strong>。<code>RUNNER_ARCHITECTURES</code> 表把 <code>ubuntu-24.04</code> 映射到 <code>amd64</code>、
+  <code>ubuntu-24.04-arm</code> 映射到 <code>arm64</code>，与 job 里读回 <code>.deb</code> 的那条断言是同源判据；换 runner
+  不更新表 ⇒ 门禁 FAIL，而不是"断言被静默跳过"。</li>
+<li><strong>apt 列表里重复的包</strong>（通常意味着一次改错的复制粘贴）。</li>
+</ul>
+<p><strong>反向验证（3 点，全部命中）</strong>：</p>
+<ul>
+<li>把 <code>preset: snow-shot-linux-x64-release</code> 改成 <code>...-relase</code> ⇒
+  <code>FAIL build: preset '...-relase' exists in CMakePresets.json</code>。
+  （<code>matches architecture</code> 那条<strong>不</strong>报错，因为 <code>-x64-</code> 还在 —— 两个判据覆盖的是不同错误，
+  这正是两条都留的原因。）</li>
+<li>把 <code>run: bash scripts/check-linux-packaging.sh</code> 换成 <code>run: echo skipped</code> ⇒
+  <code>FAIL gates job runs the packaging gates</code>。</li>
+<li>删掉 <code>build</code> 的 <code>timeout-minutes</code> ⇒ <code>FAIL build: sets a timeout</code>。</li>
+</ul>
+<h4>9.6.5 一个工具坑：<code>${{ }}</code> 与跨行匹配</h4>
+<p>第一版门禁把 <code>cmake --preset ${{ matrix.preset }}</code> 里的表达式替换成空串再匹配，结果报
+<code>configure preset 'cmake' exists: not in CMakePresets.json</code> —— 因为替换后是
+<code>cmake --preset</code>，而 <code>\s+</code> <strong>能吃掉换行</strong>，于是下一行的 <code>cmake --build ...</code> 的第一个词
+被当成了 preset 名。两处修：<code>\s+</code> 改 <code>[ \t]+</code>，名字字符类首字符排除 <code>-</code>（选项）。
+教训与 9.5.2 的 CRLF 同源：<strong>正则里的空白类默认包含换行，在多行输入上就是 bug</strong>。</p>
+<h4>9.6.6 尚未验证（这一片最重要的部分）</h4>
+<p><strong>这个 workflow 从未在 GitHub 上跑过。</strong> 本机能做的最多是：YAML 能解析、每个引用都能在
+checkout 里解析到、<code>windows-qt5-full</code> configure 仍然 EXIT=0。以下没有一条有答案：</p>
+<ul>
+<li><code>ubuntu-24.04</code> 上按 §9.1 装完包后，<code>cmake --preset snow-shot-linux-x64-release</code> 是否配置成功
+  —— 包名在 24.04 与 UOS 20 之间有差异（<code>libjxl-dev</code> 在 24.04 是 <code>libjxl-dev</code>，UOS 20 可能叫
+  别的；<code>libopencv-dev</code> 的版本差得更多）。<strong>这是最可能的第一个红灯。</strong></li>
+<li>第一次 Linux 编译会不会撞上 Qt5 与 Qt6 的头文件/cfg 差异 —— 本机只编过 Windows。</li>
+<li><code>ctest</code> 在 Linux 上跑起来时，有多少测试是 Windows-only 被条件排除的、有多少真的会跑。</li>
+<li><code>appstreamcli validate</code> 对 <code>&lt;id&gt;snow-shot.desktop&lt;/id&gt;</code> 的评级。AppStream 规范要求反向域名
+  id，而我们按 §9.5.1 决定 4 必须用 <code>productId()</code>（<code>snow-shot</code>）。<strong>预期它会给出 warning 而
+  非 error（<code>--pedantic</code> 才会升为失败）</strong>，但这是推断，没跑过。如果它其实报 error，就得在
+  "文件名与 productId 同源"和"AppStream 合规"之间做取舍 —— 那是一个需要重新论证的决定，
+  不是一个可以打补丁的地方。</li>
+<li><code>ubuntu-24.04-arm</code> runner 在私有仓库/免费额度下是否可用。</li>
+</ul>
+<p><strong>下一步</strong>：把这个 workflow 推上去跑一次，按红的地方改。红是预期输出，不是失败。</p>
+<h4>9.6.7 一个必须先解决的硬事实：仓库在 Gitee，不在 GitHub（2026-10-21 发现）</h4>
+<p><code>git remote -v</code> 只有一个 <code>origin</code>：<code>https://gitee.com/zhaoweifree/snow-apps.git</code>。GitHub Actions
+的 workflow 文件放在 <code>.github/workflows/</code> 下，推到 Gitee <strong>一行都不会执行</strong> —— 它既不会被解析，
+也不会报错，页面上什么都没有。9.6.1–9.6.6 描述的一切仍然成立，但"推上去跑一次"这个动作在
+当前远程上不存在。</p>
+<p>三条出路，成本与收益完全不同：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>代价</th>
+<th>换到什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>镜像到 GitHub，在那里跑 Actions</td>
+<td>一个 mirror remote + 凭据；仓库若含大文件需注意 LFS/配额</td>
+<td>9.6 的 workflow <strong>原样可用</strong>，含 <code>ubuntu-24.04-arm</code>（公开仓库免费）</td>
+</tr>
+<tr>
+<td>自建 runner（一台 amd64 + 一台 UOS/SBC arm64），Gitee 侧只做触发</td>
+<td>一台常开机器 + 环境维护；arm64 那台顺便能当日用机真机验证</td>
+<td>不依赖任何第三方 CI，且 arm64 上是<strong>真 UOS</strong>，比 GitHub 的 ubuntu-arm 更接近交付目标</td>
+</tr>
+<tr>
+<td>Gitee Go / 其它国内流水线</td>
+<td>重写 workflow（YAML 方言不同），<code>gates</code> 那套断言可复用但 job 语法要重打</td>
+<td>不需要外部账号</td>
+</tr>
+</tbody>
+</table>
+<p><strong>推荐第二条的后半句</strong>：9.4.4 / 9.4.19 / 9.4.20 三片累积下来的"从未在真机跑过"清单（XInput2
+投递、Damage 覆盖面、portal 握手、NEON 执行）本来就是一台 UOS arm64 机器一次性可以清掉的东西，
+CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 <code>gates</code> 也有独立价值：它能证明
+<code>cargo test --all-features</code> 与 118 项打包门禁在 Linux 上真的过。</p>
+<p>这一条不改变 9.4.20 的结论，但改变它的验证顺序：<strong>portal 的第一处真实信号，不会来自 CI</strong>。</p>
+<h4>9.6.8 方案①落地：GitHub 镜像，workflow 第一次真的跑起来（2026-10-21）</h4>
+<p>选了 9.6.7 表里的第一行，因为它是唯一当天就能给出答案的：<code>zhaoweifree/snow-apps</code>（<strong>public</strong>，
+<code>ubuntu-24.04-arm</code> 只在公开仓库免费），本地加了一个 <code>github</code> 远程，<code>origin</code> 仍然是 Gitee。</p>
+<table>
+<thead>
+<tr>
+<th>动作</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>远程</td>
+<td><code>origin</code> = Gitee（日常推送目标，未变）、<code>github</code> = 镜像 + 构建农场</td>
+</tr>
+<tr>
+<td><code>mirror-gitee.yml</code></td>
+<td>触发从 <code>push: branches: [main]</code> 改为 <code>workflow_dispatch</code>。方向反了：镜像推送会推回刚拉下来的那个远程，且仓库没有 <code>GITEE_TOKEN</code> 密钥 ⇒ 每次推送必然多一个红 job，和真正要看的 <code>build</code> 混在一起</td>
+</tr>
+<tr>
+<td>读取工具</td>
+<td><code>.workbuddy/uos-port/gh-ci.py</code>（<code>runs</code> / <code>jobs</code> / <code>watch</code> / <code>logs</code> / <code>dispatch</code>）。凭据复用 <code>git credential fill</code>，不落盘、不需要装 <code>gh</code></td>
+</tr>
+<tr>
+<td>触发</td>
+<td><code>push</code> 到 <code>github</code> 就够；第一次 <code>workflow_dispatch</code> 是多余的（push 事件的 run 注册有几十秒延迟，看起来像"没触发"）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>三次运行，三个真红灯</strong>（每一个都是本机永远看不到的）：</p>
+<table>
+<thead>
+<tr>
+<th>run</th>
+<th>结果</th>
+<th>第一个红灯</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1（<code>5ddc3561</code>）</td>
+<td><code>gates</code> ✅ / <code>build</code> ❌</td>
+<td><code>E: Unable to locate package libxrecord1-dev</code>（apt exit 100，两个架构同时倒）</td>
+</tr>
+<tr>
+<td>2（<code>ce0efc10</code>）</td>
+<td><code>gates</code> ✅ / <code>build</code> ❌</td>
+<td><code>Could not read presets: "cmakeMinimumRequired" major version 4 must be less than 3</code> —— 24.04 自带 CMake 3.28</td>
+</tr>
+<tr>
+<td>3（<code>2c55e097</code>）</td>
+<td><code>gates</code> ✅ / <code>build</code> ❌</td>
+<td><code>snow_image/CMakeLists.txt:141: PNG support requires zlib-ng compatibility mode</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>gates</code> 这一次把"平台无关"从声明变成了事实</strong>：ubuntu-24.04 上
+<code>cargo test -p snow-linux -p snow-capture --lib --all-features</code> 全绿 —— <code>snow-capture</code> 135 通过 + 4 ignored
+（共 139），<code>snow-linux</code> 232 通过；<code>cargo check --target {x86_64,aarch64}-unknown-linux-gnu --all-features</code>
+两个目标都过。<code>snow-linux</code> 在本机是 233 个，差的那一个是
+<code>text::raster::tests::a_real_installed_font_tree_renders</code>，<code>#[cfg(windows)]</code> —— 它读的是 Windows 字体树，
+本来就不该在 Linux 上跑。这条差异以前只能靠读代码推断，现在有两个平台的数字对得上。</p>
+<p><strong>顺带发现的两个真问题（都在本机跑不出来）</strong>：</p>
+<ol>
+<li><strong>门禁假绿</strong>。<code>scripts/check-linux-ci-workflow.py</code> 缺 PyYAML 时打印一句 note 就 <code>return None</code>，
+   于是"YAML 能解析""声明了三个 job"等三条检查<strong>从来没在任何地方执行过</strong>，而 job 依然绿。
+   已改为硬失败，<code>gates</code> 里显式 <code>pip install pyyaml</code>，并加一条门禁断言 gates 确实装了它。
+   这一类"静默降级"和 9.5 里 <code>qt_add_lrelease</code> 垫片是同一个模式。</li>
+<li><strong><code>libxrecord1-dev</code> 不存在</strong>。§9.1 清单里猜的包名；源码里 <code>extensions/record.h</code>、<code>XRecordQuery</code>、
+   <code>libxrecord</code> 在 <code>.c/.h/.cpp/.rs/.cmake</code> 里<strong>零命中</strong>。已从清单和 workflow 一起删除。</li>
+</ol>
+<p><strong>CMake 4.2 是硬前置，不是 CI 细节</strong>。根 <code>CMakeLists.txt</code> 与 <code>CMakePresets.json</code> 都写着 4.2，
+24.04 的 3.28 连 preset 文件都解析不了，错误发生在<strong>读文件阶段</strong>，一行项目代码都还没进去；
+UOS 20（Debian 10）自带 3.13，问题只会更早。装法（两种架构通用，不碰系统包管理器）：</p>
+<pre><code class="language-bash">python3 -m venv ~/.local/cmake &amp;&amp; ~/.local/cmake/bin/pip install &quot;cmake&gt;=4.2&quot;
+export PATH=&quot;$HOME/.local/cmake/bin:$PATH&quot;
+</code></pre>
+<p><strong>下一个阻塞要一个决定，不是一个补丁</strong>（run 3 的结论）：PNG 路径要求 <code>ZLIBNG_VERSION</code>，
+<code>snow_image/src/compression_backend.cpp</code> 里还有一条 <code>#error</code>，<code>core_tests.cpp</code> 断言版本串含 <code>zlib-ng</code>；
+而 Ubuntu 只有经典 zlib。与此同类的还有一批发行版<strong>没有 CONFIG 包</strong>的依赖：
+<code>libjpeg-turbo 3.1 CONFIG</code>（24.04 是 2.1.5 且没有 CMake config）、<code>lunasvg</code>、<code>minizip-ng</code>、
+<code>unofficial-brotli</code>、<code>hwy</code>、<code>onnxruntime</code>。Windows/macOS 侧这些全部由 <code>cmake/vcpkg-overlay-ports/</code> 提供。
+Linux 侧怎么补这一批（vcpkg / 固定版本本地编 / 砍掉可选编解码器），是 §9.2「Linux 不用 vcpkg」这条
+决策的第一次真正压力测试，<strong>留给下一片</strong>，见 9.6.9。</p>
 <hr>
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

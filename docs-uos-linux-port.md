@@ -438,7 +438,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**剩余**：workflow 从未跑过 —— 且 **远程是 Gitee，GitHub Actions 不会触发**（9.6.7，需先定镜像 / 自建 runner）、AppImage 进 CI、PipeWire 帧消费 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**剩余**：Linux 侧第三方库来源未定（9.6.9：zlib-ng / libjpeg-turbo 3.1 / lunasvg / minizip-ng / onnxruntime 等发行版无 CONFIG 包）、AppImage 进 CI、PipeWire 帧消费 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -2796,6 +2796,60 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 `cargo test --all-features` 与 118 项打包门禁在 Linux 上真的过。
 
 这一条不改变 9.4.20 的结论，但改变它的验证顺序：**portal 的第一处真实信号，不会来自 CI**。
+
+#### 9.6.8 方案①落地：GitHub 镜像，workflow 第一次真的跑起来（2026-10-21）
+
+选了 9.6.7 表里的第一行，因为它是唯一当天就能给出答案的：`zhaoweifree/snow-apps`（**public**，
+`ubuntu-24.04-arm` 只在公开仓库免费），本地加了一个 `github` 远程，`origin` 仍然是 Gitee。
+
+| 动作 | 内容 |
+|---|---|
+| 远程 | `origin` = Gitee（日常推送目标，未变）、`github` = 镜像 + 构建农场 |
+| `mirror-gitee.yml` | 触发从 `push: branches: [main]` 改为 `workflow_dispatch`。方向反了：镜像推送会推回刚拉下来的那个远程，且仓库没有 `GITEE_TOKEN` 密钥 ⇒ 每次推送必然多一个红 job，和真正要看的 `build` 混在一起 |
+| 读取工具 | `.workbuddy/uos-port/gh-ci.py`（`runs` / `jobs` / `watch` / `logs` / `dispatch`）。凭据复用 `git credential fill`，不落盘、不需要装 `gh` |
+| 触发 | `push` 到 `github` 就够；第一次 `workflow_dispatch` 是多余的（push 事件的 run 注册有几十秒延迟，看起来像"没触发"） |
+
+**三次运行，三个真红灯**（每一个都是本机永远看不到的）：
+
+| run | 结果 | 第一个红灯 |
+|---|---|---|
+| 1（`5ddc3561`） | `gates` ✅ / `build` ❌ | `E: Unable to locate package libxrecord1-dev`（apt exit 100，两个架构同时倒） |
+| 2（`ce0efc10`） | `gates` ✅ / `build` ❌ | `Could not read presets: "cmakeMinimumRequired" major version 4 must be less than 3` —— 24.04 自带 CMake 3.28 |
+| 3（`2c55e097`） | `gates` ✅ / `build` ❌ | `snow_image/CMakeLists.txt:141: PNG support requires zlib-ng compatibility mode` |
+
+**`gates` 这一次把"平台无关"从声明变成了事实**：ubuntu-24.04 上
+`cargo test -p snow-linux -p snow-capture --lib --all-features` 全绿 —— `snow-capture` 135 通过 + 4 ignored
+（共 139），`snow-linux` 232 通过；`cargo check --target {x86_64,aarch64}-unknown-linux-gnu --all-features`
+两个目标都过。`snow-linux` 在本机是 233 个，差的那一个是
+`text::raster::tests::a_real_installed_font_tree_renders`，`#[cfg(windows)]` —— 它读的是 Windows 字体树，
+本来就不该在 Linux 上跑。这条差异以前只能靠读代码推断，现在有两个平台的数字对得上。
+
+**顺带发现的两个真问题（都在本机跑不出来）**：
+
+1. **门禁假绿**。`scripts/check-linux-ci-workflow.py` 缺 PyYAML 时打印一句 note 就 `return None`，
+   于是"YAML 能解析""声明了三个 job"等三条检查**从来没在任何地方执行过**，而 job 依然绿。
+   已改为硬失败，`gates` 里显式 `pip install pyyaml`，并加一条门禁断言 gates 确实装了它。
+   这一类"静默降级"和 9.5 里 `qt_add_lrelease` 垫片是同一个模式。
+2. **`libxrecord1-dev` 不存在**。§9.1 清单里猜的包名；源码里 `extensions/record.h`、`XRecordQuery`、
+   `libxrecord` 在 `.c/.h/.cpp/.rs/.cmake` 里**零命中**。已从清单和 workflow 一起删除。
+
+**CMake 4.2 是硬前置，不是 CI 细节**。根 `CMakeLists.txt` 与 `CMakePresets.json` 都写着 4.2，
+24.04 的 3.28 连 preset 文件都解析不了，错误发生在**读文件阶段**，一行项目代码都还没进去；
+UOS 20（Debian 10）自带 3.13，问题只会更早。装法（两种架构通用，不碰系统包管理器）：
+
+```bash
+python3 -m venv ~/.local/cmake && ~/.local/cmake/bin/pip install "cmake>=4.2"
+export PATH="$HOME/.local/cmake/bin:$PATH"
+```
+
+**下一个阻塞要一个决定，不是一个补丁**（run 3 的结论）：PNG 路径要求 `ZLIBNG_VERSION`，
+`snow_image/src/compression_backend.cpp` 里还有一条 `#error`，`core_tests.cpp` 断言版本串含 `zlib-ng`；
+而 Ubuntu 只有经典 zlib。与此同类的还有一批发行版**没有 CONFIG 包**的依赖：
+`libjpeg-turbo 3.1 CONFIG`（24.04 是 2.1.5 且没有 CMake config）、`lunasvg`、`minizip-ng`、
+`unofficial-brotli`、`hwy`、`onnxruntime`。Windows/macOS 侧这些全部由 `cmake/vcpkg-overlay-ports/` 提供。
+Linux 侧怎么补这一批（vcpkg / 固定版本本地编 / 砍掉可选编解码器），是 §9.2「Linux 不用 vcpkg」这条
+决策的第一次真正压力测试，**留给下一片**，见 9.6.9。
+
 
 
 ---
