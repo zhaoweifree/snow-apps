@@ -10010,6 +10010,28 @@ if(UNIX AND NOT APPLE)
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
         RENAME "snow-shot.svg"
     )
+    # The scalable icon above is not enough on its own. XFCE's panel, dde-dock
+    # and the AppImage launchers resolve an icon name through the fixed-size
+    # hicolor directories only, and never look in scalable/, so a package that
+    # shipped just the SVG showed a generic fallback there. The PNGs are
+    # generated from the Windows icon by scripts/gen-linux-icons.py and
+    # committed, because rasterising the SVG in the build would add a
+    # rsvg-convert/ImageMagick dependency to every distribution build.
+    set(_snow_shot_hicolor_root "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/hicolor")
+    file(GLOB _snow_shot_hicolor_dirs LIST_DIRECTORIES true
+        RELATIVE "${_snow_shot_hicolor_root}" "${_snow_shot_hicolor_root}/*x*")
+    if(NOT _snow_shot_hicolor_dirs)
+        message(FATAL_ERROR
+            "No hicolor icon directories under ${_snow_shot_hicolor_root}. "
+            "Run: python3 scripts/gen-linux-icons.py")
+    endif()
+    foreach(_hicolor_dir IN LISTS _snow_shot_hicolor_dirs)
+        install(FILES "${_snow_shot_hicolor_root}/${_hicolor_dir}/apps/snow-shot.png"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_hicolor_dir}/apps"
+        )
+    endforeach()
+    unset(_snow_shot_hicolor_dirs)
+    unset(_snow_shot_hicolor_root)
 endif()
 
 foreach(_conversion_view_target IN ITEMS snow_shot snow-shot-recognition-window-tests

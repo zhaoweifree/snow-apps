@@ -230,6 +230,17 @@ def main() -> int:
     except ElementTree.ParseError as error:
         check("icon parses as XML", False, str(error))
 
+    # The fixed-size icons are a second guess at the same name, and a rename of
+    # either one would leave `Icon=` pointing at a file that is not installed.
+    # Their contents are checked by scripts/gen-linux-icons.py --check; here the
+    # only question is whether the lookup name still resolves.
+    png_icons = sorted((REPO / "snow_shot" / "resources" / "icons" / "hicolor").glob("*/apps/*.png"))
+    check("hicolor tree ships fixed-size icons", bool(png_icons))
+    if png_icons:
+        mismatched = [str(p.relative_to(REPO)) for p in png_icons if p.stem != entry.get("Icon")]
+        check("hicolor icons are named after Icon=", not mismatched,
+              f"Icon={entry.get('Icon')} but {', '.join(mismatched)}")
+
     if failures:
         print(f"\n{len(failures)} problem(s)")
         return 1

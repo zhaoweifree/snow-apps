@@ -1,0 +1,41 @@
+#!/bin/sh
+# AppRun for the Snow Shot AppImage.
+#
+# This file is copied to the root of the AppDir and becomes the AppImage's entry
+# point. Its whole job is to make a relocatable tree look like an installed one
+# before the application starts; every export below fixes a failure that shows
+# up only after the bundle is moved to a machine that is not the build host.
+set -eu
+
+# The AppImage runtime exports $APPDIR before calling AppRun, but the same AppDir
+# is also run unpacked (during packaging, and by users who extract it), and then
+# it is unset. `readlink -f` resolves a symlinked AppRun to the AppDir itself
+# rather than to the directory the symlink lives in.
+if [ -z "${APPDIR:-}" ]; then
+    APPDIR=$(dirname "$(readlink -f "$0")")
+fi
+
+# Qt finds its platform plugin (xcb) and its image format plugins through
+# QT_PLUGIN_PATH. A bundle without it dies on the first window with
+# "this application failed to start because no Qt platform plugin could be
+# initialized" -- the most common way an AppImage is broken.
+#
+# QT_QPA_PLATFORM_PLUGIN_PATH is deliberately not set: it is the deprecated
+# single-plugin override and it hides the rest of QT_PLUGIN_PATH.
+export QT_PLUGIN_PATH="$APPDIR/usr/plugins"
+
+# The loader cannot know about the mount point the AppImage picks at run time,
+# so the bundled shared libraries are reachable only through the search path.
+# The host's own libraries stay behind ours in the list.
+export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Desktop integration (icon lookup, notification categories, the AppStream file
+# when the bundle is registered) reads from XDG_DATA_DIRS; the bundle's own
+# share/ tree has to be searched before the host's or the icon in the entry we
+# ship is never found.
+export XDG_DATA_DIRS="$APPDIR/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+
+# exec, not a child process: the tray icon and the global shortcut portal talk
+# to the session bus under this pid, and a wrapper that stays in the process tree
+# makes some desktops attribute the window to the wrapper's .desktop entry.
+exec "$APPDIR/usr/bin/snow_shot" "$@"

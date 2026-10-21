@@ -43,3 +43,11 @@ echo "=== packaging module"
 echo
 echo "=== freedesktop integration"
 "$python_command" scripts/check-linux-freedesktop.py
+
+echo
+echo "=== hicolor icon tree"
+"$python_command" scripts/gen-linux-icons.py --check
+
+echo
+echo "=== appimage bundle"
+"$python_command" scripts/check-linux-appimage.py

@@ -300,8 +300,8 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 | **重构** | `snow_shot/include/snow_shot/platform/screenshotnative.h:3` | **无条件 include `windows/scrollinput.h`**，须拆出平台中立接口 |
 | **修改** | `ant_design_qt/.../widgets/{context_menu,modal}.cpp` + `detail/*` | Win32/`.mm` 分发，需 X11 对应 |
 | **重写/裁剪** | `snow_image_viewer/src/render/rhi_image_window.*` | 见 3.4 |
-| **新增** | `snow_shot/resources/linux/*.desktop`、图标 | 应用入口、右键菜单 |
-| **新增** | `cmake/SnowShotLinuxPackage.cmake` | CPack DEB/AppImage |
+| **新增** | `snow_shot/resources/linux/*.desktop`、图标 | 应用入口、右键菜单。**已落**（见 9.5.1/9.5.2）：入口放在 `snow_shot/packaging/linux/`；图标复用 `resources/app-icon.{svg,ico}`，PNG 尺寸由 `scripts/gen-linux-icons.py` 从 ico 抽出 |
+| **新增** | `cmake/SnowShotLinuxPackage.cmake`、`cmake/SnowShotAppImage.cmake` | CPack DEB / AppDir + `appimagetool` |
 
 ### 4.2 Rust 侧
 
@@ -433,7 +433,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
-| **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 图标安装规则、`scripts/check-linux-packaging.sh` 本机门禁 43 项（9.5.1）。**剩余**：AppImage、真机 `dpkg -i` 与两个 freedesktop 校验器、多尺寸 PNG 图标 |
+| **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
@@ -1867,8 +1867,9 @@ Linux 现在走自己的模块。
 - `desktop-file-validate` / `appstreamcli validate` 没跑过：本机没有这两个工具，脚本是按规范
   重写的子集。到真机的第一条命令就是这两个。
 - 图标只有 scalable 一份，没有多尺寸 PNG。dde-dock / dde-launcher 的某些版本对 SVG 支持不全，
-  可能显示模糊或取不到图。
+  可能显示模糊或取不到图。→ **已由 9.5.2 补齐**（7 个 hicolor 尺寸）。
 - AppImage 未做（下一片）；`.desktop` 未做翻译以外的本地化（名称与 GenericName 的 zh_CN 已给）。
+  → **AppImage 已由 9.5.2 落代码**；本地化仍缺。
 
 产出（Linux 上）：
 
@@ -1879,6 +1880,135 @@ snow-shot_1.2.8_amd64.deb        # 或 _arm64.deb，文件名由 CPACK_DEBIAN_FI
 /usr/share/metainfo/snow-shot.metainfo.xml
 /usr/share/icons/hicolor/scalable/apps/snow-shot.svg
 ```
+
+#### 9.5.2 P6 slice 2：多尺寸图标 + AppImage（2026-10-21）
+
+**决定 1：位图图标从 `app-icon.ico` 里抽，不在构建期光栅化 SVG。**
+
+freedesktop 的图标查找**不会**从 `scalable/` 回退到固定尺寸以外的路径 —— 反过来说，
+`Icon=snow-shot` 在 XFCE 面板、dde-dock、以及多数 AppImage 启动器里只查
+`hicolor/<size>x<size>/apps/`，一个只有 `scalable/` 的包在那些位置显示通用占位图。
+所以固定尺寸 PNG 不是可选项。
+
+问题是怎么产出。构建期用 `rsvg-convert` / Inkscape / ImageMagick 光栅化看起来最"干净"，
+实际是给每个发行版构建根引入一个不保证存在的工具依赖，而且**产出取决于碰巧装了哪个渲染器**
+（librsvg 与 Inkscape 对同一份 SVG 的抗锯齿、渐变插值都不同）。而 `app-icon.ico` 里本来就
+躺着设计师导出的九个尺寸位图，每个都是**完整的 PNG 数据流**（`struct` 解析就能确认，见
+`scripts/gen-linux-icons.py` 的 `read_ico`）—— 于是"生成"退化成字节拷贝：零工具依赖、
+零渲染差异、可逐字节复现。
+
+- 只装 hicolor 规范列出的尺寸：`16/24/32/48/64/128/256`。源里还有 20 与 40，
+  没有任何桌面环境按目录名查它们，装进去只是让 `dpkg -L` 变长。
+- 512 缺失，由同一份 scalable SVG 覆盖（两个目录并存是规范的正常形态）。
+- 脚本带 `--check`：把工作区与 ico **逐字节**比对，并核对每个 PNG 的 IHDR 边长与所在目录名一致。
+  改 ico 不重跑脚本 ⇒ 门禁 FAIL，不会出现"七个尺寸里有一个是上一版"这种只在视觉上朦胧的现象。
+- `read_ico` 遇到非 PNG 压缩的条目直接退出，而不是跳过：老式 32bpp DIB 条目要变成合法 PNG
+  需要一个解码器加一个编码器，静默少处理一个尺寸比报错危险得多。
+- CMake 侧用 `file(GLOB)` 枚举目录（安装规则跟随文件系统），"数量对不对"交给门禁断言，
+  不用 GLOB 做判据。
+
+**决定 2：AppImage 不做成 CPack 生成器，而是 AppDir + `appimagetool`。**
+
+CPack 没有 AppImage 生成器。可选的两条路：`cpack -G External` 挂一个自定义脚本，
+或者干脆自己 stage 一个 AppDir 再调 `appimagetool`。选后者 —— `External` 那条要把
+"先 `cmake --install` 到临时前缀、再造 AppDir 根布局"这套逻辑塞进 CPack 的脚本钩子里，
+换来的只是一层间接；而 AppDir 布局本身就是我们要验的东西，摊开写更好审。
+
+模块照 P6 slice 1 的切法再分一层：
+
+| 函数 | 性质 | 谁能跑 |
+|---|---|---|
+| `snow_shot_appimage_architecture()` | 纯映射 | `cmake -P`（本机门禁实测） |
+| `snow_shot_appimage_layout()` | 纯计算 | 同上 |
+| `snow_shot_add_appimage_target()` | 建 target、调 `appimagetool` | 只有真 configure + Linux |
+
+**决定 3：AppImage 只做 x86_64 / aarch64，loong64 与 riscv64 显式拒绝。**
+
+`appimagetool` 内嵌的 type-2 runtime 只有 x86_64 / i686 / armhf / aarch64 四个。给
+loong64 生成一个没人能执行的文件，比在 configure 期 `FATAL_ERROR` 并提示"用 deb"糟糕得多。
+门禁对 `sparc64` / `loongarch64` / `riscv64` 各跑一次子进程，断言退出码非零。
+
+**决定 4：`AppRun` 里三件事必须自己修，`exec` 必须真的 exec。**
+
+AppImage 把树挂到一个运行时才决定的路径上，装好的系统里那套隐式约定全部失效：
+
+| 补什么 | 不补的症状 |
+|---|---|
+| `QT_PLUGIN_PATH=$APPDIR/usr/plugins` | `this application failed to start because no Qt platform plugin could be initialized` |
+| `LD_LIBRARY_PATH=$APPDIR/usr/lib` | 只能用宿主库；宿主 Qt 版本不对就起不来 |
+| `XDG_DATA_DIRS` 前置 `$APPDIR/usr/share` | 我们装的图标与 AppStream 文件永远查不到 |
+| `exec`（而不是等子进程） | 托盘与 portal 的 bus 归属挂在包装进程的 pid 上，窗口被算到错误的 `.desktop` |
+
+另外三条容易踩的：
+
+- **`QT_QPA_PLATFORM_PLUGIN_PATH` 明确不设**。它是已废弃的单插件覆盖项，设了会盖住
+  `QT_PLUGIN_PATH` 里除 xcb 之外的一切（图像格式、iconengine 全部失效）。门禁只认
+  **赋值行**，不认注释里出现这个词 —— 脚本里正好有一段解释为什么不设它。
+- **`APPDIR` 要自己兜底**。AppImage 运行时导出它，但解包后的 AppDir（`--appimage-extract`
+  之后、以及打包过程中）没有，`readlink -f "$0"` 才能把符号链接的 `AppRun` 解析到 AppDir。
+- **`APPIMAGE_EXTRACT_AND_RUN=1`**。没有 FUSE（容器、CI runner）时 `appimagetool` 不启动，
+  除非告诉它解包自己的 runtime 再跑。
+- **`.DirIcon`** 缺了不会报错，只会让文件管理器里的缩略图空白。
+
+**决定 5：`INSTALL_RPATH=$ORIGIN/../lib`，但不 `INSTALL_RPATH_USE_LINK_PATH`。**
+
+`AppRun` 的 `LD_LIBRARY_PATH` 已经够用，RPATH 是绕开 `AppRun` 直接用 AppDir 里二进制时的
+第二道保险。关掉 `USE_LINK_PATH` 是必须的：开着会把**构建机上**的库路径（vcpkg / Qt 安装
+目录的绝对路径）写进 RPATH，那台机器之外的路径不存在，等于往二进制里塞噪声。
+
+**验证（本机可跑，不需要 Linux）**：`bash scripts/check-linux-packaging.sh`，三段 **101 项**全绿。
+
+- `cmake -P scripts/check-linux-packaging.cmake`（原 43 项 → 含新段）：appimage 架构映射
+  4 组、三个不支持处理器必须拒绝（子进程退出码）、文件名 / AppDir 前缀 / 根图标名、
+  根 CMakeLists 真的调用了 `snow_shot_add_appimage_target()`。
+- `scripts/check-linux-freedesktop.py`：新增 hicolor 树非空、PNG 文件名与 `Icon=` 同名。
+- `scripts/gen-linux-icons.py --check`：7 个尺寸与 ico 逐字节一致 + IHDR 边长与目录名一致。
+- `scripts/check-linux-appimage.py`（新，18 项）：`AppRun` 无 CRLF / 无 BOM / POSIX shebang、
+  git 索引里是 `100755`、`sh -n` 与 `bash -n` 双解析、三个 export、废弃变量未被赋值、
+  `APPDIR` 兜底、`exec` 唯一且指向 `usr/bin/snow_shot`、模块对 AppRun / `ARCH` /
+  `APPIMAGE_EXTRACT_AND_RUN` / `.DirIcon` 的引用、根 CMakeLists 的 option 门控。
+- **反向验证（5 点，全部命中）**：
+  - 删 `48x48/…/snow-shot.png` ⇒ cmake 段 `FAIL missing hicolor icon` + 退出非零；
+  - 把 `64x64` 截断到 100 字节 ⇒ `FAIL out of sync`（cmake 段的 PNG 签名检查**不**报错，
+    因为前 8 字节还在 —— 两处判据互补，这正是为什么要两个都留）；
+  - `AppRun` 注入 CRLF ⇒ `FAIL has no CRLF` + `FAIL POSIX shebang`；
+  - 删掉 `export QT_PLUGIN_PATH=` 行 ⇒ `FAIL exports QT_PLUGIN_PATH`；
+  - `git update-index --chmod=-x` ⇒ `FAIL executable in the git index: mode is 100644`。
+- `windows-qt5-full` configure `EXIT=0`（`Configuring done` / `Generating done`）。
+
+**一个值得记住的判据盲区**：CRLF 的 `AppRun` 在 `sh -n` / `bash -n` 下**语法检查照样通过**
+——坏的是内核读 shebang 那一步（`bad interpreter: /bin/sh^M`）。语法门禁抓不到，必须单独比对
+字节。这类"工具说没问题、运行环境说不"的检查，和 9.5.1 里 lrelease 对 `unfinished` 沉默是
+同一类坑。
+
+**本片未覆盖**：
+
+- **AppImage 从未真正生成**：Windows 上没有 `appimagetool`。`snow_shot_add_appimage_target()`
+  的每一条 `COMMAND` 都只在 Linux 上执行过 —— 这是本片最大的盲区，和 P5 的 NEON 同性质
+  （语法正确 ≠ 跑过）。
+- **`cmake --install --prefix` 与 `CPACK_PACKAGING_INSTALL_PREFIX=/usr` 的交互未验**：
+  AppDir 用的是 `--prefix <AppDir>/usr`，CPack 用的是 `/usr`，两者靠命令行参数各自生效，
+  但真机上是否如预期（尤其 `CMAKE_INSTALL_DATADIR` 的展开）只能实测。
+- **`AppRun` 的三条 export 在真机是否足够**：Qt5 的 xcb 插件还依赖 `libxcb-*` 一族，这些
+  是宿主提供的（AppImage 打不进 glibc 那一层，见附录 A.2），真机上缺哪个只能看
+  `QT_DEBUG_PLUGINS=1` 的输出。
+- 20x20 / 40x40 未安装（判断为无用目录），如果真机上发现某个面板确实查 20x20，加进
+  `HICOLOR_SIZES` 重跑脚本即可 —— 代价是十行改动加一次提交。
+- `.desktop` 的 `X-AppImage-Version`、`appimagetool` 的 `--updateinformation`（zsync 通道）
+  未做：前者要有发布通道才谈得上，后者依赖托管地址。
+
+产出（Linux 上，`-DSNOW_APPS_PACKAGE_APPIMAGE=ON`）：
+
+```
+snow-shot-1.2.8-x86_64.AppImage       # 或 -aarch64
+<build>/appimage/snow_shot-1.2.8-x86_64.AppDir/   # 落盘中间产物，可直接跑
+├── AppRun                            # 0755，POSIX sh
+├── snow-shot.desktop                 # 与 usr/share/applications 里同名同内容
+├── snow-shot.png                     # 256x256，名字与 Icon= 一致
+├── .DirIcon -> snow-shot.png
+└── usr/{bin,lib,plugins,share/...}
+```
+
 
 ---
 

@@ -73,6 +73,11 @@ option(SNOW_APPS_RELEASE_STATIC "Prefer static libraries and the static MSVC run
 option(SNOW_APPS_QT_STATIC "Link the release executable against a static Qt build." OFF)
 option(SNOW_APPS_PACKAGE_SNOW_SHOT "Configure the Snow Shot platform package." OFF)
 option(
+    SNOW_APPS_PACKAGE_APPIMAGE
+    "Also attach the snow-shot-appimage target (Linux only; needs appimagetool)."
+    OFF
+)
+option(
     SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION
     "Enable IPO/LTO and size/dead-code linker optimizations for Release targets."
     ON
@@ -492,6 +497,14 @@ if(SNOW_APPS_PACKAGE_SNOW_SHOT AND UNIX AND NOT APPLE)
     include(cmake/SnowShotLinuxPackage.cmake)
     snow_shot_configure_linux_package()
     include(CPack)
+
+    # AppImage is not a CPack generator: the module stages an AppDir with the
+    # ordinary install rules and calls appimagetool. It only attaches a target,
+    # so it does not interfere with the CPack configuration above.
+    if(SNOW_APPS_PACKAGE_APPIMAGE)
+        include(cmake/SnowShotAppImage.cmake)
+        snow_shot_add_appimage_target()
+    endif()
 endif()
 
 if(SNOW_APPS_PACKAGE_SNOW_SHOT)

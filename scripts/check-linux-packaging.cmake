@@ -136,6 +136,34 @@ foreach(_needle
     endif()
 endforeach()
 
+# --- 3b. The fixed-size hicolor icons ---------------------------------------
+# The scalable SVG alone is not enough: XFCE's panel, dde-dock and the AppImage
+# launchers look the icon name up in the sized hicolor directories only. The
+# PNGs are generated from app-icon.ico by scripts/gen-linux-icons.py, so a
+# deleted or unregenerated size has to fail here rather than at install time on
+# a distribution build root that has no icon tools to fix it up.
+set(_snow_hicolor_root "${_snow_repo}/snow_shot/resources/icons/hicolor")
+string(FIND "${_snow_shot_cmake}" "resources/icons/hicolor" _snow_position)
+if(_snow_position EQUAL -1)
+    message(STATUS "FAIL snow_shot/CMakeLists.txt does not install the hicolor PNG icons")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+endif()
+foreach(_size 16 24 32 48 64 128 256)
+    set(_snow_png "${_snow_hicolor_root}/${_size}x${_size}/apps/snow-shot.png")
+    if(NOT EXISTS "${_snow_png}")
+        message(STATUS "FAIL missing hicolor icon snow_shot/resources/icons/hicolor/${_size}x${_size}/apps/snow-shot.png")
+        math(EXPR _snow_failures "${_snow_failures} + 1")
+        continue()
+    endif()
+    # An .ico entry copied out of place, or a file that a text editor wrote
+    # over, would still exists() -- the signature is what makes it a PNG.
+    file(READ "${_snow_png}" _snow_png_signature HEX LIMIT 8)
+    if(NOT _snow_png_signature STREQUAL "89504e470d0a1a0a")
+        message(STATUS "FAIL ${_size}x${_size}/apps/snow-shot.png is not a PNG")
+        math(EXPR _snow_failures "${_snow_failures} + 1")
+    endif()
+endforeach()
+
 # --- 4. The desktop entry and the package agree on the application id -------
 file(READ "${_snow_repo}/snow_shot/packaging/linux/snow-shot.desktop" _snow_desktop)
 foreach(_required
@@ -157,6 +185,69 @@ file(READ "${_snow_repo}/snow_shot/packaging/linux/snow-shot.metainfo.xml" _snow
 string(FIND "${_snow_metainfo}" "<id>snow-shot.desktop</id>" _snow_position)
 if(_snow_position EQUAL -1)
     message(STATUS "FAIL snow-shot.metainfo.xml does not launch snow-shot.desktop")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+endif()
+
+# --- 5. The AppImage layout --------------------------------------------------
+# `cmake/SnowShotAppImage.cmake` attaches a target and calls appimagetool, so on
+# this host it is never parsed by a real configure. The two pure functions in it
+# are the ones that carry the decisions worth testing, and both can run here.
+include("${_snow_repo}/cmake/SnowShotAppImage.cmake")
+
+snow_shot_appimage_architecture(_appimage_arch)
+snow_expect("host appimage architecture" "x86_64" "${_appimage_arch}")
+
+foreach(_case
+        "x86_64:x86_64"
+        "AMD64:x86_64"
+        "aarch64:aarch64"
+        "arm64:aarch64")
+    string(REPLACE ":" ";" _pair "${_case}")
+    list(GET _pair 0 _processor)
+    list(GET _pair 1 _expected)
+    snow_shot_appimage_architecture(_mapped PROCESSOR "${_processor}")
+    snow_expect("appimage ${_processor}" "${_expected}" "${_mapped}")
+endforeach()
+
+# AppImage has no runtime for these two, and a silent wrong answer would be a
+# bundle that no kernel executes.
+foreach(_processor sparc64 loongarch64 riscv64)
+    # CMAKE_BINARY_DIR is deliberately a non-existent path here, so the scratch
+    # file goes where script mode actually has write access.
+    set(_negative_script "${CMAKE_CURRENT_BINARY_DIR}/check-linux-appimage-negative-${_processor}.cmake")
+    if(NOT CMAKE_CURRENT_BINARY_DIR)
+        set(_negative_script "${CMAKE_BINARY_DIR}/cmake/check-linux-appimage-negative-${_processor}.cmake")
+    endif()
+    file(WRITE "${_negative_script}"
+        "include(\"${_snow_repo}/cmake/SnowShotAppImage.cmake\")\n\
+snow_shot_appimage_architecture(_arch PROCESSOR \"${_processor}\")\n")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -P "${_negative_script}"
+        RESULT_VARIABLE _negative_result
+        OUTPUT_QUIET
+        ERROR_QUIET)
+    file(REMOVE "${_negative_script}")
+    if(_negative_result EQUAL 0)
+        message(STATUS "FAIL appimage ${_processor}: accepted, but no runtime exists for it")
+        math(EXPR _snow_failures "${_snow_failures} + 1")
+    else()
+        message(STATUS "ok   appimage ${_processor} rejected (exit ${_negative_result})")
+    endif()
+endforeach()
+
+snow_shot_appimage_layout()
+snow_expect("appimage file name" "snow-shot-1.2.8-x86_64.AppImage"
+            "${SNOW_SHOT_APPIMAGE_FILE_NAME}")
+snow_expect("appimage install prefix" "${CMAKE_BINARY_DIR}/appimage/snow_shot-1.2.8-x86_64.AppDir/usr"
+            "${SNOW_SHOT_APPIMAGE_USR}")
+# appimagetool reads the entry and the icon from the AppDir root, and the icon
+# has to be named exactly what Icon= says.
+snow_expect("appimage root icon name" "snow-shot.png" "${SNOW_SHOT_APPIMAGE_ICON_NAME}")
+
+file(READ "${_snow_repo}/CMakeLists.txt" _snow_root_cmake)
+string(FIND "${_snow_root_cmake}" "snow_shot_add_appimage_target()" _snow_position)
+if(_snow_position EQUAL -1)
+    message(STATUS "FAIL CMakeLists.txt never calls snow_shot_add_appimage_target()")
     math(EXPR _snow_failures "${_snow_failures} + 1")
 endif()
 
