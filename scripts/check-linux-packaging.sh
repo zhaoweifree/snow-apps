@@ -51,3 +51,7 @@ echo "=== hicolor icon tree"
 echo
 echo "=== appimage bundle"
 "$python_command" scripts/check-linux-appimage.py
+
+echo
+echo "=== linux ci workflow"
+"$python_command" scripts/check-linux-ci-workflow.py

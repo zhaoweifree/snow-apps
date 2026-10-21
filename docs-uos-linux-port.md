@@ -434,7 +434,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**剩余**：workflow 从未在 GitHub 上跑过（首轮必红，按红改）、AppImage 进 CI、Wayland（PipeWire/portal）全部未做 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -2008,6 +2008,104 @@ snow-shot-1.2.8-x86_64.AppImage       # 或 -aarch64
 ├── .DirIcon -> snow-shot.png
 └── usr/{bin,lib,plugins,share/...}
 ```
+
+### 9.6 P7 slice 1：Linux CI（2026-10-21）
+
+P6 剩下的每一条都是"只能在 Linux 上回答"。这台机器上能做的最后一件事，就是把那些问题变成
+一个每天都会跑的 job。
+
+#### 9.6.1 为什么分成三段，而不是一个 build job
+
+| job | 跑什么 | 需要工具链 | 定位 |
+|---|---|---|---|
+| `gates` | `scripts/check-linux-packaging.sh`（118 项）+ `cargo test -p snow-linux -p snow-capture --all-features` + 双 Linux 目标 `cargo check` | 否 | **PR 必过**。这一段的每一条在本机 Windows 上都已经跑绿过，所以红了就是改动错了，不是环境缺东西 |
+| `build` × {x64, arm64} | apt 装 §9.1 依赖 → `cmake --preset` → build → ctest → `cpack` → 拆包校验 → `dpkg-deb -x` + 两个 freedesktop 校验器 | 是 | **唯一真正编译 aarch64 C++ 的地方** |
+| AppImage | — | — | 刻意不做，理由见 9.6.3 |
+
+把 `gates` 独立出来的理由不是速度，是**归因**：一个同时装 Qt、编 Rust、跑打包校验的 job 红了，
+第一眼分不清是代码错还是环境错。分开之后，`gates` 绿而 `build` 红，几乎必然是"这棵树第一次
+真的在 Linux 上编"这类问题；两边都红，才先看 `gates`。
+
+#### 9.6.2 `build` 补掉的盲区
+
+这是本移植里第一次有东西能真正回答下面这些问题：
+
+1. **aarch64 C++ 到底编不编得过**。§7.3 那条结论（本机没有 aarch64 C++ 编译器 ⇒
+   `#if defined(__aarch64__)` 里的代码从未被解析）在这里终结 —— 不是靠人审，是靠
+   `ubuntu-24.04-arm` 上的一次 `cmake --build`。
+2. **`--all-features` 在 Linux 上是否还是好的**。P5 slice 1 修过一次（`stage-timing` 的 QPC
+   re-export 与 dead-code），修完就没有任何东西持续验证它；现在 `gates` 每次 PR 都跑。
+3. **`dpkg-shlibdeps` 算出来的 `Depends` 到底是什么**。§9.5.1 决定 1 的整个论证建立在
+   "它从 ELF 的 NEEDED 反推"上，但从没看过输出。job 里 `dpkg-deb -f "$deb" Depends` 打出来，
+   并且断言里面有 `libqt5` —— 如果 `Depends` 是空的（`SHLIBDEPS` 没生效），这一步会红。
+4. **两个 freedesktop 校验器**。`desktop-file-validate` 与 `appstreamcli validate --no-net`
+   —— §9.5.1 说"到真机的第一条命令就是这两个"，现在它们在 CI 里，而 `/dev/null` 不是它们的
+   输出终点：非零退出就是 job 失败。
+5. **`.deb` 的实际布局**。不只是"文件存在"，而是 `dpkg-deb -c` 的输出里逐条 grep：
+   `/usr/bin/snow_shot`、入口、metainfo、**七个 hicolor 尺寸加 scalable**。这一步把 9.5.2 的
+   图标决定从"仓库里有这七个文件"变成"包里真的有这七个文件"。
+6. **`Architecture:` 与 runner 一致**。矩阵里 x64 对应 `amd64`、arm64 对应 `arm64`，
+   job 把 `dpkg-deb -f Architecture` 读回来 `grep -qx`。架构名映射错了（P6 slice 1 的正向/
+   反向验证覆盖的是函数，这里覆盖的是产物）。
+
+#### 9.6.3 为什么 AppImage 不在这一片里
+
+`appimagetool` 不是发行版包，要从第三方 release 下载。**那个 URL 在本机无法验证** —— 写进
+workflow 意味着第一次跑很可能是 404，而 404 会把 `build` job 真正的编译错误盖掉。先让
+`build` 绿一次，再往里加 AppImage。这是"宁可少一条路径，不要一条会把别的失败伪装的路径"。
+
+#### 9.6.4 门禁：`scripts/check-linux-ci-workflow.py`（17 项）
+
+workflow 是仓库里唯一"推送之前没人解析"的文件。它的问题读起来全是合法 YAML：
+
+- **preset 名拼错**。`cmake --preset` 用的都是 `${{ matrix.preset }}`，真实名字只在 matrix 段
+  出现一次。门禁把 matrix 里的 `preset` / `build-preset` 逐个对照 `CMakePresets.json` 校验，
+  并断言 configure preset 不是 `hidden`（隐藏的不能按名配置）。
+- **`gates` job 里根本没有调门禁脚本**。job 存在、脚本存在、两者之间没有连线 —— 这种"看起来
+  有 CI"的状态最难发现。门禁断言 `gates` 的 `run:` 里确实出现
+  `scripts/check-linux-packaging.sh`。
+- **漏 `timeout-minutes`**。一次挂住的 Qt configure 会烧满 GitHub 六小时预算。
+- **runner 与架构对不上**。`RUNNER_ARCHITECTURES` 表把 `ubuntu-24.04` 映射到 `amd64`、
+  `ubuntu-24.04-arm` 映射到 `arm64`，与 job 里读回 `.deb` 的那条断言是同源判据；换 runner
+  不更新表 ⇒ 门禁 FAIL，而不是"断言被静默跳过"。
+- **apt 列表里重复的包**（通常意味着一次改错的复制粘贴）。
+
+**反向验证（3 点，全部命中）**：
+
+- 把 `preset: snow-shot-linux-x64-release` 改成 `...-relase` ⇒
+  `FAIL build: preset '...-relase' exists in CMakePresets.json`。
+  （`matches architecture` 那条**不**报错，因为 `-x64-` 还在 —— 两个判据覆盖的是不同错误，
+  这正是两条都留的原因。）
+- 把 `run: bash scripts/check-linux-packaging.sh` 换成 `run: echo skipped` ⇒
+  `FAIL gates job runs the packaging gates`。
+- 删掉 `build` 的 `timeout-minutes` ⇒ `FAIL build: sets a timeout`。
+
+#### 9.6.5 一个工具坑：`${{ }}` 与跨行匹配
+
+第一版门禁把 `cmake --preset ${{ matrix.preset }}` 里的表达式替换成空串再匹配，结果报
+`configure preset 'cmake' exists: not in CMakePresets.json` —— 因为替换后是
+`cmake --preset `，而 `\s+` **能吃掉换行**，于是下一行的 `cmake --build ...` 的第一个词
+被当成了 preset 名。两处修：`\s+` 改 `[ \t]+`，名字字符类首字符排除 `-`（选项）。
+教训与 9.5.2 的 CRLF 同源：**正则里的空白类默认包含换行，在多行输入上就是 bug**。
+
+#### 9.6.6 尚未验证（这一片最重要的部分）
+
+**这个 workflow 从未在 GitHub 上跑过。** 本机能做的最多是：YAML 能解析、每个引用都能在
+checkout 里解析到、`windows-qt5-full` configure 仍然 EXIT=0。以下没有一条有答案：
+
+- `ubuntu-24.04` 上按 §9.1 装完包后，`cmake --preset snow-shot-linux-x64-release` 是否配置成功
+  —— 包名在 24.04 与 UOS 20 之间有差异（`libjxl-dev` 在 24.04 是 `libjxl-dev`，UOS 20 可能叫
+  别的；`libopencv-dev` 的版本差得更多）。**这是最可能的第一个红灯。**
+- 第一次 Linux 编译会不会撞上 Qt5 与 Qt6 的头文件/cfg 差异 —— 本机只编过 Windows。
+- `ctest` 在 Linux 上跑起来时，有多少测试是 Windows-only 被条件排除的、有多少真的会跑。
+- `appstreamcli validate` 对 `<id>snow-shot.desktop</id>` 的评级。AppStream 规范要求反向域名
+  id，而我们按 §9.5.1 决定 4 必须用 `productId()`（`snow-shot`）。**预期它会给出 warning 而
+  非 error（`--pedantic` 才会升为失败）**，但这是推断，没跑过。如果它其实报 error，就得在
+  "文件名与 productId 同源"和"AppStream 合规"之间做取舍 —— 那是一个需要重新论证的决定，
+  不是一个可以打补丁的地方。
+- `ubuntu-24.04-arm` runner 在私有仓库/免费额度下是否可用。
+
+**下一步**：把这个 workflow 推上去跑一次，按红的地方改。红是预期输出，不是失败。
 
 
 ---

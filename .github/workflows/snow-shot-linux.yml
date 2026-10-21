@@ -1,0 +1,207 @@
+# Linux / UOS port gate (port document §9.6, P7).
+#
+# Three jobs, deliberately separated by what they can prove:
+#
+#  * `gates` runs on any Ubuntu image in about a minute and needs no compilers.
+#    It is the only job that must be green for a pull request: the packaging and
+#    freedesktop checks are pure Python + CMake script mode, and the Rust side
+#    is `cargo test` on the platform-independent crates. Everything here already
+#    runs on a Windows workstation, so a red result means the change is wrong,
+#    not that the environment is missing something.
+#
+#  * `build` is the job that has never existed before. It is the only place in
+#    the project where aarch64 C++ is actually compiled -- on a Windows box
+#    `#if defined(__aarch64__)` blocks are code no compiler has ever parsed
+#    (docs-uos-linux-port.md §7.3). It also runs the two validators the port
+#    document keeps deferring to "the first command on the real machine"
+#    (`desktop-file-validate`, `appstreamcli validate`) and installs the .deb
+#    into a container.
+#
+# AppImage verification is deliberately NOT here yet. It needs a third-party
+# `appimagetool` binary whose download location this repository cannot verify
+# offline; wiring it in before the job is green once would hide real compile
+# errors behind a 404. It goes in after `build` passes.
+
+name: Snow Shot Linux
+
+on:
+  push:
+    branches: [main]
+    # Packaging and desktop files are the point of the `gates` job, but a
+    # documentation edit is not worth a full Qt build.
+    paths-ignore:
+      - "docs*/**"
+      - "*.md"
+      - ".workbuddy/**"
+  pull_request:
+    paths-ignore:
+      - "docs*/**"
+      - "*.md"
+      - ".workbuddy/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snow-shot-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gates:
+    name: Linux gates (no toolchain)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The gate scripts only need cmake in script mode (`cmake -P`), which the
+      # runner image already provides -- no Qt, no compiler, no dpkg.
+      - name: Packaging and freedesktop gates
+        run: bash scripts/check-linux-packaging.sh
+
+      # `snow-linux` and the platform-independent half of `snow-capture` are
+      # pure logic on purpose (docs-uos-linux-port.md P3), so their tests run on
+      # the Linux host rather than only on the Windows workstation.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snow-crates
+
+      - name: Rust unit tests (platform-independent crates)
+        working-directory: snow-crates
+        # -Dwarnings lives in snow-crates/.cargo/config.toml, so a warning here
+        # is a hard error by design; this is the gate the port document wanted.
+        run: cargo test -p snow-linux -p snow-capture --lib --all-features
+
+      # `--all-features` on a non-Windows host was broken until P5 slice 1 fixed
+      # the stage-timing re-exports; this step is what keeps it fixed.
+      - name: Rust cross-target type check
+        working-directory: snow-crates
+        run: |
+          rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+          cargo check -p snow-linux -p snow-linux-c --target x86_64-unknown-linux-gnu --all-features
+          cargo check -p snow-linux -p snow-linux-c --target aarch64-unknown-linux-gnu --all-features
+
+  build:
+    name: Build and package ${{ matrix.architecture }}
+    needs: gates
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: ubuntu-24.04
+            preset: snow-shot-linux-x64-release
+            build-preset: build-snow-shot-linux-x64-release
+          # GitHub's hosted arm64 runner. A private fork without arm64 minutes
+          # can drop this entry; the x64 entry still proves the packaging path.
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            preset: snow-shot-linux-arm64-release
+            build-preset: build-snow-shot-linux-arm64-release
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      # The dependency list is docs-uos-linux-port.md §9.1 plus the packaging
+      # tools. Every entry is a distribution package: the Linux presets set no
+      # toolchain file, so vcpkg never runs on this side (P2 decision).
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git curl file \
+            qtbase5-dev qt5-qmake qttools5-dev-tools libqt5svg5-dev \
+            libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libfontconfig1-dev libfreetype6-dev libharfbuzz-dev \
+            libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev libxrecord1-dev \
+            libpipewire-0.3-dev libpulse-dev libasound2-dev libdbus-1-dev libegl1-mesa-dev \
+            libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
+            libheif-dev libjxl-dev zlib1g-dev libtinyxml2-dev \
+            libopencv-dev \
+            dpkg-dev desktop-file-utils appstream
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: snow-crates
+
+      # The first configure of a Linux tree in this repository. It is expected to
+      # fail on the first runs and to be fixed from there -- that is the whole
+      # point of the job, not a defect in it.
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.build-preset }} --parallel 4
+
+      - name: Unit tests
+        working-directory: build/${{ matrix.preset }}/snow_shot
+        run: ctest --output-on-failure --no-tests=error
+
+      # Reconfigures with packaging on. `CPack` reads the CPACK_* variables that
+      # `snow_shot_configure_linux_package()` assigns, and `dpkg-shlibdeps`
+      # derives Depends from what the staged ELF actually needs.
+      - name: Build the Debian package
+        run: |
+          cmake --preset ${{ matrix.preset }} -DSNOW_APPS_PACKAGE_SNOW_SHOT=ON
+          cmake --build --preset ${{ matrix.build-preset }} --parallel 4
+          cpack --config build/${{ matrix.preset }}/CPackConfig.cmake -B build/${{ matrix.preset }}
+
+      # These three were listed as "first command on the real machine" in
+      # §9.5.1/§9.5.2. They run here instead, on an architecture that is not the
+      # ARM target but does validate the metadata.
+      - name: Validate the packaged metadata
+        run: |
+          deb="$(ls build/${{ matrix.preset }}/snow-shot_*.deb)"
+          echo "== $deb"
+          dpkg-deb -I "$deb"
+          dpkg-deb -c "$deb" | tee /tmp/deb-contents.txt
+
+          # The package must not have been written for the wrong architecture,
+          # and must not ship a hand-written dependency list.
+          expected_arch=${{ matrix.architecture == 'x64' && 'amd64' || 'arm64' }}
+          dpkg-deb -f "$deb" Architecture | grep -qx "$expected_arch"
+          # Derived by dpkg-shlibdeps from the ELF NEEDED entries, so it names
+          # the shared libraries (libqt5core5t64 ...), not the -dev packages.
+          dpkg-deb -f "$deb" Depends | grep -q libqt5
+
+          # The layout the launchers read.
+          grep -q '/usr/bin/snow_shot$' /tmp/deb-contents.txt
+          grep -q '/usr/share/applications/snow-shot.desktop$' /tmp/deb-contents.txt
+          grep -q '/usr/share/metainfo/snow-shot.metainfo.xml$' /tmp/deb-contents.txt
+          for size in 16 24 32 48 64 128 256; do
+            grep -q "icons/hicolor/${size}x${size}/apps/snow-shot.png$" /tmp/deb-contents.txt
+          done
+          grep -q 'icons/hicolor/scalable/apps/snow-shot.svg$' /tmp/deb-contents.txt
+
+          rm -rf /tmp/extracted
+          dpkg-deb -x "$deb" /tmp/extracted
+          desktop-file-validate /tmp/extracted/usr/share/applications/snow-shot.desktop
+          appstreamcli validate --no-net \
+            /tmp/extracted/usr/share/metainfo/snow-shot.metainfo.xml
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: snow-shot-${{ matrix.architecture }}-deb
+          path: build/${{ matrix.preset }}/snow-shot_*.deb
+          if-no-files-found: error
