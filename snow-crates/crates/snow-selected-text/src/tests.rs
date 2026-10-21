@@ -34,9 +34,15 @@ struct FakeBackend {
     probes: std::collections::VecDeque<Result<Probe, SelectionError>>,
     calls: Vec<&'static str>,
     changed_at: Option<usize>,
+    /// What the passive stage claims to have used. Windows and macOS keep the
+    /// default; the X11 backend reports PRIMARY instead.
+    passive: RetrievalMethod,
 }
 
 impl Backend for FakeBackend {
+    fn passive_method(&self) -> RetrievalMethod {
+        self.passive
+    }
     fn validate_target(&mut self, _: &Context) -> Result<(), SelectionError> {
         self.calls.push("validate");
         if self.changed_at == Some(self.calls.len()) {
@@ -70,6 +76,7 @@ fn backend(probes: Vec<Result<Probe, SelectionError>>) -> FakeBackend {
         probes: probes.into(),
         calls: Vec::new(),
         changed_at: None,
+        passive: RetrievalMethod::Accessibility,
     }
 }
 
@@ -179,6 +186,42 @@ fn accessibility_success_preserves_unicode_whitespace_and_range_order_without_co
     assert_eq!(text.method, RetrievalMethod::Accessibility);
     assert_eq!(text.clipboard_status, ClipboardStatus::Unchanged);
     assert_eq!(backend.calls, ["validate", "accessibility", "validate"]);
+}
+
+#[test]
+fn passive_provider_reports_the_method_its_backend_declares() {
+    // The passive stage is the accessibility one on Windows and macOS, but X11
+    // answers it with PRIMARY. Reporting the stage name instead of the declared
+    // method would tell a caller an accessibility API had been used.
+    let mut automatic = backend(vec![Ok(Probe::Selected(vec![range("selected")]))]);
+    automatic.passive = RetrievalMethod::Primary;
+    let result = acquire(&mut automatic, &context()).unwrap();
+    let SelectionOutcome::Selected(text) = result else {
+        panic!()
+    };
+    assert_eq!(text.method, RetrievalMethod::Primary);
+    assert_eq!(text.clipboard_status, ClipboardStatus::Unchanged);
+    assert_eq!(automatic.calls, ["validate", "accessibility", "validate"]);
+
+    // An explicit `Accessibility` strategy asks for the passive stage, not for a
+    // specific mechanism, so it still reports what the backend actually used.
+    let mut explicit = backend(vec![Ok(Probe::Selected(vec![range("selected")]))]);
+    explicit.passive = RetrievalMethod::Primary;
+    let result = acquire(
+        &mut explicit,
+        &Context {
+            options: CaptureOptions {
+                strategy: CaptureStrategy::Accessibility,
+                ..Default::default()
+            },
+            ..context()
+        },
+    )
+    .unwrap();
+    let SelectionOutcome::Selected(text) = result else {
+        panic!()
+    };
+    assert_eq!(text.method, RetrievalMethod::Primary);
 }
 
 #[test]

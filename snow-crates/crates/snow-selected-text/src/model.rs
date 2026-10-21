@@ -98,6 +98,8 @@ pub enum RetrievalMethod {
     /// Standard native-control extraction on Windows.
     NativeControl = 2,
     Clipboard = 3,
+    /// Linux/X11 PRIMARY selection, read without touching any clipboard.
+    Primary = 4,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -187,7 +189,7 @@ impl std::error::Error for SelectionError {}
 
 pub type CaptureResult = Result<SelectionOutcome, SelectionError>;
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 pub(crate) fn assemble(
     ranges: Vec<SelectedRange>,
     source: SourceApplication,

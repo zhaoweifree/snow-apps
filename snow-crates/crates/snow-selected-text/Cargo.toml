@@ -36,5 +36,12 @@ windows = { workspace = true, features = [
   "Win32_UI_Controls",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Reading PRIMARY needs only the core protocol, so no extension feature is
+# enabled. `default-features = false` keeps libc out, which keeps the Linux path
+# type-checkable from the Windows dev box with a bare
+# `cargo check --target <linux-triple>`.
+x11rb = { version = "0.14", default-features = false }
+
 [dependencies]
 snow-core = { path = "../snow-core" }

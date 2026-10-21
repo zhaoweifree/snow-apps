@@ -32,6 +32,14 @@ impl Context {
 }
 
 pub(crate) trait Backend {
+    /// Method to report when the passive provider answers.
+    ///
+    /// Windows and macOS answer that slot through an accessibility API. X11 has
+    /// no equivalent, and reports the PRIMARY selection instead, so the reported
+    /// method has to come from the backend rather than from the stage that ran.
+    fn passive_method(&self) -> RetrievalMethod {
+        RetrievalMethod::Accessibility
+    }
     fn validate_target(&mut self, context: &Context) -> Result<(), SelectionError>;
     fn accessibility(
         &mut self,
@@ -67,16 +75,22 @@ pub(crate) fn acquire(backend: &mut impl Backend, context: &Context) -> CaptureR
         let probe = match method {
             RetrievalMethod::Accessibility => backend.accessibility(context, deadline),
             RetrievalMethod::NativeControl => backend.native_control(context, deadline),
-            RetrievalMethod::Clipboard => unreachable!(),
+            // Neither has a stage of its own: `Primary` is what the passive
+            // provider reports, and the clipboard has no provider stage.
+            RetrievalMethod::Clipboard | RetrievalMethod::Primary => unreachable!(),
         }?;
         context.check()?;
         backend.validate_target(context)?;
         match probe {
             Probe::Selected(ranges) => {
+                let reported = match method {
+                    RetrievalMethod::Accessibility => backend.passive_method(),
+                    other => other,
+                };
                 return assemble(
                     ranges,
                     context.source.clone(),
-                    method,
+                    reported,
                     ClipboardStatus::Unchanged,
                     context.options.max_text_bytes,
                 );

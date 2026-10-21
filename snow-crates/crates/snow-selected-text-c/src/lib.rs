@@ -610,6 +610,7 @@ mod tests {
         assert_eq!(RetrievalMethod::Accessibility as u32, 1);
         assert_eq!(RetrievalMethod::NativeControl as u32, 2);
         assert_eq!(RetrievalMethod::Clipboard as u32, 3);
+        assert_eq!(RetrievalMethod::Primary as u32, 4);
         let mut config = SnowSelectedTextOptions::default();
         unsafe {
             assert_eq!(snow_selected_text_options_init(&mut config), 1);

@@ -3547,6 +3547,7 @@ dependencies = [
  "objc2-foundation",
  "snow-core",
  "windows",
+ "x11rb",
 ]
 
 [[package]]

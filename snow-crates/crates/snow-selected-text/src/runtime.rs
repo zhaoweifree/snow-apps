@@ -1,13 +1,13 @@
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
 use crate::model::*;
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 use crate::policy::{Backend, Context, acquire};
 
 pub(crate) struct RequestState {
@@ -19,7 +19,7 @@ pub(crate) struct RequestState {
 }
 
 impl RequestState {
-    #[cfg(any(windows, target_os = "macos", test))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
     pub(crate) fn new(deadline: Instant) -> Self {
         Self {
             deadline,
@@ -52,7 +52,7 @@ impl RequestState {
         error
     }
 
-    #[cfg(any(windows, target_os = "macos", test))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
     fn finish(&self, result: CaptureResult) {
         let mut slot = self.result.lock().unwrap_or_else(|e| e.into_inner());
         if slot.is_none() {
@@ -118,22 +118,22 @@ impl Drop for CaptureRequest {
     }
 }
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 struct BusyGuard(Arc<AtomicBool>);
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 impl Drop for BusyGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
     }
 }
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 struct Job {
     context: Context,
     _busy: BusyGuard,
 }
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 impl Drop for Job {
     fn drop(&mut self) {
         // Also resolve pending callers if an unexpected unwind exits the backend.
@@ -144,13 +144,13 @@ impl Drop for Job {
     }
 }
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 struct Runtime {
     sender: mpsc::SyncSender<Job>,
     busy: Arc<AtomicBool>,
 }
 
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 impl Runtime {
     fn spawn<B: Backend + 'static>(
         factory: impl FnOnce() -> Result<B, SelectionError> + Send + 'static,
@@ -232,13 +232,13 @@ impl Runtime {
 /// Cheap, cloneable access to the process-wide fixed worker runtime.
 #[derive(Clone)]
 pub struct SelectedTextService {
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     runtime: Arc<Runtime>,
 }
 
 impl SelectedTextService {
     pub fn new() -> Result<Self, SelectionError> {
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         {
             static RUNTIME: OnceLock<Result<Arc<Runtime>, SelectionError>> = OnceLock::new();
             Ok(Self {
@@ -247,7 +247,7 @@ impl SelectedTextService {
                     .clone()?,
             })
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
         Err(SelectionError::new(
             ErrorKind::UnsupportedPlatform,
             "service creation",
@@ -256,22 +256,22 @@ impl SelectedTextService {
 
     /// Remains true until native acquisition and cleanup finish, including after cancellation.
     pub fn is_busy(&self) -> bool {
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         {
             self.runtime.busy.load(Ordering::Acquire)
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
         false
     }
 
     /// Capture foreground context now; perform cross-process acquisition on workers.
     pub fn start_capture(&self, options: CaptureOptions) -> Result<CaptureRequest, SelectionError> {
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         {
             self.runtime
                 .submit(options, crate::platform::capture_source)
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
         {
             let _ = options;
             Err(SelectionError::new(
@@ -438,7 +438,7 @@ mod tests {
         assert!(entered.try_recv().is_err());
     }
 
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     #[test]
     fn service_busy_tracks_native_work_after_canceled_request_is_dropped() {
         let (runtime, entered, release) = blocked();

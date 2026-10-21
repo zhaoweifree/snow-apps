@@ -154,7 +154,7 @@ fn unsupported_error() -> CaptureError {
 | D3D11 / GPU tonemap | `snow-crates/crates/snow-d3d11/*`；`snow-capture/.../gpu_tonemap.rs`（≈180 处） | Vulkan/EGL 或纯 CPU |
 | GDI 回退 | `snow-capture/src/platform/windows/gdi.rs` | X11 `GetImage` —— **已落地**：`snow-linux/src/x11.rs` + `snow-capture/src/platform/linux.rs`（见 9.4.3） |
 | WASAPI 音频 | `snow-audio-recorder/src/platform/windows/*` | PulseAudio / PipeWire |
-| UIA/MSAA 元素拾取 | `snow-ui-selector/src/windows/*`、`snow-selected-text/src/platform/windows/*` | **X11 窗口树 —— 已落地窗口级**：`snow-linux/src/window.rs`（纯逻辑）+ `snow-linux/src/x11/window.rs`（见 9.4.6）。控件级仍需 AT-SPI2 (D-Bus)；跨进程读选中文字（`snow-selected-text`）同样仍缺 |
+| UIA/MSAA 元素拾取 | `snow-ui-selector/src/windows/*`、`snow-selected-text/src/platform/windows/*` | **X11 窗口树 —— 已落地窗口级**：`snow-linux/src/window.rs`（纯逻辑）+ `snow-linux/src/x11/window.rs`（见 9.4.6）。**跨进程取选中文字已落地 PRIMARY selection**（见 9.4.22）；控件级元素、控件级文本、选中矩形仍需 AT-SPI2 (D-Bus) |
 | 全局键鼠钩子 | `snow-recording-effects/src/{keyboard_hook.rs:124, mouse_hook.rs:90}` | **XInput2 raw events —— 已落地**：`snow-linux/src/input/`（见 9.4.4）。待补：无 XInput2 时的 XRecord / evdev 退路、Wayland portal |
 | DirectWrite + Direct2D 键帽光栅化 | `snow-recording-effects/src/keyboard_rasterizer.rs:8`（macOS 走 CoreText + Quartz） | **`ab_glyph` + `ttf-parser` —— 已落地**：`snow-linux/src/text/`（见 9.4.5）。字体发现自建，**刻意不链 fontconfig** |
 | Win32 窗口层 | `snow_shot/src/platform/windows/*`（30 文件）：`windowchrome.cpp:255` `SetWindowDisplayAffinity`、`pinnedwindownative.cpp` `WS_EX_*` | X11 属性 / 无对应 |
@@ -313,7 +313,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 | **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | ~~PulseAudio / PipeWire~~ **不做（决策 4）**：保持 `UnsupportedBackend`，Linux 录制无音轨 |
 | **新增** | `snow-crates/crates/snow-cursor/src/platform/linux.rs` | XFixes `GetCursorImage` + 核心 `QueryPointer`。**已完成**（含 image 缓存的瞬时失败保护，与 Windows 后端同策略） |
 | **新增** | `snow-crates/crates/snow-ui-selector/src/linux.rs` | **窗口级已落地**（见 9.4.6）：X11 窗口树 + `_NET_CLIENT_LIST`，`ElementRegionService` 在 Linux 上导出，`snow-ui-selector-c` 恢复可编译。控件级仍需 AT-SPI2（D-Bus）——未实现，`HitTestMode::UiElement` 与 `Window` 目前返回同一个窗口矩形 |
-| **新增** | `snow-crates/crates/snow-selected-text/src/platform/linux/` | AT-SPI2（D-Bus）取选中文本 + PRIMARY selection。未开始 |
+| **新增** | `snow-crates/crates/snow-selected-text/src/platform/linux/` | **X11 PRIMARY selection 已落地**（见 9.4.22）：`selection.rs`（纯逻辑：目标优先级、`INCR` 判据、解码、上限）+ `platform/linux/{selection,source}.rs`（传输与活动窗口识别）。被动读、零注入 ⇒ `clipboard_status` 恒 `Unchanged`。待补：AT-SPI2（控件级文本与选中矩形）、真机验证 |
 | **修改** | `snow-recording-effects/src/{keyboard_hook,mouse_hook}.rs` 的 `#[cfg(not(any(windows,macos)))]` 空实现 | **已落地 X11 实现**（见 9.4.4）：`#[cfg(target_os="linux")] mod platform` 把 `snow_linux::input` 的观测翻译成 `KeyObservation` / `MouseClickObservation` / `MouseMovement` |
 | **修改** | `snow-recording-effects/src/keyboard_rasterizer.rs:547` 的 `#[cfg(not(any(windows,macos)))]` 桩 | **已落地**（见 9.4.5）。**注意**：该文件不是纯逻辑 —— 每个平台各自实现 `mod platform`（Windows 是 DirectWrite+D2D，macOS 是 CoreText+Quartz），Linux 分支原先是硬返回 Err ⇒ 按键能采到但画不出来。现已接 `snow_linux::text` |
 | **修改** | `snow_rust_ffi/{Cargo.toml,src/lib.rs}` | `snow-ui-selector-c` 的依赖与 `pub mod ui_selector` 门控从 `cfg(any(windows, target_os="macos"))` 放宽到 `cfg(any(windows, unix))`。不改的话，Linux 上 C++ 那头 `snow_ui_selector_service_*` 会在链接期全部 undefined。**本机无法验证**：该 archive 在 Linux 目标上连 `cargo check` 都过不去（见 9.4.2 A 类），只能到真机验 |
@@ -433,7 +433,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–9）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级（**音频按决策 4 不做**） |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–10）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider + `snow-selected-text` X11 PRIMARY selection（9.4.22），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级与控件级文本（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
@@ -2024,6 +2024,92 @@ API**（`zvariant` 也被并入 `zbus::wire`，`Value` 改名 `Variant`），所
   Linux 上它返回 `None` 后落到本片修好的回退路径。
 - 脏矩形仍然**不做合并**：两个监视器各报一块，聚合里就是两块。编码器侧的合并策略不在这一层，
   本片不替它决定。
+
+#### 9.4.22 P3 slice 10：X11 PRIMARY selection 取选中文字（2026-10-21）
+
+`snow-selected-text` 原先只有 `platform/{windows,macos}`，Linux 上 `SelectedTextService::new()`
+恒 `UnsupportedPlatform` ⇒ C++ 的 `SelectedTextTranslationController` 在 Linux 上永远走失败分支
+（"划词翻译"整个功能缺失）。§4.2 里这一行写的就是"AT-SPI2（D-Bus）+ PRIMARY selection，未开始"。
+
+**PRIMARY 不是剪贴板，这决定整片形态。** X11 上被选中文字的规范位置就是 PRIMARY selection：
+owner 发布、任何客户端可读。所以 Linux 路径**不注入按键、不开剪贴板、不拍快照、不需要恢复**，
+`clipboard_status` 恒 `Unchanged`，`CaptureStrategy::Clipboard` 直接报 `Unsupported`（那意味着
+往一个本进程无法校验的窗口里合成 Ctrl+C，与 Windows/macOS 的"有快照可回滚"完全不是一件事）。
+`NativeControl` 同样 `Unsupported`：X11 核心协议没有控件级文本，那需要 AT-SPI2。
+
+**方法字段不能借 stage 名凑数。** `policy::acquire` 原先直接把"哪个 stage 跑成功了"写进
+`method`，Linux 上会把 PRIMARY 报成 `Accessibility(1)` —— 一个可机读字段说了假话。新增
+`RetrievalMethod::Primary = 4` 并给 `Backend` 加 `passive_method()`（默认 `Accessibility`，
+X11 后端的 `mod.rs` 覆写）。**strategy 与 method 是两个轴**：strategy 是"要哪一段"，
+显式 `Accessibility` 在 Linux 上照样报 `Primary`，因为报的是实际用了什么。C ABI 同步加
+`SNOW_SELECTED_TEXT_PRIMARY`（纯增量；C++ 侧只读 text/error，不看 method）。
+
+**目标协商**：先问 `TARGETS`，按 `UTF8_STRING` > `text/plain;charset=utf-8` > `STRING`
+(ISO 8859-1) > `TEXT` 取；owner 拒答 `TARGETS`（`xterm` 一类）就逐个试，一次拒绝只花一个
+`ConvertSelection` 往返。**`COMPOUND_TEXT` 故意不问**：它是依赖 locale 的复合编码，没有 Xlib
+的转换器就只能自己瞎猜，猜错就是乱码 —— 只提供它的 owner 报 `Unsupported`，不吐脏数据。
+
+**本片最容易写错的一行是判据顺序。** `INCR` 公告回来时 `format` 是 **32**、值是 32 位长度估计，
+所以 `fetch_step` 里"先判 `format == 8`"会把所有大传输当场判成 `MalformedData`。纯函数把这条
+顺序固定下来，单测名字就叫 `incr_announcement_is_recognised_before_the_format_check`，反向验证
+时正是把这条判断移到最前面来制造红。
+
+**`GetProperty` 的 offset 单位是 4 字节，不是字节**，且非末尾回复可能不足一个单位 ⇒
+`next_offset` 除 4 后 `max(1)`，否则破坏性的 owner 能让读取原地打转。长度上限在
+`append_chunk` **拷贝之前**检查，伪造的 owner 无法逼出超过 `max_text_bytes` 的分配。
+
+**超时靠自己盯**：`RustConnection` 在连接时就把 socket 设成非阻塞，`poll_for_event()` 不会阻塞，
+所以 `SelectionNotify`/`PropertyNotify` 的等待是 1 ms 粒度的轮询 + deadline 判定。X server 自己的
+reply（`GetProperty` 等）走 cookie 的阻塞等待 —— 那部分只能假定 server 活着，否则任何 X 客户端
+都会卡死。
+
+**源应用识别是尽力而为，永不失败。** `_NET_ACTIVE_WINDOW` → `_NET_WM_PID`（最多向上走 3 层，
+防一些 WM 把 frame 报成活动窗口）→ `/proc/<pid>/exe`（去掉内核在二进制被就地替换后追加的
+`" (deleted)"` 后缀，自更新正好会触发）。**裸 X（无 WM）没有 `_NET_ACTIVE_WINDOW`，但 PRIMARY
+照样读得到**，所以 `capture_source()` 返回 `Ok`，字段各自降级为 None/0/空串 —— 若照 Windows 的
+写法在这里返回 `NoForegroundWindow`，等于把"能读的文字"变成"报错"。
+
+分层照铁律切：纯逻辑在 `snow-selected-text/src/selection.rs`（`cfg(any(target_os="linux", test))`，
+16 个单测在 Windows 上跑），传输在 `src/platform/linux/{selection,source}.rs`（只
+`cfg(target_os="linux")`）。依赖只加 `x11rb`（`default-features = false`，零扩展特性），
+**刻意不引 `snow-linux`** —— 这条路径只需要 xproto，而 `snow-selected-text-c` 是独立 archive，
+多引会把它的依赖面撑到 zbus/ab_glyph/ttf-parser，失去"独立 archive 只依赖纯 Rust 小集合"的意义。
+
+Wayland：`WAYLAND_DISPLAY` 有而 `DISPLAY` 空 ⇒ `UnsupportedPlatform`。PRIMARY 在 Wayland 归合成器，
+只有焦点客户端能读，本进程作为后台请求方没有合法路径。
+
+验证：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-selected-text --lib` | 33 → **50 通过**（+16 纯函数、+1 policy 映射），另有 1 个默认忽略的真机用例 |
+| `cargo test -p snow-selected-text -p snow-selected-text-c` | 50 + 6 通过 |
+| 双架构 `check`（x86_64 / aarch64） | `checked=4 failures=0` |
+| fmt + clippy `-D warnings`（host 与 linux 目标、`--all-targets`） | 绿 |
+| 反向验证 5 点 | 全红：判据顺序对调、NUL 裁尾改判空格、忽略 TARGETS 列表、passive 段自报 stage 名、长度上限失效 |
+
+反向验证脚本 `.workbuddy/uos-port/reverse-verify-primary.py` 里踩到一个值得记的坑：`copy2`
+恢复文件会带回**更旧**的 mtime，cargo 于是信任上一次变异编译出的产物，下一次跑出来的是变异结果
+而不是恢复后的结果。恢复后必须 `os.utime(path, None)`。这也说明"某次反向验证是红的"必须配合
+"恢复后确实绿"一起看，否则可能两边都在看同一份过期二进制。
+
+**本片未覆盖**：
+
+- **`platform::linux::*` 一行都没在真机跑过。** 未验证：`ConvertSelection` → `SelectionNotify`
+  往返、INCR 的 `PropertyNotify` 逐块取、真实 owner 的 `TARGETS` 应答格式、
+  `_NET_ACTIVE_WINDOW`/`_NET_WM_PID`、裸 X（无 WM）、Xwayland 下 PRIMARY 是否真通、以及
+  dde-kwin 桌面下 GTK/Qt 应用发布的主选择内容。到真机的判据：开一个编辑器选中一段中文，
+  跑 `cargo run -p snow-selected-text --example selected_text`，看拿到的字与选中一致。
+- **`TARGETS` 的 32 位列表按本机字节序解释**（`from_ne_bytes`）。X 握手声明的是客户端字节序，
+  且 x11rb-protocol 自身也只按小端解析属性，两者同源；只有 owner 用非 32 位格式写 `TARGETS` 时
+  才退化成逐个目标试（行为正确，只是多几个往返）。
+- **只有 PRIMARY，没有控件级/AT-SPI2**：`native_focus` 恒 `None`，`bounds` 恒空。想要"选中文字的
+  屏幕矩形"（翻译气泡定位用）必须走 AT-SPI2，本片不涉及。
+- **不重连**：一次抓取失败不会重建连接；X 连接整个断掉后该进程后续请求全是 `NativeApi`，
+  与 Win/macOS 的固定 worker 同构（`SelectedTextService` 的 `OnceLock` 也不重试）。
+- **C++ 侧未接线验证**：`snow_rust_ffi` 在 Linux 目标仍不能 `cargo check`（9.4.2 A 类），
+  打开 `selected-text` feature 后能不能链接只能到真机验。
+- **`snow-selected-text-c/tests` 的独立 C/C++ 消费者**没有为新常量补用例（它不读 method）。
 
 ### 9.5 打包
 

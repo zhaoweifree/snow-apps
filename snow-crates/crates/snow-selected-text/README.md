@@ -1,9 +1,9 @@
 # snow-selected-text
 
 Selected-text acquisition for translation and other explicitly invoked desktop actions. Rust 2024;
-Apache-2.0; Windows 10/11 x64 and macOS 15+ on Apple Silicon or Intel are supported. Other
-platforms compile and return `UnsupportedPlatform`. There is no translation service, global hook,
-UI, permission prompt, or network access.
+Apache-2.0; Windows 10/11 x64, macOS 15+ on Apple Silicon or Intel, and Linux on X11 are supported.
+A Wayland-only session, and every other platform, compiles and returns `UnsupportedPlatform`. There
+is no translation service, global hook, UI, permission prompt, or network access.
 
 When linked as a separate application FFI archive, enable `host-application-qos`
 and provide the C ABI `int32_t snow_application_qos_apply_current_thread(void)`.
@@ -45,6 +45,8 @@ The platform orders are:
 
 1. Windows: UI Automation `TextPattern`, standard native `EDIT`, then guarded Ctrl+C.
 2. macOS: Accessibility `AXSelectedTextRange(s)`/`AXStringForRange` and `AXSelectedText`, then guarded Command-C.
+3. Linux/X11: the PRIMARY selection, read directly. There is no fallback stage because no input
+   is ever synthesized; the result is reported as `RetrievalMethod::Primary`.
 
 The Windows Accessibility provider checks the focused element and relevant ancestors, then performs
 a bounded search for one document beneath a focused container. The native-control provider uses
@@ -75,7 +77,8 @@ Combined text joins nonempty ranges with one `\n`. Individual text is not trimme
 whitespace, CRLF and embedded NULs from accessibility/native providers are preserved. Clipboard
 text uses its first UTF-16 NUL terminator on Windows. Invalid UTF-16 is an error, never replacement
 characters. Rectangles are optional screen coordinates: physical pixels on Windows and Accessibility
-screen points on macOS. Unavailable geometry is not a text failure.
+screen points on macOS. Unavailable geometry is not a text failure; X11 reports no geometry at all,
+so a Linux result always carries zero rectangles.
 
 | Setting | Default / bound |
 | --- | --- |
@@ -99,7 +102,36 @@ requests elevation, prompts for permission, or bypasses protected content. Selec
 best-effort snapshot because neither platform provides one atomic focus/selection/clipboard
 transaction.
 
+## Linux X11 PRIMARY selection behavior
+
+On X11 the selection of the focused window is published as the PRIMARY selection, which any client
+may read. Capture is therefore passive: no keys are injected, no clipboard is opened, nothing outside
+this process changes, and `clipboard_status` is always `Unchanged`. `CaptureStrategy::Clipboard` is
+reported as `Unsupported` because it would mean synthesizing Ctrl+C into a window this crate cannot
+verify; `NativeControl` is unsupported for the same reason it is unsupported on macOS — the X11 core
+protocol has no control-level text.
+
+The reader asks the owner for `TARGETS` and then requests, in order, `UTF8_STRING`,
+`text/plain;charset=utf-8`, `STRING` (ISO 8859-1) and `TEXT`. Owners that refuse `TARGETS` are probed
+one target at a time. `COMPOUND_TEXT` is not requested: it is a locale-dependent compound encoding
+that cannot be decoded without Xlib's converter, so an owner offering only that is reported as
+`Unsupported` rather than returning mojibake. Values larger than a single property use the ICCCM
+`INCR` protocol; each chunk is appended only after the configured `max_text_bytes` budget is checked,
+so a hostile owner cannot force an allocation larger than the caller allowed. Trailing NUL padding is
+dropped, and nothing else about the text is normalized.
+
+Source identity is best effort and never a failure: `_NET_ACTIVE_WINDOW`, then `_NET_WM_PID` from that
+window or a nearby ancestor, then `/proc/<pid>/exe`. A session with no window manager has no
+`_NET_ACTIVE_WINDOW`, which leaves `native_window`/`process_id`/`executable` empty while the text is
+still returned. A Wayland-only session (`WAYLAND_DISPLAY` without `DISPLAY`) returns
+`UnsupportedPlatform`: the compositor owns the clipboard there and only a focused client can read it.
+
+The reader runs on the same fixed worker as the other platforms, with one connection opened at worker
+start. There is no reconnect: if the X connection dies, every later request returns `NativeApi` until
+the host process restarts.
+
 ## Windows clipboard behavior
+
 
 Copy is blocked for recognized console window classes and these executable basenames (case
 insensitive): WindowsTerminal, WindowsTerminalPreview, OpenConsole, conhost, powershell, pwsh,
@@ -188,7 +220,8 @@ restarting the host process. A helper-process backend is the documented future o
 recovery becomes a product requirement.
 
 Errors carry a stable kind, operation name, optional HRESULT/Win32 or macOS AX error code, and
-clipboard status.
+clipboard status. X11 failures carry no native code: the operation name identifies which request or
+wait failed.
 No error includes selection text, clipboard payloads, or window titles. Host applications should
 localize messages based on the kind; native operation names are diagnostics, not UI copy.
 
@@ -205,6 +238,8 @@ cargo fmt -p snow-selected-text -p snow-selected-text-c -- --check
 cargo clippy -p snow-selected-text -p snow-selected-text-c --all-targets -- -D warnings
 cargo check -p snow-selected-text -p snow-selected-text-c --target x86_64-pc-windows-msvc --all-targets
 cargo check -p snow-selected-text -p snow-selected-text-c --target x86_64-apple-darwin --all-targets
+cargo check -p snow-selected-text -p snow-selected-text-c --target x86_64-unknown-linux-gnu --all-targets
+cargo check -p snow-selected-text -p snow-selected-text-c --target aarch64-unknown-linux-gnu --all-targets
 ```
 
 The C wrapper has a standalone C/C++ ABI consumer in its `tests` directory. It can be linked to
@@ -220,6 +255,8 @@ either the wrapper archive or the `snow_rust_ffi` bundle without invoking text c
 | Native macOS pasteboard | Automated multi-item/type snapshot, marker, restoration, and superseding-writer tests |
 | TextEdit, Safari/Chrome/Firefox, Preview, VS Code on macOS | Manual compatibility matrix; AX and Copy behavior varies by app/version |
 | macOS secure fields / missing Accessibility permission | No bypass or prompt; capture fails before pasteboard mutation |
+| X11 target negotiation, `INCR` chunking, decoding, limits | Automated pure-function tests on every platform |
+| X11 end-to-end PRIMARY read (owner, `SelectionNotify`, `PropertyNotify`) | Not covered by any test yet; needs a live X server |
 | Remote desktops, screenshots, custom canvases | Usually unsupported without Copy; OCR is a separate host feature |
 
 Real foreground/clipboard integration tests are ignored by default, must be explicitly selected,

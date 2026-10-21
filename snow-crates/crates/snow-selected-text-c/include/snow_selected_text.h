@@ -20,11 +20,14 @@ enum {
     SNOW_SELECTED_TEXT_FAILED = 4,
     SNOW_SELECTED_TEXT_INVALID_ARGUMENT = 5
 };
-/* NATIVE_CONTROL is Windows-only in both method and strategy constants. */
+/* NATIVE_CONTROL is Windows-only in both method and strategy constants.
+   PRIMARY is Linux/X11-only and exists as a method only: it reports text read
+   from the PRIMARY selection, which never touches the clipboard. */
 enum {
     SNOW_SELECTED_TEXT_ACCESSIBILITY = 1,
     SNOW_SELECTED_TEXT_NATIVE_CONTROL = 2,
-    SNOW_SELECTED_TEXT_CLIPBOARD = 3
+    SNOW_SELECTED_TEXT_CLIPBOARD = 3,
+    SNOW_SELECTED_TEXT_PRIMARY = 4
 };
 enum {
     SNOW_SELECTED_TEXT_STRATEGY_AUTO = 0,
@@ -100,7 +103,8 @@ typedef struct SnowSelectedTextMetadata {
 } SnowSelectedTextMetadata;
 
 typedef struct SnowSelectedTextRect {
-    /* Screen coordinates: physical pixels on Windows, Accessibility points on macOS. */
+    /* Screen coordinates: physical pixels on Windows, Accessibility points on macOS.
+       X11 reports no geometry, so Linux results always carry zero rectangles. */
     double left;
     double top;
     double width;
