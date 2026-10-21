@@ -3,6 +3,7 @@
 //! All X11 traffic in the crate funnels through [`X11Session`] so that
 //! connection setup, extension probing and error translation stay in one place.
 
+pub mod damage;
 pub mod fullscreen;
 pub mod globalmouse;
 pub mod hotkey;
@@ -13,6 +14,7 @@ pub mod window;
 pub mod windowcapture;
 
 use x11rb::connection::Connection;
+use x11rb::protocol::damage as xdamage;
 use x11rb::protocol::randr;
 use x11rb::protocol::shm as xshm;
 use x11rb::protocol::xfixes;
@@ -34,6 +36,9 @@ pub struct ExtensionSupport {
     /// server-allocated segment. An older server is reported as unsupported
     /// rather than probed again, because `GetImage` is a correct answer.
     pub shm: bool,
+    /// Damage 1.1, the version that can report a region instead of raw event
+    /// rectangles. Requires XFIXES, which is where the region is delivered.
+    pub damage: bool,
 }
 
 /// An owned X11 connection plus the screen selected at connect time.
@@ -104,6 +109,14 @@ impl X11Session {
 
     pub fn screen(&self) -> &Screen {
         &self.conn.setup().roots[self.screen_num]
+    }
+
+    /// Index of the screen this session connected to.
+    ///
+    /// Needed by anything that names a per-screen selection -- the compositor's
+    /// `_NET_WM_CM_S<n>` is the one this backend asks about.
+    pub fn screen_num(&self) -> usize {
+        self.screen_num
     }
 
     pub fn root(&self) -> Window {
@@ -355,5 +368,18 @@ fn probe_extensions(conn: &RustConnection) -> ExtensionSupport {
         .and_then(|cookie| cookie.reply().ok())
         .is_some_and(|reply| reply.major_version > 1 || reply.minor_version >= 2);
 
-    ExtensionSupport { randr, xfixes, shm }
+    // Report level "non-empty" (what the capture path asks for) is Damage 1.1;
+    // 1.0 only delivers raw event rectangles, which arrive as protocol events
+    // rather than as the synchronously-fetchable region this backend reads.
+    let damage = xdamage::query_version(conn, 1, 1)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .is_some_and(|reply| reply.major_version > 1 || reply.minor_version >= 1);
+
+    ExtensionSupport {
+        randr,
+        xfixes,
+        shm,
+        damage,
+    }
 }

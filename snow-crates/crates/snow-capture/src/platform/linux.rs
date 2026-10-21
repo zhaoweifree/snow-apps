@@ -1,11 +1,18 @@
 //! X11 screen capture on the root window.
 //!
 //! One backend, one method: core `GetImage` against the root window, decoded
-//! into packed 8-bit pixels. There is no GPU path, no damage tracking and no
-//! event stream behind it, so the capturer is a thin translation between
-//! `snow-capture`'s target geometry and `snow-linux`'s X11 session -- all of the
-//! protocol work, and everything that can be wrong about pixel layout, lives in
+//! into packed 8-bit pixels. There is no GPU path and no event stream behind it,
+//! so the capturer is a thin translation between `snow-capture`'s target
+//! geometry and `snow-linux`'s X11 session -- all of the protocol work, and
+//! everything that can be wrong about pixel layout, lives in
 //! `snow-linux::capture` where it is unit-tested off-Linux.
+//!
+//! Change tracking is the exception, and it is opt-in per frame: when the caller
+//! says the buffer it passed in already holds this target's previous output,
+//! `snow-linux::damage` decides whether the frame can be skipped entirely or
+//! re-encoded partially. Both shortcuts are bounded in time, because an
+//! undetected change would otherwise freeze the recording rather than slow it
+//! down.
 //!
 //! Two consequences of "root window only" are worth stating up front, because
 //! both differ from the Windows and macOS backends:
@@ -18,18 +25,20 @@
 //!   Composite redirect, so advertising window capture here would mean
 //!   promising something the backend cannot deliver.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use snow_core::timestamp::TickFormat;
 use snow_linux::capture::OutputOrder;
+use snow_linux::damage::{Changes, DamagePolicy, Decision, decide, duplicate_hold};
 use snow_linux::display::MonitorDesc;
 use snow_linux::geometry::Rect as X11Rect;
 use snow_linux::x11::X11Session;
+use snow_linux::x11::damage::DamageTracker;
 use snow_media::time::ClockDomain;
 
 use crate::backend::{CaptureBackend, CaptureBackendKind, MonitorCapturer};
 use crate::error::{CaptureError, CaptureResult};
-use crate::frame::{CapturePixelFormat, Frame};
+use crate::frame::{CapturePixelFormat, DirtyRect, Frame};
 use crate::region::{MonitorGeometry, MonitorLayout};
 use crate::{CaptureOptions, CaptureTarget, CaptureTargetInfo, MonitorId};
 
@@ -248,6 +257,20 @@ struct X11Capturer {
     /// Extent of the previous capture, used to report a reconfiguration as a
     /// resolution change instead of handing out a differently sized frame.
     last_extent: Option<(u32, u32)>,
+    /// `None` when damage cannot be trusted here: no extension, no XFIXES, or
+    /// no compositor to make root damage cover the whole desktop. Every frame is
+    /// then read from the server, which is what this backend did before.
+    damage: Option<DamageTracker>,
+    policy: DamagePolicy,
+    /// When pixels were last read from the server. Drives the heartbeat that
+    /// bounds how long a skipped frame may last.
+    last_capture: Option<Instant>,
+    /// When a frame without dirty rectangles was last handed out. Drives the
+    /// full-frame refresh that bounds how long a bad partial frame can persist.
+    last_full: Option<Instant>,
+    /// Requested stream rate, used to pace skipped frames instead of polling the
+    /// server as fast as it answers.
+    target_fps: u32,
 }
 
 impl X11Capturer {
@@ -264,11 +287,21 @@ impl X11Capturer {
         // Resolve the target once so a monitor that has already disappeared
         // fails at construction rather than on the first frame.
         target_rect(&target, &session)?;
+        // A tracker that cannot be created only costs frames -- the capturer
+        // still reads the server every time. Turning that into a construction
+        // failure would report "screen capture unavailable" for a session whose
+        // only problem is a missing compositor or an old protocol version.
+        let damage = DamageTracker::create(&session).ok().flatten();
         Ok(Self {
             session,
             target,
             output_format: options.output_pixel_format,
             last_extent: None,
+            damage,
+            policy: DamagePolicy::default(),
+            last_capture: None,
+            last_full: None,
+            target_fps: 0,
         })
     }
 
@@ -278,14 +311,59 @@ impl X11Capturer {
             CapturePixelFormat::Rgba8 => OutputOrder::Rgba,
         }
     }
-}
 
-impl MonitorCapturer for X11Capturer {
-    fn backend_kind(&self) -> CaptureBackendKind {
-        CaptureBackendKind::X11
+    /// The part of the root window a target request actually covers.
+    ///
+    /// Damage rectangles are compared against this, so it has to be the clamped
+    /// rectangle and not the requested one.
+    fn effective_rect(&self, requested: X11Rect) -> CaptureResult<X11Rect> {
+        requested
+            .intersect(&self.session.root_rect())
+            .ok_or_else(|| {
+                CaptureError::InvalidConfig(
+                    "the target does not overlap the X11 root window".into(),
+                )
+            })
     }
 
-    fn capture(&mut self, reuse: Option<Frame>) -> CaptureResult<Frame> {
+    /// Read the accumulated change set, or `None` when tracking is off.
+    ///
+    /// A failing protocol call drops the tracker: the reasons this can fail --
+    /// the compositor restarted, the damage object was destroyed -- would
+    /// otherwise repeat a round trip that cannot succeed on every single frame.
+    fn take_changes(&mut self, area: X11Rect) -> Option<Changes> {
+        let result = self
+            .damage
+            .as_mut()
+            .map(|tracker| tracker.take(&self.session, area));
+        match result {
+            Some(Ok(changes)) => Some(changes),
+            Some(Err(_)) => {
+                self.damage = None;
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Discard accumulated damage without looking at it.
+    ///
+    /// Used by the plain `capture` path, which never skips: leaving the region
+    /// to accumulate would make the next `capture_with_history_hint` answer with
+    /// an unbounded backlog instead of this frame's change.
+    fn discard_changes(&mut self, area: X11Rect) {
+        let result = self
+            .damage
+            .as_mut()
+            .map(|tracker| tracker.take(&self.session, area));
+        if matches!(result, Some(Err(_))) {
+            self.damage = None;
+        }
+    }
+
+    /// Read the target and build a frame, optionally tagged with dirty
+    /// rectangles.
+    fn read_frame(&mut self, reuse: Option<Frame>, dirty: Vec<DirtyRect>) -> CaptureResult<Frame> {
         let requested = target_rect(&self.target, &self.session)?;
         // Read the output order first: `capture_image` borrows the session until
         // the returned image is dropped, and that image borrows the capture
@@ -301,6 +379,7 @@ impl MonitorCapturer for X11Capturer {
             // Forget the previous extent as well: the caller is about to rebuild
             // its buffers, and the next frame legitimately differs from this one.
             self.last_extent = None;
+            self.last_full = None;
             return Err(CaptureError::ResolutionChanged(width, height));
         }
         self.last_extent = Some((width, height));
@@ -311,6 +390,7 @@ impl MonitorCapturer for X11Capturer {
             .decode_into(frame.as_mut_bytes(), order)
             .map_err(map_error)?;
 
+        let now = Instant::now();
         frame.metadata = Default::default();
         frame.metadata.backend_kind = CaptureBackendKind::X11;
         // X11 hands out no capture timestamp -- `GetImage` returns pixels and
@@ -319,7 +399,7 @@ impl MonitorCapturer for X11Capturer {
         // path in `TimestampAnchor::stream_relative`, which is the only timing
         // information that actually exists here.
         frame.metadata.set_timing_with_format(
-            Some(Instant::now()),
+            Some(now),
             None,
             TickFormat::Rational {
                 timescale: 1_000_000_000,
@@ -327,7 +407,115 @@ impl MonitorCapturer for X11Capturer {
                 epoch: 0,
             },
         );
+        // Set after `prepare_for_overwrite`, which clears them.
+        frame.metadata.dirty_rects = dirty;
+        self.last_capture = Some(now);
+        if frame.metadata.dirty_rects.is_empty() {
+            self.last_full = Some(now);
+        }
         Ok(frame)
+    }
+}
+
+/// Re-label a previous frame as unchanged.
+///
+/// The pixels are deliberately left as they were: they are the previous output
+/// for this exact target, which is what a duplicate frame means.
+fn duplicate_frame(mut frame: Frame) -> Frame {
+    frame.metadata = Default::default();
+    frame.metadata.backend_kind = CaptureBackendKind::X11;
+    frame.metadata.is_duplicate = true;
+    frame.metadata.set_timing_with_format(
+        Some(Instant::now()),
+        None,
+        TickFormat::Rational {
+            timescale: 1_000_000_000,
+            domain: ClockDomain::Session,
+            epoch: 0,
+        },
+    );
+    frame
+}
+
+/// Target-local rectangle to the frame's dirty-rectangle form.
+///
+/// `localize` clips everything inside the target, so the `u32` conversion cannot
+/// fail in practice; `None` drops a rectangle rather than wrapping it into a
+/// coordinate at the far end of the buffer.
+fn dirty_rect(rect: &X11Rect) -> Option<DirtyRect> {
+    Some(DirtyRect {
+        x: u32::try_from(rect.x).ok()?,
+        y: u32::try_from(rect.y).ok()?,
+        width: rect.width,
+        height: rect.height,
+    })
+}
+
+impl MonitorCapturer for X11Capturer {
+    fn backend_kind(&self) -> CaptureBackendKind {
+        CaptureBackendKind::X11
+    }
+
+    fn capture(&mut self, reuse: Option<Frame>) -> CaptureResult<Frame> {
+        let requested = target_rect(&self.target, &self.session)?;
+        // This path is used when the caller cannot vouch for the buffer's
+        // provenance, so nothing may be skipped and nothing may be called
+        // unchanged. The change set is still consumed, to keep it describing one
+        // frame rather than every frame since the tracker was created.
+        let effective = self.effective_rect(requested)?;
+        self.discard_changes(effective);
+        self.read_frame(reuse, Vec::new())
+    }
+
+    fn capture_with_history_hint(
+        &mut self,
+        reuse: Option<Frame>,
+        destination_has_history: bool,
+    ) -> CaptureResult<Frame> {
+        let requested = target_rect(&self.target, &self.session)?;
+        let effective = self.effective_rect(requested)?;
+
+        let Some(changes) = self.take_changes(effective) else {
+            return self.read_frame(reuse, Vec::new());
+        };
+
+        let now = Instant::now();
+        let since_capture = self
+            .last_capture
+            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
+        let since_full = self
+            .last_full
+            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
+
+        match decide(&changes, since_capture, since_full, &self.policy) {
+            // Skipping needs both: a buffer the session vouches holds this
+            // target's previous output, and at least one frame of our own, since
+            // a first frame has nothing to repeat.
+            Decision::Skip
+                if destination_has_history && reuse.is_some() && self.last_extent.is_some() =>
+            {
+                let Some(frame) = reuse else {
+                    return self.read_frame(None, Vec::new());
+                };
+                // Nothing is painted, so the server answers instantly; without a
+                // pause the loop would spin as fast as it can ask. The pause is
+                // the hold a stream at this rate would have anyway.
+                std::thread::sleep(duplicate_hold(self.target_fps));
+                Ok(duplicate_frame(frame))
+            }
+            Decision::Skip | Decision::Full => self.read_frame(reuse, Vec::new()),
+            Decision::Partial(rects) => {
+                let dirty: Vec<DirtyRect> = rects.iter().filter_map(dirty_rect).collect();
+                self.read_frame(reuse, dirty)
+            }
+        }
+    }
+
+    fn set_target_fps(&mut self, fps: u32) -> CaptureResult<()> {
+        // Only used to pace skipped frames: a real capture is already as fast as
+        // the server answers, and throttling those is the session's job.
+        self.target_fps = fps;
+        Ok(())
     }
 
     fn set_output_pixel_format(&mut self, format: CapturePixelFormat) -> CaptureResult<()> {

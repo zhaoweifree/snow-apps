@@ -26,6 +26,9 @@ x11rb = { version = "0.14", default-features = false, features = [
     # MIT-SHM: `ShmGetImage` writes straight into a segment both sides map,
     # instead of shipping every pixel through the connection.
     "shm",
+    # Damage: the root window tells the recorder which areas changed, so an
+    # unchanged frame needs one round trip instead of a full read.
+    "damage",
 ] }
 # The client side of that segment. `CreateSegment` hands the client a file
 # descriptor, so mapping it is all that is left -- no System V IPC, no C.

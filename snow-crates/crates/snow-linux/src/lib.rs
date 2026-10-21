@@ -3,9 +3,9 @@
 //! The crate is deliberately layered so that most of it stays verifiable on a
 //! developer machine that is not running Linux:
 //!
-//! * [`capture`], [`fullscreen`], [`geometry`], [`globalmouse`], [`hotkey`],
-//!   [`pixels`], [`pointer`], [`text`], [`window`], [`windowcapture`] and
-//!   [`input`]'s `keys`/`tracking` modules
+//! * [`capture`], [`damage`], [`fullscreen`], [`geometry`], [`globalmouse`],
+//!   [`hotkey`], [`pixels`], [`pointer`], [`text`], [`window`], [`windowcapture`]
+//!   and [`input`]'s `keys`/`tracking` modules
 //!   are pure and compile everywhere, so their unit tests run on any host.
 //! * [`session`] only inspects environment variables and therefore compiles
 //!   everywhere too.
@@ -19,6 +19,7 @@
 //! toolchain and no target headers.
 
 pub mod capture;
+pub mod damage;
 pub mod error;
 pub mod fullscreen;
 pub mod geometry;

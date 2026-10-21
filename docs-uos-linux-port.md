@@ -307,9 +307,9 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 动作 | 路径 | 说明 |
 |---|---|---|
-| **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`window`/`pointer`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `x11`/`display`/`cursor`/`input::x11`/`x11::{window,shm,pointer}`（X11，`x11rb` 纯 Rust 实现）。待补：PipeWire/Wayland capture、evdev 退路。**音频按决策 4 不做** |
+| **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`damage`/`window`/`pointer`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `x11`/`display`/`cursor`/`input::x11`/`x11::{window,shm,damage,pointer}`（X11，`x11rb` 纯 Rust 实现）。待补：PipeWire/Wayland capture、evdev 退路。**音频按决策 4 不做** |
 | **新增** | `snow-crates/crates/snow-linux-c/`（`include/snow_linux.h`） | Rust↔C++ 平台桥：C ABI 头 + `staticlib`。**已建**（见 9.4.8）：`create`/`destroy` + 指针读写。刻意与 `snow_rust_ffi` **分成两个 archive** —— 后者经 `zstd-sys` 撞 C 源码，跨目标检查在依赖图里就断了，走不到这段 Linux-only 代码；这个 archive 只依赖纯 Rust 的 `snow-linux`，因此每次 `bash scripts/linux-cross-check.sh` 都覆盖它 |
-| **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集。待补：PipeWire + XDG portal（Wayland）、X11 Damage 脏矩形、XShm 零拷贝 |
+| **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集；XShm 零拷贝（9.4.7）；Damage 跳帧与脏矩形（9.4.19）。待补：PipeWire + XDG portal（Wayland） |
 | **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | ~~PulseAudio / PipeWire~~ **不做（决策 4）**：保持 `UnsupportedBackend`，Linux 录制无音轨 |
 | **新增** | `snow-crates/crates/snow-cursor/src/platform/linux.rs` | XFixes `GetCursorImage` + 核心 `QueryPointer`。**已完成**（含 image 缓存的瞬时失败保护，与 Windows 后端同策略） |
 | **新增** | `snow-crates/crates/snow-ui-selector/src/linux.rs` | **窗口级已落地**（见 9.4.6）：X11 窗口树 + `_NET_CLIENT_LIST`，`ElementRegionService` 在 Linux 上导出，`snow-ui-selector-c` 恢复可编译。控件级仍需 AT-SPI2（D-Bus）——未实现，`HitTestMode::UiElement` 与 `Window` 目前返回同一个窗口矩形 |
@@ -430,7 +430,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–7）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
@@ -964,7 +964,7 @@ slice 2 的 X11 采集能出画面，但每帧的像素要穿过整条连接：�
 
 - **Damage 脏矩形**：`is_duplicate` 仍恒为 false，录制器无法跳过未变化的帧。Damage 是纯协议
   （`x11rb` 的 `damage` 特性，零 C），但"根窗口的 Damage 在无 Composite 重定向时是否覆盖
-  遮挡变化"必须真机确认，属独立 slice。
+  遮挡变化"必须真机确认，属独立 slice。**—— 已由 9.4.19 落地（含合成器前置判据与心跳兜底）。**
 - **窗口采集**：仍 `BackendUnavailable`。读别的窗口像素需要 Composite 重定向，而**有合成器运行时
   重定向会被拒（BadAccess）**，届时要走合成器的截图 portal 或从根图像裁剪。这是设计决策，不是补丁。
 - **合成器的 `XCompositeNameWindowPixmap` 路径**、`XShmPutImage`（本工程不往屏幕写像素，用不到）。
@@ -1800,6 +1800,84 @@ scope"，而不是删代码（删了会打断全部 Windows 调用方）。P7 �
   （AArch64 有 CRC32 指令，属 §7.2 的 P1）、`snow_canvas_filter_*_avx2.cpp` 在 aarch64 上
   整体退化标量（属 P1/P2）。
 - **f16/HDR 全链**（见决定 4）。
+
+#### 9.4.19 P3 slice 7：X11 Damage 脏矩形（2026-10-21）
+
+9.4.7 把 X11 采集做到零拷贝（MIT-SHM），但那解决的是"每帧要拷多少"，没解决"这一帧要不要采"。
+本片之前 `is_duplicate` 恒为 false、`dirty_rects` 恒为空 ⇒ 录制时桌面完全静止，后端照样每帧
+`ShmGetImage` 一次、编码器照样全帧重编。Damage 扩展就是这两件事的答案：根窗口告诉客户端
+"自上次以来哪些区域被画过"。
+
+**决定 1：只有合成器在跑时才信这个答案。** 没有合成器时，应用窗口直接画在屏幕上，根窗口的
+Damage 只覆盖它自己的壁纸——此时"没有变化"的答案会让录制**冻结**，比慢一点糟得多。判据是
+`_NET_WM_CM_S<n>` 这个 selection 有没有 owner（该 selection 的存在意义就是"每屏只能有一个
+合成器"）。检查不通过就 `Ok(None)`，后端行为与 9.4.7 完全一致。这是**设计取舍，不是补丁**：
+宁可在无合成器的老会话上退化成"每帧都采"，也不要在那种会话上跳帧。
+
+**决定 2：两条捷径都有保质期。** Damage 漏报的途径不止一条（合成器直接把画面翻到硬件
+overlay、驱动丢报、合成器中途退出），而漏报的表现是画面卡住不动。所以：
+
+| 保证 | 默认 | 触发后 |
+|---|---|---|
+| 心跳：最久多久必须真读一次服务器 | 500 ms | 即使"没有变化"也采一帧 |
+| 全帧刷新：最久多久必须给出一帧无脏矩形的完整帧 | 2 s | 即使知道改哪儿也当全帧发 |
+
+两者的作用不同：心跳防"画面冻住"，全帧刷新防"部分编码的参考帧一路错下去"（编码器只有在
+手里有完整参考帧时才能安全地只重编局部）。它们都是 `Duration` 参数，不写死。
+
+**决定 3：合并只许变大。** `localize` 的顺序是"裁到目标 → 平移到目标本地坐标 → 合并相接的
+矩形 → 超过 16 块就标 truncated"。合并用的是**包围盒**，会连带重编两块之间没变的像素——这是
+故意的：少报一块变了的地方，屏幕上就永久留下错误；多报一块，只是多编几个块。同理
+truncated 的答案一律当全帧，因为"精确到可用的短列表"这时根本不存在。
+
+**决定 4：跳帧要调用方担保缓冲区的来历。** 只有 `capture_with_history_hint(.., true)` 并且
+`last_extent.is_some()`（已经交付过至少一帧自己的输出）时才可能返回 `is_duplicate`。普通的
+`capture()` 永不跳帧，并且会把累积的 Damage 丢掉——否则下一次带提示的调用会拿到"自创建以来
+的全部变化"这种无界积压。
+
+**决定 5：跳过的帧要睡。** 没有变化时服务器是**立即**回答的，不休的话采集循环会以几千次/
+秒的频率做 `DamageSubtract` 往返。暂停时长由 `set_target_fps` 给的目标帧率算出（未设置时
+16 ms ≈ 62 Hz，钳在 2–33 ms）。这也是为什么 `set_target_fps` 在这一片才被实现：真采集的
+节奏由会话决定，只有跳帧需要后端自己撑住时间。
+
+**决定 6：协议调用失败就丢掉 tracker，不重试。** 能失败的原因（合成器重启、damage 对象被
+销毁）都不是"下一帧会好"的类型；每帧重试等于每帧白付一次往返。丢掉之后行为回到"每帧都读"，
+并且**不会**在会话中途重建——重建的成本是一串握手，收益是不可预期的。
+
+**验证链（本机没有 X server，所以要说清楚证明了什么、没证明什么）**：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-linux --lib` | **192 通过**（9.4.18 后是 174，本片 +18 全在 `damage`） |
+| `cargo check -p {snow-linux,snow-capture} --target {x86_64,aarch64}-unknown-linux-gnu` | 双架构全绿 |
+| `cargo check -p snow-capture --lib --all-features` | 绿（P5 修过的那条不回归） |
+| `cargo fmt --check` + `cargo clippy -D warnings`（host 与 linux 目标各一遍） | 绿 |
+| 反向验证 4 点 | 心跳判据取反 ⇒ 2 failed；全帧刷新判据改成永不成立 ⇒ 1 failed；`localize` 去掉裁剪 ⇒ 2 failed；`touches` 恒 false ⇒ 3 failed |
+
+反向验证本身有个坑值得记：**`-D warnings` 会让"删掉一行"这种变异变成编译错误**（删了心跳
+分支后 `since_capture` 变成未使用变量），于是测试根本没跑、输出为空，看起来像"注入没被执行"。
+能编译的变异（取反比较符、把条件改成永假、让 `touches` 返回一个恒假但仍读参数的表达式）才是
+有效的注入方式。
+
+**本片未覆盖**：
+
+- **从未在真 X server 上跑过**。上面证明的是"几何与决策正确、双架构类型正确"，`DamageSubtract`
+  ↔ `FetchRegion` 的往返、`_NET_WM_CM_S0` 在 dde-kwin 下是否真被持有、有无合成器时根窗口
+  Damage 的实际覆盖面，全部要真机。到真机的判断方法：开一次录制，比较"静止桌面"与"拖窗口"
+  两种情况的 CPU 占用——静止时明显更低说明跳帧真的生效；接着让一个播放器全屏放视频，确认画面
+  不卡（心跳兜住了漏报）；最后 `kill` 掉合成器再录一次，画面必须照旧跟手（此时 `compositor_running`
+  的那次检查已经发生过了，兜底的是 500 ms 心跳）。**没有计数器能直接看"这一帧是跳过的还是采的"**
+  —— 这一片的可观测性只有间接证据，加计数器属下一片。
+- **多屏区域路径会丢掉脏矩形**：`capture_session` 的区域内回退路径把 `dirty_rects` 硬编码成
+  空（`capture_session.rs:1764`），所以部分编码目前只在"单个显示器整屏"这条路径上生效。
+  这是既有结构，不是本片引入；改它要同时处理 `blit.src_*` 与 `dst_*` 两套偏移。
+- **不用 Damage 事件唤醒**：现在是"每帧同步 subtract + 取区域"，靠 16 ms 轮询。改成阻塞等
+  `DamageNotify` 能把静止时 CPU 再压一个量级，但阻塞会挡住取消（会话要能随时停下），属于
+  单独一片。
+- **光标移动不是 root damage**：X 把光标叠在根窗口**之上**而不是画进去，所以纯鼠标移动的一帧
+  会被判成重复。对当前架构是对的（光标由 `snow-cursor` 单独合成），但如果将来把光标画进帧里，
+  这个判据必须一起改。
+- 真机性能数字（跳帧省下的 CPU、部分编码省下的码率）。
 
 ### 9.5 打包
 
