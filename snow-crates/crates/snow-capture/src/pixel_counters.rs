@@ -33,6 +33,10 @@ impl PixelCounters {
     }
 }
 
+// Only the readback backends that copy pixels back to the host call this, and
+// there is no such backend on Linux yet, so an `--all-features` Linux build
+// would otherwise fail on dead code.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn readback() {
     READBACKS.fetch_add(1, Ordering::Relaxed);
 }

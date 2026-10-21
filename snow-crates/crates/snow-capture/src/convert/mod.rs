@@ -6,6 +6,8 @@ mod parallel;
 #[cfg(test)]
 pub(crate) use parallel::{conversion_workers, pool_initialized};
 mod scalar;
+#[cfg(target_arch = "aarch64")]
+mod simd_neon;
 #[cfg(target_arch = "x86_64")]
 mod simd_x86;
 
@@ -2114,6 +2116,13 @@ fn select_bgra_kernel() -> PixelKernel {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if simd_neon::neon_available() {
+            return simd_neon::convert_bgra_to_rgba_neon_unchecked;
+        }
+    }
+
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
 
@@ -2130,6 +2139,13 @@ fn select_bgra_opaque_kernel() -> PixelKernel {
         }
         if std::arch::is_x86_feature_detected!("ssse3") {
             return simd_x86::convert_bgra_to_rgba_ssse3_opaque_unchecked;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if simd_neon::neon_available() {
+            return simd_neon::convert_bgra_to_rgba_neon_opaque_unchecked;
         }
     }
 
@@ -2152,6 +2168,13 @@ fn select_bgra_kernel_nt() -> PixelKernel {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if simd_neon::neon_available() {
+            return simd_neon::convert_bgra_to_rgba_neon_nt_unchecked;
+        }
+    }
+
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
 
@@ -2168,6 +2191,13 @@ fn select_bgra_opaque_kernel_nt() -> PixelKernel {
         }
         if std::arch::is_x86_feature_detected!("ssse3") {
             return simd_x86::convert_bgra_to_rgba_ssse3_nt_opaque_unchecked;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if simd_neon::neon_available() {
+            return simd_neon::convert_bgra_to_rgba_neon_nt_opaque_unchecked;
         }
     }
 
@@ -2190,6 +2220,13 @@ fn select_bgra_kernel_nt_nofence() -> PixelKernel {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if simd_neon::neon_available() {
+            return simd_neon::convert_bgra_to_rgba_neon_nt_nofence_unchecked;
+        }
+    }
+
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
 
@@ -2206,6 +2243,13 @@ fn select_bgra_opaque_kernel_nt_nofence() -> PixelKernel {
         }
         if std::arch::is_x86_feature_detected!("ssse3") {
             return simd_x86::convert_bgra_to_rgba_ssse3_nt_nofence_opaque_unchecked;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if simd_neon::neon_available() {
+            return simd_neon::convert_bgra_to_rgba_neon_nt_nofence_opaque_unchecked;
         }
     }
 
@@ -2773,6 +2817,136 @@ mod tests {
             assert_eq!(dst[idx + 1], src[idx + 1]);
             assert_eq!(dst[idx + 2], src[idx]);
             assert_eq!(dst[idx + 3], 0x2A);
+        }
+    }
+
+    /// The shared SIMD byte table must mean "swap each pixel's red and blue
+    /// byte, leave green and alpha alone".
+    ///
+    /// This is the pin for the NEON kernel: it cannot execute on an x86 host,
+    /// but it reads this same constant, so proving the constant against the
+    /// scalar per-pixel swap here proves the channel mapping of both.
+    #[test]
+    fn bgra_shuffle_table_is_a_channel_swap() {
+        use super::scalar;
+
+        assert_eq!(scalar::BGRA_TO_RGBA_SHUFFLE.len(), 16);
+
+        // Every source lane is read exactly once. A duplicated or dropped
+        // index would paint one channel twice and leave another untouched --
+        // which looks like a tint, not like a crash.
+        let mut sorted = scalar::BGRA_TO_RGBA_SHUFFLE;
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted,
+            [0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        );
+
+        // Four deliberately unrelated pixels: an index typo that happens to
+        // land on a repeated value would hide in a uniform block.
+        let block: [u8; 16] = [
+            0x10, 0x20, 0x30, 0x40, 0x01, 0x02, 0x03, 0x04, 0xAA, 0xBB, 0xCC, 0xDD, 0x7F, 0x80,
+            0x81, 0x82,
+        ];
+        let permuted = scalar::permute_bgra_block(&block);
+        for pixel in 0..4 {
+            let base = pixel * 4;
+            let source = u32::from_ne_bytes(block[base..base + 4].try_into().expect("four bytes"));
+            let expected = scalar::swap_bgra_to_rgba(source).to_ne_bytes();
+            assert_eq!(
+                &permuted[base..base + 4],
+                &expected[..],
+                "block lane {pixel} disagrees with swap_bgra_to_rgba"
+            );
+        }
+    }
+
+    /// Widths that straddle the 16-pixel main loop, the 4-pixel secondary loop
+    /// and the scalar tail of whichever kernel the host selected.
+    ///
+    /// Runs the NEON kernel on AArch64, so this is the acceptance test that
+    /// matters once the build reaches the UOS machine.
+    #[test]
+    fn selected_bgra_kernel_matches_scalar_across_tail_lengths() {
+        fn fill(pixel_count: usize) -> Vec<u8> {
+            let mut src = vec![0u8; pixel_count * 4];
+            for i in 0..pixel_count {
+                let base = i * 4;
+                src[base] = (i * 7 + 1) as u8;
+                src[base + 1] = (i * 13 + 3) as u8;
+                src[base + 2] = (i * 29 + 5) as u8;
+                src[base + 3] = (i * 17) as u8;
+            }
+            src
+        }
+
+        for pixel_count in 1..=70usize {
+            let src = fill(pixel_count);
+
+            let mut expected = vec![0u8; pixel_count * 4];
+            unsafe {
+                super::scalar::convert_bgra_to_rgba_scalar_unchecked(
+                    src.as_ptr(),
+                    expected.as_mut_ptr(),
+                    pixel_count,
+                );
+            }
+            let mut actual = vec![0u8; pixel_count * 4];
+            convert_bgra_to_rgba(&src, &mut actual, pixel_count);
+            assert_eq!(actual, expected, "pixels={pixel_count} (alpha preserved)");
+
+            let mut expected_opaque = vec![0u8; pixel_count * 4];
+            unsafe {
+                super::scalar::convert_bgra_to_rgba_scalar_opaque_unchecked(
+                    src.as_ptr(),
+                    expected_opaque.as_mut_ptr(),
+                    pixel_count,
+                );
+            }
+            let mut actual_opaque = vec![0u8; pixel_count * 4];
+            convert_bgra_to_rgba_opaque(&src, &mut actual_opaque, pixel_count);
+            assert_eq!(
+                actual_opaque, expected_opaque,
+                "pixels={pixel_count} (forced opaque alpha)"
+            );
+        }
+    }
+
+    /// The SSSE3 kernel is the x86 kernel the NEON one is shaped after (one
+    /// 16-byte table, four blocks per iteration, four-pixel secondary loop).
+    /// Comparing it directly -- rather than through dispatch, which prefers
+    /// AVX-512 -- keeps that specific shape honest.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn ssse3_kernel_matches_scalar_across_tail_lengths() {
+        if !std::arch::is_x86_feature_detected!("ssse3") {
+            return;
+        }
+        for pixel_count in 1..=70usize {
+            let mut src = vec![0u8; pixel_count * 4];
+            for i in 0..pixel_count {
+                let base = i * 4;
+                src[base] = (i * 11 + 2) as u8;
+                src[base + 1] = (i * 5 + 7) as u8;
+                src[base + 2] = (i * 23 + 13) as u8;
+                src[base + 3] = (i * 3 + 1) as u8;
+            }
+
+            let mut expected = vec![0u8; pixel_count * 4];
+            let mut actual = vec![0u8; pixel_count * 4];
+            unsafe {
+                super::scalar::convert_bgra_to_rgba_scalar_unchecked(
+                    src.as_ptr(),
+                    expected.as_mut_ptr(),
+                    pixel_count,
+                );
+                super::simd_x86::convert_bgra_to_rgba_ssse3_unchecked(
+                    src.as_ptr(),
+                    actual.as_mut_ptr(),
+                    pixel_count,
+                );
+            }
+            assert_eq!(actual, expected, "pixels={pixel_count}");
         }
     }
 

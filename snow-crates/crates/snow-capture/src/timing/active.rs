@@ -2,6 +2,7 @@
 //! feature.
 
 use std::cell::RefCell;
+#[cfg(target_os = "windows")]
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 

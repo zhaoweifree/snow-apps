@@ -1,3 +1,31 @@
+/// Byte permutation that turns four little-endian `BGRA` pixels into four
+/// little-endian `RGBA` pixels: within each pixel swap byte 0 with byte 2 and
+/// leave green and alpha where they are.
+///
+/// Every SIMD kernel in this crate is "apply this table to each 16-byte block,
+/// then optionally OR in an opaque alpha", so the table lives here once instead
+/// of being spelled out per ISA. A divergence would show up as a red/blue
+/// swapped capture that only reproduces on one architecture -- the kind of bug
+/// that costs a day on the target machine.
+pub(crate) const BGRA_TO_RGBA_SHUFFLE: [u8; 16] =
+    [2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15];
+
+/// Table-free reference for a single 16-byte block: exactly what the SIMD
+/// table lookup does, one byte at a time.
+///
+/// Tests compare this against [`swap_bgra_to_rgba`], which is what makes the
+/// shared table trustworthy for the NEON kernel that an x86 host cannot
+/// execute. Test-only on purpose: it must never end up on a hot path, because
+/// it is far slower than both the scalar and the SIMD kernels.
+#[cfg(test)]
+pub(crate) fn permute_bgra_block(block: &[u8; 16]) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    for (lane, source) in BGRA_TO_RGBA_SHUFFLE.iter().enumerate() {
+        out[lane] = block[*source as usize];
+    }
+    out
+}
+
 #[inline(always)]
 pub(crate) fn swap_bgra_to_rgba(pixel: u32) -> u32 {
     ((pixel & 0x0000_00FF) << 16)

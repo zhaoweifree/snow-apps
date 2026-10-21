@@ -400,7 +400,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 优先级 | 位置 | 说明 |
 |---|---|---|
-| P0 | `snow-capture/src/convert/simd_x86.rs` ↔ 新增 `simd_neon.rs` | 像素格式转换热路径，影响采集帧率 |
+| P0 | `snow-capture/src/convert/simd_x86.rs` ↔ 新增 `simd_neon.rs` | 像素格式转换热路径，影响采集帧率。**已完成（9.4.18）**：六个 BGRA→RGBA 入口全部有 NEON 版本，两个架构共用同一张 `BGRA_TO_RGBA_SHUFFLE`；AArch64 不提供 NT store，`_nt_*` 别名普通内核 |
 | P1 | `snow_image/src/raster.cpp:135,168`、`snow_canvas_filter_avx2.cpp` | 绘制/滤镜 |
 | P1 | `snow-stitch-images/src/{orb,region,estimator}.rs` | 滚动拼接（可先容忍标量） |
 | P2 | `snow-recording-export/src/{resize,editing}.rs` | 录制缩放 |
@@ -432,7 +432,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
-| **P5 双架构 + SIMD** | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准 |
+| **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
 
@@ -1731,6 +1731,75 @@ X11 的 window id 递下去会走进 Win32 采集路径拿一个毫无意义的�
 - **被遮挡的窗口**截出来是被遮挡的样子（决定 1 的直接后果），这不是 bug，但如果用户预期是
   "干净的单窗口截图"，只能靠 XComposite 再开一片。
 - **Wayland** 全部不适用：`onX11()` 为假 ⇒ 两张表都返回 false ⇒ 行为回到"截不到"。
+
+#### 9.4.18 P5 slice 1：NEON 像素转换内核（2026-10-21）
+
+P5 的第一项（§7.2 表里唯一的 P0）是 `snow-capture/src/convert/simd_x86.rs` 的 NEON 对应物。
+结论先说：**这不是 2000 行的移植，是 200 行**。原因是 x86 那六个 BGRA 内核的语义可以一句话
+说完——"对每个 16 字节块查一张 16 项字节表，需要时再把 alpha 位置 OR 成 0xFF"——而 AArch64
+的 `TBL`（`vqtbl1q_u8`）与 `pshufb` 是同一个操作、同一个越界约定（索引 ≥ 16 读作 0，而表里
+所有索引都在 `0..=15`）。所以 `simd_neon.rs` 与 `ssse3_bgra_core` 结构完全一致：4 块主循环、
+4 像素次级循环、标量尾巴。
+
+**决定 1：表只有一份，两个架构都读它。** `scalar::BGRA_TO_RGBA_SHUFFLE` 是唯一真值来源，
+NEON 与 SSSE3 都用 `vld1q_u8` / `_mm_loadu_si128` 加载它，**不是各自抄一份**。理由很实际：
+本机不能跑 AArch64，如果两边各写一份，颜色映射错了只会在一台机器上复现，排查成本是一天。
+
+**决定 2：AArch64 没有 NT store，`_nt_*` 直接别名普通内核。** `STNP` 只支持寄存器对
+（16 字节），且 Rust 没有对应 intrinsic；盲写没跑过的内联汇编比别名更危险。所以
+`convert_bgra_to_rgba_neon_nt_*` 三个入口都存在、都调普通内核，**写在这里而不是静默降级**，
+dispatch 表在两边形状一致，调用方不需要长 `cfg` 分支。
+
+**决定 3：没有"NEON 之下的档位"。** ARMv8-A 强制 Advanced SIMD，所以 x86 的四档
+（AVX-512/AVX2/SSSE3/标量）在 AArch64 上只有一档。`neon_available()` 保留只是为了 dispatch
+读起来与 x86 一致，它恒为真。
+
+**决定 4：f16/HDR 的 NEON 不做，因为 Linux 没有消费者。** f16→sRGB 那条路是给 DXGI HDR
+回读用的；X11 采集只有 8 位。等将来有 Wayland/HDR 采集再谈，现在写就是没有验收标准的代码。
+
+**验证链（本机不能执行 AArch64，所以链条要写清楚）**：
+
+1. `cargo check --target aarch64-unknown-linux-gnu`（默认 + `--all-features`）**PASS**；
+   `cargo build --target aarch64-unknown-linux-gnu --lib`（真做 LLVM 代码生成，53s）**PASS**
+   —— 这一条比 `check` 强得多，intrinsic 的类型/约束错误在这一步才会暴露。
+2. **读汇编**：两个 const 实例（`neon_bgra_core::<false>` / `<true>`）里各有 **6 条**
+   `tbl v?.16b, { v?.16b }, v?.16b`（4 块主循环 + 4 像素循环，与设计一致）；
+   `orr v?.4s, #255, lsl #24` **只出现在 opaque 实例**（另一个是 0 条）——说明
+   `FORCE_OPAQUE_ALPHA` 的常量折叠没有把掩码丢掉。
+3. **表字节在 aarch64 rlib 里**：按 `02 01 00 03 06 05 04 07 0a 09 08 0b 0e 0d 0c 0f`
+   二进制搜，命中。
+4. 新增 3 个本机测试：表语义 == 逐像素 `swap_bgra_to_rgba`；**ssse3 内核 == 标量**
+   （1..=70 像素，覆盖两条循环与尾巴）；**被 dispatch 选中的内核 == 标量**（同样 1..=70）。
+   最后一条就是 AArch64 上 NEON 的验收测试，一到真机自动生效。
+5. **反向验证**：把表里第 0 个像素改成恒等映射 ⇒ 上面第 1、2 条测试立刻失败。
+   记一个反直觉现象：`selected_bgra_kernel_matches_scalar` 在**本机仍然通过**，因为本机的
+   选中内核是 AVX-512，它不读这张常量表——这正是为什么要单独写一条直接打 ssse3 的测试。
+
+**顺带修掉一个真 bug**：`--all-features`（`stage-timing`）在非 Windows 上根本编译不过。
+先是 3 个错（`qpc_duration_between` / `qpc_ticks_to_duration` 只有 `#[cfg(windows)]` 定义
+却被无条件 re-export、`OnceLock` 未使用），修完又露出 6 个 dead-code 错（`StageScope` /
+`attach_stage_timings` / `stage_recording` / `pixel_counters::readback` 在 Linux 上没有调用者）。
+处置：QPC 两个 helper 的 re-export 加 `cfg(windows)`；记录器 API 用**作用域明确的**
+`#[cfg_attr(not(windows), allow(dead_code))]` + 注释说明"X11 后端只记 checkpoint，不开销
+scope"，而不是删代码（删了会打断全部 Windows 调用方）。P7 的 CI 一定会跑 `--all-features`，
+这条不通就是红。
+
+**CMake 侧不改，理由写进 `SnowSimd.cmake` 顶部**：AArch64 上 NEON 是基线，不需要
+`-march=armv8-a+simd`（加上反而把基线钉回 v8.0，丢掉 v8.2 的 dot-product/FP16）；
+真正需要开关的地方在 Rust 的 `#[target_feature(enable = "neon")]`。现存 C++ `*_avx2.cpp`
+每个 TU 都被 `#if defined(__x86_64__) || ...` 包住，aarch64 上编译成 `return false` 桩，
+调用方回落标量。
+
+**本片未覆盖**：
+
+- **NEON 从未在 ARM 上执行**：上面链条里最弱的一环就是"`TBL` 语义按 ARM ARM 推断"。
+  到真机的第一条命令是 `cargo test -p snow-capture convert::` 与 `--all-features` 各跑一遍。
+- **没有性能数字**：`snow-capture` 的 `conversion_hot_path` bench 需要真机；标量 vs NEON 的
+  差距在 X11 8 位路径上可能被 SHM 采集掩盖。
+- **C++ 侧没有 NEON 内核**：`snow_image/src/raster.cpp` 的硬件 CRC32C 仍只认 `_M_X64`
+  （AArch64 有 CRC32 指令，属 §7.2 的 P1）、`snow_canvas_filter_*_avx2.cpp` 在 aarch64 上
+  整体退化标量（属 P1/P2）。
+- **f16/HDR 全链**（见决定 4）。
 
 ### 9.5 打包
 

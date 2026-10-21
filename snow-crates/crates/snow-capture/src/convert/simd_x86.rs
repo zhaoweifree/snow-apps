@@ -4,7 +4,8 @@ use super::f16::{
     convert_f16_rgba_to_srgb_scalar_opaque_unchecked, convert_f16_rgba_to_srgb_scalar_unchecked,
 };
 use super::scalar::{
-    convert_bgra_to_rgba_scalar_opaque_unchecked, convert_bgra_to_rgba_scalar_unchecked,
+    BGRA_TO_RGBA_SHUFFLE, convert_bgra_to_rgba_scalar_opaque_unchecked,
+    convert_bgra_to_rgba_scalar_unchecked,
 };
 
 #[inline(always)]
@@ -464,11 +465,13 @@ unsafe fn ssse3_bgra_core<const FORCE_OPAQUE_ALPHA: bool>(
     fence: bool,
 ) {
     use std::arch::x86_64::{
-        __m128i, _mm_loadu_si128, _mm_or_si128, _mm_set1_epi32, _mm_setr_epi8, _mm_sfence,
-        _mm_shuffle_epi8, _mm_storeu_si128, _mm_stream_si128,
+        __m128i, _mm_loadu_si128, _mm_or_si128, _mm_set1_epi32, _mm_sfence, _mm_shuffle_epi8,
+        _mm_storeu_si128, _mm_stream_si128,
     };
 
-    let shuffle = _mm_setr_epi8(2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+    // Same table as the NEON kernel, not a copy of it: see
+    // `scalar::BGRA_TO_RGBA_SHUFFLE`.
+    let shuffle = unsafe { _mm_loadu_si128(BGRA_TO_RGBA_SHUFFLE.as_ptr().cast::<__m128i>()) };
     let alpha_mask = if FORCE_OPAQUE_ALPHA {
         Some(_mm_set1_epi32(i32::from_ne_bytes([0, 0, 0, u8::MAX])))
     } else {
