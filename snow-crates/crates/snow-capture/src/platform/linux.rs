@@ -7,6 +7,11 @@
 //! everything that can be wrong about pixel layout, lives in
 //! `snow-linux::capture` where it is unit-tested off-Linux.
 //!
+//! "One method" does not mean "one rectangle": a region capture asks the server
+//! for just the sub-rectangle it needs and decodes it straight into the
+//! caller's frame, whose row stride is wider than the rectangle. Reading the
+//! whole monitor and cropping afterwards moves the same bytes twice for nothing.
+//!
 //! Change tracking is the exception, and it is opt-in per frame: when the caller
 //! says the buffer it passed in already holds this target's previous output,
 //! `snow-linux::damage` decides whether the frame can be skipped entirely or
@@ -34,7 +39,7 @@
 use std::time::{Duration, Instant};
 
 use snow_core::timestamp::TickFormat;
-use snow_linux::capture::OutputOrder;
+use snow_linux::capture::{OutputOrder, OutputWindow, RegionBlit, region_read_rect};
 use snow_linux::damage::{Changes, DamagePolicy, Decision, decide, duplicate_hold};
 use snow_linux::display::MonitorDesc;
 use snow_linux::geometry::Rect as X11Rect;
@@ -44,7 +49,9 @@ use snow_linux::x11::X11Session;
 use snow_linux::x11::damage::DamageTracker;
 use snow_media::time::ClockDomain;
 
-use crate::backend::{CaptureBackend, CaptureBackendKind, MonitorCapturer};
+use crate::backend::{
+    CaptureBackend, CaptureBackendKind, CaptureBlitRegion, CaptureSampleMetadata, MonitorCapturer,
+};
 use crate::error::{CaptureError, CaptureResult};
 use crate::frame::{CapturePixelFormat, DirtyRect, Frame};
 use crate::region::{MonitorGeometry, MonitorLayout};
@@ -302,6 +309,15 @@ struct X11Capturer {
     /// Requested stream rate, used to pace skipped frames instead of polling the
     /// server as fast as it answers.
     target_fps: u32,
+    /// The root-window rectangle of the last region read and its extent, so a
+    /// region capture can tell "this window is unchanged" from "a different
+    /// window is unchanged".
+    ///
+    /// Separate from `last_extent` on purpose: the same capturer serves both
+    /// region reads and whole-monitor fallbacks (the fallback is what runs when
+    /// the region path declines), and a shared extent would make every such
+    /// transition look like a resolution change.
+    last_window: Option<(X11Rect, (u32, u32))>,
 }
 
 impl X11Capturer {
@@ -338,14 +354,24 @@ impl X11Capturer {
             last_capture: None,
             last_full: None,
             target_fps: 0,
+            last_window: None,
         })
     }
 
-    fn output_order(&self) -> OutputOrder {
-        match self.output_format {
+    /// Byte order for a frame this capturer is asked to fill.
+    ///
+    /// The destination decides, not `self.output_format`: a caller that
+    /// allocated its own buffer may have asked for either order, and decoding
+    /// into the wrong one produces a frame with red and blue swapped.
+    fn order_for(format: CapturePixelFormat) -> OutputOrder {
+        match format {
             CapturePixelFormat::Bgra8 => OutputOrder::Bgra,
             CapturePixelFormat::Rgba8 => OutputOrder::Rgba,
         }
+    }
+
+    fn output_order(&self) -> OutputOrder {
+        Self::order_for(self.output_format)
     }
 
     /// The part of the root window a target request actually covers.
@@ -451,6 +477,127 @@ impl X11Capturer {
         }
         Ok(frame)
     }
+
+    /// Metadata for a region capture, which has no frame of its own to carry it.
+    ///
+    /// Same clock story as [`Self::read_frame`]: X11 reports no capture
+    /// timestamp, so the observation instant is this call's own.
+    fn region_sample(
+        now: Instant,
+        is_duplicate: bool,
+        dirty: Vec<DirtyRect>,
+    ) -> CaptureSampleMetadata {
+        CaptureSampleMetadata {
+            capture_time: Some(now),
+            raw_os_ticks: None,
+            tick_format: TickFormat::Rational {
+                timescale: 1_000_000_000,
+                domain: ClockDomain::Session,
+                epoch: 0,
+            },
+            is_duplicate,
+            dirty_rects: dirty,
+        }
+    }
+
+    /// Read only the part of the target a region capture needs.
+    ///
+    /// The generic path reads the whole monitor and copies the window out of it.
+    /// For a 300x200 region on a 2560x1440 head that moves 14 MB from the server
+    /// and then 14 MB again on this side, to produce 240 KB. `GetImage` has
+    /// always accepted a sub-rectangle; what it could not do was land the reply
+    /// in a destination with a different stride, which
+    /// [`snow_linux::capture::ImageLayout::decode_window_into`] now handles.
+    ///
+    /// `Ok(None)` means "use the caller's fallback": that path is slower, not
+    /// wrong, so every condition that would make this one delicate is declined
+    /// rather than handled differently here.
+    fn read_region_into(
+        &mut self,
+        blit: CaptureBlitRegion,
+        destination: &mut Frame,
+        destination_has_history: bool,
+    ) -> CaptureResult<Option<CaptureSampleMetadata>> {
+        let base = target_rect(&self.target, &self.session)?;
+        let Some(window) = region_read_rect(
+            RegionBlit {
+                src_x: blit.src_x,
+                src_y: blit.src_y,
+                width: blit.width,
+                height: blit.height,
+                dst_x: blit.dst_x,
+                dst_y: blit.dst_y,
+            },
+            base,
+            self.session.root_rect(),
+            destination.dimensions(),
+        ) else {
+            return Ok(None);
+        };
+
+        // Ask for the change set before reading: it decides both whether the
+        // pixels are needed at all and what the caller may re-encode. The
+        // rectangles come back local to `window`, which is exactly the form a
+        // sample carries (the caller adds its own destination offset).
+        let changes = self.take_changes(window);
+        let now = Instant::now();
+        let since_capture = self
+            .last_capture
+            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
+        let since_full = self
+            .last_full
+            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
+        let decision =
+            changes.map(|changes| decide(&changes, since_capture, since_full, &self.policy));
+
+        // Skipping needs the same two guarantees as the full-frame path, plus
+        // one more: that the previous read covered *this* window at *this*
+        // extent. Without it, "nothing changed" would leave a destination that
+        // still holds a different region's pixels.
+        if destination_has_history
+            && self.last_window == Some((window, (blit.width, blit.height)))
+            && matches!(decision, Some(Decision::Skip))
+        {
+            // Nothing is read, so the server answers instantly; without a pause
+            // the caller would spin at the speed of its own loop.
+            std::thread::sleep(duplicate_hold(self.target_fps));
+            return Ok(Some(Self::region_sample(now, true, Vec::new())));
+        }
+
+        let order = Self::order_for(destination.pixel_format());
+        let (width, height) = destination.dimensions();
+        let image = self.session.capture_image(window).map_err(map_error)?;
+        if image.rect != window {
+            // `capture_image` clamps to the root window, and `window` was
+            // checked to be inside it. If those two ever disagree the reply is
+            // still a valid picture of somewhere else, so refuse rather than
+            // write it one row off.
+            return Ok(None);
+        }
+        image
+            .decode_window_into(
+                destination.as_mut_bytes(),
+                OutputWindow {
+                    width,
+                    height,
+                    x: blit.dst_x,
+                    y: blit.dst_y,
+                },
+                order,
+            )
+            .map_err(map_error)?;
+
+        let dirty: Vec<DirtyRect> = match decision {
+            Some(Decision::Partial(rects)) => rects.iter().filter_map(dirty_rect).collect(),
+            _ => Vec::new(),
+        };
+        self.last_window = Some((window, (blit.width, blit.height)));
+        self.last_capture = Some(now);
+        if dirty.is_empty() {
+            self.last_full = Some(now);
+        }
+        Ok(Some(Self::region_sample(now, false, dirty)))
+    }
 }
 
 /// Re-label a previous frame as unchanged.
@@ -545,6 +692,15 @@ impl MonitorCapturer for X11Capturer {
                 self.read_frame(reuse, dirty)
             }
         }
+    }
+
+    fn capture_region_into(
+        &mut self,
+        blit: CaptureBlitRegion,
+        destination: &mut Frame,
+        destination_has_history: bool,
+    ) -> CaptureResult<Option<CaptureSampleMetadata>> {
+        self.read_region_into(blit, destination, destination_has_history)
     }
 
     fn set_target_fps(&mut self, fps: u32) -> CaptureResult<()> {

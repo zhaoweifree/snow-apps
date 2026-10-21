@@ -345,6 +345,21 @@ impl RawImage<'_> {
         self.layout
             .decode_into(self.data.as_slice(), destination, order)
     }
+
+    /// Decode into a sub-rectangle of a larger destination.
+    ///
+    /// The rows land at the window's origin with the destination's stride, which
+    /// is how a rectangle read from the server goes straight into the frame a
+    /// caller already allocated instead of through a temporary.
+    pub fn decode_window_into(
+        &self,
+        destination: &mut [u8],
+        window: crate::capture::OutputWindow,
+        order: crate::capture::OutputOrder,
+    ) -> LinuxResult<()> {
+        self.layout
+            .decode_window_into(self.data.as_slice(), destination, window, order)
+    }
 }
 
 fn probe_extensions(conn: &RustConnection) -> ExtensionSupport {

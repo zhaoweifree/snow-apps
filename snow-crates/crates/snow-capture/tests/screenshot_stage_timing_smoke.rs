@@ -49,6 +49,9 @@ fn primary_stages(kind: CaptureBackendKind) -> &'static [&'static str] {
         ],
         CaptureBackendKind::Auto => &[],
         CaptureBackendKind::ScreenCaptureKit => &[],
+        // Not a Windows backend: this smoke test only ever observes the four
+        // above, so the X11 kind has no expectation to check here.
+        CaptureBackendKind::X11 => &[],
     }
 }
 
@@ -59,6 +62,7 @@ fn stage_prefix(kind: CaptureBackendKind) -> &'static str {
         CaptureBackendKind::Gdi => "gdi.",
         CaptureBackendKind::Auto => "",
         CaptureBackendKind::ScreenCaptureKit => "",
+        CaptureBackendKind::X11 => "x11.",
     }
 }
 

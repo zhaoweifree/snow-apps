@@ -309,7 +309,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 |---|---|---|
 | **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`damage`/`window`/`pointer`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `portal::{deadline,...}`（纯逻辑：portal 请求路径、版本门控、应答判定、流列表解析、握手顺序）+ `x11`/`display`/`cursor`/`input::x11`/`x11::{window,shm,damage,pointer}`（X11，`x11rb`）+ `portal::dbus`（session bus，`zbus`）。待补：PipeWire 帧消费、evdev 退路。**音频按决策 4 不做** |
 | **新增** | `snow-crates/crates/snow-linux-c/`（`include/snow_linux.h`） | Rust↔C++ 平台桥：C ABI 头 + `staticlib`。**已建**（见 9.4.8）：`create`/`destroy` + 指针读写。刻意与 `snow_rust_ffi` **分成两个 archive** —— 后者经 `zstd-sys` 撞 C 源码，跨目标检查在依赖图里就断了，走不到这段 Linux-only 代码；这个 archive 只依赖纯 Rust 的 `snow-linux`，因此每次 `bash scripts/linux-cross-check.sh` 都覆盖它 |
-| **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集；XShm 零拷贝（9.4.7）；Damage 跳帧与脏矩形（9.4.19）；**Wayland 会话按 `capture_plan` 明确拒绝**（9.4.20）。待补：PipeWire 帧消费（portal 会话协商已落地） |
+| **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集；XShm 零拷贝（9.4.7）；Damage 跳帧与脏矩形（9.4.19）；区域采集只读子矩形（9.4.23）；**Wayland 会话按 `capture_plan` 明确拒绝**（9.4.20）。待补：PipeWire 帧消费（portal 会话协商已落地） |
 | **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | ~~PulseAudio / PipeWire~~ **不做（决策 4）**：保持 `UnsupportedBackend`，Linux 录制无音轨 |
 | **新增** | `snow-crates/crates/snow-cursor/src/platform/linux.rs` | XFixes `GetCursorImage` + 核心 `QueryPointer`。**已完成**（含 image 缓存的瞬时失败保护，与 Windows 后端同策略） |
 | **新增** | `snow-crates/crates/snow-ui-selector/src/linux.rs` | **窗口级已落地**（见 9.4.6）：X11 窗口树 + `_NET_CLIENT_LIST`，`ElementRegionService` 在 Linux 上导出，`snow-ui-selector-c` 恢复可编译。控件级仍需 AT-SPI2（D-Bus）——未实现，`HitTestMode::UiElement` 与 `Window` 目前返回同一个窗口矩形 |
@@ -433,7 +433,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–10）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider + `snow-selected-text` X11 PRIMARY selection（9.4.22），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级与控件级文本（**音频按决策 4 不做**） |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–11）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider + `snow-selected-text` X11 PRIMARY selection（9.4.22）+ X11 区域采集只读子矩形（9.4.23），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级与控件级文本（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
@@ -663,8 +663,8 @@ SNOW_CHECK_FILTER=capture bash scripts/linux-cross-check.sh        # 只跑名�
 | 层 | 位置 | 平台 | 内容 |
 |---|---|---|---|
 | 协议 | `snow-linux/src/x11.rs` | linux | `capture_image(Rect)`：裁剪到根窗口 → `GetImage(ZPixmap, AllPlanes)` → 根 visual + 该深度的 pixmap format |
-| 解码 | `snow-linux/src/capture.rs` | **全平台** | `ImageLayout` / `ChannelMask` / `decode_into`：掩码驱动的通用解码 + 原生 BGRX 快路径；14 个单测**在 Windows 上跑** |
-| 接线 | `snow-capture/src/platform/linux.rs` | linux | `CaptureBackend`（枚举 / 主屏 / 布局 / inspect）+ `MonitorCapturer`（`capture`、`set_output_pixel_format`） |
+| 解码 | `snow-linux/src/capture.rs` | **全平台** | `ImageLayout` / `ChannelMask` / `decode_into` / `decode_window_into`：掩码驱动的通用解码 + 原生 BGRX 快路径 + 按目标 stride 写子窗口（9.4.23）；单测**在 Windows 上跑** |
+| 接线 | `snow-capture/src/platform/linux.rs` | linux | `CaptureBackend`（枚举 / 主屏 / 布局 / inspect）+ `MonitorCapturer`（`capture`、`capture_region_into`、`set_output_pixel_format`） |
 
 三个必须写下来的判断（都是跨目标类型检查逼出来的）：
 
@@ -2110,6 +2110,58 @@ Wayland：`WAYLAND_DISPLAY` 有而 `DISPLAY` 空 ⇒ `UnsupportedPlatform`。PRI
 - **C++ 侧未接线验证**：`snow_rust_ffi` 在 Linux 目标仍不能 `cargo check`（9.4.2 A 类），
   打开 `selected-text` feature 后能不能链接只能到真机验。
 - **`snow-selected-text-c/tests` 的独立 C/C++ 消费者**没有为新常量补用例（它不读 method）。
+
+#### 9.4.23 P3 slice 11：X11 区域采集只读子矩形（2026-10-21）
+
+**问题**：`snow-capture` 的区域采集走 `MonitorCapturer::capture_region_into`，Linux 后端没实现
+⇒ 落回默认的"整屏采集 + `copy_region_rgba` 裁剪"。2560x1440 的显示器上截一块 300x200 的区域，
+要服务器写 14 MB 进共享段、本地再逐行拷 14 MB，最后留下 240 KB。`GetImage` 一直支持子矩形；
+挡路的是**解码端要求目标缓冲区尺寸恰好等于图像尺寸**，所以不能直接往更大的帧里写。
+
+**三层改动**：
+
+| 层 | 文件 | 内容 |
+|---|---|---|
+| 纯逻辑 | `snow-linux/src/capture.rs` | `ImageLayout::decode_window_into`（按目标 stride 写入指定窗口）+ `region_read_rect`（blit → 根窗口矩形，或拒绝）+ `OutputWindow`/`RegionBlit` |
+| 传输 | `snow-linux/src/x11.rs` | `RawImage::decode_window_into` 转调 |
+| 后端 | `snow-capture/src/platform/linux.rs` | `capture_region_into` → `read_region_into`：只 `GetImage` 子矩形，脏矩形照旧来自 Damage |
+
+**四个关键决策**：
+
+1. **解码按下标窗口写，而不是先解到临时缓冲再逐行拷**。`decode_into` 因此退化成
+   `decode_window_into(…, OutputWindow::full(w, h), …)`，快慢两条路共用同一份行循环——否则
+   就会出现"全帧解码"和"窗口解码"两份实现，其中一份的正确性没人测。
+2. **拒绝比聪明便宜**。`region_read_rect` 对四类输入直接返回 `None`（交给既有的整屏回退：
+   它慢但不坏）：窗口不在根窗口内、窗口超出它所属的帧、目标放不下、协议字段放不下
+   （`i16` 原点 / `u16` 尺寸）。**窗口一半在屏外不在这里做平移**——那种情况下回退路径的
+   钳位语义才与 `capture_target_info` 报的矩形一致。
+3. **跳帧要三个条件，不是一个**。`destination_has_history`（调用方担保缓冲里是这一块的上一帧）
+   ∧ `last_window == (这次窗口, 这次尺寸)`（上次读的**就是这块**）∧ Damage 说 Skip。
+   缺第三条会把"另一块区域没变"当成"这块没变"，把别的区域的像素留在目标里。
+4. **区域尺寸不能用 `last_extent` 记**。同一个 capturer 实例既服务区域读、也服务整屏回退
+   （回退正是本片 `None` 时跑的那条路），共用一个 extent 会让每次切换都命中
+   `ResolutionChanged`。所以另开 `last_window: Option<(Rect, (u32, u32))>`。
+
+**顺带修掉一个已存在的红**：`tests/screenshot_stage_timing_smoke.rs` 自 `f93b1402`
+（加 `CaptureBackendKind::X11`）起**编译不过**——两处 `match` 非穷尽。它 `#![cfg(windows)]`，
+Linux CI 上编译成空 crate 所以一直没暴露，只在本机 `cargo test --all-features` 撞到。本片补上
+`X11` 分支。**注意**：能编译之后该文件里三个用例在本机是红的（`stage timings missing on
+captured frame`，DXGI/WGC/GDI 各一），与本片无关、待单独查——它们是唯一能发现"计时没挂上"
+的测试，此前一直没被跑过。
+
+**验证**：`cargo test -p snow-linux --lib` 219 → **232**（+13：窗口解码 7、区域矩形 6）；
+`snow-capture --all-features` 299 lib 用例全绿；双架构 `cargo check` 8/8 PASS；
+`fmt` + `clippy`（host 与 linux 目标、`--all-targets`、`-D warnings`）绿；反向验证 6 点全红。
+
+**本片未覆盖**：
+
+- **真机一行没跑**：`capture_region_into` 的整条路径（`GetImage` 子矩形 → 窗口解码 →
+  目标帧）只做过类型检查。判据：UOS 上框选一块区域截图，与整屏路径的同一区域逐像素比对，
+  并确认 `dirty_rects` 与整屏路径一致。
+- **`ShmGetImage` 的子矩形尺寸推导**未变（`shm_segment_size` 按请求矩形算），但"同一次会话里
+  从大矩形切到小矩形"（段只增不减）只在代码上成立，没有真机往返验证。
+- **多个区域共享一个 capturer**：`last_window` 是单槽，来回切换两块区域的 `capture_region_into`
+  会一直读（不跳帧），行为正确但没有为它专门做多槽缓存。
 
 ### 9.5 打包
 

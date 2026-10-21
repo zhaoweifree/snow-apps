@@ -16,6 +16,7 @@
 //! including the Windows workstation the port is developed on.
 
 use crate::error::{LinuxError, LinuxResult};
+use crate::geometry::Rect;
 
 /// Byte order the decoder writes for each pixel.
 ///
@@ -28,6 +29,32 @@ pub enum OutputOrder {
     Bgra,
     /// Red, green, blue, alpha.
     Rgba,
+}
+
+/// Where a decoded image belongs inside a larger frame.
+///
+/// The extent and the origin travel together because neither means anything
+/// without the other: `x` is only in range relative to `width`, and a stride
+/// mistaken for an extent writes rows at the wrong offset rather than failing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutputWindow {
+    /// The destination's width in pixels, i.e. its row stride in pixels.
+    pub width: u32,
+    pub height: u32,
+    pub x: u32,
+    pub y: u32,
+}
+
+impl OutputWindow {
+    /// The whole of a `width` x `height` destination.
+    pub const fn full(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            x: 0,
+            y: 0,
+        }
+    }
 }
 
 /// One colour channel packed into a pixel, as a shift plus a width.
@@ -208,6 +235,39 @@ impl ImageLayout {
         destination: &mut [u8],
         order: OutputOrder,
     ) -> LinuxResult<()> {
+        self.decode_window_into(
+            source,
+            destination,
+            OutputWindow::full(self.width, self.height),
+            order,
+        )
+    }
+
+    /// Decode this image into a sub-rectangle of a larger destination.
+    ///
+    /// This is what makes a region capture read only the region: the server is
+    /// asked for the sub-rectangle, and its rows land at `(x, y)` inside a
+    /// destination whose own stride is `destination_width` pixels. The
+    /// alternative -- read the whole frame, then copy the window out of it --
+    /// moves the same bytes over the connection *and* through a temporary.
+    ///
+    /// Every bound is checked here rather than left to the caller: a window
+    /// that does not fit is an error, because the alternative is either a panic
+    /// inside the row slicing or, with saturating arithmetic, rows written at
+    /// the wrong offset -- a picture that looks plausible and is shifted.
+    pub fn decode_window_into(
+        &self,
+        source: &[u8],
+        destination: &mut [u8],
+        window: OutputWindow,
+        order: OutputOrder,
+    ) -> LinuxResult<()> {
+        let OutputWindow {
+            width: destination_width,
+            height: destination_height,
+            x,
+            y,
+        } = window;
         let required = self.required_len();
         if source.len() < required {
             return Err(LinuxError::other(format!(
@@ -217,79 +277,85 @@ impl ImageLayout {
                 self.height
             )));
         }
-        let expected = self.output_len();
+        let expected = destination_width as usize * destination_height as usize * 4;
         if destination.len() != expected {
             return Err(LinuxError::other(format!(
                 "the destination holds {} bytes, {expected} are needed for {}x{}",
                 destination.len(),
-                self.width,
-                self.height
+                destination_width,
+                destination_height
             )));
         }
 
-        if self.is_native_bgrx() {
-            return self.decode_native_bgrx(source, destination, order);
+        let right = x
+            .checked_add(self.width)
+            .filter(|right| *right <= destination_width)
+            .ok_or_else(|| {
+                LinuxError::other(format!(
+                    "a {} pixel wide image does not fit at x = {x} in a {destination_width} pixel wide frame",
+                    self.width
+                ))
+            })?;
+        let bottom = y
+            .checked_add(self.height)
+            .filter(|bottom| *bottom <= destination_height)
+            .ok_or_else(|| {
+                LinuxError::other(format!(
+                    "a {} pixel tall image does not fit at y = {y} in a {destination_height} pixel tall frame",
+                    self.height
+                ))
+            })?;
+        debug_assert!(right <= destination_width && bottom <= destination_height);
+
+        let destination_stride = destination_width as usize * 4;
+        let row_bytes = self.width as usize * 4;
+        let source_stride = self.bytes_per_line as usize;
+        let native_bgrx = self.is_native_bgrx();
+
+        for row in 0..self.height as usize {
+            let start = (y as usize + row) * destination_stride + x as usize * 4;
+            let out_row = &mut destination[start..start + row_bytes];
+            let source_row = &source[row * source_stride..];
+            if native_bgrx {
+                // 32-bit `B,G,R,X` rows: copy the row as a unit and patch the
+                // alpha byte, instead of masking every pixel.
+                out_row.copy_from_slice(&source_row[..row_bytes]);
+                if order == OutputOrder::Rgba {
+                    for pixel in out_row.chunks_exact_mut(4) {
+                        pixel.swap(0, 2);
+                    }
+                }
+                // X11 leaves the padding byte undefined (commonly zero,
+                // sometimes stale), so opacity is asserted rather than
+                // forwarded.
+                for pixel in out_row.chunks_exact_mut(4) {
+                    pixel[3] = 0xff;
+                }
+            } else {
+                self.decode_generic_row(source_row, out_row, order);
+            }
         }
-        self.decode_generic(source, destination, order)
+        Ok(())
     }
 
-    /// Mask-driven reference decode, used for every layout the fast path does
+    /// Mask-driven decode of one row, used for every layout the fast path does
     /// not cover. This is the definition of "correct" for the decoder, so the
     /// tests compare the fast path's output against it.
-    fn decode_generic(
-        &self,
-        source: &[u8],
-        destination: &mut [u8],
-        order: OutputOrder,
-    ) -> LinuxResult<()> {
+    fn decode_generic_row(&self, source_row: &[u8], out_row: &mut [u8], order: OutputOrder) {
         let pixel_bytes = self.pixel_bytes();
-        let stride = self.bytes_per_line as usize;
-        for (row, out_row) in destination
-            .chunks_exact_mut(self.width as usize * 4)
-            .enumerate()
-        {
-            let source_row = &source[row * stride..];
-            for (column, pixel) in out_row.chunks_exact_mut(4).enumerate() {
-                let offset = column * pixel_bytes;
-                let raw = read_pixel(&source_row[offset..offset + pixel_bytes], self.lsb_first);
-                let (r, g, b) = (
-                    self.red.extract(raw),
-                    self.green.extract(raw),
-                    self.blue.extract(raw),
-                );
-                match order {
-                    OutputOrder::Bgra => pixel.copy_from_slice(&[b, g, r, 0xff]),
-                    OutputOrder::Rgba => pixel.copy_from_slice(&[r, g, b, 0xff]),
-                }
+        for (column, pixel) in out_row.chunks_exact_mut(4).enumerate() {
+            let offset = column * pixel_bytes;
+            let raw = read_pixel(&source_row[offset..offset + pixel_bytes], self.lsb_first);
+            let (r, g, b) = (
+                self.red.extract(raw),
+                self.green.extract(raw),
+                self.blue.extract(raw),
+            );
+            match order {
+                OutputOrder::Bgra => pixel.copy_from_slice(&[b, g, r, 0xff]),
+                OutputOrder::Rgba => pixel.copy_from_slice(&[r, g, b, 0xff]),
             }
         }
-        Ok(())
-    }
-
-    /// 32-bit `B,G,R,X` source rows, copied (and optionally reordered) as a
-    /// unit instead of pixel by pixel.
-    fn decode_native_bgrx(
-        &self,
-        source: &[u8],
-        destination: &mut [u8],
-        order: OutputOrder,
-    ) -> LinuxResult<()> {
-        let row_bytes = self.width as usize * 4;
-        let stride = self.bytes_per_line as usize;
-        for (row, out_row) in destination.chunks_exact_mut(row_bytes).enumerate() {
-            out_row.copy_from_slice(&source[row * stride..row * stride + row_bytes]);
-            if order == OutputOrder::Rgba {
-                for pixel in out_row.chunks_exact_mut(4) {
-                    pixel.swap(0, 2);
-                }
-            }
-            // X11 leaves the padding byte undefined (commonly zero, sometimes
-            // stale), so opacity is asserted rather than forwarded.
-            for pixel in out_row.chunks_exact_mut(4) {
-                pixel[3] = 0xff;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -357,6 +423,89 @@ pub fn shm_segment_size(
     let stride = bits.div_ceil(pad) * (pad / 8);
     let bytes = stride.checked_mul(u64::from(height))?;
     u32::try_from(bytes).ok()
+}
+
+/// A sub-rectangle of a frame, plus where it belongs in someone else's frame.
+///
+/// The field names mirror `snow_capture`'s blit description: `src_*` is in the
+/// captured frame's own coordinates and `dst_*` in the destination's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RegionBlit {
+    pub src_x: u32,
+    pub src_y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub dst_x: u32,
+    pub dst_y: u32,
+}
+
+/// The root-window rectangle a region capture has to read, or `None` when one
+/// sub-rectangle read cannot serve it.
+///
+/// `base` is the frame the blit is relative to (a monitor's rectangle, in root
+/// coordinates) and `root` the root window's own rectangle; `destination` is the
+/// extent of the frame the pixels are going into.
+///
+/// Every rejection here has a fallback that already works -- read the whole
+/// frame and copy the window out of it -- so this is deliberately strict rather
+/// than clever. The two rejections worth naming:
+///
+/// * A window that is not inside `root`. Monitors can be laid out past the edge
+///   of the screen; the whole-frame path clamps the request and reports what it
+///   actually read, while a sub-rectangle path would have to shift the
+///   destination to match. Declining keeps that translation out of this layer.
+/// * A window that does not fit inside `base`. That is a caller bug (the blit
+///   was computed from a different layout), and honouring it would silently mix
+///   pixels from two adjacent monitors into one frame.
+pub fn region_read_rect(
+    blit: RegionBlit,
+    base: Rect,
+    root: Rect,
+    destination: (u32, u32),
+) -> Option<Rect> {
+    if blit.width == 0 || blit.height == 0 {
+        return None;
+    }
+    let right = blit
+        .src_x
+        .checked_add(blit.width)
+        .filter(|right| *right <= base.width)?;
+    let bottom = blit
+        .src_y
+        .checked_add(blit.height)
+        .filter(|bottom| *bottom <= base.height)?;
+    debug_assert!(right <= base.width && bottom <= base.height);
+    if blit
+        .dst_x
+        .checked_add(blit.width)
+        .is_none_or(|right| right > destination.0)
+        || blit
+            .dst_y
+            .checked_add(blit.height)
+            .is_none_or(|bottom| bottom > destination.1)
+    {
+        return None;
+    }
+
+    // `GetImage` carries `i16` origins and `u16` extents; anything past that
+    // cannot be encoded, and the server would read a negative coordinate as a
+    // pixel far to the left.
+    let x = base.x.checked_add(i32::try_from(blit.src_x).ok()?)?;
+    let y = base.y.checked_add(i32::try_from(blit.src_y).ok()?)?;
+    if i16::try_from(x).is_err() || i16::try_from(y).is_err() {
+        return None;
+    }
+    if u16::try_from(blit.width).is_err() || u16::try_from(blit.height).is_err() {
+        return None;
+    }
+
+    let rect = Rect::new(x, y, blit.width, blit.height);
+    // `intersect` returning the same rectangle is the containment test: half the
+    // window outside the root is exactly the case this refuses.
+    match rect.intersect(&root) {
+        Some(clipped) if clipped == rect => Some(rect),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -604,9 +753,13 @@ mod tests {
             layout.decode_into(&source, &mut fast, order).unwrap();
 
             let mut reference = vec![0u8; layout.output_len()];
-            layout
-                .decode_generic(&source, &mut reference, order)
-                .unwrap();
+            for (row, out_row) in reference.chunks_exact_mut(WIDTH * 4).enumerate() {
+                layout.decode_generic_row(
+                    &source[row * layout.bytes_per_line as usize..],
+                    out_row,
+                    order,
+                );
+            }
 
             assert_eq!(fast, reference, "fast path diverged for {order:?}");
             // Opacity is asserted, never forwarded from the padding byte.
@@ -648,5 +801,430 @@ mod tests {
         // happily write past.
         assert_eq!(shm_segment_size(u32::MAX, u32::MAX, 32, 32), None);
         assert_eq!(shm_segment_size(65_536, 65_536, 32, 32), None);
+    }
+
+    /// A 16-bit `RGB565` root: the layout the native fast path does not cover,
+    /// so it exercises the mask-driven decoder.
+    fn rgb565_layout(width: u32, height: u32) -> ImageLayout {
+        let stride = scanline_bytes(width, 16, 32);
+        ImageLayout::new(width, height, 16, stride, true, 0xf800, 0x07e0, 0x001f)
+            .expect("RGB565 layout")
+    }
+
+    /// 32-bit little-endian `B,G,R,X` for a `0x00RRGGBB` pixel, with an
+    /// undefined (here: hostile) padding byte.
+    fn bgrx(pixel: u32, padding: u8) -> [u8; 4] {
+        [
+            (pixel & 0xff) as u8,
+            ((pixel >> 8) & 0xff) as u8,
+            ((pixel >> 16) & 0xff) as u8,
+            padding,
+        ]
+    }
+
+    /// Read one pixel out of a packed `RGBA`-ordered frame.
+    fn pixel_at(frame: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+        let start = ((y * width) + x) as usize * 4;
+        frame[start..start + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn a_window_decode_writes_only_its_own_rectangle() {
+        let layout = native_layout(2, 2);
+        // Distinct per-pixel colours, so a swapped row or column is visible.
+        let source: Vec<u8> = [
+            0x00_11_22_33u32,
+            0x00_44_55_66,
+            0x00_77_88_99,
+            0x00_aa_bb_cc,
+        ]
+        .iter()
+        .flat_map(|pixel| bgrx(*pixel, 0xee))
+        .collect();
+        let mut destination = vec![0xccu8; 4 * 4 * 4];
+
+        layout
+            .decode_window_into(
+                &source,
+                &mut destination,
+                OutputWindow {
+                    width: 4,
+                    height: 4,
+                    x: 1,
+                    y: 2,
+                },
+                OutputOrder::Bgra,
+            )
+            .unwrap();
+
+        // The window landed where it was asked to, in the destination's order.
+        assert_eq!(pixel_at(&destination, 4, 1, 2), [0x33, 0x22, 0x11, 0xff]);
+        assert_eq!(pixel_at(&destination, 4, 2, 3), [0xcc, 0xbb, 0xaa, 0xff]);
+        // Everything outside it is untouched, byte for byte.
+        for y in 0..4 {
+            for x in 0..4 {
+                if (1..3).contains(&x) && (2..4).contains(&y) {
+                    continue;
+                }
+                assert_eq!(pixel_at(&destination, 4, x, y), [0xcc; 4], "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_decode_keeps_the_destination_stride() {
+        // Three pixels of padding to the right of the window: a decoder that
+        // assumed a contiguous destination would write the second row into the
+        // tail of the first.
+        let layout = native_layout(2, 2);
+        let source: Vec<u8> = [
+            0x00_00_00_0au32,
+            0x00_00_00_0b,
+            0x00_00_00_0c,
+            0x00_00_00_0d,
+        ]
+        .iter()
+        .flat_map(|pixel| bgrx(*pixel, 0x00))
+        .collect();
+        let mut destination = vec![0xccu8; 5 * 2 * 4];
+
+        layout
+            .decode_window_into(
+                &source,
+                &mut destination,
+                OutputWindow {
+                    width: 5,
+                    height: 2,
+                    x: 3,
+                    y: 0,
+                },
+                OutputOrder::Bgra,
+            )
+            .unwrap();
+
+        assert_eq!(pixel_at(&destination, 5, 3, 0), [0x0a, 0, 0, 0xff]);
+        assert_eq!(pixel_at(&destination, 5, 4, 0), [0x0b, 0, 0, 0xff]);
+        assert_eq!(pixel_at(&destination, 5, 3, 1), [0x0c, 0, 0, 0xff]);
+        // The three leading pixels of the second row belong to nothing.
+        assert_eq!(pixel_at(&destination, 5, 2, 1), [0xcc; 4]);
+    }
+
+    #[test]
+    fn a_window_decode_at_the_origin_equals_a_whole_frame_decode() {
+        let layout = native_layout(3, 2);
+        let source: Vec<u8> = (0..6u32)
+            .flat_map(|index| bgrx(index.wrapping_mul(0x00_01_02_03), 0x5a))
+            .collect();
+        let mut whole = vec![0u8; 3 * 2 * 4];
+        let mut window = vec![0u8; 3 * 2 * 4];
+
+        layout
+            .decode_into(&source, &mut whole, OutputOrder::Rgba)
+            .unwrap();
+        layout
+            .decode_window_into(
+                &source,
+                &mut window,
+                OutputWindow {
+                    width: 3,
+                    height: 2,
+                    x: 0,
+                    y: 0,
+                },
+                OutputOrder::Rgba,
+            )
+            .unwrap();
+
+        assert_eq!(whole, window);
+    }
+
+    #[test]
+    fn a_window_that_does_not_fit_is_refused_instead_of_shifted() {
+        let layout = native_layout(2, 2);
+        let source = vec![0u8; 2 * 2 * 4];
+        let mut destination = vec![0u8; 4 * 4 * 4];
+
+        // One column past the right edge, one row past the bottom.
+        assert!(
+            layout
+                .decode_window_into(
+                    &source,
+                    &mut destination,
+                    OutputWindow {
+                        width: 4,
+                        height: 4,
+                        x: 3,
+                        y: 0
+                    },
+                    OutputOrder::Bgra
+                )
+                .is_err()
+        );
+        assert!(
+            layout
+                .decode_window_into(
+                    &source,
+                    &mut destination,
+                    OutputWindow {
+                        width: 4,
+                        height: 4,
+                        x: 0,
+                        y: 3
+                    },
+                    OutputOrder::Bgra
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_window_origin_that_would_wrap_is_refused_instead_of_panicking() {
+        let layout = native_layout(2, 2);
+        let source = vec![0u8; 2 * 2 * 4];
+        let mut destination = vec![0u8; 4 * 4 * 4];
+        // `x + width` overflows before it can be compared: the overflow has to
+        // surface as an error, not as a wrapped origin that indexes somewhere
+        // arbitrary in the destination.
+        assert!(
+            layout
+                .decode_window_into(
+                    &source,
+                    &mut destination,
+                    OutputWindow {
+                        width: 4,
+                        height: 4,
+                        x: u32::MAX,
+                        y: 0
+                    },
+                    OutputOrder::Bgra
+                )
+                .is_err()
+        );
+        assert!(
+            layout
+                .decode_window_into(
+                    &source,
+                    &mut destination,
+                    OutputWindow {
+                        width: 4,
+                        height: 4,
+                        x: 0,
+                        y: u32::MAX
+                    },
+                    OutputOrder::Bgra
+                )
+                .is_err()
+        );
+        assert_eq!(destination, vec![0u8; 4 * 4 * 4]);
+    }
+
+    #[test]
+    fn a_window_decode_of_a_narrow_layout_scales_and_orders_channels() {
+        // RGB565 forces the generic path: red at the top of the word.
+        let layout = rgb565_layout(2, 1);
+        let source: Vec<u8> = [0xf800u16, 0x07e0u16]
+            .iter()
+            .flat_map(|pixel| pixel.to_le_bytes())
+            .collect();
+        let mut destination = vec![0u8; 3 * 4];
+
+        layout
+            .decode_window_into(
+                &source,
+                &mut destination,
+                OutputWindow {
+                    width: 3,
+                    height: 1,
+                    x: 1,
+                    y: 0,
+                },
+                OutputOrder::Rgba,
+            )
+            .unwrap();
+
+        assert_eq!(pixel_at(&destination, 3, 1, 0), [255, 0, 0, 0xff]);
+        assert_eq!(pixel_at(&destination, 3, 2, 0), [0, 255, 0, 0xff]);
+        assert_eq!(pixel_at(&destination, 3, 0, 0), [0; 4]);
+    }
+
+    #[test]
+    fn a_destination_of_the_wrong_length_is_refused() {
+        let layout = native_layout(2, 2);
+        let source = vec![0u8; 2 * 2 * 4];
+        // Described as 4x4 but only holds 4x3 pixels.
+        let mut short = vec![0u8; 4 * 3 * 4];
+        assert!(
+            layout
+                .decode_window_into(
+                    &source,
+                    &mut short,
+                    OutputWindow {
+                        width: 4,
+                        height: 4,
+                        x: 0,
+                        y: 0
+                    },
+                    OutputOrder::Bgra
+                )
+                .is_err()
+        );
+        // A reply shorter than the image is refused before anything is written.
+        let mut destination = vec![0u8; 2 * 2 * 4];
+        assert!(
+            layout
+                .decode_window_into(
+                    &source[..4],
+                    &mut destination,
+                    OutputWindow {
+                        width: 2,
+                        height: 2,
+                        x: 0,
+                        y: 0
+                    },
+                    OutputOrder::Bgra
+                )
+                .is_err()
+        );
+        assert_eq!(destination, vec![0u8; 2 * 2 * 4]);
+    }
+
+    #[test]
+    fn a_region_read_translates_monitor_local_coordinates() {
+        let base = Rect::new(1920, 0, 1920, 1080);
+        let root = Rect::new(0, 0, 3840, 1080);
+        let blit = RegionBlit {
+            src_x: 10,
+            src_y: 20,
+            width: 100,
+            height: 50,
+            dst_x: 200,
+            dst_y: 300,
+        };
+        // The second monitor's window is the first monitor's rectangle shifted
+        // right by 1920 -- the read has to happen in root coordinates.
+        assert_eq!(
+            region_read_rect(blit, base, root, (400, 400)),
+            Some(Rect::new(1930, 20, 100, 50))
+        );
+    }
+
+    #[test]
+    fn a_region_read_accepts_the_whole_frame() {
+        let base = Rect::new(0, 0, 1280, 720);
+        let blit = RegionBlit {
+            src_x: 0,
+            src_y: 0,
+            width: 1280,
+            height: 720,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        assert_eq!(
+            region_read_rect(blit, base, Rect::new(0, 0, 1280, 720), (1280, 720)),
+            Some(base)
+        );
+    }
+
+    #[test]
+    fn a_region_read_refuses_a_window_that_hangs_off_the_screen() {
+        // A monitor whose left edge is outside the root, with a window that
+        // straddles the edge. The whole-frame path clamps and reports what it
+        // read, so this layer declines instead of inventing a destination shift.
+        // The window has to *overlap* the root: one entirely off-screen is
+        // already refused by the intersection being empty, which would leave
+        // the containment check untested.
+        let base = Rect::new(-50, 0, 1920, 1080);
+        let root = Rect::new(0, 0, 1920, 1080);
+        let blit = RegionBlit {
+            src_x: 0,
+            src_y: 0,
+            width: 100,
+            height: 100,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        assert_eq!(region_read_rect(blit, base, root, (200, 200)), None);
+    }
+
+    #[test]
+    fn a_region_read_refuses_a_blit_from_outside_its_frame() {
+        let base = Rect::new(0, 0, 100, 100);
+        let root = Rect::new(0, 0, 1920, 1080);
+        // One pixel wider than the monitor it claims to come from: honouring
+        // this would read a column of the neighbouring monitor.
+        let blit = RegionBlit {
+            src_x: 1,
+            src_y: 0,
+            width: 100,
+            height: 10,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        assert_eq!(region_read_rect(blit, base, root, (200, 200)), None);
+    }
+
+    #[test]
+    fn a_region_read_refuses_a_window_larger_than_its_destination() {
+        let base = Rect::new(0, 0, 1920, 1080);
+        let root = Rect::new(0, 0, 1920, 1080);
+        let blit = RegionBlit {
+            src_x: 0,
+            src_y: 0,
+            width: 100,
+            height: 100,
+            dst_x: 50,
+            dst_y: 0,
+        };
+        assert_eq!(region_read_rect(blit, base, root, (149, 100)), None);
+        assert!(region_read_rect(blit, base, root, (150, 100)).is_some());
+    }
+
+    #[test]
+    fn a_region_read_refuses_an_empty_or_unencodable_window() {
+        let base = Rect::new(0, 0, 1920, 1080);
+        let root = Rect::new(0, 0, 1920, 1080);
+        let point = |width, height| RegionBlit {
+            src_x: 0,
+            src_y: 0,
+            width,
+            height,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        // A zero-extent blit copies nothing and needs no read at all.
+        assert_eq!(region_read_rect(point(0, 10), base, root, (10, 10)), None);
+        assert_eq!(region_read_rect(point(10, 0), base, root, (10, 10)), None);
+        // `GetImage` cannot encode a 65536-pixel extent nor a negative origin.
+        let wide = Rect::new(0, 0, 70_000, 10);
+        assert_eq!(
+            region_read_rect(
+                RegionBlit {
+                    src_x: 0,
+                    src_y: 0,
+                    width: 65_536,
+                    height: 10,
+                    dst_x: 0,
+                    dst_y: 0,
+                },
+                wide,
+                Rect::new(0, 0, 70_000, 10),
+                (70_000, 10)
+            ),
+            None
+        );
+        let far = RegionBlit {
+            src_x: 10,
+            src_y: 0,
+            width: 10,
+            height: 10,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        // A frame origin near `i32::MAX` plus a source offset wraps; the answer
+        // has to be `None` rather than a rectangle on the other side of zero.
+        assert_eq!(
+            region_read_rect(far, Rect::new(i32::MAX - 5, 0, 1920, 10), root, (10, 10)),
+            None
+        );
     }
 }
