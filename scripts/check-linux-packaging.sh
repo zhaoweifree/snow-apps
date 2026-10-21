@@ -61,3 +61,10 @@ echo "=== qt5 install path resolution"
 # Runs on any host: it builds a fake multiarch layout and a fake prefix layout,
 # then asserts the resolver picks the right one for each (9.6.8).
 "$cmake_command" -P scripts/check-qt5-install-paths.cmake
+
+echo
+echo "=== cmake module self-reference scope"
+# Textual on purpose: `CMAKE_CURRENT_LIST_DIR` inside a function body resolves
+# against the *caller*, and a `cmake -P` fixture always calls at file scope, so
+# no runtime check can catch this class (9.6.10).
+"$python_command" scripts/check-cmake-list-dir-scope.py

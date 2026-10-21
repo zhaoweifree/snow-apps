@@ -42,6 +42,14 @@ endif()
 
 message(STATUS "Snow Qt shims: Qt5 detected (${Qt5_VERSION}), installing Qt6-compatible command shims.")
 
+# 与 cmake/SnowQt.cmake:26 同一个坑，只是这次踩在 function 上：
+# `CMAKE_CURRENT_LIST_DIR` 是**动态**的 —— 在函数体内它求值成「调用方」的目录，
+# 不是本文件所在目录。snow_shot 从 ant_design_qt/ 调进 _snow_qt_shim_bin_dir，
+# 于是 include("${CMAKE_CURRENT_LIST_DIR}/SnowQt5InstallPaths.cmake") 变成去找
+# ant_design_qt/SnowQt5InstallPaths.cmake（CI run 39599176029 就是这样红的）。
+# 相对本文件的路径必须在**文件作用域**求值一次后固化，函数里只引用变量。
+set(SNOW_QT5_INSTALL_PATHS_MODULE "${CMAKE_CURRENT_LIST_DIR}/SnowQt5InstallPaths.cmake")
+
 # ---------------------------------------------------------------------------
 # 解析当前 Qt 套件的 bin 目录（lupdate/lrelease/windeployqt 所在处）。
 # 结果缓存到 SNOW_QT_SHIM_BIN_DIR，避免每次重复推断。
@@ -55,7 +63,7 @@ function(_snow_qt_shim_bin_dir outvar)
     # prefix-shaped `<Qt5Core_DIR>/../../../bin` is /usr/lib/bin. The shared
     # resolver asks qmake first and accepts only a directory that really holds
     # `lrelease`; see cmake/SnowQt5InstallPaths.cmake.
-    include("${CMAKE_CURRENT_LIST_DIR}/SnowQt5InstallPaths.cmake")
+    include("${SNOW_QT5_INSTALL_PATHS_MODULE}")
     snow_qt5_tools_dir(_bin)
     set(SNOW_QT_SHIM_BIN_DIR "${_bin}" CACHE INTERNAL "Qt5 kit bin directory (shim)" FORCE)
     set(${outvar} "${_bin}" PARENT_SCOPE)

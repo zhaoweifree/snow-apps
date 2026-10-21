@@ -1,5 +1,10 @@
 include_guard(GLOBAL)
 
+# `CMAKE_CURRENT_LIST_DIR` 在函数体内求值的是**调用方**的目录，不是本文件目录。
+# snow_shot 调本函数时它指向 snow_shot/，于是 include 会去找
+# snow_shot/SnowQt5InstallPaths.cmake 并失败。路径在文件作用域固化。
+set(SNOW_QT5_INSTALL_PATHS_MODULE "${CMAKE_CURRENT_LIST_DIR}/SnowQt5InstallPaths.cmake")
+
 function(snow_shot_release_translation_catalogs target catalog_dir output_dir output_variable)
     # Qt 6 exports the directory through its own variables; Qt 5.15 exposes neither
     # `QT_INTERNAL_ABSOLUTE_TRANSLATIONS_DIR` nor `QT6_INSTALL_*`, so without the
@@ -15,7 +20,7 @@ function(snow_shot_release_translation_catalogs target catalog_dir output_dir ou
         # derivation below lands on /usr/lib/translations (which does not exist)
         # while the catalogs are in /usr/share/qt5/translations. That module asks
         # qmake first and only then tries both shapes.
-        include("${CMAKE_CURRENT_LIST_DIR}/SnowQt5InstallPaths.cmake")
+        include("${SNOW_QT5_INSTALL_PATHS_MODULE}")
         if(SNOW_QT5_TRANSLATIONS_DIR)
             set(_qt_translation_dir "${SNOW_QT5_TRANSLATIONS_DIR}")
         else()
