@@ -27,7 +27,7 @@
 | `ant_design_qt` | 中 | 中高 | **中改** | 4 个 `.mm`、`enterEvent`、`position()` |
 | `snow_shot`（主程序） | 低（平台层全缺） | 中 | **大改** | 需从零实现全部 Linux 平台后端。**已起步**：物理光标走 X11，并建立了 Rust↔C++ 平台桥（见 9.4.8） |
 | `snow_image_viewer` | 低 | **极低** | **重写或裁剪** | `QRhi*` 为 Qt6 专有公开 API |
-| Rust `snow-capture` / `snow-cursor` | 低 | — | **X11 完成，Wayland 半程** | 采集与光标走 X11（见 9.4.3），经 MIT-SHM 零拷贝读像素（见 9.4.7）、Damage 跳帧（见 9.4.19）；Wayland 侧 portal 握手已落地（见 9.4.20），**PipeWire 帧消费仍缺**，故 Wayland 会话明确拒绝采集而不是交出错图 |
+| Rust `snow-capture` / `snow-cursor` | 低 | — | **X11 完成，Wayland 半程** | 采集与光标走 X11（见 9.4.3），经 MIT-SHM 零拷贝读像素（见 9.4.7）、Damage 跳帧与多屏区域脏矩形（见 9.4.19 / 9.4.21）；Wayland 侧 portal 握手已落地（见 9.4.20），**PipeWire 帧消费仍缺**，故 Wayland 会话明确拒绝采集而不是交出错图 |
 | Rust 输入钩子 / 键帽渲染 | 低 | — | **已完成 X11 部分** | XInput2 观测（见 9.4.4）+ `ab_glyph` 光栅化（见 9.4.5）；Wayland / 无 XInput2 退路仍缺 |
 | Rust 元素拾取 | 低 | — | **已完成窗口级** | X11 窗口树 + `_NET_*`（见 9.4.6）；控件级仍需 AT-SPI2 |
 | Rust 音频 | 低（全为 `UnsupportedBackend`） | — | **范围外（决策 4）** | 不做：只在 Win/mac 提供录制音轨，Linux 上诚实上报不可用 |
@@ -433,7 +433,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–8）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级（**音频按决策 4 不做**） |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–9）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
@@ -1872,9 +1872,9 @@ truncated 的答案一律当全帧，因为"精确到可用的短列表"这时�
   不卡（心跳兜住了漏报）；最后 `kill` 掉合成器再录一次，画面必须照旧跟手（此时 `compositor_running`
   的那次检查已经发生过了，兜底的是 500 ms 心跳）。**没有计数器能直接看"这一帧是跳过的还是采的"**
   —— 这一片的可观测性只有间接证据，加计数器属下一片。
-- **多屏区域路径会丢掉脏矩形**：`capture_session` 的区域内回退路径把 `dirty_rects` 硬编码成
-  空（`capture_session.rs:1764`），所以部分编码目前只在"单个显示器整屏"这条路径上生效。
-  这是既有结构，不是本片引入；改它要同时处理 `blit.src_*` 与 `dst_*` 两套偏移。
+- ~~**多屏区域路径会丢掉脏矩形**~~：`capture_session` 的区域内回退路径把 `dirty_rects` 硬编码成
+  空，所以部分编码只在"单个显示器整屏"这条路径上生效。**已在 9.4.21 修掉**（裁剪 + 平移，
+  目标偏移仍由 `append_exact_sample_damage` 加一次）。
 - **不用 Damage 事件唤醒**：现在是"每帧同步 subtract + 取区域"，靠 16 ms 轮询。改成阻塞等
   `DamageNotify` 能把静止时 CPU 再压一个量级，但阻塞会挡住取消（会话要能随时停下），属于
   单独一片。
@@ -1970,6 +1970,60 @@ API**（`zvariant` 也被并入 `zbus::wire`，`Value` 改名 `Variant`），所
   关闭会话。这是有意的，但也意味着帧消费必须把 `PortalSession` 活着带到不需要为止。
 - **探测有代价**：Wayland 下每次创建 capturer 都会走一次属性读取（3 s 上限）。X11 会话完全不
   碰 portal——`session_plan` 里那条 `if session.is_wayland()` 就是为此。
+
+#### 9.4.21 P3 slice 9：区域内回退路径保留脏矩形（2026-10-21）
+
+9.4.19 留下的第一条明确缺口：**多屏区域采集的脏矩形被丢掉**。`capture_session` 的区域内回退
+路径（`capture_region_into` 返回 `None` 时走"整屏采集 + CPU 贴图"）把 `dirty_rects` 硬编码成
+空列表。后果是整条链上"部分编码"只在**单个显示器整屏**这一种情形生效：多屏区域录制每帧都
+报"变了，但不知道变了哪儿"，编码器退化成全帧刷新。而 X11 后端根本没有实现
+`capture_region_into`，所以**Linux 的多屏区域录制 100% 走这条回退路径** —— 这个缺口恰好落在
+最常用的场景上。
+
+**修法不是"把监视器的脏矩形直接抄过来"，而是先裁后移。** `CaptureBlitRegion` 是 1:1 的裁剪
+加放置（`src_*` 取源窗口，`dst_*` 放到输出位置，不缩放），所以每个监视器脏矩形要：裁到
+`[src_x, src_x+width) × [src_y, src_y+height)`，再减去 `src_x/src_y` 变成"相对被拷贝窗口"的
+坐标。落在窗口外的矩形**丢弃**——它描述的是这一帧输出里根本不存在的像素，报上去会让编码器
+去刷新从未变过的区域。
+
+**目标偏移只许加一次，这是本片最容易错的地方。** `append_exact_sample_damage` 在聚合时已经给
+每个矩形加过 `blit.dst_x/dst_y`（对加速路径和回退路径一视同仁，因为后端返回的脏矩形一律是
+**目标本地**坐标）。如果裁剪函数自己也加一遍，双屏右侧那块会被报成 `x=3850` 而不是 `1930`。
+第一版就是这么写的，端到端测试当场抓到（`left: 9, right: 5`）——**纯函数单测全绿而端到端红**，
+因为单测里 `dst_x` 写的是 0。这条教训比修法本身值得记：涉及两套坐标系时，单测必须让两套
+坐标系取不同值，否则等于没测。第二版专门加了 `blit_damage_leaves_the_destination_offset_to_the_caller`，
+用一个 `dst_x = 1920` 的监视器把这条不变量钉住。
+
+**空集语义必须保持原样。** 回退路径里"监视器报了重复帧"和"监视器说变了但给不出位置"是两件事：
+前者 `is_duplicate = true` 且空列表 ⇒ 这一路没有贡献；后者 `is_duplicate = false` 且空列表
+⇒ `append_exact_sample_damage` 把整个聚合清空并标记不精确 ⇒ 全帧刷新。裁剪函数对空输入返回
+空，不发明矩形，正是为了不打乱这个判据。
+
+验证：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-capture --lib` | 283 → **291 通过**（+6 纯函数、+2 端到端） |
+| `--all-features` | 299 通过（+8） |
+| 双架构 `check`（x86_64 / aarch64） | 绿 |
+| `check-rust.sh snow-capture`（fmt + clippy `-D warnings`，host 与 linux 目标） | 绿 |
+| 反向验证 3 点 | 调用点改回 `Vec::new()` ⇒ 两个端到端测试都红；裁剪换成 `max`（过度上报）⇒ 4 个纯函数测试红；目标偏移加两次 ⇒ 端到端 + 不变量测试都红 |
+
+端到端用的是"两台并排 8×8 监视器、区域横跨接缝、后端没有加速区域路径"的假后端，两台监视器
+故意把脏矩形放在不同偏移，这样两侧的目标偏移一旦搞混就必然对不上。第二个端到端用例把区域
+只放在右侧监视器上，验证左侧的脏矩形被丢掉而不是被平移进输出。
+
+**本片未覆盖**：
+
+- 仍然**没有真机**。证明的是"坐标系换算与裁剪正确 + 双架构类型正确"，不是"UOS 上多屏录制
+  码率真的降了"。到真机的判据同上：录一段双屏区域，静止时看编码器输出的帧大小是否接近 0。
+- **`capture_region_into` 仍然只有 Windows 实现**。X11 后端本可以直写输出帧（它有
+  `capture_image(rect)`，天然支持子矩形），但那是"省一次 memcpy"，与本片的"省一次全帧编码"
+  不是同一件事，属另一片。
+- **`capture_desktop_region_into` 同理**：单显示器整屏区域的那条快路径仍只有 Windows 后端实现，
+  Linux 上它返回 `None` 后落到本片修好的回退路径。
+- 脏矩形仍然**不做合并**：两个监视器各报一块，聚合里就是两块。编码器侧的合并策略不在这一层，
+  本片不替它决定。
 
 ### 9.5 打包
 

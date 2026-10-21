@@ -53,6 +53,73 @@ struct PreparedRegionPlan {
     entries: Arc<[RegionPlanEntry]>,
 }
 
+/// Clip a monitor-local damage set to the window a blit copies out of it.
+///
+/// `blit` is a 1:1 crop-and-place (see [`copy_region_rgba`]), so each rectangle
+/// only has to be clipped to the copied source window and shifted to that
+/// window's origin -- no scaling is involved. Rectangles that fall entirely
+/// outside the window are dropped: they describe monitor pixels this output
+/// frame does not contain, and reporting them would send the encoder after
+/// regions that were never updated.
+///
+/// The result is still relative to the copied window, **not** to the output
+/// frame: [`append_exact_sample_damage`] adds `blit.dst_x`/`dst_y` itself, and
+/// that offset must be applied exactly once. A backend that handles a region
+/// directly reports in the same space for the same reason.
+///
+/// The result stays empty when the input was empty, which the caller relies on:
+/// an empty set on a non-duplicate frame means "changed, but not known where",
+/// and `append_exact_sample_damage` turns that into a full-frame refresh.
+fn clip_damage_to_blit_window(
+    rects: &[DirtyRect],
+    blit: CaptureBlitRegion,
+) -> CaptureResult<Vec<DirtyRect>> {
+    if rects.is_empty() || blit.width == 0 || blit.height == 0 {
+        return Ok(Vec::new());
+    }
+
+    let src_right = blit
+        .src_x
+        .checked_add(blit.width)
+        .ok_or(CaptureError::BufferOverflow)?;
+    let src_bottom = blit
+        .src_y
+        .checked_add(blit.height)
+        .ok_or(CaptureError::BufferOverflow)?;
+
+    let mut clipped = Vec::with_capacity(rects.len());
+    for rect in rects.iter().copied() {
+        if rect.width == 0 || rect.height == 0 {
+            continue;
+        }
+        let rect_right = rect
+            .x
+            .checked_add(rect.width)
+            .ok_or(CaptureError::BufferOverflow)?;
+        let rect_bottom = rect
+            .y
+            .checked_add(rect.height)
+            .ok_or(CaptureError::BufferOverflow)?;
+
+        let left = rect.x.max(blit.src_x);
+        let top = rect.y.max(blit.src_y);
+        let right = rect_right.min(src_right);
+        let bottom = rect_bottom.min(src_bottom);
+        if left >= right || top >= bottom {
+            continue;
+        }
+
+        clipped.push(DirtyRect {
+            x: left - blit.src_x,
+            y: top - blit.src_y,
+            width: right - left,
+            height: bottom - top,
+        });
+    }
+
+    Ok(clipped)
+}
+
 fn copy_region_rgba(src: &Frame, blit: CaptureBlitRegion, dst: &mut Frame) -> CaptureResult<()> {
     if blit.width == 0 || blit.height == 0 {
         return Ok(());
@@ -1744,6 +1811,13 @@ impl CaptureSession {
                 };
 
                 copy_region_rgba(&monitor_frame, entry.blit, &mut out_frame)?;
+                // The monitor frame knows which of its own pixels changed; the
+                // output frame needs that clipped to the copied window. Dropping
+                // the set here (as this path used to) forced every multi-monitor
+                // region capture to report "changed, unknown where", so partial
+                // encoding never engaged outside the single-monitor fast path.
+                let dirty_rects =
+                    clip_damage_to_blit_window(&monitor_frame.metadata.dirty_rects, entry.blit)?;
                 let sample = CaptureSampleMetadata {
                     capture_time: monitor_frame
                         .metadata
@@ -1761,7 +1835,7 @@ impl CaptureSession {
                         .as_ref()
                         .map_or(TickFormat::RawQpc, |st| st.tick_format),
                     is_duplicate: monitor_frame.metadata.is_duplicate,
-                    dirty_rects: Vec::new(),
+                    dirty_rects,
                 };
                 self.region_runtime_mut()
                     .fallback_frames
@@ -1927,6 +2001,219 @@ mod tests {
 
         append_exact_sample_damage(&mut aggregate, &mut exact_damage, &exact, 0, 0).unwrap();
         assert!(aggregate.is_empty());
+    }
+
+    #[test]
+    fn blit_damage_moves_from_monitor_space_into_window_space() {
+        // A cropped blit: monitor pixels from (100, 50) are the window origin.
+        let blit = CaptureBlitRegion {
+            src_x: 100,
+            src_y: 50,
+            width: 800,
+            height: 600,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        let clipped = clip_damage_to_blit_window(
+            &[DirtyRect {
+                x: 150,
+                y: 80,
+                width: 10,
+                height: 20,
+            }],
+            blit,
+        )
+        .unwrap();
+        assert_eq!(
+            clipped,
+            vec![DirtyRect {
+                x: 50,
+                y: 30,
+                width: 10,
+                height: 20,
+            }]
+        );
+    }
+
+    #[test]
+    fn blit_damage_leaves_the_destination_offset_to_the_caller() {
+        // `append_exact_sample_damage` adds `dst_x`/`dst_y` once for both the
+        // accelerated and the blit path. Applying it here as well would double
+        // the offset -- a change at (10, 20) on the right-hand display of a pair
+        // would be reported at 3850 instead of 1930.
+        let blit = CaptureBlitRegion {
+            src_x: 0,
+            src_y: 0,
+            width: 1920,
+            height: 1080,
+            dst_x: 1920,
+            dst_y: 0,
+        };
+        let clipped = clip_damage_to_blit_window(
+            &[DirtyRect {
+                x: 10,
+                y: 20,
+                width: 30,
+                height: 40,
+            }],
+            blit,
+        )
+        .unwrap();
+        assert_eq!(
+            clipped,
+            vec![DirtyRect {
+                x: 10,
+                y: 20,
+                width: 30,
+                height: 40,
+            }]
+        );
+    }
+
+    #[test]
+    fn blit_damage_is_clipped_to_the_copied_window() {
+        let blit = CaptureBlitRegion {
+            src_x: 100,
+            src_y: 100,
+            width: 200,
+            height: 200,
+            dst_x: 5,
+            dst_y: 7,
+        };
+        let clipped = clip_damage_to_blit_window(
+            &[
+                // Straddles the right edge: keep the covered half.
+                DirtyRect {
+                    x: 280,
+                    y: 150,
+                    width: 40,
+                    height: 10,
+                },
+                // Straddles the top-left corner.
+                DirtyRect {
+                    x: 90,
+                    y: 90,
+                    width: 20,
+                    height: 20,
+                },
+            ],
+            blit,
+        )
+        .unwrap();
+        assert_eq!(
+            clipped,
+            vec![
+                DirtyRect {
+                    x: 180,
+                    y: 50,
+                    width: 20,
+                    height: 10,
+                },
+                DirtyRect {
+                    x: 0,
+                    y: 0,
+                    width: 10,
+                    height: 10,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn blit_damage_outside_the_copied_window_is_dropped() {
+        // A change on a part of the monitor the region does not cover. Reporting
+        // it would point the encoder at output pixels that never moved.
+        let blit = CaptureBlitRegion {
+            src_x: 0,
+            src_y: 0,
+            width: 100,
+            height: 100,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        let clipped = clip_damage_to_blit_window(
+            &[
+                DirtyRect {
+                    x: 200,
+                    y: 200,
+                    width: 10,
+                    height: 10,
+                },
+                // Touching but not overlapping: a half-open range excludes it.
+                DirtyRect {
+                    x: 100,
+                    y: 0,
+                    width: 10,
+                    height: 10,
+                },
+                // Degenerate rectangles carry no pixels.
+                DirtyRect {
+                    x: 10,
+                    y: 10,
+                    width: 0,
+                    height: 5,
+                },
+            ],
+            blit,
+        )
+        .unwrap();
+        assert!(clipped.is_empty());
+    }
+
+    #[test]
+    fn blit_damage_of_an_empty_source_stays_empty() {
+        // The differentiation between "nothing changed" and "changed, unknown
+        // where" lives in `append_exact_sample_damage`, which reads the same
+        // empty list either way -- so this function must not invent rectangles.
+        let blit = CaptureBlitRegion {
+            src_x: 0,
+            src_y: 0,
+            width: 640,
+            height: 480,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        assert!(clip_damage_to_blit_window(&[], blit).unwrap().is_empty());
+        let empty_blit = CaptureBlitRegion {
+            width: 0,
+            height: 0,
+            ..blit
+        };
+        assert!(
+            clip_damage_to_blit_window(
+                &[DirtyRect {
+                    x: 0,
+                    y: 0,
+                    width: 4,
+                    height: 4,
+                }],
+                empty_blit
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn blit_damage_rejects_rectangles_that_wrap() {
+        let blit = CaptureBlitRegion {
+            src_x: 0,
+            src_y: 0,
+            width: 10,
+            height: 10,
+            dst_x: 0,
+            dst_y: 0,
+        };
+        let result = clip_damage_to_blit_window(
+            &[DirtyRect {
+                x: u32::MAX,
+                y: 0,
+                width: 2,
+                height: 2,
+            }],
+            blit,
+        );
+        assert!(matches!(result, Err(CaptureError::BufferOverflow)));
     }
 
     struct MockBackend {
@@ -3496,6 +3783,187 @@ mod tests {
 
         assert_eq!(*desktop_calls.lock().unwrap(), 1);
         assert_eq!(*region_calls.lock().unwrap(), 1);
+        Ok(())
+    }
+
+    /// Two monitors side by side, with a backend that has no accelerated region
+    /// path, so every monitor goes through "full capture plus CPU blit".
+    struct SplitRegionBackend {
+        left: MonitorId,
+        right: MonitorId,
+    }
+
+    struct SplitRegionCapturer {
+        left: bool,
+    }
+
+    impl MonitorCapturer for SplitRegionCapturer {
+        fn capture(&mut self, reuse: Option<Frame>) -> CaptureResult<Frame> {
+            let mut frame = reuse.unwrap_or_else(Frame::empty);
+            frame.prepare_for_overwrite(8, 8, CapturePixelFormat::Rgba8)?;
+            frame.metadata = Default::default();
+            // Monitor-local damage, one rectangle per monitor, deliberately at
+            // different offsets so a mixed-up translation cannot pass.
+            frame.metadata.dirty_rects = if self.left {
+                vec![DirtyRect {
+                    x: 5,
+                    y: 1,
+                    width: 2,
+                    height: 2,
+                }]
+            } else {
+                vec![DirtyRect {
+                    x: 1,
+                    y: 2,
+                    width: 2,
+                    height: 2,
+                }]
+            };
+            Ok(frame)
+        }
+    }
+
+    impl CaptureBackend for SplitRegionBackend {
+        fn enumerate_monitors(&self) -> CaptureResult<Vec<MonitorId>> {
+            Ok(vec![self.left.clone(), self.right.clone()])
+        }
+
+        fn monitor_layout(&self) -> CaptureResult<MonitorLayout> {
+            Ok(MonitorLayout {
+                monitors: vec![
+                    crate::region::MonitorGeometry {
+                        monitor: self.left.clone(),
+                        x: 0,
+                        y: 0,
+                        width: 8,
+                        height: 8,
+                    },
+                    crate::region::MonitorGeometry {
+                        monitor: self.right.clone(),
+                        x: 8,
+                        y: 0,
+                        width: 8,
+                        height: 8,
+                    },
+                ],
+                virtual_left: 0,
+                virtual_top: 0,
+                virtual_width: 16,
+                virtual_height: 8,
+            })
+        }
+
+        fn primary_monitor(&self) -> CaptureResult<MonitorId> {
+            Ok(self.left.clone())
+        }
+
+        fn create_monitor_capturer(
+            &self,
+            monitor: &MonitorId,
+        ) -> CaptureResult<Box<dyn MonitorCapturer>> {
+            Ok(Box::new(SplitRegionCapturer {
+                left: monitor == &self.left,
+            }))
+        }
+    }
+
+    #[test]
+    fn region_capture_keeps_damage_across_the_monitor_seam() -> CaptureResult<()> {
+        // Region x = 4..12 straddles the seam at x = 8: the left half is a crop
+        // of the left monitor placed at 0, the right half a crop of the right
+        // monitor placed at 4. Damage reported by each monitor has to be shifted
+        // by its own destination offset, which is where the two halves differ.
+        let backend: Arc<dyn CaptureBackend> = Arc::new(SplitRegionBackend {
+            left: MonitorId::from_parts(1, 2, 0, "left", true),
+            right: MonitorId::from_parts(1, 3, 0, "right", false),
+        });
+        let mut session = CaptureSession::builder()
+            .target(CaptureTarget::Region(CaptureRegion::new(4, 0, 8, 8)?))
+            .with_backend(backend)
+            .build()?;
+
+        let frame = session.capture()?;
+
+        let mut dirty = frame.metadata.dirty_rects.clone();
+        dirty.sort_by_key(|rect| (rect.y, rect.x));
+        assert_eq!(
+            dirty,
+            vec![
+                // Left monitor: (5, 1) minus src_x 4, plus dst 0.
+                DirtyRect {
+                    x: 1,
+                    y: 1,
+                    width: 2,
+                    height: 2,
+                },
+                // Right monitor: (1, 2) minus src_x 0, plus dst 4.
+                DirtyRect {
+                    x: 5,
+                    y: 2,
+                    width: 2,
+                    height: 2,
+                },
+            ],
+            "damage from both monitors must survive the blit into output space"
+        );
+        assert!(!frame.metadata.is_duplicate);
+        Ok(())
+    }
+
+    #[test]
+    fn region_capture_drops_damage_for_monitor_area_it_does_not_copy() -> CaptureResult<()> {
+        // Same two-monitor backend, but the region only covers the right
+        // monitor. The left monitor's damage describes pixels that this output
+        // frame does not contain, so reporting it would point the encoder at
+        // output regions that were never touched.
+        struct RightOnlyBackend {
+            inner: SplitRegionBackend,
+        }
+
+        impl CaptureBackend for RightOnlyBackend {
+            fn enumerate_monitors(&self) -> CaptureResult<Vec<MonitorId>> {
+                self.inner.enumerate_monitors()
+            }
+
+            fn monitor_layout(&self) -> CaptureResult<MonitorLayout> {
+                self.inner.monitor_layout()
+            }
+
+            fn primary_monitor(&self) -> CaptureResult<MonitorId> {
+                self.inner.primary_monitor()
+            }
+
+            fn create_monitor_capturer(
+                &self,
+                monitor: &MonitorId,
+            ) -> CaptureResult<Box<dyn MonitorCapturer>> {
+                self.inner.create_monitor_capturer(monitor)
+            }
+        }
+
+        let backend: Arc<dyn CaptureBackend> = Arc::new(RightOnlyBackend {
+            inner: SplitRegionBackend {
+                left: MonitorId::from_parts(1, 2, 0, "left", true),
+                right: MonitorId::from_parts(1, 3, 0, "right", false),
+            },
+        });
+        let mut session = CaptureSession::builder()
+            .target(CaptureTarget::Region(CaptureRegion::new(8, 0, 8, 8)?))
+            .with_backend(backend)
+            .build()?;
+
+        let frame = session.capture()?;
+
+        assert_eq!(
+            frame.metadata.dirty_rects,
+            vec![DirtyRect {
+                x: 1,
+                y: 2,
+                width: 2,
+                height: 2,
+            }],
+            "only the right monitor contributes pixels to this region"
+        );
         Ok(())
     }
 
