@@ -437,7 +437,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**剩余**：workflow 从未在 GitHub 上跑过（首轮必红，按红改）、AppImage 进 CI、Wayland（PipeWire/portal）全部未做 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**剩余**：workflow 从未跑过 —— 且 **远程是 Gitee，GitHub Actions 不会触发**（9.6.7，需先定镜像 / 自建 runner）、AppImage 进 CI、PipeWire 帧消费 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -2276,6 +2276,28 @@ checkout 里解析到、`windows-qt5-full` configure 仍然 EXIT=0。以下没�
 - `ubuntu-24.04-arm` runner 在私有仓库/免费额度下是否可用。
 
 **下一步**：把这个 workflow 推上去跑一次，按红的地方改。红是预期输出，不是失败。
+
+#### 9.6.7 一个必须先解决的硬事实：仓库在 Gitee，不在 GitHub（2026-10-21 发现）
+
+`git remote -v` 只有一个 `origin`：`https://gitee.com/zhaoweifree/snow-apps.git`。GitHub Actions
+的 workflow 文件放在 `.github/workflows/` 下，推到 Gitee **一行都不会执行** —— 它既不会被解析，
+也不会报错，页面上什么都没有。9.6.1–9.6.6 描述的一切仍然成立，但"推上去跑一次"这个动作在
+当前远程上不存在。
+
+三条出路，成本与收益完全不同：
+
+| 方案 | 代价 | 换到什么 |
+|---|---|---|
+| 镜像到 GitHub，在那里跑 Actions | 一个 mirror remote + 凭据；仓库若含大文件需注意 LFS/配额 | 9.6 的 workflow **原样可用**，含 `ubuntu-24.04-arm`（公开仓库免费） |
+| 自建 runner（一台 amd64 + 一台 UOS/SBC arm64），Gitee 侧只做触发 | 一台常开机器 + 环境维护；arm64 那台顺便能当日用机真机验证 | 不依赖任何第三方 CI，且 arm64 上是**真 UOS**，比 GitHub 的 ubuntu-arm 更接近交付目标 |
+| Gitee Go / 其它国内流水线 | 重写 workflow（YAML 方言不同），`gates` 那套断言可复用但 job 语法要重打 | 不需要外部账号 |
+
+**推荐第二条的后半句**：9.4.4 / 9.4.19 / 9.4.20 三片累积下来的"从未在真机跑过"清单（XInput2
+投递、Damage 覆盖面、portal 握手、NEON 执行）本来就是一台 UOS arm64 机器一次性可以清掉的东西，
+CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates` 也有独立价值：它能证明
+`cargo test --all-features` 与 118 项打包门禁在 Linux 上真的过。
+
+这一条不改变 9.4.20 的结论，但改变它的验证顺序：**portal 的第一处真实信号，不会来自 CI**。
 
 
 ---
