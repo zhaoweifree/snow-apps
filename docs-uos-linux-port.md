@@ -2850,6 +2850,41 @@ export PATH="$HOME/.local/cmake/bin:$PATH"
 Linux 侧怎么补这一批（vcpkg / 固定版本本地编 / 砍掉可选编解码器），是 §9.2「Linux 不用 vcpkg」这条
 决策的第一次真正压力测试，**留给下一片**，见 9.6.9。
 
+#### 9.6.9 决定：Linux 侧第三方库「固定版本本地编」，不进 vcpkg（2026-10-21）
+
+| 方案 | 代价 | 结论 |
+|---|---|---|
+| Linux 也用 vcpkg | 复用现成 overlay ports，版本与 Windows 同源；但要在两种架构上各编 ~15 个库（ffmpeg / opencv / jxl / heif / onnxruntime），小时级；且本机已实测 vcpkg 驱动会随机挂死子进程 | **不选** |
+| 放宽 PNG 门槛 | 删 `compression_backend.cpp` 的 `#error` 与 `core_tests` 的版本断言，Linux 用经典 zlib | **不选**：这是一条产品保证（`THIRD_PARTY_NOTICES` 里就写着随包发布 zlib-ng），不是构建细节 |
+| **固定版本本地编** | 多一个 `scripts/build-linux-deps.sh` + 一张版本表 | **选中** |
+
+`scripts/build-linux-deps.sh` 的四条设计：
+
+1. **版本只有一个真源**。`zlib` 的版本从 `cmake/vcpkg-overlay-ports/zlib/vcpkg.json` 读、校验和从
+   同目录 `portfile.cmake` 的 `SHA512` 读 —— 改 port 就同时改了 Linux。实测在 Windows 上下载的
+   `zlib-ng-2.3.3.tar.gz`，sha512 **与 portfile 里的值逐字节相同**，所以"两边是同一个包"是验证过的，
+   不是假设。没有 overlay port 的（`libjpeg-turbo 3.1.0`）pin 写在脚本里，带校验和。
+2. **CMake 选项照抄 portfile**，包括 `WITH_NATIVE_INSTRUCTIONS=OFF`：port 关掉 `-march=native`，
+   否则在 CI runner 上编出来的库拿到客户机上跑会 `SIGILL`。
+3. **判据是产品要求本身**，不是"命令返回 0"：装完必须 `grep ZLIBNG_VERSION include/zlib.h` 命中；
+   `libjpeg-turbo` 必须真的落下 `libjpeg-turboConfig.cmake`（`find_package(... CONFIG REQUIRED)`
+   读的就是它）。
+4. **用系统 cmake 编这两个库**（`CMAKE=` 可覆盖）。它们的 `cmake_minimum_required` 早于 3.5，
+   CMake 4 会直接拒绝 —— 所以 workflow 里这一步排在"装 CMake 4.2"**之前**：需要 4.2 的是仓库自己的
+   configure（9.6.8），不是这两个第三方项目。
+
+离线 / 内网：把 tarball 放进 `<prefix>/src` 或指向 `SNOW_LINUX_DEPS_SRC`，脚本不再联网。
+
+**这一片没解决的问题**：
+
+- 还剩 `lunasvg`、`minizip-ng`、`hwy`、`unofficial-brotli`、`onnxruntime`。按"一个红灯一次"往里加，
+  不预先猜（9.6.8 的第一个红灯就是猜出来的包名）。
+- **运行时链接谁，还没定**。若可执行文件链接的是 `$prefix` 里的 `libz.so.1`，`dpkg-shlibdeps` 会按
+  soname 把它算成 `zlib1g`；zlib-ng 的 compat 模式保持 zlib ABI，所以装到用户机上实际加载的是发行版
+  zlib，`compression_backend_version()` 就不再说 zlib-ng 了。要么静态链进包，要么随包带 `libz-ng`
+  并设 rpath —— 这是打包决定，等 `build` 绿了再定。
+- 脚本**一次都没在 Linux 上执行过**，下一次 CI 就是它的第一次运行。
+
 
 
 ---

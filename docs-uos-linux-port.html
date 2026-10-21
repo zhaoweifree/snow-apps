@@ -4734,6 +4734,59 @@ export PATH=&quot;$HOME/.local/cmake/bin:$PATH&quot;
 <code>unofficial-brotli</code>、<code>hwy</code>、<code>onnxruntime</code>。Windows/macOS 侧这些全部由 <code>cmake/vcpkg-overlay-ports/</code> 提供。
 Linux 侧怎么补这一批（vcpkg / 固定版本本地编 / 砍掉可选编解码器），是 §9.2「Linux 不用 vcpkg」这条
 决策的第一次真正压力测试，<strong>留给下一片</strong>，见 9.6.9。</p>
+<h4>9.6.9 决定：Linux 侧第三方库「固定版本本地编」，不进 vcpkg（2026-10-21）</h4>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>代价</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux 也用 vcpkg</td>
+<td>复用现成 overlay ports，版本与 Windows 同源；但要在两种架构上各编 ~15 个库（ffmpeg / opencv / jxl / heif / onnxruntime），小时级；且本机已实测 vcpkg 驱动会随机挂死子进程</td>
+<td><strong>不选</strong></td>
+</tr>
+<tr>
+<td>放宽 PNG 门槛</td>
+<td>删 <code>compression_backend.cpp</code> 的 <code>#error</code> 与 <code>core_tests</code> 的版本断言，Linux 用经典 zlib</td>
+<td><strong>不选</strong>：这是一条产品保证（<code>THIRD_PARTY_NOTICES</code> 里就写着随包发布 zlib-ng），不是构建细节</td>
+</tr>
+<tr>
+<td><strong>固定版本本地编</strong></td>
+<td>多一个 <code>scripts/build-linux-deps.sh</code> + 一张版本表</td>
+<td><strong>选中</strong></td>
+</tr>
+</tbody>
+</table>
+<p><code>scripts/build-linux-deps.sh</code> 的四条设计：</p>
+<ol>
+<li><strong>版本只有一个真源</strong>。<code>zlib</code> 的版本从 <code>cmake/vcpkg-overlay-ports/zlib/vcpkg.json</code> 读、校验和从
+   同目录 <code>portfile.cmake</code> 的 <code>SHA512</code> 读 —— 改 port 就同时改了 Linux。实测在 Windows 上下载的
+   <code>zlib-ng-2.3.3.tar.gz</code>，sha512 <strong>与 portfile 里的值逐字节相同</strong>，所以"两边是同一个包"是验证过的，
+   不是假设。没有 overlay port 的（<code>libjpeg-turbo 3.1.0</code>）pin 写在脚本里，带校验和。</li>
+<li><strong>CMake 选项照抄 portfile</strong>，包括 <code>WITH_NATIVE_INSTRUCTIONS=OFF</code>：port 关掉 <code>-march=native</code>，
+   否则在 CI runner 上编出来的库拿到客户机上跑会 <code>SIGILL</code>。</li>
+<li><strong>判据是产品要求本身</strong>，不是"命令返回 0"：装完必须 <code>grep ZLIBNG_VERSION include/zlib.h</code> 命中；
+   <code>libjpeg-turbo</code> 必须真的落下 <code>libjpeg-turboConfig.cmake</code>（<code>find_package(... CONFIG REQUIRED)</code>
+   读的就是它）。</li>
+<li><strong>用系统 cmake 编这两个库</strong>（<code>CMAKE=</code> 可覆盖）。它们的 <code>cmake_minimum_required</code> 早于 3.5，
+   CMake 4 会直接拒绝 —— 所以 workflow 里这一步排在"装 CMake 4.2"<strong>之前</strong>：需要 4.2 的是仓库自己的
+   configure（9.6.8），不是这两个第三方项目。</li>
+</ol>
+<p>离线 / 内网：把 tarball 放进 <code>&lt;prefix&gt;/src</code> 或指向 <code>SNOW_LINUX_DEPS_SRC</code>，脚本不再联网。</p>
+<p><strong>这一片没解决的问题</strong>：</p>
+<ul>
+<li>还剩 <code>lunasvg</code>、<code>minizip-ng</code>、<code>hwy</code>、<code>unofficial-brotli</code>、<code>onnxruntime</code>。按"一个红灯一次"往里加，
+  不预先猜（9.6.8 的第一个红灯就是猜出来的包名）。</li>
+<li><strong>运行时链接谁，还没定</strong>。若可执行文件链接的是 <code>$prefix</code> 里的 <code>libz.so.1</code>，<code>dpkg-shlibdeps</code> 会按
+  soname 把它算成 <code>zlib1g</code>；zlib-ng 的 compat 模式保持 zlib ABI，所以装到用户机上实际加载的是发行版
+  zlib，<code>compression_backend_version()</code> 就不再说 zlib-ng 了。要么静态链进包，要么随包带 <code>libz-ng</code>
+  并设 rpath —— 这是打包决定，等 <code>build</code> 绿了再定。</li>
+<li>脚本<strong>一次都没在 Linux 上执行过</strong>，下一次 CI 就是它的第一次运行。</li>
+</ul>
 <hr>
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
