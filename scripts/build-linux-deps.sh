@@ -19,7 +19,10 @@
 #   * Imath + OpenEXR -- the EXR codec is written against the 3.4 API, 24.04
 #     ships 3.1.5 and UOS 20 ships 2.5 (neither compiles);
 #   * libwebp -- the animation codec calls `WebPAnimEncoderSetChunk()`, absent
-#     from 24.04's 1.3.2 and from UOS 20's 0.6.
+#     from 24.04's 1.3.2 and from UOS 20's 0.6;
+#   * highway + libjxl + libheif -- the JXL/HEIF codecs are written against
+#     0.11 / 1.21; 24.04 carries 0.7 / 1.17, where the first does not compile
+#     and the second lacks `<libheif/heif_sequences.h>`.
 #
 # Windows/macOS get all of them through `cmake/vcpkg-overlay-ports/` or the
 # manifest baseline.
@@ -568,7 +571,170 @@ build_libwebp() {
     stamp libwebp "$version"
 }
 
-for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime imath openexr libwebp; do
+# --- highway + libjxl + libheif ---------------------------------------------
+# Both codecs are written against the versions Windows uses, and the gap is not
+# a missing symbol here and there:
+#   * libjxl 0.11.2 (vcpkg) vs 0.7.0 (24.04): `JXL_DEC_BOX_COMPLETE`,
+#     `JxlEncoderDistanceFromQuality` and the `JxlColorProfileTarget` overloads
+#     of `JxlDecoderGetColorAs*Profile` all postdate 0.7 -- the codec does not
+#     compile at all;
+#   * libheif 1.21.2 (vcpkg) vs 1.17.6: `heif_codec.cpp` includes
+#     `<libheif/heif_sequences.h>`, which 1.17 does not ship.
+# Neither is reachable by adapting the code, and UOS 20 is older still, so the
+# same rule as 9.6.12 applies: carry the version.
+#
+# libjxl needs highway; the port forces the system one (`JPEGXL_FORCE_SYSTEM_HWY`),
+# so highway is built right before it. brotli and lcms2 are taken from the
+# distribution (the port forces those too) -- see the apt list in §9.1.
+#
+# libheif is built with exactly the Windows feature set: HEVC via libde265/x265,
+# no aom (the overlay port's default features are `hevc` only, so AVIF is absent
+# on Windows as well -- building it here would be a *difference*, not parity).
+highway_version="1.3.0"
+highway_sha512="8b9f4fdc4fa60b6817417959853f5b55bf86aec9d35fc6664dda15179cc55e0a9940f3a46011a84b95263ba342dc47ca1cb93b04481ff4b63d724cce1815d7c6"
+
+libjxl_version="0.11.2"
+libjxl_sha512="a7e1f7d060b358f4382e84367d66aa2850aef3b4524a0fdfe3f22dd258fb9e35dda7540f859d8bf4c32f31c61a7a03db677f4490a9f472cd25869a9d00797336"
+
+libheif_version="1.21.2"
+libheif_sha512="c953cb9c3a4c0f1052f4d1e0475143cfea6c0a1ab787acb33a2fd173e0460b665717a56a99b864226dfe62bd139c92a66fe5dec75b91e2a333b77a0571e3c5a8"
+
+build_highway() {
+    local version="$highway_version"
+    local url archive work build config
+
+    if stamped highway "$version"; then
+        echo "== highway ${version}: up to date"
+        return 0
+    fi
+    echo "== highway ${version}"
+
+    # The port's REF is the bare version (`REF "${VERSION}"`), not `v${VERSION}`.
+    url="https://github.com/google/highway/archive/${version}.tar.gz"
+    archive="${src_dir}/highway-${version}.tar.gz"
+    work="${build_root}/highway-${version}"
+    build="${work}/cmake-build"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$highway_sha512"
+    unpack "$archive" "${work}/src"
+
+    configure_build_install "${work}/src" "$build" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTING=OFF \
+        -DHWY_ENABLE_EXAMPLES=OFF \
+        -DHWY_ENABLE_TESTS=OFF \
+        -DHWY_ENABLE_CONTRIB=OFF
+
+    config="$(find "${prefix}" -name 'hwy-config.cmake' -o -name 'hwyConfig.cmake' -print -quit)"
+    [[ -n "$config" ]] || die "highway installed no CMake config package"
+    stamp highway "$version"
+}
+
+build_libjxl() {
+    local version="$libjxl_version"
+    local url archive work build pc
+
+    if stamped libjxl "$version"; then
+        echo "== libjxl ${version}: up to date"
+        return 0
+    fi
+    echo "== libjxl ${version}"
+
+    url="https://github.com/libjxl/libjxl/archive/refs/tags/v${version}.tar.gz"
+    archive="${src_dir}/libjxl-${version}.tar.gz"
+    work="${build_root}/libjxl-${version}"
+    build="${work}/cmake-build"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$libjxl_sha512"
+    unpack "$archive" "${work}/src"
+
+    # Options are the overlay port's, minus the patches: those teach vcpkg's
+    # prefix layout to the bundled find modules, while here every dependency is
+    # either in `$prefix` or a distribution package. `FORCE_SYSTEM_*` is what
+    # makes it use them instead of the (absent) third_party submodules: a GitHub
+    # archive tarball carries no submodules, so skcms/brotli/highway have to come
+    # from outside -- that is also why SKCMS is OFF and lcms2 is required.
+    configure_build_install "${work}/src" "$build" \
+        -DCMAKE_PREFIX_PATH="${prefix}" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTING=OFF \
+        -DJPEGXL_FORCE_SYSTEM_HWY=ON \
+        -DJPEGXL_FORCE_SYSTEM_BROTLI=ON \
+        -DJPEGXL_FORCE_SYSTEM_LCMS2=ON \
+        -DJPEGXL_ENABLE_SKCMS=OFF \
+        -DJPEGXL_BUNDLE_LIBPNG=OFF \
+        -DJPEGXL_ENABLE_BENCHMARK=OFF \
+        -DJPEGXL_ENABLE_DOXYGEN=OFF \
+        -DJPEGXL_ENABLE_EXAMPLES=OFF \
+        -DJPEGXL_ENABLE_FUZZERS=OFF \
+        -DJPEGXL_ENABLE_JNI=OFF \
+        -DJPEGXL_ENABLE_MANPAGES=OFF \
+        -DJPEGXL_ENABLE_OPENEXR=OFF \
+        -DJPEGXL_ENABLE_PLUGINS=OFF \
+        -DJPEGXL_ENABLE_SJPEG=OFF \
+        -DJPEGXL_ENABLE_TCMALLOC=OFF \
+        -DJPEGXL_ENABLE_TOOLS=OFF
+
+    # `snow_image` finds this codec through pkg-config, not CMake config:
+    # `pkg_check_modules(JXL ... libjxl)` + `libjxl_threads`. CMake prepends
+    # `<prefix>/lib/pkgconfig` to PKG_CONFIG_PATH for every CMAKE_PREFIX_PATH
+    # entry, so the file landing here is what closes the loop.
+    pc="$(find "${prefix}" -name 'libjxl.pc' -print -quit)"
+    [[ -n "$pc" ]] || die "libjxl installed no libjxl.pc"
+    pc="$(find "${prefix}" -name 'libjxl_threads.pc' -print -quit)"
+    [[ -n "$pc" ]] || die "libjxl installed no libjxl_threads.pc (JXL_THREADS lookup would fail)"
+    stamp libjxl "$version"
+}
+
+build_libheif() {
+    local version="$libheif_version"
+    local url archive work build config
+
+    if stamped libheif "$version"; then
+        echo "== libheif ${version}: up to date"
+        return 0
+    fi
+    echo "== libheif ${version}"
+
+    url="https://github.com/strukturag/libheif/archive/refs/tags/v${version}.tar.gz"
+    archive="${src_dir}/libheif-${version}.tar.gz"
+    work="${build_root}/libheif-${version}"
+    build="${work}/cmake-build"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$libheif_sha512"
+    unpack "$archive" "${work}/src"
+
+    configure_build_install "${work}/src" "$build" \
+        -DCMAKE_PREFIX_PATH="${prefix}" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTING=OFF \
+        -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
+        -DWITH_LIBDE265=ON \
+        -DWITH_X265=ON \
+        -DWITH_AOM_DECODER=OFF \
+        -DWITH_AOM_ENCODER=OFF \
+        -DWITH_DAV1D=OFF \
+        -DWITH_JPEG_DECODER=OFF \
+        -DWITH_JPEG_ENCODER=OFF \
+        -DWITH_OpenH264_DECODER=OFF \
+        -DWITH_OpenJPEG_DECODER=OFF \
+        -DWITH_OpenJPEG_ENCODER=OFF \
+        -DWITH_X264=OFF \
+        -DWITH_UNCOMPRESSED_CODEC=OFF \
+        -DWITH_LIBSHARPYUV=OFF \
+        -DWITH_EXAMPLES=OFF \
+        -DWITH_GDK_PIXBUF=OFF \
+        -DPLUGIN_DIRECTORY=
+
+    config="$(find "${prefix}" \( -name 'libheif-config.cmake' -o -name 'libheifConfig.cmake' \) -print -quit)"
+    [[ -n "$config" ]] || die "libheif installed no CMake config package"
+    stamp libheif "$version"
+}
+
+for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime imath openexr libwebp highway libjxl libheif; do
     if ! selected "$library"; then
         continue
     fi
@@ -582,6 +748,9 @@ for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime imath openexr l
         imath) build_imath >"$log" 2>&1 || { cat "$log"; die "imath build failed (log: ${log})"; } ;;
         openexr) build_openexr >"$log" 2>&1 || { cat "$log"; die "openexr build failed (log: ${log})"; } ;;
         libwebp) build_libwebp >"$log" 2>&1 || { cat "$log"; die "libwebp build failed (log: ${log})"; } ;;
+        highway) build_highway >"$log" 2>&1 || { cat "$log"; die "highway build failed (log: ${log})"; } ;;
+        libjxl) build_libjxl >"$log" 2>&1 || { cat "$log"; die "libjxl build failed (log: ${log})"; } ;;
+        libheif) build_libheif >"$log" 2>&1 || { cat "$log"; die "libheif build failed (log: ${log})"; } ;;
     esac
     echo "   $(tail -n 1 "$log")"
 done

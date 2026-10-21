@@ -467,8 +467,12 @@ sudo apt install -y libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkb
     libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev \
     libpipewire-0.3-dev libpulse-dev libasound2-dev libdbus-1-dev libegl1-mesa-dev
 # 图像/编解码
+# 注意：**不装** libheif-dev / libjxl-dev。这两个编解码器由 scripts/build-linux-deps.sh
+# 带固定版本自编（见 9.6.13），发行版版本比代码老一代；两个来源并存 = 自编失败时静默回落到
+# 老版本，唯一正确的做法是让 find_package 大声失败。libde265/x265/brotli/lcms2 要装，
+# 它们是自编 HEIF / JXL 的后端。
 sudo apt install -y libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
-    libheif-dev libjxl-dev zlib1g-dev libtinyxml2-dev
+    libde265-dev libx265-dev libbrotli-dev liblcms2-dev zlib1g-dev libtinyxml2-dev
 # 可选：OCR
 sudo apt install -y libopencv-dev
 ```
@@ -2830,6 +2834,7 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 8（`7fe30ad0`） | `gates` ✅ / `build` ❌ | `SnowQtVersionShims.cmake:58 (include)`：找不到 `ant_design_qt/SnowQt5InstallPaths.cmake` —— **上一片自己新写的代码**，`CMAKE_CURRENT_LIST_DIR` 在函数体里指向调用方，见 9.6.10 |
 | 9（`7f42249d`） | `gates` ✅ / `build` ❌ | 翻译目录那关过了；卡在 `ant_design_qt/CMakeLists.txt:106` 与 `snow_shot/CMakeLists.txt:10577`：`Target links to: Qt5::GuiPrivate` —— 缺的不是代码是**私有头**，见 9.6.11 |
 | 10（`2eab250d`） | `gates` ✅ / **`Configure` ✅** / `build` ❌ | **整棵树的 Linux + Qt5 配置第一次走通**；`Build` 在 7 秒内倒，`snow_image` 的 EXR/WebP 各报一处 API 不存在 —— 发行版版本比 vcpkg 的 pin 老一代，见 9.6.12 |
+| 11（`c03eacf3`） | `gates` ✅ / `Configure` ✅ / `build` ❌ | 自编的 Imath/OpenEXR/libwebp 全过，EXR/WebP 报错消失；换成 `libheif/heif_sequences.h` 缺失与 JXL 0.7 的四个 API —— 同一条规则再扩到 highway/libjxl/libheif，见 9.6.13 |
 
 **run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug**，不是缺包。Qt5 装在自定义前缀时
 `Qt5Core_DIR` 是 `<prefix>/lib/cmake/Qt5Core`，`../../../bin` 正好是 `<prefix>/bin`；但发行版的同名文件
@@ -3080,6 +3085,51 @@ snow_image/src/codecs/webp_codec.cpp:1489: error: 'WebPAnimEncoderSetChunk' was 
 理由和这一片一路的做法一致：等 CI 报出**具体哪个符号**，再决定是自己带版本还是适配。
 另外 configure 里那条 `libz.so.1 in /usr/lib/… may be hidden by files in <prefix>/lib` 的警告仍在，
 它就是 9.6.9 留给打包决定的那个"运行时链接谁"。
+
+#### 9.6.13 run 11：同一个病在 JXL / HEIF 上（2026-10-21）
+
+run 11（`c03eacf3`）的 `Build the pinned Linux dependencies` 全绿（Imath/OpenEXR/libwebp 在 Linux 上
+第一次编过），EXR 与 WebP 的报错消失，剩下的正是上一节预判的：
+
+```
+snow_image/src/codecs/heif_codec.cpp:8: fatal error: libheif/heif_sequences.h: No such file or directory
+snow_image/src/codecs/jxl_codec.cpp:150: error: cannot convert 'JxlColorProfileTarget' to 'const JxlPixelFormat*'
+snow_image/src/codecs/jxl_codec.cpp:338: error: 'JXL_DEC_BOX_COMPLETE' was not declared
+snow_image/src/codecs/jxl_codec.cpp:1048: error: 'JxlEncoderDistanceFromQuality' was not declared
+```
+
+`JXL_DEC_BOX_COMPLETE`、`JxlEncoderDistanceFromQuality`、`JxlDecoderGetColorAs*Profile` 的
+`JxlColorProfileTarget` 重载，都是 0.7 之后才有的；`heif_sequences.h` 是 libheif 1.18+ 才拆出来的头。
+**两者都不是"补一个符号"能解决的**，于是同一轮回把三个库按固定版本自编：
+
+| 库 | vcpkg | 24.04 | 说明 |
+|---|---|---|---|
+| highway | 1.3.0 | 1.0.7 | libjxl 的 `JPEGXL_FORCE_SYSTEM_HWY` 后端 |
+| libjxl | 0.11.2 | 0.7.0 | 编码器 API 重写过 |
+| libheif | 1.21.2（overlay） | 1.17.6 | 缺 `heif_sequences.h` |
+
+三处设计（都在脚本注释里）：
+
+1. **GitHub 归档没有 submodule**，所以 libjxl 必须走 `JPEGXL_FORCE_SYSTEM_*`（hwy / brotli / lcms2）
+   且 `JPEGXL_ENABLE_SKCMS=OFF`（skcms 是 submodule），`JPEGXL_BUNDLE_LIBPNG=OFF` 用前缀里的
+   libpng。这不是选择，是归档包的硬约束。
+2. **libheif 只开 Windows 也开的那套 feature**：overlay port 的 default-features 只有 `hevc`
+   （libde265 + x265），**没有 aom** —— 也就是说 Windows 版本来就不支持 AVIF。Linux 上补 aom
+   不是"更完整"，而是与 Windows 不一致，所以 `WITH_AOM_*`/`WITH_DAV1D`/`WITH_X264`/
+   `WITH_JPEG_*`/`WITH_OpenJPEG_*` 一律 OFF。
+3. **apt 里删掉 `libheif-dev` / `libjxl-dev`**。两个来源并存时，自编失败会静默回落到发行版老版本，
+   然后以一堆看不懂的 API 错误出现在编译期；删掉之后只剩一条路，失败就是 configure 期的
+   `find_package` 报错。`libde265`/`x265`/`brotli`/`lcms2` 保留 —— 它们是自编时的后端。
+
+判据按消费者来定，不按"装上了"：libjxl 这条链**不走 CMake config 而走 pkg-config**
+（`pkg_check_modules(JXL libjxl)` + `libjxl_threads`），所以脚本断言的是
+`libjxl.pc` 与 `libjxl_threads.pc` 两个文件；libheif 断言 `libheif-config.cmake`；
+highway 断言 `hwy-config.cmake`。
+
+pin 门禁扩到六条，并顺带修好它自己的一个结构性缺陷：overlay port 在**仓库里**（CI 也有），
+builtin port 在 `.tools/vcpkg`（CI 没有），所以查表时先 overlay 后 builtin。现在
+`libjxl`/`libheif` 的比对在 CI 上也会真的执行，只有 `imath`/`openexr`/`libwebp`/`highway` 会打印 skip；
+并且新增一条"一条都比对不了就失败"，避免整张表哑掉还被当成绿。
 
 
 

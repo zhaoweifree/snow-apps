@@ -139,7 +139,8 @@ jobs:
             libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev \
             libpipewire-0.3-dev libpulse-dev libasound2-dev libdbus-1-dev libegl1-mesa-dev \
             libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
-            libheif-dev libjxl-dev zlib1g-dev libtinyxml2-dev \
+            zlib1g-dev libtinyxml2-dev \
+            libde265-dev libx265-dev libbrotli-dev liblcms2-dev \
             libopencv-dev \
             python3 \
             dpkg-dev desktop-file-utils appstream
@@ -148,7 +149,15 @@ jobs:
       # which `compression_backend.cpp` requires) and libjpeg-turbo has to be
       # 3.1 with a CMake config; 24.04 ships 2.1.5 without one. Both are pinned
       # to the archives and options the vcpkg overlay ports use -- see
-      # scripts/build-linux-deps.sh and §9.6.9.
+      # scripts/build-linux-deps.sh and §9.6.9. The same script now also builds
+      # OpenEXR/Imath, libwebp, highway, libjxl and libheif, because the
+      # distribution versions of those are a whole API generation behind what the
+      # codecs compile against (§9.6.12, §9.6.13). That is why `libheif-dev` and
+      # `libjxl-dev` are *absent* from the apt list above: two sources for the
+      # same codec means a failed build silently falls back to the old one, and
+      # the only correct outcome is a loud `find_package` failure.
+      # libde265/x265/brotli/lcms2 stay, as the pinned HEIF and JXL builds use
+      # them as backends.
       - name: Build the pinned Linux dependencies
         run: |
           bash scripts/build-linux-deps.sh --prefix "$RUNNER_TEMP/snow-linux-deps"
