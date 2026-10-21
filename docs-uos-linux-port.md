@@ -457,7 +457,7 @@ sudo apt install -y qtbase5-dev qt5-qmake qttools5-dev-tools libqt5svg5-dev
 # 图形/输入/媒体
 sudo apt install -y libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
     libfontconfig1-dev libfreetype6-dev libharfbuzz-dev \
-    libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev libxrecord1-dev \
+    libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev \
     libpipewire-0.3-dev libpulse-dev libasound2-dev libdbus-1-dev libegl1-mesa-dev
 # 图像/编解码
 sudo apt install -y libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
