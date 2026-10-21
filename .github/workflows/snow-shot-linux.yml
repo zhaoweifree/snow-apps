@@ -192,10 +192,6 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.build-preset }} --parallel 4
 
-      - name: Unit tests
-        working-directory: build/${{ matrix.preset }}/snow_shot
-        run: ctest --output-on-failure --no-tests=error
-
       # Reconfigures with packaging on. `CPack` reads the CPACK_* variables that
       # `snow_shot_configure_linux_package()` assigns, and `dpkg-shlibdeps`
       # derives Depends from what the staged ELF actually needs.
@@ -244,3 +240,16 @@ jobs:
           name: snow-shot-${{ matrix.architecture }}-deb
           path: build/${{ matrix.preset }}/snow-shot_*.deb
           if-no-files-found: error
+
+      # Tests come **after** the package, in the same tree, for two reasons: the
+      # release presets configure with `SNOW_APPS_BUILD_TESTS=OFF`, so a ctest up
+      # front finds zero tests and `--no-tests=error` turns that into a failure
+      # that says nothing about the code; and reconfigure-for-tests before
+      # packaging would let a test-only compile error hide the whole .deb path,
+      # which is the one thing this job exists to prove. Reconfiguring the same
+      # tree is incremental -- only the test targets are new.
+      - name: Unit tests
+        run: |
+          cmake --preset ${{ matrix.preset }} -DSNOW_APPS_BUILD_TESTS=ON
+          cmake --build --preset ${{ matrix.build-preset }} --parallel 4
+          ctest --test-dir build/${{ matrix.preset }} --output-on-failure --no-tests=error

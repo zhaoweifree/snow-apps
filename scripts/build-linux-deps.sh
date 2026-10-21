@@ -4,10 +4,17 @@
 #
 # §9.2 decided the Linux side uses distribution packages instead of vcpkg. That
 # decision survives everywhere apt has the library; it fails for the few this
-# project pins *beyond* what a distribution carries -- here zlib **is** zlib-ng
-# (`snow_image/src/compression_backend.cpp` does not compile against classic
-# zlib) and libjpeg-turbo must be >= 3.1 with a CMake config (24.04 ships 2.1.5
-# and no config). Windows/macOS get both from `cmake/vcpkg-overlay-ports/`.
+# project pins *beyond* what a distribution carries:
+#
+#   * zlib -- here it **is** zlib-ng (`snow_image/src/compression_backend.cpp`
+#     does not compile against classic zlib);
+#   * libjpeg-turbo -- must be >= 3.1 *with* a CMake config (24.04 ships 2.1.5
+#     and ships no config at all);
+#   * lunasvg -- the SVG codec links `lunasvg::lunasvg`; 24.04 has no package
+#     for it whatsoever.
+#
+# Windows/macOS get all three through `cmake/vcpkg-overlay-ports/` or the
+# manifest baseline.
 #
 # Importing vcpkg on Linux to solve that is the option this script exists to
 # avoid: it would build ~15 libraries on both architectures and the toolchain
@@ -18,6 +25,10 @@
 # `vcpkg.json` (version) and `portfile.cmake` (SHA512), so bumping the port
 # bumps Linux too, and the checksum proves the archive is the same one vcpkg
 # fetches. Libraries with no overlay port carry their own pin below.
+#
+# To add one: pin version + sha512, write a `build_<name>` that ends with the
+# assertion that proves the *consumer* will find it (its CMake config file, its
+# defining header), then add the name to the loop at the bottom.
 #
 # Usage:
 #   bash scripts/build-linux-deps.sh                       # everything, default prefix
@@ -38,7 +49,9 @@ only=""
 clean=0
 
 usage() {
-    sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
+    # Print the comment block that starts at "Usage:" -- a fixed line range
+    # would silently drift every time the header above it grows.
+    sed -n '/^# Usage:/,/^# The script prints/p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 die() {
@@ -233,7 +246,44 @@ build_libjpeg_turbo() {
     stamp libjpeg-turbo "$version"
 }
 
-for library in zlib libjpeg-turbo; do
+# --- lunasvg ----------------------------------------------------------------
+# `snow_image`'s SVG codec links `lunasvg::lunasvg`. Ubuntu 24.04 has no such
+# package at all (unlike libwebp/libheif/libjxl, which are only too old or
+# lack a config file), so this is a build-from-source, not a version bump.
+lunasvg_version="3.5.0"
+lunasvg_sha512="62cf1433f4d158008ab07c9b6a83dca2322e1adf97a7f30a2021be5610af7b28e2ed54c75292fb382a3dcc6205f0e7b8d815b8a59aa11843a059883203d191c1"
+
+build_lunasvg() {
+    local version="$lunasvg_version"
+    local url archive work build config
+
+    if stamped lunasvg "$version"; then
+        echo "== lunasvg ${version}: up to date"
+        return 0
+    fi
+    echo "== lunasvg ${version}"
+
+    url="https://github.com/sammycage/lunasvg/archive/refs/tags/v${version}.tar.gz"
+    archive="${src_dir}/lunasvg-${version}.tar.gz"
+    work="${build_root}/lunasvg-${version}"
+    build="${work}/cmake-build"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$lunasvg_sha512"
+    unpack "$archive" "${work}/src"
+
+    configure_build_install "${work}/src" "$build" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DLUNASVG_BUILD_EXAMPLES=OFF
+
+    # The target `snow_image` links is `lunasvg::lunasvg`; the config file is
+    # what defines it, so an install without one is an install that does nothing.
+    config="$(find "${prefix}" \( -name 'lunasvg-config.cmake' -o -name 'lunasvgConfig.cmake' \) -print -quit)"
+    [[ -n "$config" ]] || die "lunasvg installed no CMake config package"
+    stamp lunasvg "$version"
+}
+
+for library in zlib libjpeg-turbo lunasvg; do
     if ! selected "$library"; then
         continue
     fi
@@ -241,6 +291,7 @@ for library in zlib libjpeg-turbo; do
     case "$library" in
         zlib) build_zlib >"$log" 2>&1 || { cat "$log"; die "zlib build failed (log: ${log})"; } ;;
         libjpeg-turbo) build_libjpeg_turbo >"$log" 2>&1 || { cat "$log"; die "libjpeg-turbo build failed (log: ${log})"; } ;;
+        lunasvg) build_lunasvg >"$log" 2>&1 || { cat "$log"; die "lunasvg build failed (log: ${log})"; } ;;
     esac
     echo "   $(tail -n 1 "$log")"
 done

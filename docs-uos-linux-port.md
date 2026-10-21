@@ -2816,6 +2816,7 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 1（`5ddc3561`） | `gates` ✅ / `build` ❌ | `E: Unable to locate package libxrecord1-dev`（apt exit 100，两个架构同时倒） |
 | 2（`ce0efc10`） | `gates` ✅ / `build` ❌ | `Could not read presets: "cmakeMinimumRequired" major version 4 must be less than 3` —— 24.04 自带 CMake 3.28 |
 | 3（`2c55e097`） | `gates` ✅ / `build` ❌ | `snow_image/CMakeLists.txt:141: PNG support requires zlib-ng compatibility mode` |
+| 4（`411aca6c`） | `gates` ✅ / `build` ❌ | `find_package(lunasvg CONFIG REQUIRED)` 找不到包 —— 但**前两步全绿**：CMake 4.2 装好、`build-linux-deps.sh` 在 Linux 上第一次运行就把 zlib-ng 与 libjpeg-turbo 编过并装进前缀（PNG/JPEG 两道关都过了） |
 
 **`gates` 这一次把"平台无关"从声明变成了事实**：ubuntu-24.04 上
 `cargo test -p snow-linux -p snow-capture --lib --all-features` 全绿 —— `snow-capture` 135 通过 + 4 ignored
@@ -2877,13 +2878,17 @@ Linux 侧怎么补这一批（vcpkg / 固定版本本地编 / 砍掉可选编解
 
 **这一片没解决的问题**：
 
-- 还剩 `lunasvg`、`minizip-ng`、`hwy`、`unofficial-brotli`、`onnxruntime`。按"一个红灯一次"往里加，
-  不预先猜（9.6.8 的第一个红灯就是猜出来的包名）。
+- 还剩 `minizip-ng`、`unofficial-brotli`、`onnxruntime`（`hwy`/`lcms2` 在非 Windows 上先走 pkg-config，
+  `libjxl-dev` 提供 `libjxl.pc`，所以只有 pkg-config 失败时才会要它们）。按"一个红灯一次"往里加，
+  不预先猜（9.6.8 的第一个红灯就是猜出来的包名）。`lunasvg` 是 run 4 的红灯，已按同一条路子加进来
+  （3.5.0，pin 在脚本里，判据是 `lunasvg::lunasvg` 的 config 文件真的落下）。
 - **运行时链接谁，还没定**。若可执行文件链接的是 `$prefix` 里的 `libz.so.1`，`dpkg-shlibdeps` 会按
   soname 把它算成 `zlib1g`；zlib-ng 的 compat 模式保持 zlib ABI，所以装到用户机上实际加载的是发行版
   zlib，`compression_backend_version()` 就不再说 zlib-ng 了。要么静态链进包，要么随包带 `libz-ng`
   并设 rpath —— 这是打包决定，等 `build` 绿了再定。
-- 脚本**一次都没在 Linux 上执行过**，下一次 CI 就是它的第一次运行。
+- `build` job 里的 `ctest` 原来是空的：release 预设 `SNOW_APPS_BUILD_TESTS=OFF`，`--no-tests=error`
+  会把"一个测试都没有"报成失败。已改成**打包之后**再在同一个树里打开测试编一遍（增量，只多测试目标），
+  理由写在 workflow 注释里：先让 .deb 那条路证明自己，别让测试编译错误把它藏起来。
 
 
 
