@@ -19,7 +19,9 @@ Checked:
     runner's full six-hour budget;
   * the matrix architectures map to the architectures the packaging gate
     asserts, so ``Architecture:`` in the .deb cannot disagree with the runner;
-  * the apt package list is non-empty and names no package twice.
+  * the apt package list is non-empty and names no package twice;
+  * ``gates`` installs PyYAML, without which three checks in this file degrade
+    to no-ops (see ``load_yaml``).
 
 Usage: ``python scripts/check-linux-ci-workflow.py``.
 """
@@ -54,10 +56,16 @@ def check(label: str, condition: bool, detail: str = "") -> bool:
 
 
 def load_yaml(path: Path):
+    # A missing PyYAML used to print a note and return None, which turned three
+    # of the checks in this file into no-ops. That is the worst failure mode a
+    # gate has: it still exits 0 and prints "check passed". Every host that runs
+    # this is expected to have PyYAML (`pip install pyyaml`; the `gates` job in
+    # `.github/workflows/snow-shot-linux.yml` installs it), so its absence is a
+    # broken environment, not a reason to skip.
     try:
         import yaml
     except ImportError:
-        print("note PyYAML is not installed; skipping the parse and structure checks")
+        check("PyYAML is available", False, "pip install pyyaml")
         return None
     try:
         # The workflow uses `on:` as a key, which YAML 1.1 reads as a boolean.
@@ -188,6 +196,13 @@ def main() -> int:
         check("gates job runs the packaging gates",
               "scripts/check-linux-packaging.sh" in gates_text,
               "the job exists but never calls the gate script")
+
+        # This file's own YAML checks need PyYAML. `setup-python` does not ship
+        # it, and the fallback used to be a printed note -- so a job could run
+        # the gate, skip a fifth of it, and still be green.
+        check("gates job installs PyYAML",
+              re.search(r"pip install[^\n]*pyyaml", gates_text) is not None,
+              "the workflow's own structure checks would be skipped")
 
         # The apt list: duplicated names are harmless but usually mean a
         # copy-paste that dropped the package somebody meant to add.

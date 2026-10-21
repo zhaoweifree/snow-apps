@@ -64,6 +64,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      # `scripts/check-linux-ci-workflow.py` parses this very file, and
+      # `setup-python` does not ship PyYAML. Without this step three of its
+      # checks used to degrade to a printed note, leaving the job green.
+      - name: Install gate dependencies
+        run: python -m pip install --quiet pyyaml
+
       # The gate scripts only need cmake in script mode (`cmake -P`), which the
       # runner image already provides -- no Qt, no compiler, no dpkg.
       - name: Packaging and freedesktop gates
