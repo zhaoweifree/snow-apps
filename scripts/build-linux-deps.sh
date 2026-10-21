@@ -11,20 +11,25 @@
 #   * libjpeg-turbo -- must be >= 3.1 *with* a CMake config (24.04 ships 2.1.5
 #     and ships no config at all);
 #   * lunasvg -- the SVG codec links `lunasvg::lunasvg`; 24.04 has no package
-#     for it whatsoever.
+#     for it whatsoever;
+#   * minizip-ng -- `snow_shot` links `MINIZIP::minizip-ng`; Ubuntu's `minizip`
+#     is zlib's project, not this one;
+#   * onnxruntime -- the OCR process needs it, and the port document already
+#     says Linux takes Microsoft's prebuilt CPU build rather than building it.
 #
-# Windows/macOS get all three through `cmake/vcpkg-overlay-ports/` or the
+# Windows/macOS get all five through `cmake/vcpkg-overlay-ports/` or the
 # manifest baseline.
 #
 # Importing vcpkg on Linux to solve that is the option this script exists to
 # avoid: it would build ~15 libraries on both architectures and the toolchain
 # hangs on the Windows workstation (§9.6.8). Instead the same source archives
-# are built with the same options the overlay ports pass.
+# are built with the same options the overlay ports pass -- and onnxruntime,
+# which nobody builds on a laptop, is Microsoft's own prebuilt CPU package.
 #
-# Version pins are not copied here for `zlib`: they are read out of the port's
-# `vcpkg.json` (version) and `portfile.cmake` (SHA512), so bumping the port
-# bumps Linux too, and the checksum proves the archive is the same one vcpkg
-# fetches. Libraries with no overlay port carry their own pin below.
+# Version pins are not copied here for `zlib` and `minizip-ng`: they are read
+# out of the port's `vcpkg.json` (version) and `portfile.cmake` (SHA512), so
+# bumping the port bumps Linux too, and the checksum proves the archive is the
+# same one vcpkg fetches. Libraries with no overlay port carry their own pin.
 #
 # To add one: pin version + sha512, write a `build_<name>` that ends with the
 # assertion that proves the *consumer* will find it (its CMake config file, its
@@ -283,7 +288,136 @@ build_lunasvg() {
     stamp lunasvg "$version"
 }
 
-for library in zlib libjpeg-turbo lunasvg; do
+# --- minizip-ng -------------------------------------------------------------
+# `snow_shot` links `MINIZIP::minizip-ng` (zip handling for the update package).
+# Ubuntu ships zlib's own `minizip`, which is a different project with a
+# different ABI and no CMake config under that name, so this is built here from
+# the same port the Windows build uses -- version and checksum read from it.
+build_minizip_ng() {
+    local port_dir="${repo_root}/cmake/vcpkg-overlay-ports/minizip-ng"
+    local version sha url archive work build config
+    version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
+        "${port_dir}/vcpkg.json")"
+    sha="$(sed -n 's/^[[:space:]]*SHA512[[:space:]]\{1,\}\([0-9a-f]\{128\}\).*/\1/p' \
+        "${port_dir}/portfile.cmake" | head -n1)"
+    [[ -n "$sha" ]] || die "no SHA512 found in ${port_dir}/portfile.cmake"
+
+    if stamped minizip-ng "$version"; then
+        echo "== minizip-ng ${version}: up to date"
+        return 0
+    fi
+    echo "== minizip-ng ${version}"
+
+    url="https://github.com/zlib-ng/minizip-ng/archive/refs/tags/${version}.tar.gz"
+    archive="${src_dir}/minizip-ng-${version}.tar.gz"
+    work="${build_root}/minizip-ng-${version}"
+    build="${work}/cmake-build"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$sha"
+    unpack "$archive" "${work}/src"
+
+    # `MZ_LIB_SUFFIX=-ng` and `MZ_COMPAT=OFF` are copied from the port: without
+    # them the library installs as `libminizip.so`, which collides with zlib's
+    # minizip on a distribution that has both.
+    configure_build_install "${work}/src" "$build" \
+        -DMZ_ZLIB=ON \
+        -DMZ_FETCH_LIBS=OFF \
+        -DMZ_LIB_SUFFIX=-ng \
+        -DMZ_ICONV=OFF \
+        -DMZ_COMPAT=OFF \
+        -DMZ_BUILD_TESTS=OFF
+
+    config="$(find "${prefix}" \( -name 'minizip-ng-config.cmake' -o -name 'minizip-ngConfig.cmake' \) -print -quit)"
+    [[ -n "$config" ]] || die "minizip-ng installed no CMake config package"
+    stamp minizip-ng "$version"
+}
+
+# --- onnxruntime ------------------------------------------------------------
+# The port document (§3 table, §9.3 item 4) says Linux uses the *official
+# prebuilt* `libonnxruntime.so` with the CPU execution provider, so unlike the
+# three above this is a download, not a build: building ONNX Runtime from source
+# is a multi-hour job and is what W9 ("onnxruntime CPU EP 接入") is for.
+#
+# Two things the prebuilt tarball does not give us:
+#   * a CMake config -- `snow_shot/CMakeLists.txt:368` calls
+#     `find_package(onnxruntime CONFIG REQUIRED)`, so one is generated here;
+#   * a checksum -- Microsoft publishes none, and the 9 MB asset cannot be
+#     fetched on this workstation (the proxy stalls at ~300 KB). The pin is
+#     therefore version + asset name, and the archive's sha512 is *printed* on
+#     first use so it can be filled in below: an unverified pin that says so is
+#     better than a `sha512sum` that was never run.
+onnxruntime_version="1.28.0"
+onnxruntime_sha512_x64=""
+onnxruntime_sha512_aarch64=""
+
+build_onnxruntime() {
+    local version="$onnxruntime_version"
+    local arch sha url archive work target root
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch="x64"; sha="$onnxruntime_sha512_x64" ;;
+        aarch64|arm64) arch="aarch64"; sha="$onnxruntime_sha512_aarch64" ;;
+        *) die "no ONNX Runtime prebuilt for $(uname -m)" ;;
+    esac
+
+    if stamped onnxruntime "${version}-${arch}"; then
+        echo "== onnxruntime ${version} (${arch}): up to date"
+        return 0
+    fi
+    echo "== onnxruntime ${version} (${arch})"
+
+    url="https://github.com/microsoft/onnxruntime/releases/download/v${version}/onnxruntime-linux-${arch}-${version}.tgz"
+    archive="${src_dir}/onnxruntime-linux-${arch}-${version}.tgz"
+    work="${build_root}/onnxruntime-${version}-${arch}"
+
+    fetch "$url" "$archive"
+    if [[ -n "$sha" ]]; then
+        verify "$archive" "$sha"
+    else
+        echo "warning: no pinned checksum for $(basename "$archive"); sha512 is $(sha512sum "$archive" | cut -d' ' -f1)"
+    fi
+
+    rm -rf "$work"
+    mkdir -p "$work"
+    tar -xzf "$archive" -C "$work" --strip-components=1
+    # The release layout is include/ + lib/, which is already the prefix layout.
+    cp -a "$work/include/." "${prefix}/include/"
+    mkdir -p "${prefix}/lib"
+    cp -a "$work/lib/." "${prefix}/lib/"
+
+    root="$(find "${prefix}/lib" -maxdepth 1 -name "libonnxruntime.so.${version}" -print -quit)"
+    [[ -n "$root" ]] || die "prebuilt onnxruntime ${version} does not contain libonnxruntime.so.${version}"
+
+    # Minimal config: one imported target, whose location is resolved from this
+    # file's own position so the prefix stays relocatable.
+    mkdir -p "${prefix}/lib/cmake/onnxruntime"
+    cat >"${prefix}/lib/cmake/onnxruntime/onnxruntimeConfig.cmake" <<'CONFIG'
+# Generated by scripts/build-linux-deps.sh.
+#
+# The official ONNX Runtime tarball ships headers and libraries but no CMake
+# package, while snow_shot configures with `find_package(onnxruntime CONFIG
+# REQUIRED)`. This file is that package: a single imported target, located
+# relative to itself so moving the prefix does not break it.
+get_filename_component(_snow_ort_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+
+if(NOT TARGET onnxruntime::onnxruntime)
+    add_library(onnxruntime::onnxruntime SHARED IMPORTED)
+    set_target_properties(onnxruntime::onnxruntime PROPERTIES
+        IMPORTED_LOCATION "${_snow_ort_prefix}/lib/libonnxruntime.so"
+        IMPORTED_SONAME "libonnxruntime.so"
+        INTERFACE_INCLUDE_DIRECTORIES "${_snow_ort_prefix}/include"
+    )
+endif()
+unset(_snow_ort_prefix)
+CONFIG
+
+    config="$(find "${prefix}" -name 'onnxruntimeConfig.cmake' -print -quit)"
+    [[ -n "$config" ]] || die "onnxruntime config was not written"
+    stamp onnxruntime "${version}-${arch}"
+}
+
+for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime; do
     if ! selected "$library"; then
         continue
     fi
@@ -292,6 +426,8 @@ for library in zlib libjpeg-turbo lunasvg; do
         zlib) build_zlib >"$log" 2>&1 || { cat "$log"; die "zlib build failed (log: ${log})"; } ;;
         libjpeg-turbo) build_libjpeg_turbo >"$log" 2>&1 || { cat "$log"; die "libjpeg-turbo build failed (log: ${log})"; } ;;
         lunasvg) build_lunasvg >"$log" 2>&1 || { cat "$log"; die "lunasvg build failed (log: ${log})"; } ;;
+        minizip-ng) build_minizip_ng >"$log" 2>&1 || { cat "$log"; die "minizip-ng build failed (log: ${log})"; } ;;
+        onnxruntime) build_onnxruntime >"$log" 2>&1 || { cat "$log"; die "onnxruntime install failed (log: ${log})"; } ;;
     esac
     echo "   $(tail -n 1 "$log")"
 done

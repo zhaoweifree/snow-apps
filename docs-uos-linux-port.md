@@ -2818,6 +2818,8 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 2（`ce0efc10`） | `gates` ✅ / `build` ❌ | `Could not read presets: "cmakeMinimumRequired" major version 4 must be less than 3` —— 24.04 自带 CMake 3.28 |
 | 3（`2c55e097`） | `gates` ✅ / `build` ❌ | `snow_image/CMakeLists.txt:141: PNG support requires zlib-ng compatibility mode` |
 | 4（`411aca6c`） | `gates` ✅ / `build` ❌ | `find_package(lunasvg CONFIG REQUIRED)` 找不到包 —— 但**前两步全绿**：CMake 4.2 装好、`build-linux-deps.sh` 在 Linux 上第一次运行就把 zlib-ng 与 libjpeg-turbo 编过并装进前缀（PNG/JPEG 两道关都过了） |
+| 5（`a242facc`） | `gates` ✅ / `build` ❌ | `Qt5LinguistTools` 找不到 —— `qttools5-dev-tools` 只给 `lrelease` 二进制，CMake 配置在 `qttools5-dev` 里 |
+| 6（`eb0a2c80`） | `gates` ✅ / `build` ❌ | `find_package(onnxruntime CONFIG REQUIRED)` —— SVG/lunasvg 之后一路走到 `snow_shot`，说明 `snow_image` 的 PNG/JPEG/GIF/HEIF/JXL/WebP 依赖全部找到了 |
 
 **`gates` 这一次把"平台无关"从声明变成了事实**：ubuntu-24.04 上
 `cargo test -p snow-linux -p snow-capture --lib --all-features` 全绿 —— `snow-capture` 135 通过 + 4 ignored
@@ -2879,14 +2881,20 @@ Linux 侧怎么补这一批（vcpkg / 固定版本本地编 / 砍掉可选编解
 
 **这一片没解决的问题**：
 
-- 还剩 `minizip-ng`、`unofficial-brotli`、`onnxruntime`（`hwy`/`lcms2` 在非 Windows 上先走 pkg-config，
-  `libjxl-dev` 提供 `libjxl.pc`，所以只有 pkg-config 失败时才会要它们）。按"一个红灯一次"往里加，
-  不预先猜（9.6.8 的第一个红灯就是猜出来的包名）。`lunasvg` 是 run 4 的红灯，已按同一条路子加进来
-  （3.5.0，pin 在脚本里，判据是 `lunasvg::lunasvg` 的 config 文件真的落下）。
+- `minizip-ng` 与 `onnxruntime` 已按同一条路子接上（见下），还剩 `unofficial-brotli` 与 `hwy`/`lcms2`
+  —— 后三个只在 pkg-config 失败时才会被 `snow_image` 要求（非 Windows 上优先 `pkg_check_modules(JXL)`，
+  `libjxl-dev` 提供 `libjxl.pc`），所以先不预先加。
+- **`onnxruntime` 走的是官方预编译包，没有校验和**。端口文档 §3/§9.3 本来就是这么定的（CPU EP +
+  `libonnxruntime.so`），但微软不发布校验和，而这台机器上 9 MB 的 release 资产拉不动（代理在 300 KB
+  处停住）。所以脚本的 pin 是"版本 + 资产名"，第一次使用时把 sha512 **打印出来**，然后回填到
+  `onnxruntime_sha512_{x64,aarch64}`；回填之前它是一处诚实的弱点，不是一处假装存在的检查。
+  另外预编译包里没有 CMake 配置，脚本生成一个只含 `onnxruntime::onnxruntime` 的
+  `onnxruntimeConfig.cmake`（路径按自身位置推导，prefix 可搬）。
 - **运行时链接谁，还没定**。若可执行文件链接的是 `$prefix` 里的 `libz.so.1`，`dpkg-shlibdeps` 会按
   soname 把它算成 `zlib1g`；zlib-ng 的 compat 模式保持 zlib ABI，所以装到用户机上实际加载的是发行版
   zlib，`compression_backend_version()` 就不再说 zlib-ng 了。要么静态链进包，要么随包带 `libz-ng`
-  并设 rpath —— 这是打包决定，等 `build` 绿了再定。
+  并设 rpath —— 这是打包决定，等 `build` 绿了再定。`libonnxruntime.so` 同理：目前没有任何一步把它
+  放进 `.deb`。
 - `build` job 里的 `ctest` 原来是空的：release 预设 `SNOW_APPS_BUILD_TESTS=OFF`，`--no-tests=error`
   会把"一个测试都没有"报成失败。已改成**打包之后**再在同一个树里打开测试编一遍（增量，只多测试目标），
   理由写在 workflow 注释里：先让 .deb 那条路证明自己，别让测试编译错误把它藏起来。
