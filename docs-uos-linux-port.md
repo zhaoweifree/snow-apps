@@ -466,6 +466,25 @@ sudo apt install -y libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
 sudo apt install -y libopencv-dev
 ```
 
+**CMake 不能用发行版自带的那个。** 根 `CMakeLists.txt` 是 `cmake_minimum_required(VERSION 4.2)`，
+`CMakePresets.json` 里也写着同一个下限；而 Ubuntu 24.04 自带 3.28.3、UOS 20（Debian 10）自带 3.13，
+**两者的 preset 读取器都会直接拒绝这个文件**：
+
+```
+CMake Error: Could not read presets from ...:
+Error: @4,14: "cmakeMinimumRequired" major version 4 must be less than 3
+```
+
+注意这条错误发生在 **`cmake --preset` 读文件的时候**，一行项目代码都还没被解析，所以换
+`-S/-B` 手动传参也一样过不去（`CMakeLists.txt` 自己也会在 `cmake_minimum_required` 处失败）。
+装法（不碰系统包管理器，两种架构通用）：
+
+```bash
+python3 -m venv ~/.local/cmake && ~/.local/cmake/bin/pip install "cmake>=4.2"
+export PATH="$HOME/.local/cmake/bin:$PATH"   # 先于 /usr/bin/cmake
+cmake --version                              # 必须是 4.2+
+```
+
 ### 9.2 CMake preset（已落地，不再是草案）
 
 以下预设已写入仓库根 `CMakePresets.json`（对应上面 §8 的 **P2**，可直接用）：

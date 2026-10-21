@@ -145,6 +145,28 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # The root `CMakeLists.txt` says `cmake_minimum_required(VERSION 4.2)`, and
+      # Ubuntu 24.04 ships 3.28 -- whose preset reader rejects the file outright
+      # ("cmakeMinimumRequired major version 4 must be less than 3"), so even
+      # `cmake --preset` fails before any project code is read. PyPI's `cmake`
+      # wheel is the only way to get 4.x on both architectures without adding a
+      # third-party apt repository; the venv also keeps it off the system python.
+      - name: Install CMake 4.2
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cmake"
+          "$RUNNER_TEMP/cmake/bin/pip" install --quiet --upgrade "cmake>=4.2"
+          echo "$RUNNER_TEMP/cmake/bin" >> "$GITHUB_PATH"
+
+      # Whichever cmake the next step picks up is printed, not assumed: every
+      # other entry in the apt list is a distribution package, and `cmake` is the
+      # one build tool that is not.
+      - name: Report the toolchain
+        run: |
+          cmake --version | head -1
+          ninja --version
+          gcc --version | head -1
+          qmake --version | tail -1
+
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
