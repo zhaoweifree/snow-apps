@@ -433,7 +433,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–11）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider + `snow-selected-text` X11 PRIMARY selection（9.4.22）+ X11 区域采集只读子矩形（9.4.23），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级与控件级文本（**音频按决策 4 不做**） |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–12）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider + `snow-selected-text` X11 PRIMARY selection（9.4.22）+ X11 区域采集只读子矩形（9.4.23）+ X11 采集的 `record_stage_timings` 真正产出（9.4.24），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级与控件级文本（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
@@ -1784,8 +1784,11 @@ dispatch 表在两边形状一致，调用方不需要长 `cfg` 分支。
 却被无条件 re-export、`OnceLock` 未使用），修完又露出 6 个 dead-code 错（`StageScope` /
 `attach_stage_timings` / `stage_recording` / `pixel_counters::readback` 在 Linux 上没有调用者）。
 处置：QPC 两个 helper 的 re-export 加 `cfg(windows)`；记录器 API 用**作用域明确的**
-`#[cfg_attr(not(windows), allow(dead_code))]` + 注释说明"X11 后端只记 checkpoint，不开销
-scope"，而不是删代码（删了会打断全部 Windows 调用方）。P7 的 CI 一定会跑 `--all-features`，
+`#[cfg_attr(not(windows), allow(dead_code))]` + 注释说明这部分 recorder API 只有 Windows
+调用者，而不是删代码（删了会打断全部 Windows 调用方）。**后续修正**：当时注释写的
+"X11 后端只记 checkpoint，不开 scope"确实是 X11 后端的真实状态，但那是缺口而不是设计——
+9.4.24 让 X11 也开 scope 后，只剩 `stage_mark` / QPC helper / `stage_recording` 仍为
+Windows 专有。P7 的 CI 一定会跑 `--all-features`，
 这条不通就是红。
 
 **CMake 侧不改，理由写进 `SnowSimd.cmake` 顶部**：AArch64 上 NEON 是基线，不需要
@@ -2162,6 +2165,64 @@ captured frame`，DXGI/WGC/GDI 各一），与本片无关、待单独查——�
   从大矩形切到小矩形"（段只增不减）只在代码上成立，没有真机往返验证。
 - **多个区域共享一个 capturer**：`last_window` 是单槽，来回切换两块区域的 `capture_region_into`
   会一直读（不跳帧），行为正确但没有为它专门做多槽缓存。
+
+#### 9.4.24 P3 slice 12：X11 采集计时真的产出，阶段名不再漂移（2026-10-21）
+
+上一片的"待单独查"就是这一片。查下来是两个互不相干的洞，恰好都在"计时"这条线上：
+
+1. **`record_stage_timings` 在 Linux 上是句空承诺**。`X11Capturer` 既没实现
+   `set_record_stage_timings`（走的是 trait 默认的 no-op），也从不 `StageScope::enter`，
+   于是每个 marker 都是空转、`stage_timings` 恒为空。更糟的是 session 侧照旧把
+   `capture_duration` 填上（`stamp_captured_frame`），帧上就出现"总耗时 8 ms、明细 0 项"——
+   消费方分不清"没测"和"没耗时"。
+2. **Windows 的冒烟测试自带一份阶段名前缀白名单**，而它是**唯一**枚举阶段名的地方。
+   `653a4102` 给分配器加了 `buffer.allocate` / `buffer.writable_reuse`，白名单没跟上 ⇒
+   DXGI/WGC/GDI 三个用例一起红。它 `#![cfg(windows)]`，Linux CI 上编译成空 crate；本机也只在
+   `--features stage-timing` 时才构建，所以红着没人看见。
+
+**改动**：
+
+| 层 | 文件 | 内容 |
+|---|---|---|
+| 契约（唯一来源） | `snow-capture/src/timing.rs` | `BACKEND_STAGE_PREFIXES`（`dxgi./wgc./gdi./x11.`）+ `AGNOSTIC_STAGE_PREFIXES`（`readback./buffer.`）+ `is_known_stage` |
+| 门禁（跨平台） | `timing.rs` 的 `tests` | 扫 `src/**/*.rs` 里所有 `stage_mark` / `stage_record` / `stage_record_since` 的**字面量**，断言每个都落在已声明家族内；跳过 `timing/` 自身（那里有 `stage.one` 这类测试夹具） |
+| 后端 | `snow-capture/src/platform/linux.rs` | `record_stage_timings` 字段 + `set_record_stage_timings`；`capture` / `capture_with_history_hint` 开头 `StageScope::enter`、结尾 `attach_stage_timings`；新增 `x11.sys.get_image`、`x11.decode`、`x11.damage_drain`、`x11.skip_hold` 四个阶段 |
+| 冒烟 | `tests/screenshot_stage_timing_smoke.rs` | 前缀判据改用 `AGNOSTIC_STAGE_PREFIXES`；新增"明细里必须同时出现 `buffer.*`"的断言 |
+
+**五个关键决策**：
+
+1. **`buffer.*` 是诊断明细，不是可加桶**。GDI 的 `readback.frame_alloc` 量的正是
+   `frame.prepare_for_overwrite(...)` 这一段，而它内部就 `stage_record("buffer.allocate")`——
+   两者相加会把同一段微秒数两遍。所以 `buffer.` 进 `AGNOSTIC_STAGE_PREFIXES`、**不进**
+   `primary_stages`。新增的那条断言把这件事钉住：明细里必须**同时**有 `readback.frame_alloc`
+   与 `buffer.*`，否则说明 scope 没覆盖到帧交接。
+2. **白名单放进库，不留在测试里**。名字的**产生方**（`frame.rs`、各后端）与**校验方**（冒烟
+   测试）必须共享同一份声明，否则下一个家族照样能溜过去。测试自己只保留一条更严的判据：
+   "本后端前缀必须匹配"——`dxgi.` 出现在 WGC 的明细里仍然要红。
+3. **用源码扫描补上 `#![cfg(windows)]` 的盲区**。Windows-only 测试在 Linux CI 里是空 crate，
+   这是本轮两个洞里唯一"没人看着"的那个。扫 `src/` 是全平台、全 feature 组合都跑的判据，
+   而且它扫的正是人写阶段名的方式（字面量）。
+4. **Linux 的 region 路径刻意不开 scope**。`CaptureSampleMetadata` 没有 timings 字段，
+   开一个再把结果丢掉只是骗自己。
+5. **跳帧的 `duplicate_hold` 要记成 `x11.skip_hold`**。"跳过一帧"和"真读一帧"耗时相当，
+   本身就是策略问题的信号；不测出来就只能靠猜。
+
+**验证**：`snow-capture --all-features` lib 299 → **302**（+3 计时契约用例）；
+`--features stage-timing` 的 4 个冒烟用例 3 红 1 绿 → **全绿**；双架构 `cargo check` 8/8 PASS；
+`clippy`（host `--all-targets --all-features`，x64/arm64 linux `--lib` 的两种 feature 组合）绿；
+反向验证 **5/5 红、2/2 基线绿**（`.workbuddy/uos-port/reverse-verify-stage-timing.py`）。
+
+**本片未覆盖**：
+
+- **Linux 的计时只在类型层面成立**。没有 X server 就没有 `capture`，`x11.*` 四个阶段一次都没
+  被真正记录过。真机判据：UOS 上开 `record_stage_timings` 抓一帧，断言明细非空、
+  `x11.sys.get_image + x11.decode + buffer.allocate ≤ capture_duration`。
+- **源码扫描是文本级判据**：认 `stage_record("...")` 的写法，认不出通过常量间接传入的名字
+  （当前代码里没有这种写法）。
+- **脚本自身的坑**：本片的反向验证脚本第一次运行时被沙箱 `SIGTERM` 打断，Python 的 `finally`
+  没执行，于是 `BACKEND_STAGE_PREFIXES` 留在"缺 `x11.`"的变异状态；下一次运行把两个用例报成
+  `pattern occurs 0 times`——看着像"找不到目标"，实际是**上一次的变异没被撤销**。现在脚本启动
+  时先扫 `*.revbak` 自动恢复，并且把最贵的用例放在第一位（要杀就趁还没改过任何文件）。
 
 ### 9.5 打包
 

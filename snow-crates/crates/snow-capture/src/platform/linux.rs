@@ -55,6 +55,9 @@ use crate::backend::{
 use crate::error::{CaptureError, CaptureResult};
 use crate::frame::{CapturePixelFormat, DirtyRect, Frame};
 use crate::region::{MonitorGeometry, MonitorLayout};
+#[cfg(feature = "stage-timing")]
+use crate::timing::{StageScope, attach_stage_timings};
+use crate::timing::{stage_checkpoint, stage_record_since};
 use crate::{CaptureOptions, CaptureTarget, CaptureTargetInfo, MonitorId};
 
 /// Map a `snow-linux` failure onto this crate's error taxonomy.
@@ -318,6 +321,15 @@ struct X11Capturer {
     /// the region path declines), and a shared extent would make every such
     /// transition look like a resolution change.
     last_window: Option<(X11Rect, (u32, u32))>,
+    /// Mirrors `CaptureOptions::record_stage_timings`; set by the session after
+    /// construction, so the constructor's value is only the starting point.
+    ///
+    /// Without this the option was silently ignored on Linux: nothing here
+    /// opened a `StageScope`, so every marker compiled to a no-op and frames
+    /// came back with an empty breakdown even though `capture_duration` was
+    /// filled in by the session.
+    #[cfg(feature = "stage-timing")]
+    record_stage_timings: bool,
 }
 
 impl X11Capturer {
@@ -355,6 +367,8 @@ impl X11Capturer {
             last_full: None,
             target_fps: 0,
             last_window: None,
+            #[cfg(feature = "stage-timing")]
+            record_stage_timings: options.record_stage_timings,
         })
     }
 
@@ -394,10 +408,12 @@ impl X11Capturer {
     /// the compositor restarted, the damage object was destroyed -- would
     /// otherwise repeat a round trip that cannot succeed on every single frame.
     fn take_changes(&mut self, area: X11Rect) -> Option<Changes> {
+        let drain_begin = stage_checkpoint();
         let result = self
             .damage
             .as_mut()
             .map(|tracker| tracker.take(&self.session, area));
+        stage_record_since("x11.damage_drain", drain_begin);
         match result {
             Some(Ok(changes)) => Some(changes),
             Some(Err(_)) => {
@@ -414,10 +430,12 @@ impl X11Capturer {
     /// to accumulate would make the next `capture_with_history_hint` answer with
     /// an unbounded backlog instead of this frame's change.
     fn discard_changes(&mut self, area: X11Rect) {
+        let drain_begin = stage_checkpoint();
         let result = self
             .damage
             .as_mut()
             .map(|tracker| tracker.take(&self.session, area));
+        stage_record_since("x11.damage_drain", drain_begin);
         if matches!(result, Some(Err(_))) {
             self.damage = None;
         }
@@ -431,7 +449,9 @@ impl X11Capturer {
         // the returned image is dropped, and that image borrows the capture
         // buffer inside it.
         let order = self.output_order();
+        let read_begin = stage_checkpoint();
         let image = self.session.capture_image(requested).map_err(map_error)?;
+        stage_record_since("x11.sys.get_image", read_begin);
         let width = image.rect.width;
         let height = image.rect.height;
 
@@ -448,9 +468,11 @@ impl X11Capturer {
 
         let mut frame = reuse.unwrap_or_else(Frame::empty);
         frame.prepare_for_overwrite(width, height, self.output_format)?;
+        let decode_begin = stage_checkpoint();
         image
             .decode_into(frame.as_mut_bytes(), order)
             .map_err(map_error)?;
+        stage_record_since("x11.decode", decode_begin);
 
         let now = Instant::now();
         frame.metadata = Default::default();
@@ -598,6 +620,60 @@ impl X11Capturer {
         }
         Ok(Some(Self::region_sample(now, false, dirty)))
     }
+
+    /// The history-hint path, split out so the public entry point can open one
+    /// stage scope and attach the result to whichever branch produced the frame.
+    ///
+    /// Every return here is a real frame: a skipped one is the previous frame
+    /// re-labelled, so it carries the timings of the call that decided not to
+    /// read the server. That is the number worth having -- a skip that costs as
+    /// much as a read is a policy bug, and without instrumentation it looks like
+    /// an ordinary stream.
+    fn capture_hinted(
+        &mut self,
+        reuse: Option<Frame>,
+        destination_has_history: bool,
+    ) -> CaptureResult<Frame> {
+        let requested = target_rect(&self.target, &self.session)?;
+        let effective = self.effective_rect(requested)?;
+
+        let Some(changes) = self.take_changes(effective) else {
+            return self.read_frame(reuse, Vec::new());
+        };
+
+        let now = Instant::now();
+        let since_capture = self
+            .last_capture
+            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
+        let since_full = self
+            .last_full
+            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
+
+        match decide(&changes, since_capture, since_full, &self.policy) {
+            // Skipping needs both: a buffer the session vouches holds this
+            // target's previous output, and at least one frame of our own, since
+            // a first frame has nothing to repeat.
+            Decision::Skip
+                if destination_has_history && reuse.is_some() && self.last_extent.is_some() =>
+            {
+                let Some(frame) = reuse else {
+                    return self.read_frame(None, Vec::new());
+                };
+                // Nothing is painted, so the server answers instantly; without a
+                // pause the loop would spin as fast as it can ask. The pause is
+                // the hold a stream at this rate would have anyway.
+                let hold_begin = stage_checkpoint();
+                std::thread::sleep(duplicate_hold(self.target_fps));
+                stage_record_since("x11.skip_hold", hold_begin);
+                Ok(duplicate_frame(frame))
+            }
+            Decision::Skip | Decision::Full => self.read_frame(reuse, Vec::new()),
+            Decision::Partial(rects) => {
+                let dirty: Vec<DirtyRect> = rects.iter().filter_map(dirty_rect).collect();
+                self.read_frame(reuse, dirty)
+            }
+        }
+    }
 }
 
 /// Re-label a previous frame as unchanged.
@@ -640,6 +716,8 @@ impl MonitorCapturer for X11Capturer {
     }
 
     fn capture(&mut self, reuse: Option<Frame>) -> CaptureResult<Frame> {
+        #[cfg(feature = "stage-timing")]
+        let stages = StageScope::enter(self.record_stage_timings);
         let requested = target_rect(&self.target, &self.session)?;
         // This path is used when the caller cannot vouch for the buffer's
         // provenance, so nothing may be skipped and nothing may be called
@@ -647,7 +725,12 @@ impl MonitorCapturer for X11Capturer {
         // frame rather than every frame since the tracker was created.
         let effective = self.effective_rect(requested)?;
         self.discard_changes(effective);
-        self.read_frame(reuse, Vec::new())
+        // `mut` exists only for the feature-gated attach below.
+        #[cfg_attr(not(feature = "stage-timing"), allow(unused_mut))]
+        let mut frame = self.read_frame(reuse, Vec::new())?;
+        #[cfg(feature = "stage-timing")]
+        attach_stage_timings(&mut frame, stages);
+        Ok(frame)
     }
 
     fn capture_with_history_hint(
@@ -655,43 +738,14 @@ impl MonitorCapturer for X11Capturer {
         reuse: Option<Frame>,
         destination_has_history: bool,
     ) -> CaptureResult<Frame> {
-        let requested = target_rect(&self.target, &self.session)?;
-        let effective = self.effective_rect(requested)?;
-
-        let Some(changes) = self.take_changes(effective) else {
-            return self.read_frame(reuse, Vec::new());
-        };
-
-        let now = Instant::now();
-        let since_capture = self
-            .last_capture
-            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
-        let since_full = self
-            .last_full
-            .map_or(Duration::MAX, |at| now.saturating_duration_since(at));
-
-        match decide(&changes, since_capture, since_full, &self.policy) {
-            // Skipping needs both: a buffer the session vouches holds this
-            // target's previous output, and at least one frame of our own, since
-            // a first frame has nothing to repeat.
-            Decision::Skip
-                if destination_has_history && reuse.is_some() && self.last_extent.is_some() =>
-            {
-                let Some(frame) = reuse else {
-                    return self.read_frame(None, Vec::new());
-                };
-                // Nothing is painted, so the server answers instantly; without a
-                // pause the loop would spin as fast as it can ask. The pause is
-                // the hold a stream at this rate would have anyway.
-                std::thread::sleep(duplicate_hold(self.target_fps));
-                Ok(duplicate_frame(frame))
-            }
-            Decision::Skip | Decision::Full => self.read_frame(reuse, Vec::new()),
-            Decision::Partial(rects) => {
-                let dirty: Vec<DirtyRect> = rects.iter().filter_map(dirty_rect).collect();
-                self.read_frame(reuse, dirty)
-            }
-        }
+        #[cfg(feature = "stage-timing")]
+        let stages = StageScope::enter(self.record_stage_timings);
+        // `mut` exists only for the feature-gated attach below.
+        #[cfg_attr(not(feature = "stage-timing"), allow(unused_mut))]
+        let mut frame = self.capture_hinted(reuse, destination_has_history)?;
+        #[cfg(feature = "stage-timing")]
+        attach_stage_timings(&mut frame, stages);
+        Ok(frame)
     }
 
     fn capture_region_into(
@@ -700,6 +754,9 @@ impl MonitorCapturer for X11Capturer {
         destination: &mut Frame,
         destination_has_history: bool,
     ) -> CaptureResult<Option<CaptureSampleMetadata>> {
+        // Region samples carry no stage timings: `CaptureSampleMetadata` has no
+        // field for them, so opening a scope here would measure into a breakdown
+        // that is then dropped.
         self.read_region_into(blit, destination, destination_has_history)
     }
 
@@ -712,6 +769,14 @@ impl MonitorCapturer for X11Capturer {
 
     fn set_output_pixel_format(&mut self, format: CapturePixelFormat) -> CaptureResult<()> {
         self.output_format = format;
+        Ok(())
+    }
+
+    #[cfg(feature = "stage-timing")]
+    fn set_record_stage_timings(&mut self, enabled: bool) -> CaptureResult<()> {
+        // The session calls this after construction, so it has to land in a
+        // field: a marker's scope is opened per capture call, not per capturer.
+        self.record_stage_timings = enabled;
         Ok(())
     }
 

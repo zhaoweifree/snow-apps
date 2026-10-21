@@ -66,10 +66,17 @@ fn stage_prefix(kind: CaptureBackendKind) -> &'static str {
     }
 }
 
-/// Some backend stages (shared `readback.*`) intentionally carry no backend
-/// prefix; everything else must.
+/// Some stages are measured outside any one backend -- `readback.*` in the
+/// shared Windows surface layer, `buffer.*` in the frame allocator -- so they
+/// carry no backend prefix. Everything else must. The list of families lives in
+/// `snow_capture::timing` precisely so this file cannot go stale on its own:
+/// `buffer.allocate` was added to the allocator and this test kept its own copy
+/// of the allowed prefixes, so it stayed red until someone ran it by hand.
 fn has_expected_prefix(kind: CaptureBackendKind, name: &str) -> bool {
-    name.starts_with(stage_prefix(kind)) || name.starts_with("readback.")
+    name.starts_with(stage_prefix(kind))
+        || snow_capture::timing::AGNOSTIC_STAGE_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
 }
 
 fn primary_sum(kind: CaptureBackendKind, timings: &[StageTiming]) -> Duration {
@@ -166,6 +173,17 @@ fn capture_with_backend(kind: CaptureBackendKind) {
     assert!(
         primary <= capture_duration + Duration::from_millis(1),
         "{context}: primary stages ({primary:?}) exceed capture_duration ({capture_duration:?})"
+    );
+    // The allocator's own stage has to land in the same breakdown: it runs
+    // *inside* the backend's scope, which is why it cannot be summed with the
+    // primary stages above. A snapshot always allocates its destination buffer,
+    // so its absence would mean the scope is not covering the frame handoff.
+    assert!(
+        timings
+            .iter()
+            .any(|timing| timing.name.starts_with("buffer.")),
+        "{context}: no buffer.* stage recorded alongside {:?}",
+        timings.iter().map(|timing| timing.name).collect::<Vec<_>>()
     );
 
     println!(
