@@ -72,6 +72,39 @@ No complete window tree is cached. Apps with inaccessible or unexposed content r
 window fallback. Native calls depend on the target honoring macOS IPC timeouts; the UI
 thread never performs those calls or waits for worker shutdown.
 
+## Linux selection
+
+Two sources, because neither answers "what is under the pointer" alone. The X11 window
+manager's `_NET_CLIENT_LIST` gives the topmost window containing the point, in
+bottom-to-top order. AT-SPI2 — a second D-Bus connection every toolkit publishes its
+widget tree on — gives the widgets inside that window.
+
+`HitTestMode::Window` returns the window rectangle. `HitTestMode::UiElement` descends into
+the widget tree with `Component.GetAccessibleAtPoint`, one call per level, and returns the
+path from the innermost widget out to the window. A six-level toolkit tree therefore costs
+six round trips rather than a 256-node walk: the interface is *asked* where to go instead
+of being scanned for it.
+
+The two trees are joined by process id: `_NET_WM_PID` on the window (walking up to eight
+ancestors, since some window managers republish it on the frame) against
+`org.freedesktop.DBus.GetConnectionUnixProcessID` for each application on the
+accessibility bus. A window that publishes no pid, or publishes zero, cannot be matched —
+and is not matched against another window that also published none.
+
+A rectangle reaches the reported path only if it contains the point, lies inside the
+window, and nests inside the rectangles already accepted; the window itself is always the
+last element, once. Toolkits that report `(0, 0, 0, 0)` for an unrealized widget, an
+application root the size of the whole screen, or identical extents for a container and
+its only child are all handled by those rules rather than by per-toolkit special cases.
+
+Fallbacks, in order: no accessibility bus, no pid, no widget under the point, a path that
+does not nest — each of them reports the window rectangle, which is what
+`HitTestMode::Window` would have returned. The alternative would be reporting nothing
+where the window answer is available. Query results use the caller's budget
+(`QueryControl::budget`): 168 ms for a foreground pass, 1500 ms for a refinement, with
+each D-Bus call separately bounded at 500 ms so a wedged toolkit cannot spend the whole
+budget in one call.
+
 ## Focused diagnostics
 
 Set `SNOW_SELECTOR_DIAGNOSTICS=1` to log activation outcome, initialization time, visited

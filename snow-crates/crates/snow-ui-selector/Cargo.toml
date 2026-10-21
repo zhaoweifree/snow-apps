@@ -24,9 +24,14 @@ core-foundation = "0.10.1"
 core-foundation-sys = "0.8"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# The X11 window tree is the only pointer-selection source on Linux, and it is
-# pure Rust, so the cross-target type check still runs from a Windows host.
+# The X11 window tree is the window-level source on Linux, and it is pure Rust,
+# so the cross-target type check still runs from a Windows host.
 snow-linux = { path = "../snow-linux" }
+# The widget tree above that window tree. Separate crate rather than a module of
+# `snow-linux` because `snow-selected-text-c` -- the other consumer of AT-SPI2 --
+# deliberately does not depend on `snow-linux`, and one implementation is what
+# keeps the two from drifting apart.
+snow-atspi = { path = "../snow-atspi" }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows = { workspace = true, features = [

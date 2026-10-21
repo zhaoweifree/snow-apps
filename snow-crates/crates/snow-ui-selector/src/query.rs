@@ -29,10 +29,7 @@ pub struct QueryResult {
 /// window list rather than walking an accessibility tree, so it has no
 /// traversal to spend a budget on. On a platform with no provider yet nothing
 /// reads them at all.
-#[cfg_attr(
-    not(any(target_os = "windows", target_os = "macos")),
-    allow(dead_code)
-)]
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
 pub struct QueryControl<'a> {
     pub(crate) budget: Duration,
     pub(crate) call_limit: Duration,

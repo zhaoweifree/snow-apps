@@ -78,6 +78,14 @@ pub struct WindowAttributes {
     pub has_pixels: bool,
     /// Frame rectangle in root coordinates.
     pub bounds: Rect,
+    /// The process that created the window, from `_NET_WM_PID`.
+    ///
+    /// `None` covers "the client did not publish one" and "it published zero",
+    /// which are the same thing to every caller: there is no application behind
+    /// this window to ask anything. Comparing a zero instead would match every
+    /// other window that also failed to report one -- which is how a control
+    /// picker ends up describing a widget belonging to a different program.
+    pub pid: Option<u32>,
 }
 
 /// Whether a window is a surface the user can name as a target on its own.
@@ -108,6 +116,8 @@ pub fn selectable(attributes: &WindowAttributes) -> bool {
 pub struct WindowInfo {
     pub id: u64,
     pub bounds: Rect,
+    /// The process behind the window; see [`WindowAttributes::pid`].
+    pub pid: Option<u32>,
 }
 
 /// The windows the pointer may select, over the desktop rectangle they sit on.
@@ -160,6 +170,7 @@ pub fn desktop_windows(
         .map(|attributes| WindowInfo {
             id: attributes.id,
             bounds: attributes.bounds,
+            pid: attributes.pid,
         })
         .collect();
     DesktopWindows { windows, desktop }
@@ -183,7 +194,28 @@ mod tests {
             override_redirect: false,
             has_pixels: true,
             bounds: Rect::new(x, y, width, height),
+            pid: Some(4321),
         }
+    }
+
+    #[test]
+    fn the_process_id_travels_with_the_window() {
+        // A caller that needs the application behind a window -- the control
+        // picker asks the accessibility bus by pid -- must get it from the same
+        // record as the rectangle, or the two can describe different windows.
+        let attributes = [
+            WindowAttributes {
+                pid: None,
+                ..normal(1, 0, 0, 100, 100)
+            },
+            normal(2, 0, 0, 100, 100),
+        ];
+        let desktop = desktop_windows(&attributes, &[], Rect::new(0, 0, 200, 200));
+        assert_eq!(desktop.hit_test(50, 50).unwrap().pid, Some(4321));
+        let unknown = desktop_windows(&attributes[..1], &[], Rect::new(0, 0, 200, 200));
+        // "No pid" survives as `None` rather than as a zero that would match
+        // every other unpublished window.
+        assert_eq!(unknown.windows[0].pid, None);
     }
 
     #[test]

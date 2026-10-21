@@ -154,7 +154,7 @@ fn unsupported_error() -> CaptureError {
 | D3D11 / GPU tonemap | `snow-crates/crates/snow-d3d11/*`；`snow-capture/.../gpu_tonemap.rs`（≈180 处） | Vulkan/EGL 或纯 CPU |
 | GDI 回退 | `snow-capture/src/platform/windows/gdi.rs` | X11 `GetImage` —— **已落地**：`snow-linux/src/x11.rs` + `snow-capture/src/platform/linux.rs`（见 9.4.3） |
 | WASAPI 音频 | `snow-audio-recorder/src/platform/windows/*` | PulseAudio / PipeWire |
-| UIA/MSAA 元素拾取 | `snow-ui-selector/src/windows/*`、`snow-selected-text/src/platform/windows/*` | **X11 窗口树 —— 已落地窗口级**：`snow-linux/src/window.rs`（纯逻辑）+ `snow-linux/src/x11/window.rs`（见 9.4.6）。**跨进程取选中文字已落地 PRIMARY selection**（见 9.4.22）；**AT-SPI2 已接进 `snow-selected-text`**（`snow-atspi` crate，见 9.4.25/9.4.26）：控件级文本 + 选中矩形 + 按 `_NET_WM_PID` 定位应用，PRIMARY 作退路。控件级元素拾取（`snow-ui-selector`）仍待做 |
+| UIA/MSAA 元素拾取 | `snow-ui-selector/src/windows/*`、`snow-selected-text/src/platform/windows/*` | **X11 窗口树 —— 已落地窗口级**：`snow-linux/src/window.rs`（纯逻辑）+ `snow-linux/src/x11/window.rs`（见 9.4.6）。**跨进程取选中文字已落地 PRIMARY selection**（见 9.4.22）；**AT-SPI2 已接进 `snow-selected-text`**（`snow-atspi` crate，见 9.4.25/9.4.26）：控件级文本 + 选中矩形 + 按 `_NET_WM_PID` 定位应用，PRIMARY 作退路。**控件级拾取已接进 `snow-ui-selector`**（见 9.4.27）：`Component.GetAccessibleAtPoint` 点命中下探，返回「控件→…→窗口」路径，读不到时回退窗口矩形 |
 | 全局键鼠钩子 | `snow-recording-effects/src/{keyboard_hook.rs:124, mouse_hook.rs:90}` | **XInput2 raw events —— 已落地**：`snow-linux/src/input/`（见 9.4.4）。待补：无 XInput2 时的 XRecord / evdev 退路、Wayland portal |
 | DirectWrite + Direct2D 键帽光栅化 | `snow-recording-effects/src/keyboard_rasterizer.rs:8`（macOS 走 CoreText + Quartz） | **`ab_glyph` + `ttf-parser` —— 已落地**：`snow-linux/src/text/`（见 9.4.5）。字体发现自建，**刻意不链 fontconfig** |
 | Win32 窗口层 | `snow_shot/src/platform/windows/*`（30 文件）：`windowchrome.cpp:255` `SetWindowDisplayAffinity`、`pinnedwindownative.cpp` `WS_EX_*` | X11 属性 / 无对应 |
@@ -313,7 +313,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 | **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集；XShm 零拷贝（9.4.7）；Damage 跳帧与脏矩形（9.4.19）；区域采集只读子矩形（9.4.23）；**Wayland 会话按 `capture_plan` 明确拒绝**（9.4.20）。待补：PipeWire 帧消费（portal 会话协商已落地） |
 | **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | ~~PulseAudio / PipeWire~~ **不做（决策 4）**：保持 `UnsupportedBackend`，Linux 录制无音轨 |
 | **新增** | `snow-crates/crates/snow-cursor/src/platform/linux.rs` | XFixes `GetCursorImage` + 核心 `QueryPointer`。**已完成**（含 image 缓存的瞬时失败保护，与 Windows 后端同策略） |
-| **新增** | `snow-crates/crates/snow-ui-selector/src/linux.rs` | **窗口级已落地**（见 9.4.6）：X11 窗口树 + `_NET_CLIENT_LIST`，`ElementRegionService` 在 Linux 上导出，`snow-ui-selector-c` 恢复可编译。控件级仍需 AT-SPI2（D-Bus）——未实现，`HitTestMode::UiElement` 与 `Window` 目前返回同一个窗口矩形 |
+| **新增** | `snow-crates/crates/snow-ui-selector/src/linux.rs` | **窗口级已落地**（见 9.4.6）：X11 窗口树 + `_NET_CLIENT_LIST`，`ElementRegionService` 在 Linux 上导出，`snow-ui-selector-c` 恢复可编译。**控件级已落地**（见 9.4.27）：`HitTestMode::UiElement` 经 `snow-atspi` 的点命中下降返回「控件→…→窗口」；读不到时回退窗口矩形（`HitTestMode::Window` 语义） |
 | **新增** | `snow-crates/crates/snow-selected-text/src/platform/linux/` | **X11 PRIMARY selection 已落地**（见 9.4.22）：`selection.rs`（纯逻辑：目标优先级、`INCR` 判据、解码、上限）+ `platform/linux/{selection,source}.rs`（传输与活动窗口识别）。被动读、零注入 ⇒ `clipboard_status` 恒 `Unchanged`。**AT-SPI2 已接线**（见 9.4.26）：先读焦点控件的 `Text` 选中（带矩形），没有才退回 PRIMARY；`method` 报真正答话的那条路。待补：真机验证 |
 | **修改** | `snow-recording-effects/src/{keyboard_hook,mouse_hook}.rs` 的 `#[cfg(not(any(windows,macos)))]` 空实现 | **已落地 X11 实现**（见 9.4.4）：`#[cfg(target_os="linux")] mod platform` 把 `snow_linux::input` 的观测翻译成 `KeyObservation` / `MouseClickObservation` / `MouseMovement` |
 | **修改** | `snow-recording-effects/src/keyboard_rasterizer.rs:547` 的 `#[cfg(not(any(windows,macos)))]` 桩 | **已落地**（见 9.4.5）。**注意**：该文件不是纯逻辑 —— 每个平台各自实现 `mod platform`（Windows 是 DirectWrite+D2D，macOS 是 CoreText+Quartz），Linux 分支原先是硬返回 Err ⇒ 按键能采到但画不出来。现已接 `snow_linux::text` |
@@ -434,7 +434,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–14）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider + `snow-selected-text` X11 PRIMARY selection（9.4.22）+ X11 区域采集只读子矩形（9.4.23）+ X11 采集的 `record_stage_timings` 真正产出（9.4.24）+ AT-SPI2 访问层（9.4.25）+ AT-SPI2 抽成 `snow-atspi` 并接进 `snow-selected-text`（9.4.26），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级元素拾取（`snow-ui-selector`）（**音频按决策 4 不做**） |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–15）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider + `snow-selected-text` X11 PRIMARY selection（9.4.22）+ X11 区域采集只读子矩形（9.4.23）+ X11 采集的 `record_stage_timings` 真正产出（9.4.24）+ AT-SPI2 访问层（9.4.25）+ AT-SPI2 抽成 `snow-atspi` 并接进 `snow-selected-text`（9.4.26）+ AT-SPI2 点命中接进 `snow-ui-selector` 的控件级拾取（9.4.27），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
@@ -2377,7 +2377,78 @@ RED —— **编译失败比断言失败证明得少**，它可能说明这条�
 - **`native_focus` 仍恒 `None`。** AT-SPI2 没有整数控件 id 这种东西；`bounds` 已经覆盖了它原本的
   主要用途（气泡定位），留 `None` 比编一个假 id 诚实。
 - **`snow-ui-selector` 的控件级拾取没做**：`snow-atspi` 已经把需要的东西备好了，但那边要改的是
-  `HitTestMode::UiElement` 的返回结构与 C ABI，属另一片。
+  `HitTestMode::UiElement` 的返回结构与 C ABI，属另一片。**已在 9.4.27 补上**（结论：C ABI 不用改，
+  `path` 本来就是「最内层在前」的矩形链）。
+
+#### 9.4.27 P3 slice 15：控件级拾取——点命中下降接进 `snow-ui-selector`（2026-10-21）
+
+9.4.25/9.4.26 让选中文字有了矩形，但 `HitTestMode::UiElement` 在 Linux 上仍只回一个窗口矩形
+（9.4.6 的窗口级 provider 把两种模式答成一件事）。本片把控件级接上：指针落点进去，一路
+`Component.GetAccessibleAtPoint` 下探到最内层控件。
+
+| 层 | 位置 | 内容 |
+|---|---|---|
+| 纯逻辑 | `snow-atspi/src/lib.rs` | `ComponentSource`（`child_at_point` + `extents`）、`descend_to_point`（有界下降）、`Bounds::{contains,contains_rect,is_empty}`、`hit_path`（链→路径）；单测在 Windows 上跑 |
+| 传输 | `snow-atspi/src/bus.rs` | `AccessibilityBus::point_path(pid, point, window, deadline)`：按 pid 找应用 → 下降 → 读 extents → `hit_path` |
+| 数据 | `snow-linux/src/{window.rs,x11/window.rs}` | `WindowAttributes.pid` / `WindowInfo.pid`：读 `_NET_WM_PID`（可上溯 8 层），0 视为"没有" |
+| 接线 | `snow-ui-selector/src/linux.rs` | `HitTestMode::UiElement` 先发窗口矩形再走 AT-SPI2；后者答话就换成控件链，否则留窗口矩形。`HitTestMode::Window` 不变 |
+
+**七个关键判断**：
+
+1. **点命中要下探，不要扫描。** 找焦点只能 BFS（没有任何接口能"问焦点"），但找落点可以：
+   `GetAccessibleAtPoint` 让工具包自己往下指。六层树 = 六次调用，而不是最多 256 次访问。
+   代价是**信任**工具包——某个控件在自己身上回"这里什么都没有"，下降就早停一层，
+   拿到的是祖先的矩形；那正是窗口级回退会给的答案，所以失败模式是"粗"而不是"错"。
+2. **`GetAccessibleAtPoint` 回 `(so)`，`GetChildren` 回 `a(so)`。** 两者在 Rust 里都能解码成元组，
+   用错的哪一个只会在运行时解码失败。已用签名断言把 `(so)` 钉进 `bus.rs` 的测试。
+3. **下降有三个终止条件**：null 引用、已经见过的引用、深度/期限。第二条不是防御性编程：
+   好几个工具包在叶子节点上回**自己**，没有 seen-set 会一直撞到深度上限，24 次往返白跑。
+   这里只查 `max_depth` 不查 `max_visits`——每一层正好一次调用，两个预算其实是同一个数。
+4. **矩形要过三道关**：含这个点、落在窗口内、与已接受的内层矩形嵌套且不重复。
+   其中"零尺寸"这一关**故意没有单独写**：`(0, 0, 0, 0)` 不含任何点，`contains` 已经挡掉了。
+   本片先写了那行守卫，反向验证里那条变异**保持绿**才发现它是任何输入都走不到的代码——
+   一个走不到的守卫比没有守卫更糟，它让人以为有保护。已删，理由写在函数文档里。
+5. **窗口永远在路径末尾，且只出现一次。** 窗口不含这个点 ⇒ 返回**空路径**而不是窗口：
+   那说明调用方拿去命中测试的快照已经过期，硬报窗口等于把这个事实藏起来。
+6. **pid 是两棵树唯一的接头。** `_NET_WM_PID` 在客户窗口上（`_NET_CLIENT_LIST` 给的正是它），
+   少数窗管会把它复制到自己的框上，所以向上找、上限 8 层。**0 一律当"没有"**：
+   否则一个没上报 pid 的窗口会配上一个同样没上报的应用，比读不到更糟。
+7. **预算来自调用方，不是常量。** `QueryControl.budget` 是 168 ms（前景）/ 1500 ms（精修），
+   与 Windows provider 的遍历预算同一个数。配合 AT-SPI2 每调用 500 ms 的超时，
+   真正的上界是 `budget`，而不是"每次调用都很短"。
+
+**验证**：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-atspi` | 28 → **47 通过**（+19：8 个下降用例 + 11 个路径/几何用例；另在既有签名用例里补了 `(so)`） |
+| `cargo test -p snow-linux --lib` | 232 → **233 通过**（+1 pid 随窗口传递） |
+| `cargo test -p snow-ui-selector --lib` | **50 通过**，无回归（Linux provider 在 Windows 上不编译，见下） |
+| 双架构 `cargo check`（x86_64 / aarch64） | `checked=14 failures=0` |
+| 跨目标 `clippy --lib --tests -D warnings` | 绿 |
+| fmt + host `clippy --all-targets --all-features` | 绿 |
+| 反向验证 | **34/34 红、0 只崩编译、3/3 基线绿**（`.workbuddy/uos-port/reverse-verify-a11y.py`，覆盖 3 个文件 3 个 crate） |
+
+**这一片又一次被反向验证改掉了一个断言**：`contains_rect` 的"空矩形被任何矩形包含"那条规则，
+最初的用例用的是原点处的空矩形——算术上不带那条守卫也成立，于是变异保持绿。改成**屏幕外**的空
+矩形（`(500,500,0,0)`）才真正钉住"空即真"。同一类问题的第三次：**判据必须能让目标规则自己产生
+差别**，否则它测的是别的规则。
+
+**本片未覆盖**：
+
+- **`snow-ui-selector/src/linux.rs` 一行都没被执行过**：它在 `#[cfg(target_os = "linux")]` 之后，
+  Windows 上连编译都没有，Linux 上也没有自动化测试跑过它。跨目标 `check` 只证明它**编译**。
+  真正的判据在真机：UOS 上悬停在一个 gedit 的按钮上，`count` 应为 ≥2（按钮 + 窗口），
+  `rects[0]` 落在按钮上；关掉 at-spi2-core 后同一位置 `count` 应为 1 且是窗口矩形。
+- **整条传输仍未在真机跑过一次**（同 9.4.25/9.4.26）：`GetAccessibleAtPoint` 的 `(so)` 解码、
+  `GetExtents` 的屏幕坐标系、Qt/GTK 各自下降几层，都没有实测数据。
+- **`progress` 会在每次查询里先发一次窗口矩形**：叠加层会先画窗口再换成控件。这是有意的
+  （慢工具包不至于什么都不显示），但没有量过它对叠加层刷新频率的影响。
+- **连接只尝试一次**：`bus_attempted` 一旦置真就不再重连。无障碍总线在会话中途重启的话，
+  这个 service 实例剩下的生命里都会退回窗口级。service 是**每会话**创建的，影响面有限，
+  但 `release_cache` 会把它清掉，属于"知道但不修"。
+- **多显示器负坐标只做了单位换算**：`Bounds` 是 i32 桌面坐标，`SelectionRect`/`ElementRect`
+  各自是 f64 / i32 像素，目前只在纯函数层验过符号不被夹掉，没有在双头布局上真机验过。
 
 ### 9.5 打包
 

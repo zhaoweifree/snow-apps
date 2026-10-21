@@ -21,6 +21,7 @@ use crate::window::{
 };
 
 const NET_CLIENT_LIST: &[u8] = b"_NET_CLIENT_LIST";
+const NET_WM_PID: &[u8] = b"_NET_WM_PID";
 const NET_WM_WINDOW_TYPE: &[u8] = b"_NET_WM_WINDOW_TYPE";
 const NET_WM_WINDOW_TYPE_DESKTOP: &[u8] = b"_NET_WM_WINDOW_TYPE_DESKTOP";
 const NET_WM_WINDOW_TYPE_DOCK: &[u8] = b"_NET_WM_WINDOW_TYPE_DOCK";
@@ -114,6 +115,7 @@ impl TypeAtoms {
 
 struct Atoms {
     client_list: u32,
+    pid: u32,
     types: TypeAtoms,
 }
 
@@ -137,14 +139,25 @@ pub fn desktop_windows_for(session: &X11Session, excluded: &[u64]) -> LinuxResul
 
 fn intern_atoms(session: &X11Session) -> LinuxResult<Atoms> {
     let conn = session.conn();
+    // Both atoms are interned before either reply is awaited, so the pair costs
+    // one round trip. `TypeAtoms::intern` does the same for its own batch.
     let client_list = conn
         .intern_atom(false, NET_CLIENT_LIST)
-        .map_err(|error| LinuxError::backend("intern atom", error))?
+        .map_err(|error| LinuxError::backend("intern atom", error))?;
+    let pid = conn
+        .intern_atom(false, NET_WM_PID)
+        .map_err(|error| LinuxError::backend("intern atom", error))?;
+    let client_list = client_list
+        .reply()
+        .map_err(|error| LinuxError::reply("intern atom", error))?
+        .atom;
+    let pid = pid
         .reply()
         .map_err(|error| LinuxError::reply("intern atom", error))?
         .atom;
     Ok(Atoms {
         client_list,
+        pid,
         types: TypeAtoms::intern(session)?,
     })
 }
@@ -270,5 +283,49 @@ fn read_window(
         override_redirect: attributes.override_redirect,
         has_pixels: attributes.class == WindowClass::INPUT_OUTPUT,
         bounds,
+        pid: window_pid(session, root, window, atoms.pid),
     }))
+}
+
+/// How many ancestors are searched for `_NET_WM_PID`.
+///
+/// The property belongs on the client window, which is exactly what
+/// `_NET_CLIENT_LIST` names, so the first read is normally the answer. The walk
+/// exists for window managers that copy the property onto their frame, and the
+/// cap keeps a reparenting chain -- frame, group leader, root -- from turning
+/// into an unbounded traversal on every enumeration.
+const MAX_PID_ANCESTORS: u32 = 8;
+
+/// The process that created `window`, or `None` when it does not say.
+///
+/// A published zero is reported as absent. `_NET_WM_PID` has no meaning at zero,
+/// and a caller that matched on it would pair the window with whichever
+/// application also failed to publish one.
+fn window_pid(session: &X11Session, root: Window, window: Window, atom: u32) -> Option<u32> {
+    let conn = session.conn();
+    let mut current = window;
+    for _ in 0..MAX_PID_ANCESTORS {
+        let reply = conn
+            .get_property(false, current, atom, AtomEnum::CARDINAL, 0, 1)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())?;
+        if let Some(pid) = reply.value32().and_then(|mut values| values.next())
+            && pid != 0
+        {
+            return Some(pid);
+        }
+        let parent = conn
+            .query_tree(current)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .map(|tree| tree.parent)
+            .unwrap_or_default();
+        // No parent to walk to: a window whose parent is itself would loop, and
+        // the root has nothing above it.
+        if parent == 0 || parent == current || parent == root {
+            return None;
+        }
+        current = parent;
+    }
+    None
 }

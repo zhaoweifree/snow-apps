@@ -29,6 +29,12 @@
 //! treats a missing answer as an empty list. Only [`AccessibilityBus::connect`]
 //! reports an error, because "there is no accessibility bus" is a fact the
 //! caller has to act on (it falls back to the PRIMARY selection).
+//!
+//! There are two traversals here, not one. [`find_focused`] walks breadth-first
+//! looking for the focus, because there is no way to *ask* for it. Point hit
+//! testing does not walk at all: `Component.GetAccessibleAtPoint` is asked to
+//! descend, so a six-level tree costs six calls instead of up to 256. See
+//! [`AccessibilityBus::point_path`].
 
 use std::time::{Duration, Instant};
 
@@ -38,9 +44,10 @@ use zbus::export::serde::de::DeserializeOwned;
 use zbus::wire::{OwnedObjectPath, Type};
 
 use super::{
-    AccessibleSource, AtspiError, AtspiResult, Bounds, DEFAULT_WALK_LIMITS, Focus, MAX_TEXT_BYTES,
-    ObjectRef, ROOT_PATH, TEXT_INTERFACE, TextSelection, choose_selection, clamp_text,
-    deadline_passed, extents_to_bounds, find_focused, match_app_by_pid,
+    AccessibleSource, AtspiError, AtspiResult, Bounds, COMPONENT_INTERFACE, ComponentSource,
+    DEFAULT_WALK_LIMITS, Focus, MAX_TEXT_BYTES, ObjectRef, ROOT_PATH, TEXT_INTERFACE,
+    TextSelection, choose_selection, clamp_text, deadline_passed, descend_to_point,
+    extents_to_bounds, find_focused, hit_path, match_app_by_pid,
 };
 
 /// The launcher on the session bus, and the one method it answers.
@@ -58,6 +65,15 @@ const DBUS_INTERFACE: &str = "org.freedesktop.DBus";
 /// Generous for a local socket (a toolkit answers in microseconds) and short
 /// enough that a wedged application costs half a second instead of the capture.
 const CALL_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// `ATSPI_COORD_TYPE_SCREEN`: coordinates relative to the desktop.
+///
+/// The other two values in `AtkCoordType` are relative to the component's
+/// toplevel window (1) and to its immediate parent (2). Every coordinate in this
+/// crate -- the point a selector was given, the extents it reports -- is in
+/// desktop pixels, so mixing in a relative frame would place the answer in a
+/// coordinate system the caller cannot interpret.
+const SCREEN_COORDINATES: u32 = 0;
 
 /// What a focused text node reports.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -179,6 +195,42 @@ impl AccessibilityBus {
         Ok(self.selection_of(&node))
     }
 
+    /// The widget path under `point` inside `pid`'s application.
+    ///
+    /// Returns the rectangles a selector reports: innermost first, the window
+    /// last. Empty when the application is not on the accessibility bus, when
+    /// the descent learned nothing, or when `window` does not contain the point
+    /// (a stale snapshot) -- the caller's fallback is the window rectangle,
+    /// which is what an empty answer already means to it.
+    ///
+    /// `window` is the X11 frame the caller hit-tested. It is both the outer
+    /// bound of the answer and the last element of it: the accessibility tree
+    /// knows nothing about window frames, so without it the caller would have
+    /// to guess which of the returned rectangles encloses the others.
+    pub fn point_path(
+        &self,
+        pid: u32,
+        point: (i32, i32),
+        window: Bounds,
+        deadline: Option<Instant>,
+    ) -> Vec<Bounds> {
+        let Some(application) = match_app_by_pid(&self.applications(deadline), pid) else {
+            return Vec::new();
+        };
+        let limits = match deadline {
+            Some(deadline) => DEFAULT_WALK_LIMITS.until(deadline),
+            None => DEFAULT_WALK_LIMITS,
+        };
+        let mut tree = AppTree { bus: self };
+        let chain = descend_to_point(&mut tree, &application, point, limits);
+        // The extents are read afterwards, for the chain the descent settled
+        // on: one call per level, and none for the nodes it skipped over. A
+        // walk would have asked every candidate for its rectangle before it
+        // knew which one it wanted.
+        let bounds: Vec<Bounds> = chain.iter().filter_map(|node| tree.extents(node)).collect();
+        hit_path(&bounds, window, point)
+    }
+
     /// The selection of one text node.
     fn selection_of(&self, node: &ObjectRef) -> Option<FocusReading> {
         let count: i32 = self.call(node, TEXT_INTERFACE, "GetNSelections", &())?;
@@ -291,6 +343,31 @@ impl AccessibleSource for AppTree<'_> {
     }
 }
 
+impl ComponentSource for AppTree<'_> {
+    fn child_at_point(&mut self, node: &ObjectRef, x: i32, y: i32) -> Option<ObjectRef> {
+        // A `(so)` reply: one reference, not a list. A toolkit without
+        // `Component` fails here, which the descent reads as "no child".
+        let (name, path) = self.bus.call::<_, (String, OwnedObjectPath)>(
+            node,
+            COMPONENT_INTERFACE,
+            "GetAccessibleAtPoint",
+            &(x, y, SCREEN_COORDINATES),
+        )?;
+        Some(node.child(ObjectRef::new(name, path.as_str())))
+    }
+
+    fn extents(&mut self, node: &ObjectRef) -> Option<Bounds> {
+        self.bus
+            .call::<_, (i32, i32, i32, i32)>(
+                node,
+                COMPONENT_INTERFACE,
+                "GetExtents",
+                &(SCREEN_COORDINATES,),
+            )
+            .and_then(extents_to_bounds)
+    }
+}
+
 /// The desktop root, for a caller that wants to enumerate applications itself.
 pub fn desktop() -> ObjectRef {
     ObjectRef::new(super::REGISTRY_SERVICE, ROOT_PATH)
@@ -322,6 +399,14 @@ mod tests {
         assert_eq!(
             <(i32, i32, i32, i32) as Type>::SIGNATURE.to_string(),
             "(iiii)"
+        );
+        // One reference, not a list: `GetAccessibleAtPoint` answers `(so)`
+        // while `GetChildren` answers `a(so)`. Both decode into a Rust tuple
+        // per element, so using the wrong one is a deserialisation failure at
+        // runtime and nothing a type check would catch.
+        assert_eq!(
+            <(String, OwnedObjectPath) as Type>::SIGNATURE.to_string(),
+            "(so)"
         );
     }
 

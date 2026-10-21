@@ -20,7 +20,7 @@
 //! is what lets this half be tested on a machine that has never run a desktop
 //! bus.
 //!
-//! Five rules in here are easy to get wrong and expensive to debug on a real
+//! Six rules in here are easy to get wrong and expensive to debug on a real
 //! machine, so they are stated here rather than buried in the transport:
 //!
 //! 1. **Text offsets are characters, not bytes.** They are UCS-4 code points,
@@ -28,7 +28,7 @@
 //!    every Chinese character. See [`char_range_to_byte_range`].
 //! 2. **An empty bus name means "the same application as the parent".** The
 //!    spec allows a child reference to omit it, and a client that takes the
-//!    empty string literally addresses no one. See [`inherit_name`].
+//!    empty string literally addresses no one. See [`ObjectRef::child`].
 //! 3. **`FOCUSED` does not mean "this is the text".** Window frames and buttons
 //!    carry it too, so the walk prefers a focused node that also implements
 //!    `org.a11y.atspi.Text` and keeps the first plain one as a fallback.
@@ -37,6 +37,11 @@
 //! 5. **A visit budget bounds the work, not the time.** Every visit is a round
 //!    trip to an application that may be wedged, so the walk also takes a
 //!    deadline and gives up on it. See [`WalkLimits::deadline`].
+//! 6. **A point hit test descends, it does not scan.** Eight round trips down
+//!    [`descend_to_point`] replace a 256-visit walk over the same tree, and the
+//!    answer is the same node. The catch is that the descent relies on the
+//!    toolkit's own `GetAccessibleAtPoint`, so it can stop early -- the path is
+//!    then the node it reached, not the node the user is pointing at.
 
 use std::collections::{HashSet, VecDeque};
 use std::ops::Range;
@@ -306,6 +311,52 @@ impl Bounds {
             height,
         }
     }
+
+    /// Whether a point is inside, with the right and bottom edges **exclusive**.
+    ///
+    /// Half-open matches the X11 convention that `snow-linux`'s `Rect` follows,
+    /// so two rectangles that share an edge never both claim the point on it --
+    /// which matters here because the window rectangle and the toolkit's
+    /// rectangle for the same widget are compared against the same point.
+    ///
+    /// The arithmetic is done in `i64`: `x + width` overflows `i32` for a
+    /// rectangle that starts far to the left and is wide, and an overflow in a
+    /// containment test is a wrong answer, not a panic worth catching.
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        let (left, top) = (i64::from(self.x), i64::from(self.y));
+        let (right, bottom) = (left + i64::from(self.width), top + i64::from(self.height));
+        let (x, y) = (i64::from(x), i64::from(y));
+        x >= left && x < right && y >= top && y < bottom
+    }
+
+    /// Whether the rectangle covers no pixels at all.
+    ///
+    /// Toolkits return `(0, 0, 0, 0)` for a widget that exists but is not
+    /// realized. Such a rectangle is not a position -- drawing an overlay at
+    /// its origin puts a widget outline in the top-left corner of the primary
+    /// head, on top of whatever is actually there.
+    pub fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
+    /// Whether `inner` lies entirely inside this rectangle, edges included.
+    ///
+    /// Unlike [`Bounds::contains`] this is closed on all sides: a child widget
+    /// that exactly fills its parent is still the parent's child, and an empty
+    /// `inner` is contained by anything (it occupies no pixels that could fall
+    /// outside). Callers that need a real nesting check reject empty rectangles
+    /// first.
+    pub fn contains_rect(&self, inner: &Bounds) -> bool {
+        if inner.is_empty() {
+            return true;
+        }
+        let (left, top) = (i64::from(self.x), i64::from(self.y));
+        let (right, bottom) = (left + i64::from(self.width), top + i64::from(self.height));
+        i64::from(inner.x) >= left
+            && i64::from(inner.y) >= top
+            && i64::from(inner.x) + i64::from(inner.width) <= right
+            && i64::from(inner.y) + i64::from(inner.height) <= bottom
+    }
 }
 
 /// Turn `GetRangeExtents`'s `(iiii)` into a rectangle.
@@ -498,6 +549,131 @@ pub fn match_app_by_pid(apps: &[(ObjectRef, u32)], pid: u32) -> Option<ObjectRef
     apps.iter()
         .find(|(_, candidate)| *candidate == pid)
         .map(|(app, _)| app.clone())
+}
+
+/// The two reads a point-directed descent needs.
+///
+/// Split out for the same reason as [`AccessibleSource`]: the termination
+/// rules are what deserve testing, and they do not need a bus.
+pub trait ComponentSource {
+    /// `Component.GetAccessibleAtPoint`: the child under the point, or `None`
+    /// when there is nothing there (which the interface spells as a null
+    /// reference).
+    fn child_at_point(&mut self, node: &ObjectRef, x: i32, y: i32) -> Option<ObjectRef>;
+
+    /// `Component.GetExtents` in screen coordinates, or `None` when the node
+    /// has no `Component` interface or reports a degenerate rectangle.
+    fn extents(&mut self, node: &ObjectRef) -> Option<Bounds>;
+}
+
+/// Descend from `root` towards the deepest node under `point`.
+///
+/// One `GetAccessibleAtPoint` per level, so a toolkit tree six levels deep
+/// costs six round trips -- against up to 256 for a breadth-first walk that
+/// tests every node's extents. The descent is what the interface is for.
+///
+/// What it costs: it trusts the toolkit. A widget that answers "nothing here"
+/// for a point inside itself ends the descent one level too high, and the
+/// caller then reports the ancestor's rectangle. That is the same answer the
+/// window-level fallback would give, so the failure mode is a coarser selection
+/// rather than a wrong one.
+///
+/// It stops at: a null reference, a reference it has already seen (toolkits do
+/// return the node itself, or an ancestor), `max_depth`, or the deadline. Only
+/// `max_depth` is consulted -- each level is exactly one call, so a visit
+/// budget would be the same number under another name.
+pub fn descend_to_point(
+    source: &mut impl ComponentSource,
+    root: &ObjectRef,
+    point: (i32, i32),
+    limits: WalkLimits,
+) -> Vec<ObjectRef> {
+    let mut chain = Vec::new();
+    if root.is_null() {
+        return chain;
+    }
+    let mut seen = HashSet::new();
+    seen.insert((root.name.clone(), root.path.clone()));
+    chain.push(root.clone());
+
+    let mut depth = 0u32;
+    while depth < limits.max_depth {
+        if deadline_passed(limits.deadline) {
+            break;
+        }
+        let Some(current) = chain.last().cloned() else {
+            break;
+        };
+        let Some(child) = source.child_at_point(&current, point.0, point.1) else {
+            break;
+        };
+        // Empty bus name: same application as the node that was asked. Getting
+        // this wrong addresses the bus daemon, which is not even on the
+        // accessibility bus.
+        let child = current.child(child);
+        if child.is_null() || !seen.insert((child.name.clone(), child.path.clone())) {
+            break;
+        }
+        chain.push(child);
+        depth += 1;
+    }
+    chain
+}
+
+/// Order a descent chain into the hit path a selector reports.
+///
+/// Output is **innermost first**, ending with `window`: `path[0]` is the widget
+/// under the pointer and the last element is the frame the user would select in
+/// window mode. That is the order the Windows provider uses, so a caller can
+/// treat both platforms the same way.
+///
+/// A rectangle earns its place in the path by three rules, and each of them
+/// exists because a real toolkit breaks it:
+///
+/// - it must contain the point (a stale extents report misses it, and
+///   `(0, 0, 0, 0)` -- "not realized", not "at the origin" -- contains nothing),
+/// - it must lie inside `window` and contain everything already kept (the path
+///   has to be a nesting chain; a toolkit that reports a sibling, or the whole
+///   application spanning several windows, is answering about something other
+///   than what the user's pointer is in),
+/// - it must not repeat the rectangle already kept (containers and their only
+///   child often report identical extents).
+///
+/// An incoherent pair -- a window that does not contain the point at all -- is
+/// reported as an empty path rather than as the window: the snapshot the caller
+/// hit-tested against is stale, and pretending otherwise hides that.
+pub fn hit_path(chain: &[Bounds], window: Bounds, point: (i32, i32)) -> Vec<Bounds> {
+    // No separate empty-rectangle check: a rectangle of zero size contains no
+    // point, so `contains` already rejects it. A second check would look like a
+    // guard and be one that no input can reach.
+    if !window.contains(point.0, point.1) {
+        return Vec::new();
+    }
+    let mut path: Vec<Bounds> = Vec::new();
+    // The chain is outermost-first, the path is innermost-first.
+    for bounds in chain.iter().rev() {
+        if !bounds.contains(point.0, point.1) {
+            continue;
+        }
+        if !window.contains_rect(bounds) {
+            continue;
+        }
+        if path
+            .last()
+            .is_some_and(|inner| inner == bounds || !bounds.contains_rect(inner))
+        {
+            continue;
+        }
+        path.push(*bounds);
+    }
+    // The window is always part of the answer: it is the rectangle this
+    // function was asked about, and the caller's fallback when nothing else is
+    // known. Never twice, though -- a toolkit whose topmost node *is* the
+    // window has already put it there.
+    if path.last() != Some(&window) {
+        path.push(window);
+    }
+    path
 }
 
 #[cfg(test)]
@@ -974,5 +1150,337 @@ mod tests {
         let unknown = [(ObjectRef::new(":1.3", ROOT_PATH), 0)];
         assert_eq!(match_app_by_pid(&unknown, 0), None);
         assert_eq!(match_app_by_pid(&unknown, u32::MAX), None);
+    }
+
+    // ---- point hit testing ----------------------------------------------
+
+    /// A component tree answering `GetAccessibleAtPoint` from a table.
+    ///
+    /// Keyed like [`FakeTree`] so a child reference with an empty bus name is
+    /// looked up the way the descent resolves it -- looking it up raw would make
+    /// every answer invisible and the tests would pass for the wrong reason.
+    #[derive(Default)]
+    struct FakeComponents {
+        answers: HashMap<(String, String), ObjectRef>,
+        extents: HashMap<(String, String), Bounds>,
+        reads: usize,
+    }
+
+    impl FakeComponents {
+        fn under(mut self, parent: ObjectRef, child: ObjectRef) -> Self {
+            self.answers.insert(key(&parent), child);
+            self
+        }
+
+        fn sized(mut self, reference: ObjectRef, bounds: Bounds) -> Self {
+            self.extents.insert(key(&reference), bounds);
+            self
+        }
+    }
+
+    impl ComponentSource for FakeComponents {
+        fn child_at_point(&mut self, node: &ObjectRef, _: i32, _: i32) -> Option<ObjectRef> {
+            self.reads += 1;
+            self.answers.get(&key(node)).cloned()
+        }
+
+        fn extents(&mut self, node: &ObjectRef) -> Option<Bounds> {
+            self.reads += 1;
+            self.extents.get(&key(node)).copied()
+        }
+    }
+
+    /// Application, window frame, view, document -- the shape of a text editor.
+    fn editor() -> (ObjectRef, ObjectRef, ObjectRef, ObjectRef) {
+        (app(), node("frame"), node("view"), node("doc"))
+    }
+
+    #[test]
+    fn the_descent_reaches_the_innermost_node() {
+        let (app, frame, view, doc) = editor();
+        let mut source = FakeComponents::default()
+            .under(app.clone(), frame.clone())
+            .under(frame.clone(), view.clone())
+            .under(view.clone(), doc.clone())
+            // Nothing under the document: the descent ends on its own answer.
+            .under(doc.clone(), ObjectRef::new("", NULL_PATH));
+
+        let chain = descend_to_point(&mut source, &app, (10, 10), DEFAULT_WALK_LIMITS);
+        // Empty bus names in the replies are resolved against the parent, so
+        // every step is addressed to the application rather than to nobody.
+        assert_eq!(
+            chain,
+            vec![
+                inherited("root"),
+                inherited("frame"),
+                inherited("view"),
+                inherited("doc")
+            ]
+        );
+        // One call per level, and nothing else: no extents, no states.
+        assert_eq!(source.reads, 4);
+    }
+
+    #[test]
+    fn the_widget_under_the_pointer_is_what_the_path_reports() {
+        // The whole pure half of the hit test: descend, ask each node for its
+        // extents, order the result. The transport does exactly these three
+        // steps, so a mistake in any of them is visible here.
+        let (app, frame, view, doc) = editor();
+        let (app_box, frame_box) = (Bounds::new(0, 0, 1000, 800), Bounds::new(0, 0, 1000, 800));
+        let (view_box, doc_box) = (Bounds::new(40, 60, 400, 300), Bounds::new(50, 70, 380, 200));
+        let mut source = FakeComponents::default()
+            .under(app.clone(), frame.clone())
+            .under(frame.clone(), view.clone())
+            .under(view.clone(), doc.clone())
+            .under(doc.clone(), ObjectRef::new("", NULL_PATH))
+            .sized(app.clone(), app_box)
+            .sized(frame.clone(), frame_box)
+            .sized(view.clone(), view_box)
+            .sized(doc.clone(), doc_box);
+
+        let chain = descend_to_point(&mut source, &app, (100, 100), DEFAULT_WALK_LIMITS);
+        let bounds: Vec<Bounds> = chain
+            .iter()
+            .filter_map(|node| source.extents(node))
+            .collect();
+        assert_eq!(
+            hit_path(&bounds, frame_box, (100, 100)),
+            vec![doc_box, view_box, frame_box]
+        );
+    }
+
+    #[test]
+    fn a_toolkit_that_answers_itself_ends_the_descent() {
+        // `GetAccessibleAtPoint` on a leaf returns the leaf on several toolkits.
+        // Without the seen-set this loops until the depth budget, spending 24
+        // round trips to learn nothing.
+        let (app, frame, view, doc) = editor();
+        let mut source = FakeComponents::default()
+            .under(app.clone(), frame.clone())
+            .under(frame.clone(), view.clone())
+            .under(view.clone(), doc.clone())
+            .under(doc.clone(), doc.clone());
+
+        let chain = descend_to_point(&mut source, &app, (10, 10), DEFAULT_WALK_LIMITS);
+        assert_eq!(chain.len(), 4);
+        assert_eq!(source.reads, 4);
+    }
+
+    #[test]
+    fn a_null_answer_ends_the_descent() {
+        let (app, frame, view, doc) = editor();
+        let mut source = FakeComponents::default()
+            .under(app.clone(), frame.clone())
+            .under(frame.clone(), view.clone())
+            .under(view, ObjectRef::new(":1.42", NULL_PATH))
+            .under(doc, app.clone());
+
+        let chain = descend_to_point(&mut source, &app, (10, 10), DEFAULT_WALK_LIMITS);
+        assert_eq!(chain.len(), 3);
+        assert_eq!(chain.last(), Some(&inherited("view")));
+        assert_eq!(source.reads, 3);
+    }
+
+    #[test]
+    fn a_cycle_stops_the_descent() {
+        // Real trees contain these: `Parent` points back up, and some toolkits
+        // report a node as its own descendant after a re-layout.
+        let (app, frame, view, _) = editor();
+        let mut source = FakeComponents::default()
+            .under(app.clone(), frame.clone())
+            .under(frame.clone(), view.clone())
+            .under(view.clone(), frame.clone());
+
+        let chain = descend_to_point(&mut source, &app, (10, 10), DEFAULT_WALK_LIMITS);
+        assert_eq!(chain.len(), 3);
+        assert_eq!(source.reads, 3);
+    }
+
+    #[test]
+    fn the_depth_budget_ends_the_descent() {
+        let (app, frame, view, doc) = editor();
+        let mut source = FakeComponents::default()
+            .under(app.clone(), frame.clone())
+            .under(frame.clone(), view.clone())
+            .under(view.clone(), doc.clone())
+            .under(doc, ObjectRef::new("", NULL_PATH));
+
+        let shallow = WalkLimits {
+            max_depth: 2,
+            ..DEFAULT_WALK_LIMITS
+        };
+        let chain = descend_to_point(&mut source, &app, (10, 10), shallow);
+        assert_eq!(chain.len(), 3, "root plus two levels");
+        assert_eq!(source.reads, 2);
+    }
+
+    #[test]
+    fn an_expired_deadline_stops_the_descent_before_it_reads() {
+        let (app, frame, _, _) = editor();
+        let mut source = FakeComponents::default().under(app.clone(), frame);
+        let limits = DEFAULT_WALK_LIMITS.until(Instant::now() - Duration::from_millis(1));
+
+        let chain = descend_to_point(&mut source, &app, (10, 10), limits);
+        // The root is still reported: it is the caller's fallback rectangle.
+        assert_eq!(chain, vec![inherited("root")]);
+        assert_eq!(source.reads, 0, "an expired deadline still made a call");
+    }
+
+    #[test]
+    fn a_null_root_has_no_chain() {
+        let mut source = FakeComponents::default();
+        let chain = descend_to_point(
+            &mut source,
+            &ObjectRef::new(":1.42", NULL_PATH),
+            (0, 0),
+            DEFAULT_WALK_LIMITS,
+        );
+        assert!(chain.is_empty());
+        assert_eq!(source.reads, 0);
+    }
+
+    // ---- the path a selector reports ------------------------------------
+
+    const WINDOW: Bounds = Bounds::new(0, 0, 1000, 800);
+
+    #[test]
+    fn the_path_runs_from_the_widget_to_the_window() {
+        // Chain as the descent returned it: outermost first.
+        let chain = [
+            Bounds::new(0, 0, 1000, 800),  // application: the whole window
+            Bounds::new(40, 60, 400, 300), // view
+            Bounds::new(50, 70, 380, 200), // document
+        ];
+        assert_eq!(
+            hit_path(&chain, WINDOW, (100, 100)),
+            vec![chain[2], chain[1], chain[0]]
+        );
+    }
+
+    #[test]
+    fn the_window_is_appended_once_and_never_twice() {
+        // The chain ends on the application, which is the window itself here.
+        let app = Bounds::new(0, 0, 1000, 800);
+        let leaf = Bounds::new(10, 10, 20, 20);
+        assert_eq!(hit_path(&[app, leaf], WINDOW, (12, 12)), vec![leaf, app]);
+
+        // A chain that stops at the leaf still names the window last.
+        assert_eq!(hit_path(&[leaf], WINDOW, (12, 12)), vec![leaf, WINDOW]);
+        // And an empty chain is the window alone: that is the fallback answer.
+        assert_eq!(hit_path(&[], WINDOW, (12, 12)), vec![WINDOW]);
+    }
+
+    #[test]
+    fn a_rectangle_that_misses_the_point_is_dropped() {
+        let chain = [
+            Bounds::new(0, 0, 1000, 800),
+            Bounds::new(500, 500, 100, 100),
+        ];
+        assert_eq!(hit_path(&chain, WINDOW, (10, 10)), vec![WINDOW]);
+    }
+
+    #[test]
+    fn a_degenerate_rectangle_is_dropped() {
+        // `(0, 0, 0, 0)` is "not realized", not "the widget is at the origin".
+        // Keeping it would draw a widget outline in the corner of the screen.
+        let chain = [Bounds::new(0, 0, 1000, 800), Bounds::new(0, 0, 0, 0)];
+        assert_eq!(hit_path(&chain, WINDOW, (1, 1)), vec![WINDOW]);
+    }
+
+    #[test]
+    fn repeated_rectangles_appear_once() {
+        // Toolkits that report a container and its single child at the same
+        // extents are common; the path is not a set of duplicates.
+        let same = Bounds::new(10, 10, 100, 100);
+        let chain = [Bounds::new(0, 0, 1000, 800), same, same];
+        assert_eq!(hit_path(&chain, WINDOW, (50, 50)), vec![same, WINDOW]);
+    }
+
+    #[test]
+    fn a_rectangle_outside_the_window_is_dropped() {
+        // An application's root node often reports the whole screen rather than
+        // the window, and a torn-off tab can report a sibling window's area.
+        // Neither is what the user is pointing into.
+        let chain = [
+            Bounds::new(-1920, 0, 3840, 1080), // the application spans both heads
+            Bounds::new(10, 10, 100, 50),      // the widget, inside the window
+        ];
+        assert_eq!(
+            hit_path(&chain, WINDOW, (50, 50)),
+            vec![Bounds::new(10, 10, 100, 50), WINDOW]
+        );
+    }
+
+    #[test]
+    fn an_ancestor_that_does_not_contain_its_child_is_dropped() {
+        // The path has to be a nesting chain. A sibling that happens to contain
+        // the point is an answer about a different subtree.
+        let leaf = Bounds::new(100, 100, 50, 50);
+        let sibling = Bounds::new(140, 140, 200, 200);
+        let view = Bounds::new(50, 50, 400, 400);
+        let chain = [Bounds::new(0, 0, 1000, 800), view, sibling, leaf];
+        // The point is in both the leaf and the overlapping sibling; only the
+        // leaf can be inside the view's subtree, so only the leaf survives.
+        assert_eq!(
+            hit_path(&chain, WINDOW, (145, 145)),
+            vec![leaf, view, WINDOW]
+        );
+    }
+
+    #[test]
+    fn a_stale_window_that_misses_the_point_reports_nothing() {
+        // The caller hit-tested the point against this window, so a window that
+        // does not contain it means the snapshot moved underneath. Reporting
+        // the window anyway would hide that.
+        let stale = Bounds::new(0, 0, 100, 100);
+        assert!(hit_path(&[Bounds::new(10, 10, 20, 20)], stale, (500, 500)).is_empty());
+    }
+
+    #[test]
+    fn containment_is_half_open_on_the_right_and_bottom() {
+        let rect = Bounds::new(10, 20, 30, 40);
+        assert!(rect.contains(10, 20));
+        assert!(rect.contains(39, 59));
+        assert!(
+            !rect.contains(40, 30),
+            "the right edge belongs to the next widget"
+        );
+        assert!(
+            !rect.contains(20, 60),
+            "the bottom edge belongs to the next row"
+        );
+        assert!(!rect.contains(9, 20));
+        // Negative origins are ordinary on a multi-head layout.
+        let left_hand = Bounds::new(-1920, -200, 100, 40);
+        assert!(left_hand.contains(-1900, -190));
+        assert!(!left_hand.contains(-1820, -190));
+    }
+
+    #[test]
+    fn a_rectangle_with_no_pixels_is_empty() {
+        assert!(Bounds::new(5, 5, 0, 10).is_empty());
+        assert!(Bounds::new(5, 5, 10, 0).is_empty());
+        assert!(Bounds::default().is_empty());
+        assert!(!Bounds::new(5, 5, 1, 1).is_empty());
+
+        // An empty rectangle occupies no pixels that could fall outside, so it
+        // is contained by anything -- and contains nothing. The origin is far
+        // outside the outer rectangle on purpose: an empty rectangle at the
+        // origin would satisfy the arithmetic anyway, and then this rule would
+        // be untestable.
+        assert!(Bounds::new(0, 0, 10, 10).contains_rect(&Bounds::new(500, 500, 0, 0)));
+        assert!(!Bounds::default().contains_rect(&Bounds::new(0, 0, 10, 10)));
+    }
+
+    #[test]
+    fn containment_does_not_overflow_at_the_coordinate_extremes() {
+        let huge = Bounds::new(i32::MIN, i32::MIN, u32::MAX, u32::MAX);
+        assert!(huge.contains(i32::MIN, i32::MIN));
+        assert!(huge.contains(i32::MAX - 1, i32::MAX - 1));
+        // The exclusive edge lands on the saturated maximum.
+        assert!(!huge.contains(i32::MAX, i32::MAX));
+        assert!(huge.contains_rect(&Bounds::new(0, 0, 10, 10)));
+        assert!(!Bounds::new(0, 0, 10, 10).contains_rect(&huge));
     }
 }
