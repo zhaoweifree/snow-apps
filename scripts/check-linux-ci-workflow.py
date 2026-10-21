@@ -21,7 +21,9 @@ Checked:
     asserts, so ``Architecture:`` in the .deb cannot disagree with the runner;
   * the apt package list is non-empty and names no package twice;
   * ``gates`` installs PyYAML, without which three checks in this file degrade
-    to no-ops (see ``load_yaml``).
+    to no-ops (see ``load_yaml``);
+  * ``build`` actually invokes ``scripts/build-linux-deps.sh``, the step that
+    supplies zlib-ng and libjpeg-turbo, which no distribution package provides.
 
 Usage: ``python scripts/check-linux-ci-workflow.py``.
 """
@@ -203,6 +205,14 @@ def main() -> int:
         check("gates job installs PyYAML",
               re.search(r"pip install[^\n]*pyyaml", gates_text) is not None,
               "the workflow's own structure checks would be skipped")
+
+        # Two of the libraries the build needs are not distribution packages
+        # (§9.6.9). A job that configures without building them fails on a
+        # missing ZLIBNG_VERSION three steps later, which reads like a code bug.
+        build_text = "\n".join(run_commands(jobs.get("build", {})))
+        check("build job builds the pinned Linux dependencies",
+              "scripts/build-linux-deps.sh" in build_text,
+              "configure would run against whatever the distribution happens to have")
 
         # The apt list: duplicated names are harmless but usually mean a
         # copy-paste that dropped the package somebody meant to add.

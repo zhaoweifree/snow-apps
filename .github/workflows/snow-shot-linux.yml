@@ -140,7 +140,18 @@ jobs:
             libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
             libheif-dev libjxl-dev zlib1g-dev libtinyxml2-dev \
             libopencv-dev \
+            python3 \
             dpkg-dev desktop-file-utils appstream
+
+      # zlib here *is* zlib-ng (classic zlib does not define ZLIBNG_VERSION,
+      # which `compression_backend.cpp` requires) and libjpeg-turbo has to be
+      # 3.1 with a CMake config; 24.04 ships 2.1.5 without one. Both are pinned
+      # to the archives and options the vcpkg overlay ports use -- see
+      # scripts/build-linux-deps.sh and §9.6.9.
+      - name: Build the pinned Linux dependencies
+        run: |
+          bash scripts/build-linux-deps.sh --prefix "$RUNNER_TEMP/snow-linux-deps"
+          echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/snow-linux-deps" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
