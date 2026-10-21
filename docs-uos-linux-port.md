@@ -452,8 +452,9 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 ```bash
 sudo apt update
 sudo apt install -y build-essential cmake ninja-build pkg-config git
-# Qt5 开发环境
-sudo apt install -y qtbase5-dev qt5-qmake qttools5-dev-tools libqt5svg5-dev
+# Qt5 开发环境（qttools5-dev 提供 Qt5LinguistTools 的 CMake 配置；
+# 只有 qttools5-dev-tools 时 lrelease 存在但 find_package 找不到）
+sudo apt install -y qtbase5-dev qt5-qmake qttools5-dev qttools5-dev-tools libqt5svg5-dev
 # 图形/输入/媒体
 sudo apt install -y libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
     libfontconfig1-dev libfreetype6-dev libharfbuzz-dev \
