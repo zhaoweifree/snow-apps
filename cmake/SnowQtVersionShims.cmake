@@ -51,14 +51,12 @@ function(_snow_qt_shim_bin_dir outvar)
         set(${outvar} "${SNOW_QT_SHIM_BIN_DIR}" PARENT_SCOPE)
         return()
     endif()
-    set(_bin "")
-    if(SNOW_QT_BIN_DIR)
-        set(_bin "${SNOW_QT_BIN_DIR}")
-    elseif(Qt5Core_DIR)
-        get_filename_component(_bin "${Qt5Core_DIR}/../../../bin" ABSOLUTE)
-    elseif(QT5_INSTALL_PREFIX)
-        set(_bin "${QT5_INSTALL_PREFIX}/bin")
-    endif()
+    # A Debian/Ubuntu Qt5 kit lives in /usr/lib/<triple>/cmake/Qt5Core, where the
+    # prefix-shaped `<Qt5Core_DIR>/../../../bin` is /usr/lib/bin. The shared
+    # resolver asks qmake first and accepts only a directory that really holds
+    # `lrelease`; see cmake/SnowQt5InstallPaths.cmake.
+    include("${CMAKE_CURRENT_LIST_DIR}/SnowQt5InstallPaths.cmake")
+    snow_qt5_tools_dir(_bin)
     set(SNOW_QT_SHIM_BIN_DIR "${_bin}" CACHE INTERNAL "Qt5 kit bin directory (shim)" FORCE)
     set(${outvar} "${_bin}" PARENT_SCOPE)
 endfunction()

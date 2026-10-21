@@ -453,8 +453,11 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 sudo apt update
 sudo apt install -y build-essential cmake ninja-build pkg-config git
 # Qt5 开发环境（qttools5-dev 提供 Qt5LinguistTools 的 CMake 配置；
-# 只有 qttools5-dev-tools 时 lrelease 存在但 find_package 找不到）
-sudo apt install -y qtbase5-dev qt5-qmake qttools5-dev qttools5-dev-tools libqt5svg5-dev
+# 只有 qttools5-dev-tools 时 lrelease 存在但 find_package 找不到。
+# qttranslations5-l10n 提供 /usr/share/qt5/translations 下的 qtbase_*.qm，
+# 缺了它 configure 会在「stock-dialog 目录」那一步直接失败）
+sudo apt install -y qtbase5-dev qt5-qmake qttools5-dev qttools5-dev-tools \
+    qttranslations5-l10n libqt5svg5-dev
 # 图形/输入/媒体
 sudo apt install -y libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
     libfontconfig1-dev libfreetype6-dev libharfbuzz-dev \
@@ -2820,6 +2823,27 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 4（`411aca6c`） | `gates` ✅ / `build` ❌ | `find_package(lunasvg CONFIG REQUIRED)` 找不到包 —— 但**前两步全绿**：CMake 4.2 装好、`build-linux-deps.sh` 在 Linux 上第一次运行就把 zlib-ng 与 libjpeg-turbo 编过并装进前缀（PNG/JPEG 两道关都过了） |
 | 5（`a242facc`） | `gates` ✅ / `build` ❌ | `Qt5LinguistTools` 找不到 —— `qttools5-dev-tools` 只给 `lrelease` 二进制，CMake 配置在 `qttools5-dev` 里 |
 | 6（`eb0a2c80`） | `gates` ✅ / `build` ❌ | `find_package(onnxruntime CONFIG REQUIRED)` —— SVG/lunasvg 之后一路走到 `snow_shot`，说明 `snow_image` 的 PNG/JPEG/GIF/HEIF/JXL/WebP 依赖全部找到了 |
+| 7（`60302201`） | `gates` ✅ / `build` ❌ | `SnowShotTranslationRelease.cmake:59`：找不到 `zh_CN` 的 stock-dialog 目录，报的路径是 `/usr/lib/translations` —— **一个在 Debian 系上根本不存在的目录**，见下 |
+
+**run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug**，不是缺包。Qt5 装在自定义前缀时
+`Qt5Core_DIR` 是 `<prefix>/lib/cmake/Qt5Core`，`../../../bin` 正好是 `<prefix>/bin`；但发行版的同名文件
+在 `/usr/lib/<triple>/cmake/Qt5Core`，`../../../` 落在 `/usr/lib`，于是工具目录被算成 `/usr/lib/bin`、
+翻译目录被算成 `/usr/lib/translations`（真实位置是 `/usr/share/qt5/translations`）。
+`cmake/SnowQtVersionShims.cmake` 里那份 lrelease 目录推导是同一个错误 —— 两处都会在下一步才炸。
+修法：
+
+1. 新增 `cmake/SnowQt5InstallPaths.cmake`，两个解析器（工具目录 / 翻译目录）。顺序是
+   **显式覆盖 → 由 `Qt5Core_DIR` 推的两种形状（前缀形、multiarch 形）→ `qmake -query`**。
+   `qmake` 排最后是刻意的：PATH 上的 qmake 可能属于另一个 Qt，它不该压过"从实际找到的那个
+   Qt5 包推出来的路径"。工具目录的判据不是"目录存在"而是"目录里真的有 `lrelease`"。
+2. `SnowShotTranslationRelease.cmake` 与 `SnowQtVersionShims.cmake` 都改用它，不再各自推导。
+3. 新增 `scripts/check-qt5-install-paths.cmake`，**在 Windows 上**用假目录建出两种布局并断言解析结果，
+   已接进 `scripts/check-linux-packaging.sh`。反向验证两次：删掉 multiarch 的翻译分支 ⇒ 翻译用例红；
+   删掉 multiarch 的工具分支 ⇒ 工具用例红（各自只让对应用例红）。
+   这个检查自己也被反向验证抓过一次 —— 第一版把传进来的**值**又当变量名解引用了一次
+   （`${${actual}}`），路径因此全变成空串，于是"空 == 空"永远通过。**假门禁的第二例**
+   （第一例是 PyYAML 那一处静默跳过）。
+4. `qttranslations5-l10n` 补进 apt 清单（翻译目录存在的前提），§9.1 同步。
 
 **`gates` 这一次把"平台无关"从声明变成了事实**：ubuntu-24.04 上
 `cargo test -p snow-linux -p snow-capture --lib --all-features` 全绿 —— `snow-capture` 135 通过 + 4 ignored

@@ -132,7 +132,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config git curl file \
-            qtbase5-dev qt5-qmake qttools5-dev qttools5-dev-tools libqt5svg5-dev \
+            qtbase5-dev qt5-qmake qttools5-dev qttools5-dev-tools qttranslations5-l10n \
+            libqt5svg5-dev \
             libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libfontconfig1-dev libfreetype6-dev libharfbuzz-dev \
             libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxi-dev libxtst-dev \

@@ -55,3 +55,9 @@ echo "=== appimage bundle"
 echo
 echo "=== linux ci workflow"
 "$python_command" scripts/check-linux-ci-workflow.py
+
+echo
+echo "=== qt5 install path resolution"
+# Runs on any host: it builds a fake multiarch layout and a fake prefix layout,
+# then asserts the resolver picks the right one for each (9.6.8).
+"$cmake_command" -P scripts/check-qt5-install-paths.cmake

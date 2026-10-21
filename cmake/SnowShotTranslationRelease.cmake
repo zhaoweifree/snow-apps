@@ -10,20 +10,23 @@ function(snow_shot_release_translation_catalogs target catalog_dir output_dir ou
     # also included by isolated CMake fixtures that do not load cmake/SnowQt.cmake,
     # and they must keep resolving exactly as before the Qt5 route existed.
     if(SNOW_QT_MAJOR STREQUAL "5")
-        # Resolution order: explicit override, then derive from the resolved kit
-        # (Qt5Core_DIR is <prefix>/lib/cmake/Qt5Core), then from the kit bin dir.
+        # Resolution lives in SnowQt5InstallPaths.cmake: a Debian/Ubuntu kit keeps
+        # Qt5Core_DIR under /usr/lib/<triple>/cmake, where the prefix-shaped
+        # derivation below lands on /usr/lib/translations (which does not exist)
+        # while the catalogs are in /usr/share/qt5/translations. That module asks
+        # qmake first and only then tries both shapes.
+        include("${CMAKE_CURRENT_LIST_DIR}/SnowQt5InstallPaths.cmake")
         if(SNOW_QT5_TRANSLATIONS_DIR)
             set(_qt_translation_dir "${SNOW_QT5_TRANSLATIONS_DIR}")
-        elseif(Qt5Core_DIR)
-            get_filename_component(_qt_translation_dir
-                "${Qt5Core_DIR}/../../../translations" ABSOLUTE)
-        elseif(SNOW_QT_BIN_DIR)
-            get_filename_component(_qt_translation_dir
-                "${SNOW_QT_BIN_DIR}/../translations" ABSOLUTE)
         else()
+            snow_qt5_translations_dir(_qt_translation_dir)
+        endif()
+        if(NOT _qt_translation_dir)
             message(FATAL_ERROR
-                "Cannot locate the Qt5 translations directory: Qt5Core_DIR and "
-                "SNOW_QT_BIN_DIR are both unset. Set SNOW_QT5_TRANSLATIONS_DIR explicitly.")
+                "Cannot locate the Qt5 translations directory: neither qmake -query "
+                "QT_INSTALL_TRANSLATIONS nor any derivation from Qt5Core_DIR / "
+                "SNOW_QT_BIN_DIR produced an existing directory. "
+                "Set SNOW_QT5_TRANSLATIONS_DIR explicitly.")
         endif()
     else()
         set(_qt_translation_dir "${QT_INTERNAL_ABSOLUTE_TRANSLATIONS_DIR}")
