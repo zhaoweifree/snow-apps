@@ -117,3 +117,51 @@ function(snow_qt5_translations_dir outvar)
     endforeach()
     set(${outvar} "" PARENT_SCOPE)
 endfunction()
+
+# Private headers of one Qt5 module (needed for `<qpa/...>` and `<private/...>`).
+#
+# A distribution kit splits them into a separate package: on Debian/Ubuntu
+# `qtbase5-dev` ships the public headers only and `qtbase5-private-dev` adds
+# `.../QtGui/5.15.13/QtGui/{private,qpa}`. Without that package
+# `Qt5GuiConfig.cmake` never creates the `Qt5::GuiPrivate` target (the official
+# kit does, because it bundles private headers), so every
+# `target_link_libraries(... Qt5::GuiPrivate)` fails at configure time with
+# "Target links to Qt5::GuiPrivate" -- a message that names the target but not
+# the missing package (CI run 39600792545).
+#
+# Order: the kit's own variable first, then a glob of the version directories
+# under `qmake -query QT_INSTALL_HEADERS` (override: `SNOW_QT5_HEADERS_DIR`),
+# which is the layout both Debian and the official installer use. Two include
+# dirs are normally required: the version directory (for `<QtGui/private/...>`)
+# and its `Qt<Module>` subdirectory (for `<qpa/...>` and `<private/...>`). A
+# candidate is accepted only if it really contains the `private`/`qpa`
+# directory.
+function(snow_qt5_private_include_dirs outvar module)
+    set(_dirs "")
+    if(Qt5${module}_PRIVATE_INCLUDE_DIRS)
+        set(_dirs ${Qt5${module}_PRIVATE_INCLUDE_DIRS})
+    else()
+        if(SNOW_QT5_HEADERS_DIR)
+            set(_headers "${SNOW_QT5_HEADERS_DIR}")
+        else()
+            snow_qt5_query_path(_headers QT_INSTALL_HEADERS)
+        endif()
+        if(_headers AND IS_DIRECTORY "${_headers}/Qt${module}")
+            # Qt's header tree is `Qt<Module>/<version>/`, while the variables are
+            # named `Qt5<Module>_*` -- the `Qt` prefix only exists on the path.
+            file(GLOB _version_dirs "${_headers}/Qt${module}/*")
+            foreach(_version_dir IN LISTS _version_dirs)
+                if(NOT IS_DIRECTORY "${_version_dir}")
+                    continue()
+                endif()
+                if(IS_DIRECTORY "${_version_dir}/private")
+                    list(APPEND _dirs "${_version_dir}")
+                endif()
+                if(IS_DIRECTORY "${_version_dir}/Qt${module}/qpa")
+                    list(APPEND _dirs "${_version_dir}/Qt${module}")
+                endif()
+            endforeach()
+        endif()
+    endif()
+    set(${outvar} "${_dirs}" PARENT_SCOPE)
+endfunction()

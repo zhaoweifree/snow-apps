@@ -229,6 +229,12 @@ def main() -> int:
             # no-op that still exits zero on an empty grep.
             for tool in ("desktop-file-utils", "appstream", "dpkg-dev"):
                 check(f"{job_name}: installs {tool}", tool in packages, "missing from apt list")
+            # qtbase5-dev is public headers only: without qtbase5-private-dev
+            # `Qt5::GuiPrivate` never exists, and the sources do include
+            # `<qpa/...>` / `<private/...>` (CI run 39600792545).
+            check(f"{job_name}: installs qtbase5-private-dev",
+                  "qtbase5-private-dev" in packages,
+                  "Qt5::GuiPrivate would be missing and 19 link lines would fail")
 
     if failures:
         print(f"\n{len(failures)} problem(s)")

@@ -68,3 +68,9 @@ echo "=== cmake module self-reference scope"
 # against the *caller*, and a `cmake -P` fixture always calls at file scope, so
 # no runtime check can catch this class (9.6.10).
 "$python_command" scripts/check-cmake-list-dir-scope.py
+
+echo
+echo "=== qt private module pairing"
+# Every `${SNOW_QT_NS}::<Module>Private` link needs a `snow_find_qt_private(Module)`
+# in the same CMakeLists: on Qt5 that call is what creates the target (9.6.11).
+"$python_command" scripts/check-qt-private-modules.py

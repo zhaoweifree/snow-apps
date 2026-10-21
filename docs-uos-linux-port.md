@@ -455,8 +455,11 @@ sudo apt install -y build-essential cmake ninja-build pkg-config git
 # Qt5 开发环境（qttools5-dev 提供 Qt5LinguistTools 的 CMake 配置；
 # 只有 qttools5-dev-tools 时 lrelease 存在但 find_package 找不到。
 # qttranslations5-l10n 提供 /usr/share/qt5/translations 下的 qtbase_*.qm，
-# 缺了它 configure 会在「stock-dialog 目录」那一步直接失败）
-sudo apt install -y qtbase5-dev qt5-qmake qttools5-dev qttools5-dev-tools \
+# 缺了它 configure 会在「stock-dialog 目录」那一步直接失败。
+# qtbase5-private-dev 提供 <include>/QtGui/<ver>/{private,qpa}：源码真的 include
+# 了 <qpa/qwindowsysteminterface.h>、<private/qhighdpiscaling_p.h>，缺它时
+# Qt5GuiConfig.cmake 不会建 Qt5::GuiPrivate，19 处链接在配置期就报错，见 9.6.11）
+sudo apt install -y qtbase5-dev qtbase5-private-dev qt5-qmake qttools5-dev qttools5-dev-tools \
     qttranslations5-l10n libqt5svg5-dev
 # 图形/输入/媒体
 sudo apt install -y libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
@@ -2824,6 +2827,8 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 5（`a242facc`） | `gates` ✅ / `build` ❌ | `Qt5LinguistTools` 找不到 —— `qttools5-dev-tools` 只给 `lrelease` 二进制，CMake 配置在 `qttools5-dev` 里 |
 | 6（`eb0a2c80`） | `gates` ✅ / `build` ❌ | `find_package(onnxruntime CONFIG REQUIRED)` —— SVG/lunasvg 之后一路走到 `snow_shot`，说明 `snow_image` 的 PNG/JPEG/GIF/HEIF/JXL/WebP 依赖全部找到了 |
 | 7（`60302201`） | `gates` ✅ / `build` ❌ | `SnowShotTranslationRelease.cmake:59`：找不到 `zh_CN` 的 stock-dialog 目录，报的路径是 `/usr/lib/translations` —— **一个在 Debian 系上根本不存在的目录**，见下 |
+| 8（`7fe30ad0`） | `gates` ✅ / `build` ❌ | `SnowQtVersionShims.cmake:58 (include)`：找不到 `ant_design_qt/SnowQt5InstallPaths.cmake` —— **上一片自己新写的代码**，`CMAKE_CURRENT_LIST_DIR` 在函数体里指向调用方，见 9.6.10 |
+| 9（`7f42249d`） | `gates` ✅ / `build` ❌ | 翻译目录那关过了；卡在 `ant_design_qt/CMakeLists.txt:106` 与 `snow_shot/CMakeLists.txt:10577`：`Target links to: Qt5::GuiPrivate` —— 缺的不是代码是**私有头**，见 9.6.11 |
 
 **run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug**，不是缺包。Qt5 装在自定义前缀时
 `Qt5Core_DIR` 是 `<prefix>/lib/cmake/Qt5Core`，`../../../bin` 正好是 `<prefix>/bin`；但发行版的同名文件
@@ -2922,6 +2927,105 @@ Linux 侧怎么补这一批（vcpkg / 固定版本本地编 / 砍掉可选编解
 - `build` job 里的 `ctest` 原来是空的：release 预设 `SNOW_APPS_BUILD_TESTS=OFF`，`--no-tests=error`
   会把"一个测试都没有"报成失败。已改成**打包之后**再在同一个树里打开测试编一遍（增量，只多测试目标），
   理由写在 workflow 注释里：先让 .deb 那条路证明自己，别让测试编译错误把它藏起来。
+
+#### 9.6.10 run 8：`CMAKE_CURRENT_LIST_DIR` 在函数体里指向调用方（2026-10-21）
+
+run 8（`7fe30ad0`）的红灯不是缺包，而是**上一节自己新写的代码**：
+
+```
+CMake Error at cmake/SnowQtVersionShims.cmake:58 (include):
+  include could not find requested file:
+    .../ant_design_qt/SnowQt5InstallPaths.cmake
+```
+
+multiarch 修复引入了两处 `include("${CMAKE_CURRENT_LIST_DIR}/SnowQt5InstallPaths.cmake")`，**都写在
+function 体内**。`CMAKE_CURRENT_LIST_DIR` 报告的是"当前正在处理的 listfile 的目录"，而函数体在**调用点**
+展开 —— 于是它给出的是**调用方**的目录。`_snow_qt_shim_bin_dir()` 由 `ant_design_qt/CMakeLists.txt`
+调用，"本文件旁边那个 .cmake"就成了 `ant_design_qt/SnowQt5InstallPaths.cmake`；
+`snow_shot_release_translation_catalogs()` 同病（会去找 `snow_shot/SnowQt5InstallPaths.cmake`），
+只是被前一个挡住，还没轮到它。
+
+`cmake/SnowQt.cmake:26` 早就为 macro 记过这个坑并固化了 `SNOW_QT_CMAKE_DIR`，这两处没照做。修法统一：
+**文件作用域求值一次，函数里只引用变量**（`SNOW_QT5_INSTALL_PATHS_MODULE`）。
+
+**为什么本机七轮门禁全绿**：`scripts/check-qt5-install-paths.cmake` 是 `cmake -P` 夹具，两个解析器都在
+**文件作用域**被调用 —— 调用方语义根本不会出现。这与"探针只能覆盖它真跑过的路径"是同一句话，只是缺口
+在语义层（**谁**在调）而不是路径层（有没有被调）。补法是**文本门禁**
+`scripts/check-cmake-list-dir-scope.py`：
+
+- 扫 `cmake/` 下 74 个 `*.cmake`，跟踪 `function()` / `macro()` 嵌套深度，函数/宏体内出现
+  `CMAKE_CURRENT_LIST_DIR` 或 `CMAKE_CURRENT_LIST_FILE` 即报红；
+- 注释不算（这两个文件里恰好有讲解该坑的注释），`CMAKE_CURRENT_FUNCTION_LIST_DIR`（CMake ≥ 3.17，
+  按定义绑定**定义文件**）放行；
+- 已接进 `scripts/check-linux-packaging.sh`。
+
+反向验证：对临时根注入 function 内的一处用法 ⇒ 报红 `exit=1`；同一文件中"文件作用域的那处 / 注释 /
+`CMAKE_CURRENT_FUNCTION_LIST_DIR`"三处都不误报。当前树 74 个模块，0 违规。
+
+**可复用的判据**：只要"我的目录"与"调用者的目录"是两个不同概念，就必须在文件作用域求值。CMake 里
+`CMAKE_CURRENT_LIST_DIR` / `CMAKE_CURRENT_LIST_FILE` 属于**调用方**，`CMAKE_CURRENT_FUNCTION_LIST_DIR`
+属于**定义方** —— `__FILE__` 风格的直觉在这里正好是反的。
+
+**遗留的验证缺口（诚实记一笔）**：这次只有 CI 能证明修复有效，本机没有任何一步会配置 `snow_shot` 的
+Qt5 路线（`check-qt5-install-paths.cmake` 只跑解析器，`windows-qt5-smoke` 只开
+`ant_design_qt` + `snow_image`），所以"本机全绿"对这类 bug **不构成证据**。文本门禁把这一类挡在门口，
+但它挡的是写法，不是行为；行为仍只能由一次真实 configure 证明。
+
+#### 9.6.11 run 9：Qt5 私有头是独立包，`Qt5::GuiPrivate` 因此不存在（2026-10-21）
+
+run 9（`7f42249d`）把翻译目录那关过了（`qt_add_lrelease` 走打包侧合并、`qtbase` 目录找到），
+下一个红灯是：
+
+```
+CMake Error at ant_design_qt/CMakeLists.txt:106 (target_link_libraries):
+  Target "ant_design_qt" links to:
+    Qt5::GuiPrivate
+CMake Error at snow_shot/CMakeLists.txt:10577 (target_link_libraries):
+  Target "snow_shot" links to:
+    Qt5::GuiPrivate
+```
+
+**根因不是链接写错，是包没装全**：Debian/Ubuntu 的 `qtbase5-dev` 只给公开头，私有头在
+`qtbase5-private-dev`（`<include>/QtGui/5.15.13/{private,qpa}`）。`Qt5GuiConfig.cmake` 在私有头缺席时
+**根本不建** `Qt5::GuiPrivate`（官方安装包自带私有头，所以 Windows 上这个目标一直在）。而源码是真的要：
+
+| 位置 | 用到的私有头 |
+|---|---|
+| `ant_design_qt/.../widgets/detail/window_modality.cpp` | `<QtGui/private/qguiapplication_p.h>` |
+| `ant_design_qt/.../widgets/platform_compatibility.cpp` | `<QtGui/private/qaccessiblecache_p.h>` |
+| `snow_shot/src/platform/physicalcursor.cpp` | `<qpa/qwindowsysteminterface.h>`、`<private/qhighdpiscaling_p.h>` |
+| `snow_shot/tests/global_canvas_tests.cpp` 等 | `<qpa/qplatformscreen.h>`、`<private/qwindow_p.h>` |
+
+修法是三层，缺一层就会以别处报错的形式回来：
+
+1. **装包**：`qtbase5-private-dev` 进 workflow 的 apt 清单与 §9.1。`check-linux-ci-workflow.py` 加一条
+   断言，防止这条被"精简依赖"时删掉。
+2. **解析器补位**：新增 `snow_qt5_private_include_dirs(<out> <module>)`
+   （`cmake/SnowQt5InstallPaths.cmake`）。顺序是 **套件自带变量 `Qt5<Module>_PRIVATE_INCLUDE_DIRS` →
+   `SNOW_QT5_HEADERS_DIR`（新增覆盖）或 `qmake -query QT_INSTALL_HEADERS` 下 glob `Qt<Module>/<ver>/`**；
+   接受判据是"目录里真有 `private`/`qpa`"。两个目录通常都要：版本目录给 `<QtGui/private/…>`，
+   它的 `QtGui` 子目录给 `<qpa/…>`、`<private/…>`。
+   路径上有个易错点：头树是 `Qt<Module>/`，变量是 `Qt5<Module>_` —— **`Qt` 前缀只存在于路径里**，
+   第一版就写成 `${module}` 被本地夹具当场抓住。
+3. **补目标而不是改 19 处调用点**：`snow_find_qt_private` 在 Qt5 分支发现目标不存在时，用解析结果
+   `add_library(Qt5::<Module>Private INTERFACE IMPORTED GLOBAL)` 造一个同名目标
+   （`INTERFACE_INCLUDE_DIRECTORIES` + `INTERFACE_LINK_LIBRARIES Qt5::<Module>`）。
+   解析为空 ⇒ **`FATAL_ERROR` 并点名该装的包**，不做"先编着看"的降级 —— 私有头真缺时
+   `qpa/` 那批 include 过不去。
+
+本机判据（`scripts/check-qt5-install-paths.cmake`，全部在 Windows 上跑）：
+
+- 伪造 `…/qt5/QtGui/5.15.13/{private,QtGui/qpa}` ⇒ 两个目录按"版本目录在前"返回；
+- 套件自带 `Qt5Gui_PRIVATE_INCLUDE_DIRS` 存在时**压过** glob（上游导出值不该被反推值覆盖）；
+- 两头都没有 ⇒ 返回空（调用方据此报错）。
+- 反向验证：把路径前缀从 `Qt${module}` 改回 `${module}` ⇒ 用例 1 变红。
+
+另加一条**配对**门禁 `scripts/check-qt-private-modules.py`：凡在某个 `CMakeLists.txt` 里
+`target_link_libraries(... ${SNOW_QT_NS}::<M>Private)` 的，同一文件必须调用 `snow_find_qt_private(<M>)`
+—— 因为 Qt5 上"目标存在"完全取决于那次调用。当前 3 个文件（`ant_design_qt` / `snow_image_viewer` /
+`snow_shot`）都配对；拿掉一处调用即报红。
+
+
 
 
 

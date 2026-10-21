@@ -190,9 +190,9 @@ macro(snow_find_qt_private module)
         endif()
     else()
         # Qt5 的私有模块没有独立的 find_package 包装。
-        # 5.15 的 Qt5GuiConfig.cmake 会按 OWN_PRIVATE_INCLUDE_DIRS 建出
-        # Qt5::GuiPrivate 目标，但**没有任何目标去链接它**（各目标只链 Qt::Gui），
-        # 于是 `#include <qpa/qplatformnativeinterface.h>` 会以
+        # 带私有头的套件（官方安装包）里 Qt5GuiConfig.cmake 会建出 Qt5::GuiPrivate，
+        # 但**没有任何目标去链接它**（各目标只链 Qt::Gui），于是
+        # `#include <qpa/qplatformnativeinterface.h>` 会以
         # "fatal error C1083: 无法打开包括文件" 的形式失败 —— 看着像缺 Qt 组件，
         # 实际是缺一个 -I。这里直接把私有头目录加到**当前目录作用域**，
         # 覆盖 snow_shot/ 下所有目标（宏就是在 snow_shot/CMakeLists.txt 里调用的）。
@@ -207,11 +207,33 @@ macro(snow_find_qt_private module)
                 unset(_snow_priv_incs)
             endif()
         else()
-            set_property(GLOBAL APPEND PROPERTY SNOW_QT5_PRIVATE_MODULES "${module}")
+            # 发行版把私有头拆成单独的包：Debian/Ubuntu 的 qtbase5-dev 只有公开头，
+            # `qtbase5-private-dev` 才提供 `<prefix>/QtGui/<ver>/{private,qpa}`。
+            # 没有它 Qt5GuiConfig.cmake 不会建 Qt5::GuiPrivate（官方安装包带私有头才建），
+            # 而仓库里 19 处 target_link_libraries 直接写 ${SNOW_QT_NS}::GuiPrivate ⇒
+            # 配置期报 "Target links to Qt5::GuiPrivate"，只说目标名不说缺哪个包
+            #（CI run 39600792545）。这里补一个同名 INTERFACE 目标，调用点一行不改；
+            # 私有头真的没装就报出该装哪个包 —— 不静默降级，因为源码里
+            # `<qpa/qwindowsysteminterface.h>`、`<private/qhighdpiscaling_p.h>` 是真需要的。
+            include("${SNOW_QT_CMAKE_DIR}/SnowQt5InstallPaths.cmake")
+            snow_qt5_private_include_dirs(_snow_priv_dirs ${module})
+            if(NOT _snow_priv_dirs)
+                message(FATAL_ERROR
+                    "Qt5 ${module} private headers are not installed: neither "
+                    "Qt5${module}_PRIVATE_INCLUDE_DIRS nor a "
+                    "<QT_INSTALL_HEADERS>/${module}/<version> layout was found. "
+                    "On Debian/Ubuntu install 'qtbase5-private-dev'; on other "
+                    "distributions install the qtbase private headers package that "
+                    "matches the kit in use.")
+            endif()
+            add_library(Qt5::${module}Private INTERFACE IMPORTED GLOBAL)
+            set_target_properties(Qt5::${module}Private PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${_snow_priv_dirs}"
+                INTERFACE_LINK_LIBRARIES "Qt5::${module}")
             message(STATUS
-                "Snow Qt: Qt5 kit does not export Qt5::${module}Private; "
-                "private headers fall back to Qt5${module}_PRIVATE_INCLUDE_DIRS "
-                "(must be applied via target_include_directories at the call site).")
+                "Snow Qt: created Qt5::${module}Private from the kit's private headers: "
+                "${_snow_priv_dirs}")
+            unset(_snow_priv_dirs)
         endif()
     endif()
 endmacro()

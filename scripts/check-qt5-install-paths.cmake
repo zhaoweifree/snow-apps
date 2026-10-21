@@ -90,6 +90,36 @@ set(SNOW_QT_BIN_DIR "${_root}/nowhere/bin")
 snow_qt5_translations_dir(_translations)
 _check("no layout: translations resolve to empty"
     "${_translations}" "")
+
+# ---------------------------------------------------------------------------
+# Private headers (9.6.11): a distribution kit ships them in a separate package,
+# so `Qt5::GuiPrivate` does not exist until they are installed. The resolver has
+# to find the two include dirs the sources actually use -- `<QtGui/private/...>`
+# from the version directory and `<qpa/...>` from its QtGui subdirectory.
+# ---------------------------------------------------------------------------
+set(SNOW_QT5_HEADERS_DIR "${_root}/multiarch/usr/include/x86_64-linux-gnu/qt5")
+file(MAKE_DIRECTORY "${SNOW_QT5_HEADERS_DIR}/QtGui/5.15.13/private")
+file(MAKE_DIRECTORY "${SNOW_QT5_HEADERS_DIR}/QtGui/5.15.13/QtGui/qpa")
+
+snow_qt5_private_include_dirs(_private_dirs Gui)
+_check("private headers: version directory comes first"
+    "${_private_dirs}" "${SNOW_QT5_HEADERS_DIR}/QtGui/5.15.13;${SNOW_QT5_HEADERS_DIR}/QtGui/5.15.13/QtGui")
+
+# The kit's own variable is authoritative: it is what upstream Qt exports, and a
+# kit that sets it must not be second-guessed by the glob.
+set(Qt5Gui_PRIVATE_INCLUDE_DIRS "${_root}/kit/gui-private")
+snow_qt5_private_include_dirs(_private_dirs Gui)
+_check("private headers: kit variable wins"
+    "${_private_dirs}" "${_root}/kit/gui-private")
+unset(Qt5Gui_PRIVATE_INCLUDE_DIRS)
+
+# No headers installed at all: empty, which the caller turns into a message
+# naming the package to install -- never a silent "it will probably work".
+set(SNOW_QT5_HEADERS_DIR "${_root}/empty-headers")
+snow_qt5_private_include_dirs(_private_dirs Gui)
+_check("private headers: absent resolve to empty"
+    "${_private_dirs}" "")
+unset(SNOW_QT5_HEADERS_DIR)
 unset(SNOW_QT_BIN_DIR)
 
 file(REMOVE_RECURSE "${_root}")
