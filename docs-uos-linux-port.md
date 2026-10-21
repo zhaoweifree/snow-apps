@@ -2835,6 +2835,7 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 9（`7f42249d`） | `gates` ✅ / `build` ❌ | 翻译目录那关过了；卡在 `ant_design_qt/CMakeLists.txt:106` 与 `snow_shot/CMakeLists.txt:10577`：`Target links to: Qt5::GuiPrivate` —— 缺的不是代码是**私有头**，见 9.6.11 |
 | 10（`2eab250d`） | `gates` ✅ / **`Configure` ✅** / `build` ❌ | **整棵树的 Linux + Qt5 配置第一次走通**；`Build` 在 7 秒内倒，`snow_image` 的 EXR/WebP 各报一处 API 不存在 —— 发行版版本比 vcpkg 的 pin 老一代，见 9.6.12 |
 | 11（`c03eacf3`） | `gates` ✅ / `Configure` ✅ / `build` ❌ | 自编的 Imath/OpenEXR/libwebp 全过，EXR/WebP 报错消失；换成 `libheif/heif_sequences.h` 缺失与 JXL 0.7 的四个 API —— 同一条规则再扩到 highway/libjxl/libheif，见 9.6.13 |
+| 12（`2e10f9d1`） | `gates` ✅ / **deps 步骤 ❌** | 依赖构建这一步自己倒了，而且**什么都没打印**（只有 `Process completed with exit code 1`）—— `die` 的消息被重定向进了日志文件。同时暴露 `HWY_ENABLE_INSTALL` 缺失，见 9.6.14 |
 
 **run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug**，不是缺包。Qt5 装在自定义前缀时
 `Qt5Core_DIR` 是 `<prefix>/lib/cmake/Qt5Core`，`../../../bin` 正好是 `<prefix>/bin`；但发行版的同名文件
@@ -3130,6 +3131,30 @@ pin 门禁扩到六条，并顺带修好它自己的一个结构性缺陷：over
 builtin port 在 `.tools/vcpkg`（CI 没有），所以查表时先 overlay 后 builtin。现在
 `libjxl`/`libheif` 的比对在 CI 上也会真的执行，只有 `imath`/`openexr`/`libwebp`/`highway` 会打印 skip；
 并且新增一条"一条都比对不了就失败"，避免整张表哑掉还被当成绿。
+
+#### 9.6.14 run 12：一个静默失败的 `die`，和 highway 少一个开关（2026-10-21）
+
+run 12（`2e10f9d1`）的失败方式比错误本身更值得记：`Build the pinned Linux dependencies`
+**退出码 1，一行输出都没有**。日志里最后一条是 libwebp 装好 `WebPConfig.cmake`，
+8 秒后就 `##[error]Process completed with exit code 1`。
+
+两个原因叠在一起：
+
+1. 循环里每个 builder 都是 `build_x >"$log" 2>&1 || { cat "$log"; die ...; }` ——
+   **`die` 自己也把 stderr 重定向进了 `$log`**，而且它用 `exit` 直接结束 shell，于是
+   `cat "$log"` 那一半永远跑不到。消息进了日志文件、进程退出、控制台空白。
+   修法：脚本开头 `exec 3>&2`，`die` 写 fd 3 —— 重定向只影响 1/2，fd 3 是通向控制台的逃生口。
+   **判据**：凡是"把输出重定向进日志 + 在函数里直接 exit"的脚本，都要有这么一个逃生口，
+   否则最关键的失败恰好是最安静的那种。
+2. 真正的错误是 highway 的 `hwy-config.cmake` 没装出来。**upstream 默认 `HWY_ENABLE_INSTALL=OFF`**，
+   vcpkg 的 portfile 里显式给了 `-DHWY_ENABLE_INSTALL=ON` —— 抄 portfile 时漏了这一条，
+   于是库编好了但没装 config，libjxl 那条 `find_package(hwy CONFIG)` 注定失败。
+   这说明"照抄 portfile 的 OPTIONS"要抄全，包括那些看着像默认值的开关。
+
+顺带把 9.6.9 留下的最后一个"诚实的弱点"补掉：`onnxruntime` 的两份预编译包从来没有校验和。
+run 12 的日志把两份资产的 sha512 都打印出来了（x64 `4191bc61…`、aarch64 `6fb4fbdd…`，
+取自 CI 实际下载的那两个文件），现已回填到脚本，`check-linux-deps-pins.py` 也加了一条断言：
+任一架构的 onnxruntime 校验和为空即失败。从此这条下载链接是验证过的，不再是"打印出来等你回填"。
 
 
 

@@ -84,6 +84,15 @@ def main() -> int:
         if f"build_{name.replace('-', '_')}" not in builders:
             failures.append(f"loop lists '{name}' but no build_{name.replace('-', '_')}() exists")
         if name == "onnxruntime":
+            # Per-architecture pins: Microsoft publishes no checksum, so these
+            # were read off the assets the first real run downloaded. Empty
+            # values would mean the archive is used unverified.
+            for arch in ("x64", "aarch64"):
+                value = re.search(rf'^onnxruntime_sha512_{arch}="([0-9a-f]{{128}})"',
+                                  text, re.MULTILINE)
+                if value is None:
+                    failures.append(f"onnxruntime has no sha512 pin for {arch} "
+                                    f"(the prebuilt archive would be used unverified)")
             continue
         if name in RUNTIME_READ:
             continue

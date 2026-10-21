@@ -59,6 +59,10 @@
 # `SNOW_LINUX_DEPS_SRC` at a directory holding them) and nothing is downloaded.
 set -euo pipefail
 
+# fd 3 = the console's stderr, kept across the per-library redirections so `die`
+# stays visible (see die()).
+exec 3>&2
+
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 prefix="${HOME}/.local/snow-linux-deps"
 only=""
@@ -71,7 +75,13 @@ usage() {
 }
 
 die() {
-    echo "error: $*" >&2
+    # `die` is called from inside builders whose stdout *and* stderr are
+    # redirected into `<prefix>/logs/<lib>.log`, which used to make a failed
+    # assertion invisible: the message went into the log file, the shell exited,
+    # and the loop's `cat` never ran (CI run 39607822963 lost the highway error
+    # exactly this way, leaving only "Process completed with exit code 1").
+    # fd 3 is a saved copy of the real stderr, so the message always surfaces.
+    echo "error: $*" >&3
     exit 1
 }
 
@@ -350,17 +360,16 @@ build_minizip_ng() {
 # three above this is a download, not a build: building ONNX Runtime from source
 # is a multi-hour job and is what W9 ("onnxruntime CPU EP 接入") is for.
 #
-# Two things the prebuilt tarball does not give us:
+# Two of the things the prebuilt tarball does not give us:
 #   * a CMake config -- `snow_shot/CMakeLists.txt:368` calls
 #     `find_package(onnxruntime CONFIG REQUIRED)`, so one is generated here;
-#   * a checksum -- Microsoft publishes none, and the 9 MB asset cannot be
-#     fetched on this workstation (the proxy stalls at ~300 KB). The pin is
-#     therefore version + asset name, and the archive's sha512 is *printed* on
-#     first use so it can be filled in below: an unverified pin that says so is
-#     better than a `sha512sum` that was never run.
+#   * a checksum -- Microsoft publishes none. The pins below were read off the
+#     archive the first real run downloaded on each architecture (run
+#     39607822963), which is the only honest way to obtain them: they are
+#     checksums of the exact assets, verified from then on by `sha512sum`.
 onnxruntime_version="1.28.0"
-onnxruntime_sha512_x64=""
-onnxruntime_sha512_aarch64=""
+onnxruntime_sha512_x64="4191bc612e14ab7dc28f76002bd21ad7a1aa981cd45f9572045f081d7d3947ab49c1918131d27fdb0482d389972b03ed5e21b268c4f2aacd63f9eb4ea3554bd3"
+onnxruntime_sha512_aarch64="6fb4fbdd45517beeb9f19a42291184122bc25b92fe4854e487f3b047d747469460d5ada15f13308934f399c5149d1b82725469de1805dd4b2f9658bb8a0d1f59"
 
 build_onnxruntime() {
     local version="$onnxruntime_version"
@@ -622,11 +631,15 @@ build_highway() {
     configure_build_install "${work}/src" "$build" \
         -DBUILD_SHARED_LIBS=ON \
         -DBUILD_TESTING=OFF \
+        -DHWY_ENABLE_INSTALL=ON \
         -DHWY_ENABLE_EXAMPLES=OFF \
         -DHWY_ENABLE_TESTS=OFF \
         -DHWY_ENABLE_CONTRIB=OFF
 
-    config="$(find "${prefix}" -name 'hwy-config.cmake' -o -name 'hwyConfig.cmake' -print -quit)"
+    # `HWY_ENABLE_INSTALL` is what produces this file at all -- upstream leaves
+    # installation off by default, so without it the target libjxl links simply
+    # does not exist.
+    config="$(find "${prefix}" -name 'hwy-config.cmake' -print -quit)"
     [[ -n "$config" ]] || die "highway installed no CMake config package"
     stamp highway "$version"
 }
