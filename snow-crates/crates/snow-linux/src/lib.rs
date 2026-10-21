@@ -4,19 +4,20 @@
 //! developer machine that is not running Linux:
 //!
 //! * [`capture`], [`damage`], [`fullscreen`], [`geometry`], [`globalmouse`],
-//!   [`hotkey`], [`pixels`], [`pointer`], [`text`], [`window`], [`windowcapture`]
-//!   and [`input`]'s `keys`/`tracking` modules
+//!   [`hotkey`], [`pixels`], [`pointer`], [`text`], [`window`], [`windowcapture`],
+//!   [`portal`] and [`input`]'s `keys`/`tracking` modules
 //!   are pure and compile everywhere, so their unit tests run on any host.
 //! * [`session`] only inspects environment variables and therefore compiles
 //!   everywhere too.
-//! * [`x11`], [`display`], [`cursor`] and [`input::x11`] talk to an X server and
-//!   are gated on `target_os = "linux"`; they are type-checked with
+//! * [`x11`], [`display`], [`cursor`], [`input::x11`] and [`portal::dbus`] talk
+//!   to a server -- an X server, or the session bus -- and are gated on
+//!   `target_os = "linux"`; they are type-checked with
 //!   `cargo check --target x86_64-unknown-linux-gnu`.
 //!
 //! Nothing here links a C library. The X11 work is built on `x11rb` instead of
-//! `libxcb`, and the text stack is built on `ab_glyph`/`ttf-parser` instead of
-//! fontconfig and FreeType, so the cross-target type check above needs no C
-//! toolchain and no target headers.
+//! `libxcb`, the D-Bus work on `zbus` instead of `libdbus`, and the text stack
+//! on `ab_glyph`/`ttf-parser` instead of fontconfig and FreeType, so the
+//! cross-target type check above needs no C toolchain and no target headers.
 
 pub mod capture;
 pub mod damage;
@@ -28,6 +29,7 @@ pub mod hotkey;
 pub mod input;
 pub mod pixels;
 pub mod pointer;
+pub mod portal;
 pub mod session;
 pub mod text;
 pub mod window;

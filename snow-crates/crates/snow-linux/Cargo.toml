@@ -33,6 +33,14 @@ x11rb = { version = "0.14", default-features = false, features = [
 # The client side of that segment. `CreateSegment` hands the client a file
 # descriptor, so mapping it is all that is left -- no System V IPC, no C.
 memmap2 = "0.9"
+# The D-Bus client for xdg-desktop-portal. zbus 6 merged `zvariant` into itself
+# (as `zbus::wire`) and dropped the blocking API, so the calls below are async
+# futures driven by `zbus::block_on` -- still pure Rust, still cross-checkable
+# from a Windows host with no C toolchain and no libdbus.
+zbus = { version = "6.0", default-features = false, features = [
+    "proxy",
+    "default-rt",
+] }
 # The input observer hands events to its consumer over a channel, and the
 # consumer selects on it alongside its own stop signal; matching the channel type
 # the macOS observer already uses keeps both adapters shaped the same way.

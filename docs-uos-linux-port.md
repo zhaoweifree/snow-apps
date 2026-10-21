@@ -27,7 +27,7 @@
 | `ant_design_qt` | 中 | 中高 | **中改** | 4 个 `.mm`、`enterEvent`、`position()` |
 | `snow_shot`（主程序） | 低（平台层全缺） | 中 | **大改** | 需从零实现全部 Linux 平台后端。**已起步**：物理光标走 X11，并建立了 Rust↔C++ 平台桥（见 9.4.8） |
 | `snow_image_viewer` | 低 | **极低** | **重写或裁剪** | `QRhi*` 为 Qt6 专有公开 API |
-| Rust `snow-capture` / `snow-cursor` | 低 | — | **已完成 X11 部分** | 采集与光标走 X11（见 9.4.3），经 MIT-SHM 零拷贝读像素（见 9.4.7）；PipeWire / portal 仍缺 |
+| Rust `snow-capture` / `snow-cursor` | 低 | — | **X11 完成，Wayland 半程** | 采集与光标走 X11（见 9.4.3），经 MIT-SHM 零拷贝读像素（见 9.4.7）、Damage 跳帧（见 9.4.19）；Wayland 侧 portal 握手已落地（见 9.4.20），**PipeWire 帧消费仍缺**，故 Wayland 会话明确拒绝采集而不是交出错图 |
 | Rust 输入钩子 / 键帽渲染 | 低 | — | **已完成 X11 部分** | XInput2 观测（见 9.4.4）+ `ab_glyph` 光栅化（见 9.4.5）；Wayland / 无 XInput2 退路仍缺 |
 | Rust 元素拾取 | 低 | — | **已完成窗口级** | X11 窗口树 + `_NET_*`（见 9.4.6）；控件级仍需 AT-SPI2 |
 | Rust 音频 | 低（全为 `UnsupportedBackend`） | — | **范围外（决策 4）** | 不做：只在 Win/mac 提供录制音轨，Linux 上诚实上报不可用 |
@@ -307,9 +307,9 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 动作 | 路径 | 说明 |
 |---|---|---|
-| **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`damage`/`window`/`pointer`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `x11`/`display`/`cursor`/`input::x11`/`x11::{window,shm,damage,pointer}`（X11，`x11rb` 纯 Rust 实现）。待补：PipeWire/Wayland capture、evdev 退路。**音频按决策 4 不做** |
+| **新增** | `snow-crates/crates/snow-linux/` | 替代 `snow-macos` 的平台 crate：X11/Wayland 屏幕、音频、光标、输入、文字。**已建**：`geometry`/`pixels`/`session`/`capture`/`damage`/`window`/`pointer`（纯逻辑，任何平台可单测）+ `input::{keys,tracking}`（纯逻辑：keysym→虚拟键映射、键码表、点击/区域状态机）+ `text::{font,raster}`（纯逻辑：字体发现 + 键帽光栅化，`ab_glyph`/`ttf-parser`）+ `portal::{deadline,...}`（纯逻辑：portal 请求路径、版本门控、应答判定、流列表解析、握手顺序）+ `x11`/`display`/`cursor`/`input::x11`/`x11::{window,shm,damage,pointer}`（X11，`x11rb`）+ `portal::dbus`（session bus，`zbus`）。待补：PipeWire 帧消费、evdev 退路。**音频按决策 4 不做** |
 | **新增** | `snow-crates/crates/snow-linux-c/`（`include/snow_linux.h`） | Rust↔C++ 平台桥：C ABI 头 + `staticlib`。**已建**（见 9.4.8）：`create`/`destroy` + 指针读写。刻意与 `snow_rust_ffi` **分成两个 archive** —— 后者经 `zstd-sys` 撞 C 源码，跨目标检查在依赖图里就断了，走不到这段 Linux-only 代码；这个 archive 只依赖纯 Rust 的 `snow-linux`，因此每次 `bash scripts/linux-cross-check.sh` 都覆盖它 |
-| **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集；XShm 零拷贝（9.4.7）；Damage 跳帧与脏矩形（9.4.19）。待补：PipeWire + XDG portal（Wayland） |
+| **新增** | `snow-crates/crates/snow-capture/src/platform/linux.rs` | **X11 已落地**（`LinuxBackend` + `X11Capturer`，见 9.4.3）：显示器枚举 / 主屏 / `MonitorLayout` / `inspect_target` + 全屏与区域采集；XShm 零拷贝（9.4.7）；Damage 跳帧与脏矩形（9.4.19）；**Wayland 会话按 `capture_plan` 明确拒绝**（9.4.20）。待补：PipeWire 帧消费（portal 会话协商已落地） |
 | **新增** | `snow-crates/crates/snow-audio-recorder/src/platform/linux.rs` | ~~PulseAudio / PipeWire~~ **不做（决策 4）**：保持 `UnsupportedBackend`，Linux 录制无音轨 |
 | **新增** | `snow-crates/crates/snow-cursor/src/platform/linux.rs` | XFixes `GetCursorImage` + 核心 `QueryPointer`。**已完成**（含 image 缓存的瞬时失败保护，与 Windows 后端同策略） |
 | **新增** | `snow-crates/crates/snow-ui-selector/src/linux.rs` | **窗口级已落地**（见 9.4.6）：X11 窗口树 + `_NET_CLIENT_LIST`，`ElementRegionService` 在 Linux 上导出，`snow-ui-selector-c` 恢复可编译。控件级仍需 AT-SPI2（D-Bus）——未实现，`HitTestMode::UiElement` 与 `Window` 目前返回同一个窗口矩形 |
@@ -346,7 +346,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 用途 | crate |
 |---|---|
-| 屏幕采集（Wayland） | `pipewire-rs`（`libspa`）、`ashpd` 或 `zbus`（xdg-desktop-portal ScreenCast） |
+| 屏幕采集（Wayland） | `zbus`（xdg-desktop-portal ScreenCast，**已引入：v6，协商层见 9.4.20**）、`pipewire-rs`（`libspa`，帧消费，未引入） |
 | 屏幕采集（X11） | `x11rb` 或 `xcb`、`xfixes`、`xrecord` |
 | 音频 | `libpulse-binding` / `pipewire-rs` |
 | 输入钩子 | `evdev`、`input-linux`、或 `x11rb` XRecord |
@@ -354,7 +354,10 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 | 可访问性 | `atspi` / `zbus`（AT-SPI2 over D-Bus） |
 | 硬件编码（amd64） | FFmpeg `h264_vaapi`/`h264_nvenc` 经由 `ffmpeg-next` 绑定 |
 
-> 目前上述依赖**一个都没有**（`Cargo.lock` 中无 `nix`/`wayland`/`x11rb`/`pipewire`/`zbus`）。
+> 已有：`x11rb`（X11 全栈）、`zbus`（portal 协商）、`ab_glyph`/`ttf-parser`（文字）、`memmap2`（MIT-SHM）。
+> 仍缺：`pipewire-rs`（Wayland 帧消费）、`nix`/`libc`、`evdev`、`atspi`。
+> 注意 `zbus` 6 的两处破坏性变化：`zvariant` 并入 `zbus::wire`（`Value` → `Variant`），blocking API 被移除，
+> 同步接送只能 `zbus::block_on` 驱动 future。
 
 ---
 
@@ -362,7 +365,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 能力 | Windows 实现 | macOS 实现 | **Linux 目标实现** |
 |---|---|---|---|
-| 屏幕采集 | DXGI Duplication / WGC | ScreenCaptureKit | **X11 `GetImage` + MIT-SHM —— 已落地**（见 9.4.3 / 9.4.7）；**PipeWire**（Wayland）仍缺 |
+| 屏幕采集 | DXGI Duplication / WGC | ScreenCaptureKit | **X11 `GetImage` + MIT-SHM —— 已落地**（见 9.4.3 / 9.4.7）；Wayland 的 portal **协商**已落地（见 9.4.20），**PipeWire 帧消费仍缺** ⇒ Wayland 明确拒绝采集 |
 | 窗口采集 | WGC per-window | SCK per-window | PipeWire `restore_token` / X11 Composite |
 | 防截屏排除 | `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` | `NSWindowSharingNone` | **无等价**，X11 用 shape/`XComposite` 近似；建议降级说明 |
 | 全局快捷键 | `RegisterHotKey` | Carbon/CGEventTap | **X11 `XGrabKey`** / Wayland `GlobalShortcuts` portal |
@@ -430,7 +433,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P0 预研基线** | 验证 Qt5.15 能否编译纯逻辑模块 | 在 UOS 上构建 `snow_image` + `snow_draw_engine_qt` + `ant_design_qt`（暂关平台功能） | 三库链接通过；`snow_image` 单元测试在 x86_64+arm64 通过 |
 | **P1 Qt5 兼容层** | 建立 `compat/` + CMake 双版本开关 | `snow_shot/include/snow_shot/compat/qt5compat.h`；`SnowQt.cmake` 增加 `SNOW_QT_MAJOR` 分支 | 一个不含平台代码的目标可在 Qt5/Qt6 下分别编译 |
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
-| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–7）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级（**音频按决策 4 不做**） |
+| **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–8）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）、AT-SPI2 控件级（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
@@ -967,6 +970,7 @@ slice 2 的 X11 采集能出画面，但每帧的像素要穿过整条连接：�
   遮挡变化"必须真机确认，属独立 slice。**—— 已由 9.4.19 落地（含合成器前置判据与心跳兜底）。**
 - **窗口采集**：仍 `BackendUnavailable`。读别的窗口像素需要 Composite 重定向，而**有合成器运行时
   重定向会被拒（BadAccess）**，届时要走合成器的截图 portal 或从根图像裁剪。这是设计决策，不是补丁。
+  **—— Wayland 侧已由 9.4.20 打通到"拿到流描述"为止，帧消费与窗口源选择仍缺。**
 - **合成器的 `XCompositeNameWindowPixmap` 路径**、`XShmPutImage`（本工程不往屏幕写像素，用不到）。
 - **真机待验**：UOS 20 / Deepin 23 上 `CreateSegment` 的可用率、1440p 下每帧耗时与 CPU 占用
   相对 `GetImage` 的实际差距。
@@ -1878,6 +1882,94 @@ truncated 的答案一律当全帧，因为"精确到可用的短列表"这时�
   会被判成重复。对当前架构是对的（光标由 `snow-cursor` 单独合成），但如果将来把光标画进帧里，
   这个判据必须一起改。
 - 真机性能数字（跳帧省下的 CPU、部分编码省下的码率）。
+
+#### 9.4.20 P3 slice 8：Wayland portal 会话协商（2026-10-21）
+
+Wayland 不给任何客户端屏幕像素。唯一受支持的路径是经 `xdg-desktop-portal` 的 `ScreenCast`
+接口向合成器申请一条 PipeWire 流，而"申请"本身是一串三次调用、异步应答、带版本特性的握手。
+这一片做的是这串握手，**不做**帧消费。
+
+**先说这一片修掉的一个真实错误行为。** 此前 `snow-capture` 的 Linux 后端无条件连 X11：在
+Wayland 会话里 XWayland 会导出 `DISPLAY`，于是 `X11Session::connect()` 成功、`GetImage` 返回
+真实像素——只不过那是 XWayland 根窗口的像素，只包含 X 客户端。截图"成功"了，内容是一张几乎
+空白的桌面，而且**下游没有任何地方能把它和真空白区分开**。所以本片在 `X11Capturer::new` 里
+加了一道判据：不是 `CapturePlan::X11Root` 就返回 `BackendUnavailable` 并带上具体原因。宁可
+明确失败，也不要交付一张看起来正常的错图。
+
+**决定 1：把"判断"和"管道"分开，管道先不写。** `portal` 模块里纯逻辑部分（路径构造、版本门控、
+应答判定、流列表解析、握手顺序）在 Windows 上跑单测；真正的 D-Bus 调用在 `portal::dbus`，
+只有 `cfg(target_os = "linux")` 才编译。中间的缝是一个 `PortalTransport` trait——正因为有它，
+"三次调用的顺序""版本门控""取消发生在哪一步"这些真会出错的判断都能用假 transport 测，而不用
+先让 portal 跑起来。这与 9.4.7 的 MIT-SHM、9.4.19 的 Damage 是同一套切法。
+
+**决定 2：Wayland 会话永远不返回 `X11Root`。** 这是本片唯一的硬不变量，也是唯一写成
+"无论 portal 探测结果如何"的判据（探测到 0/1/6 或干脆没有，都不得回落）。XWayland 让
+`DISPLAY` 看起来可用，这是本片存在的全部理由。
+
+**决定 3：版本不够就报错，不静默丢选项。** portal 对不认识的选项是忽略而不是拒绝，所以
+"v1 上请求 `cursor_mode`"会握手成功、行为却不是调用方要的；`restore_token` 更糟——它被丢掉时
+用户每次都要重新授权，而日志里一个字都没有。`select_sources_options` 因此返回
+`UnsupportedOption { option, found, needed }` 而不是少塞一个键。版本锚点（`cursor_mode` v2、
+`restore_token`/`persist_mode` v4、流属性 `source_type` v3、`pipewire-serial` v6）取自上游
+接口文档 v6。
+
+**决定 4：先订阅再调用，且允许 portal 换路径。** 应答不是方法返回值，而是 `Request` 对象上的
+`Response` 信号。路径可由 `sender + handle_token` 预先算出（`request_path`：去掉 unique name
+的前导 `:`、`.` 换 `_`），所以订阅能发生在调用之前——否则快到没有对话框的 `CreateSession`
+会赢下这场竞争。但 token 只是"请求"：方法返回的对象路径才是权威，两者不一致时按返回值重新
+订阅，而不是判失败（部分旧版 portal 会自己挑路径）。
+
+**决定 5：取消不是错误。** `Response` code 1 是"用户关掉了对话框"，把它当失败上报会诱导上层
+重试，而重试只会再弹一次对话框。code 0/1 之外的码保留原始数字（`Denied { code }`），不折叠成
+"失败"——portal 将来新增码时那个数字本身是信息。
+
+**决定 6：请求 `cursor_mode = Embedded`。** Wayland 下客户端拿不到权威指针位置（`XQueryPointer`
+读的是 XWayland 自己那份副本），所以"隐藏光标、我们画"这条路不存在。Embedded 让合成器把指针
+画进帧里，恰好一次。等 `cursor_mode = Metadata`（位置随流元数据下发）落地，才轮到录制器自己
+渲染高亮——那需要消费 PipeWire metadata，属后续。
+
+**决定 7：自己写超时组合器。** zbus 6 的超时是 crate 内部 API，且 6.0 起**移除了 blocking
+API**（`zvariant` 也被并入 `zbus::wire`，`Value` 改名 `Variant`），所以同步接送必须
+`zbus::block_on` 驱动 future。`Response` 可能永远不来（portal 中途崩掉），而调用方是同步的
+`capture()`、没东西可取消，因此在 future 内部加边界：`portal::deadline::timeout_after`，
+一个 50 行的 waker+线程组合器，不依赖具体 runtime，也能在 Windows 上单测。默认 120 s——那是
+一个人在看对话框，不是网络超时。
+
+**另一个协议陷阱**：`CreateSession` 结果里的 `session_handle` 声明是 `o`，实际是 `s`（上游
+承认的历史实现错误），所以两种都接受，并且要求它真的以 `/` 开头。
+
+**验证链（本机没有 D-Bus，所以要说清楚证明了什么、没证明什么）**：
+
+| 检查 | 结果 |
+|---|---|
+| `cargo test -p snow-linux --lib` | 192 → **219 通过**（本片 +27：`portal` 23 + `portal::deadline` 4） |
+| `cargo check -p {snow-linux,snow-capture} --target {x86_64,aarch64}-unknown-linux-gnu` | 双架构全绿（`portal::dbus` 首次进编译） |
+| `cargo check -p {snow-linux,snow-capture} --all-features` | 绿 |
+| `cargo fmt --check` + `cargo clippy -D warnings`（host 与 linux 目标各一遍） | 绿 |
+| 反向验证 5 点 | sender 改写符号 `.`→`-` ⇒ 1 failed；Wayland 允许回落 `X11Root` ⇒ 2 failed；版本门控放松一档 ⇒ 2 failed；取消当成功 ⇒ 1 failed；deadline 恒 Ready ⇒ 2 failed |
+
+反向验证的两点都改成"能编译的变异"：`sender.replace('.', "_")` 改字符而不删行，`capture_plan`
+里**加**一条 `Wayland if portal_version.is_none() => X11Root` 的守卫（它同时证明那条不变量测试
+是真的在测不变量，而不是恰好没覆盖到），`deadline` 的 `if state.fired` 改 `if true`。
+
+**本片未覆盖**：
+
+- **`portal::dbus` 从未执行过**。本机没有 session bus、没有 portal，证明的只是"双架构类型正确"。
+  到真机的第一条命令：`WAYLAND_DISPLAY=wayland-0 XDG_SESSION_TYPE=wayland <binary> --probe`，
+  先看非交互探测能不能拿到版本号；再看 `negotiate_screencast` 能否弹出授权框并拿到 `streams`。
+  最可能的第一处失败是 `a{sv}` 的序列化形态（`HashMap<String, Variant>` 是否真按 `a{sv}` 落线），
+  这也是它被单独放在一层的原因：改这一层不牵动任何已测逻辑。
+- **帧消费不存在**：`negotiate` 返回的 `ScreenCastStream`（node id / size / position）目前没有
+  消费者，`OpenPipeWireRemote` 也没调用。所以 `capture_plan` 对"Wayland + 有 portal"返回的是
+  `PortalCaptureUnimplemented`，而不是"可用"。这条分支是这一片最诚实的一行代码。
+- **`restore_token` 无处持久化**：拿到了但没有存储位置（配置 schema 属 C++ 侧），所以每次仍会
+  弹框。`persist_mode` 同理没被请求。
+- **多流未处理**：`multiple = false`，但仍接受多流应答（不硬性要求 1 条）。真的出现多流时
+  调用方要自己决定是拼接还是取第一条，本片不替它决定。
+- **会话生命周期绑在连接上**：`PortalSession` 拿着 `BusTransport`，drop 即断开、portal 随即
+  关闭会话。这是有意的，但也意味着帧消费必须把 `PortalSession` 活着带到不需要为止。
+- **探测有代价**：Wayland 下每次创建 capturer 都会走一次属性读取（3 s 上限）。X11 会话完全不
+  碰 portal——`session_plan` 里那条 `if session.is_wayland()` 就是为此。
 
 ### 9.5 打包
 

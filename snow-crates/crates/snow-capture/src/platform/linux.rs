@@ -24,6 +24,12 @@
 //! * Window targets are refused. Reading another window's pixels needs a
 //!   Composite redirect, so advertising window capture here would mean
 //!   promising something the backend cannot deliver.
+//! * A Wayland session is refused outright, and that refusal is the point of
+//!   the [`capture_plan`] check below. XWayland exports `DISPLAY` there, so an
+//!   X11 connection succeeds and `GetImage` returns real pixels -- of the
+//!   XWayland root window, which holds only X clients. A capture would "succeed"
+//!   with a picture of a desktop that has nothing on it, and nothing downstream
+//!   could tell that from a genuinely empty screen.
 
 use std::time::{Duration, Instant};
 
@@ -32,6 +38,8 @@ use snow_linux::capture::OutputOrder;
 use snow_linux::damage::{Changes, DamagePolicy, Decision, decide, duplicate_hold};
 use snow_linux::display::MonitorDesc;
 use snow_linux::geometry::Rect as X11Rect;
+use snow_linux::portal::{CapturePlan, capture_plan};
+use snow_linux::session::SessionKind;
 use snow_linux::x11::X11Session;
 use snow_linux::x11::damage::DamageTracker;
 use snow_media::time::ClockDomain;
@@ -82,6 +90,29 @@ fn monitor_id(desc: &MonitorDesc) -> MonitorId {
 
 fn open_session() -> CaptureResult<X11Session> {
     X11Session::connect().map_err(map_error)
+}
+
+/// How long the non-interactive portal probe may take.
+///
+/// The probe is one property read on the session bus, so a portal that is
+/// merely slow still answers well within this. A longer bound would turn
+/// "the portal is hung" into a capture that hangs with it, and a shorter one
+/// would misreport a busy machine as "no portal".
+const PORTAL_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Decide whether this session can be captured by reading the root window.
+///
+/// The portal is only contacted on a Wayland session: on X11 the answer does
+/// not depend on it, and a round trip nobody needs is a round trip that can
+/// fail.
+fn session_plan() -> CapturePlan {
+    let session = SessionKind::detect();
+    let portal = if session.is_wayland() {
+        snow_linux::portal::dbus::screencast_version(PORTAL_PROBE_TIMEOUT)
+    } else {
+        None
+    };
+    capture_plan(session, portal)
 }
 
 fn monitors(session: &X11Session) -> CaptureResult<Vec<MonitorId>> {
@@ -282,6 +313,11 @@ impl X11Capturer {
             return Err(CaptureError::BackendUnavailable(
                 "Windows capture tuning is unavailable on Linux".into(),
             ));
+        }
+        // Before connecting, not after: on Wayland the connection succeeds and
+        // the failure only shows up as wrong pixels.
+        if let CapturePlan::Unsupported(reason) = session_plan() {
+            return Err(CaptureError::BackendUnavailable(reason.message()));
         }
         let session = open_session()?;
         // Resolve the target once so a monitor that has already disappeared
