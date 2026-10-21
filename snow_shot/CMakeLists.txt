@@ -9984,6 +9984,34 @@ install(DIRECTORY
     OPTIONAL
 )
 
+if(UNIX AND NOT APPLE)
+    # Freedesktop integration. Three names have to agree with the application,
+    # and they come from two different places:
+    #
+    #  * the entry file name is the application id from `app::edition::productId()`
+    #    ("snow-shot"), because the autostart override and the hiding stub that
+    #    `AutoStartRegistration` writes look for exactly that file name, and a
+    #    package that installed `Snow Shot.desktop` instead would leave the user
+    #    with two entries that disagree about whether the app starts at login;
+    #  * the icon name in `Icon=` is the same id, which is why the shipped
+    #    `app-icon.svg` is renamed on the way in rather than duplicated;
+    #  * `StartupWMClass` is the Qt application name ("snow_shot"), which is what
+    #    the xcb platform plugin puts in WM_CLASS.
+    #
+    # The AppStream file is not decoration: dde-launcher and most software
+    # centres read it for the name, the screenshot list and the release notes.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/snow-shot.desktop"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+    )
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/snow-shot.metainfo.xml"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo"
+    )
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon.svg"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+        RENAME "snow-shot.svg"
+    )
+endif()
+
 foreach(_conversion_view_target IN ITEMS snow_shot snow-shot-recognition-window-tests
         snow-shot-mcp-document-tests
         snow-shot-recognition-session-controller-tests snow-shot-translation-tool-tests

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>snow-shot.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Snow Shot</name>
+  <summary>Capture, annotate, pin and recognize screen content</summary>
+  <summary xml:lang="zh_CN">截取、标注、贴图与文字识别屏幕内容</summary>
+  <description>
+    <p>Snow Shot captures a region, a window or a scrolling page, annotates the result with shapes, text and mosaics, and keeps it available on top of other windows.</p>
+    <p>Text and table recognition run on the same captured image, so a screenshot can be turned back into selectable content without leaving the application.</p>
+    <ul>
+      <li>Region, window, current-monitor and scrolling capture</li>
+      <li>Shape, pen, text and mosaic annotation</li>
+      <li>Pin screenshots above other windows</li>
+      <li>Text, table and QR-code recognition</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">snow-shot.desktop</launchable>
+  <url type="homepage">https://snowshot.top</url>
+  <developer_name>Snow Apps</developer_name>
+  <provides>
+    <binary>snow_shot</binary>
+  </provides>
+  <categories>
+    <category>Graphics</category>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>screenshot</keyword>
+    <keyword>capture</keyword>
+    <keyword>annotate</keyword>
+    <keyword>ocr</keyword>
+  </keywords>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.2.8"/>
+  </releases>
+</component>

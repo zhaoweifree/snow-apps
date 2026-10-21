@@ -476,6 +476,14 @@ int main(int argc, char* argv[]) {
     // Keep it stable while giving Qt windows and the macOS menu the product name.
     QGuiApplication::setApplicationDisplayName(snow_shot::app::edition::productName());
     QApplication app(argc, argv);
+#ifdef Q_OS_LINUX
+    // Ties the window to the installed `snow-shot.desktop` entry. Without it the
+    // compositor matches windows by WM_CLASS alone, so launching from the dock
+    // shows a second, iconless slot next to the pinned launcher, and a running
+    // instance is not marked as active on its own launcher.
+    QGuiApplication::setDesktopFileName(snow_shot::app::edition::productId() +
+                                        QStringLiteral(".desktop"));
+#endif
     adqt::widgets::initializePlatformCompatibility(app);
     snow_shot::diagnostics::logEvent(QStringLiteral("snow_shot.app"),
                                      QStringLiteral("application.platform"),

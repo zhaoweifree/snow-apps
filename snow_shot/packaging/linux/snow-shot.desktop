@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Snow Shot
+GenericName=Screenshot Tool
+GenericName[zh_CN]=截图工具
+Comment=Capture, annotate, pin and recognize screen content
+Comment[zh_CN]=截取、标注、贴图与文字识别屏幕内容
+Exec=snow_shot
+TryExec=snow_shot
+Icon=snow-shot
+Terminal=false
+Categories=Graphics;Utility;
+Keywords=screenshot;capture;annotate;pin;ocr;
+Keywords[zh_CN]=截图;截屏;标注;贴图;识别;
+StartupNotify=true
+StartupWMClass=snow_shot
+SingleMainWindow=true
+X-GNOME-UsesNotifications=true

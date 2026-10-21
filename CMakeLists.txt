@@ -423,7 +423,7 @@ if(SNOW_APPS_PACKAGE_SNOW_SHOT AND APPLE)
     include(cmake/SnowShotMacOSPackage.cmake)
 endif()
 
-if(SNOW_APPS_PACKAGE_SNOW_SHOT AND NOT APPLE)
+if(SNOW_APPS_PACKAGE_SNOW_SHOT AND WIN32)
     if(NOT TARGET snow_shot)
         message(FATAL_ERROR "SNOW_APPS_PACKAGE_SNOW_SHOT requires SNOW_APPS_BUILD_SNOW_SHOT=ON")
     endif()
@@ -481,6 +481,16 @@ if(SNOW_APPS_PACKAGE_SNOW_SHOT AND NOT APPLE)
     include(cmake/SnowShotPackageCompression.cmake)
     snow_shot_apply_nsis_compression()
     include(cmake/SnowShotInstaller.cmake)
+    include(CPack)
+endif()
+
+if(SNOW_APPS_PACKAGE_SNOW_SHOT AND UNIX AND NOT APPLE)
+    # Debian package for the Linux port. The generator is chosen by the module;
+    # `include(CPack)` stays here so that only one file in the project includes
+    # it, and so the module can be evaluated by scripts/check-linux-packaging.cmake
+    # on a host that never configures a Linux tree.
+    include(cmake/SnowShotLinuxPackage.cmake)
+    snow_shot_configure_linux_package()
     include(CPack)
 endif()
 

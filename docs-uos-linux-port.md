@@ -433,7 +433,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–6）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider，双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire/Wayland、AT-SPI2 控件级、Damage 脏矩形（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
-| **P6 打包与系统集成** | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动 |
+| **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 图标安装规则、`scripts/check-linux-packaging.sh` 本机门禁 43 项（9.5.1）。**剩余**：AppImage、真机 `dpkg -i` 与两个 freedesktop 校验器、多尺寸 PNG 图标 |
 | **P7 硬化与 CI** | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
@@ -1803,15 +1803,82 @@ scope"，而不是删代码（删了会打断全部 Windows 调用方）。P7 �
 
 ### 9.5 打包
 
-```cmake
-# cmake/SnowShotLinuxPackage.cmake（新增）
-set(CPACK_GENERATOR "DEB;External")
-set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")   # 或 arm64
-set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libqt5widgets5, libqt5svg5, libqt5network5, libpipewire-0.3-0, libpulse0")
-```
+#### 9.5.1 P6 slice 1：deb + freedesktop 集成（2026-10-21）
 
-产出：`snow-shot_<ver>_amd64.deb`、`snow-shot_<ver>_arm64.deb`，附 `.desktop` 与图标。
+**决定 1：`Depends` 交给 `dpkg-shlibdeps`，不手写。** 本节原来那张草稿写死了
+`libqt5widgets5, libqt5svg5, libqt5network5, libpipewire-0.3-0, libpulse0` —— 这是猜的。
+链接线一改（多挂一个 Qt 模块、接上 PipeWire、换掉音频后端）它就过期，而症状是**装得上、
+起不来**（`error while loading shared libraries`），且只在恰好没装那一套库的机器上复现。
+改成 `CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON`：CPack 对暂存目录里的 ELF 跑 `dpkg-shlibdeps`，从
+实际 `NEEDED` 反推依赖。代价是打包机需要 `dpkg-dev` + `file`，交叉打包 arm64 时还要让它能读
+目标架构的 ELF。
+
+**决定 2：架构名显式映射，未知架构必须失败。** dpkg 只认 `amd64`/`arm64`/`loong64`/
+`mips64el`/`riscv64`。把 `x86_64` 写进 `Architecture:` 的包在任何机器上都装不上，而
+`dpkg -i` 的报错完全看不出原因。`snow_shot_linux_debian_architecture()` 做这层映射（顺带
+兜住信创侧可能出现的 loongarch64 / mips64el / riscv64），不认识的处理器名直接 `FATAL_ERROR`。
+
+**决定 3：模块只赋值，不 `include(CPack)`。** `include(CPack)` 留在根 `CMakeLists.txt`。
+这样 `cmake -P` 能在没有工具链的机器上把整段配置真跑一遍 —— 否则这个模块只会在 Linux
+configure 时被解析，又是一块盲区。
+
+**决定 4：三个名字必须同源。**
+
+| 出现在哪里 | 值 | 来源 |
+|---|---|---|
+| 入口文件名 | `snow-shot.desktop` | `app::edition::productId()` |
+| `Icon=` | `snow-shot` | 同上 |
+| `StartupWMClass=` | `snow_shot` | `app::edition::applicationName()` |
+
+- 文件名不是装饰：`AutoStartRegistration` 写自启动覆盖和 `Hidden=true` 隐藏桩时都按
+  `<productId>.desktop` 找文件。包里叫 `Snow Shot.desktop` 的话，用户会看到两个互相矛盾的条目
+  （一个进菜单、一个管自启动），且后者的"已启用"状态与系统菜单的勾选对不上。
+- 图标不复制：install 时 `RENAME` 成 `snow-shot.svg`。同一份 `app-icon.svg` 也是 Windows
+  `.ico` 的来源，复制一份就等着两边漂移。
+- 另给 `main.cpp` 补 `QGuiApplication::setDesktopFileName()`：没有它，合成器只按 WM_CLASS
+  匹配窗口，从 dock 启动会在固定图标旁多出一个无图标槽位，运行中的实例也不会点亮自己的图标。
+
+**决定 5：NSIS 分支从 `NOT APPLE` 收紧到 `WIN32`。** 原来那个条件是"Windows + Linux"，
+在 Linux 上开 `SNOW_APPS_PACKAGE_SNOW_SHOT` 会去调 NSIS —— 一个在 Linux 上不存在的生成器。
+Linux 现在走自己的模块。
+
+**验证（本机可跑，不需要 Linux）**：`bash scripts/check-linux-packaging.sh`，两半。
+
+- `cmake -P scripts/check-linux-packaging.cmake`：7 个处理器名映射、未知处理器必须拒绝
+  （子进程比对退出码）、25 个 `CPACK_*` 变量、把 `CMAKE_SYSTEM_PROCESSOR` 换成 aarch64 再跑
+  一遍、三个安装输入既存在**又真的被 `install()` 引用**（只放文件不装是死重量）、入口必需键。
+- `scripts/check-linux-freedesktop.py`：编码（BOM/CRLF）、`[Desktop Entry]` 必需键、无字段码、
+  `TryExec`/`StartupWMClass`/`Icon` 与 `edition.h` 一致、Categories 含主分类且分号收尾、
+  XML 良构、AppStream 必需元素，以及通用校验器做不到的跨文件一致性
+  （`productId` ↔ 文件名 ↔ `Icon` ↔ `launchable` ↔ `provides/binary` ↔ `SNOW_SHOT_VERSION`
+  ↔ release 版本 ↔ install 的 `RENAME` 名）。
+- 合计 **43 项**检查，全绿。
+- **反向验证**：删掉 `Categories=` ⇒ 4 项 FAIL；把 aarch64 映射成 `x86_64` ⇒ cmake 退出 1、
+  3 项 FAIL；把 metainfo 的 release 版本改成 1.2.7 ⇒ 跨文件检查 FAIL。
+- `main.cpp` 的 `setDesktopFileName` 在 `#ifdef Q_OS_LINUX` 里，Windows 构建编不到、Linux
+  语法门禁也覆盖不到（`main.cpp` 其余部分是 Windows-only）⇒ 专门写探针 TU，Qt 5.15.2 与
+  Qt 6.12.0 各编一遍，两个 `EXIT=0`。
+- `windows-qt5-full` configure `EXIT=0`。
+
+**本片未覆盖**：
+
+- **deb 从未真正生成**：Windows 上没有 `dpkg-deb` / `dpkg-shlibdeps`。`dpkg-shlibdeps` 算出来
+  的 `Depends` 实际内容、包体积、`/usr` 布局能否被 UOS 的软件中心索引，只能在 Linux 上答。
+- `desktop-file-validate` / `appstreamcli validate` 没跑过：本机没有这两个工具，脚本是按规范
+  重写的子集。到真机的第一条命令就是这两个。
+- 图标只有 scalable 一份，没有多尺寸 PNG。dde-dock / dde-launcher 的某些版本对 SVG 支持不全，
+  可能显示模糊或取不到图。
+- AppImage 未做（下一片）；`.desktop` 未做翻译以外的本地化（名称与 GenericName 的 zh_CN 已给）。
+
+产出（Linux 上）：
+
+```
+snow-shot_1.2.8_amd64.deb        # 或 _arm64.deb，文件名由 CPACK_DEBIAN_FILE_NAME=DEB-DEFAULT 决定
+/usr/bin/snow_shot
+/usr/share/applications/snow-shot.desktop
+/usr/share/metainfo/snow-shot.metainfo.xml
+/usr/share/icons/hicolor/scalable/apps/snow-shot.svg
+```
 
 ---
 
