@@ -45,8 +45,10 @@ The platform orders are:
 
 1. Windows: UI Automation `TextPattern`, standard native `EDIT`, then guarded Ctrl+C.
 2. macOS: Accessibility `AXSelectedTextRange(s)`/`AXStringForRange` and `AXSelectedText`, then guarded Command-C.
-3. Linux/X11: the PRIMARY selection, read directly. There is no fallback stage because no input
-   is ever synthesized; the result is reported as `RetrievalMethod::Primary`.
+3. Linux/X11: AT-SPI2 (the focused widget's own text selection, with its rectangle), then the
+   PRIMARY selection read directly. Both are passive -- no input is ever synthesized -- so there is
+   no clipboard stage; the result is reported as `RetrievalMethod::Accessibility` or
+   `RetrievalMethod::Primary` depending on which route answered.
 
 The Windows Accessibility provider checks the focused element and relevant ancestors, then performs
 a bounded search for one document beneath a focused container. The native-control provider uses
@@ -102,14 +104,33 @@ requests elevation, prompts for permission, or bypasses protected content. Selec
 best-effort snapshot because neither platform provides one atomic focus/selection/clipboard
 transaction.
 
-## Linux X11 PRIMARY selection behavior
+## Linux X11 behavior
+
+Two routes, in order. **AT-SPI2** over the accessibility bus reads the *focused widget's* text
+selection and, when the toolkit reports it, the rectangle that selection is drawn in
+(`ranges[0].bounds`). **PRIMARY** is the fallback: whatever was selected last anywhere in the session,
+read straight from the X server. The AT-SPI2 answer wins whenever it has text, and it is skipped
+entirely when the accessibility bus is unavailable, when the desktop publishes no `_NET_WM_PID` for
+the active window, or when no accessibility application matches that pid.
+
+An empty answer is not an answer: a toolkit reporting a zero-width selection has no text, and that
+must not hide a readable PRIMARY selection. If both routes are silent the result is `NoSelection`.
+
+Capture is passive on both routes: no keys are injected, no clipboard is opened, nothing outside this
+process changes, and `clipboard_status` is always `Unchanged`. `CaptureStrategy::Clipboard` is
+reported as `Unsupported` because it would mean synthesizing Ctrl+C into a window this crate cannot
+verify; `NativeControl` is unsupported for the same reason it is unsupported on macOS — neither the
+X11 core protocol nor AT-SPI2 has a *native control* in the Win32 sense.
+
+The accessibility route is bounded twice: each D-Bus call has a 500 ms timeout, and the whole search
+(walk plus application enumeration) has a deadline inside the 600 ms accessibility stage, so a wedged
+toolkit cannot spend the stage's budget one call at a time. `native_focus` stays `None` on Linux:
+AT-SPI2 has no integer control identifier, and the rectangle is what bubble placement needs.
+
+### PRIMARY details
 
 On X11 the selection of the focused window is published as the PRIMARY selection, which any client
-may read. Capture is therefore passive: no keys are injected, no clipboard is opened, nothing outside
-this process changes, and `clipboard_status` is always `Unchanged`. `CaptureStrategy::Clipboard` is
-reported as `Unsupported` because it would mean synthesizing Ctrl+C into a window this crate cannot
-verify; `NativeControl` is unsupported for the same reason it is unsupported on macOS — the X11 core
-protocol has no control-level text.
+may read.
 
 The reader asks the owner for `TARGETS` and then requests, in order, `UTF8_STRING`,
 `text/plain;charset=utf-8`, `STRING` (ISO 8859-1) and `TEXT`. Owners that refuse `TARGETS` are probed
@@ -257,6 +278,8 @@ either the wrapper archive or the `snow_rust_ffi` bundle without invoking text c
 | macOS secure fields / missing Accessibility permission | No bypass or prompt; capture fails before pasteboard mutation |
 | X11 target negotiation, `INCR` chunking, decoding, limits | Automated pure-function tests on every platform |
 | X11 end-to-end PRIMARY read (owner, `SelectionNotify`, `PropertyNotify`) | Not covered by any test yet; needs a live X server |
+| X11 route choice (AT-SPI2 vs PRIMARY, empty answers, bounds conversion) | Automated pure-function tests on every platform |
+| AT-SPI2 end-to-end (bus address, tree walk, `GetText`, `GetRangeExtents`) | Not covered by any test yet; needs a live accessibility bus |
 | Remote desktops, screenshots, custom canvases | Usually unsupported without Copy; OCR is a separate host feature |
 
 Real foreground/clipboard integration tests are ignored by default, must be explicitly selected,

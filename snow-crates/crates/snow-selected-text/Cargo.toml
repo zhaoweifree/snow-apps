@@ -45,3 +45,10 @@ x11rb = { version = "0.14", default-features = false }
 
 [dependencies]
 snow-core = { path = "../snow-core" }
+# The focused widget's own selection and its rectangle, over the accessibility
+# bus. A separate crate rather than `snow-linux` because this archive is meant to
+# stay clear of that dependency surface; `snow-atspi` depends only on `zbus`, and
+# only on Linux -- its own logic is platform-neutral, which is why it is a plain
+# dependency: the route decision and the bounds conversion are unit tested here
+# on the Windows dev box, not on the machine that has a desktop bus.
+snow-atspi = { path = "../snow-atspi" }

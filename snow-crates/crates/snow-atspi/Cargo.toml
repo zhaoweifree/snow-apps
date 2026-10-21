@@ -1,0 +1,17 @@
+[package]
+name = "snow-atspi"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "AT-SPI2 client: widget text and selection geometry over the accessibility bus"
+
+# Deliberately tiny. Both consumers of this crate are independent archives
+# (`snow-selected-text-c`, `snow-ui-selector-c`), so every dependency here is
+# paid for twice, and one of them refuses to depend on `snow-linux` on purpose.
+# `zbus` is pure Rust and cross-checkable from a Windows host; the pure logic in
+# the crate root needs nothing at all, which is where its tests run.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "6.0", default-features = false, features = [
+    "proxy",
+    "default-rt",
+] }

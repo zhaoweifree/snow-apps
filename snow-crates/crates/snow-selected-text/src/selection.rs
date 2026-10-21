@@ -5,7 +5,7 @@
 //! production. The transport that feeds these values lives in
 //! `platform::linux::selection` and contains no decisions of its own.
 
-use crate::model::{ErrorKind, SelectionError};
+use crate::model::{ErrorKind, RetrievalMethod, SelectionError, SelectionRect};
 
 /// The text targets this crate can decode, most preferred first.
 ///
@@ -188,6 +188,84 @@ pub(crate) fn executable_basename(link_target: &str) -> String {
     path.rsplit('/').next().unwrap_or_default().to_owned()
 }
 
+/// What the accessibility route said, before a route has been chosen.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Accessibility {
+    pub text: String,
+    /// Where the selection is drawn, in desktop coordinates, when the toolkit
+    /// could say. `None` is normal: the text is what matters, and a caller that
+    /// needs an anchor falls back to the pointer.
+    pub bounds: Option<snow_atspi::Bounds>,
+}
+
+/// What the backend should report, and which route produced it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Answer {
+    pub text: String,
+    pub bounds: Vec<SelectionRect>,
+    pub method: RetrievalMethod,
+}
+
+/// AT-SPI2's integer rectangle as this crate's floating-point one.
+///
+/// The values are desktop pixels and `f64` holds every `i32` and `u32` exactly,
+/// so this is a widening conversion: no rounding, and negative origins (a head
+/// left of the primary one) survive unchanged.
+fn desktop_rect(bounds: snow_atspi::Bounds) -> SelectionRect {
+    SelectionRect {
+        left: f64::from(bounds.x),
+        top: f64::from(bounds.y),
+        width: f64::from(bounds.width),
+        height: f64::from(bounds.height),
+    }
+}
+
+fn has_text(answer: &Accessibility) -> bool {
+    !answer.text.is_empty()
+}
+
+/// Whether the accessibility route produced text worth reporting.
+///
+/// The backend asks this to decide whether reading the selection is worth the
+/// round trips at all; [`choose_answer`] then makes the same call for the answer
+/// it reports. One predicate, so the two cannot disagree about what "answered"
+/// means.
+pub(crate) fn accessibility_answered(answer: Option<&Accessibility>) -> bool {
+    answer.is_some_and(has_text)
+}
+
+/// Choose between the two Linux routes.
+///
+/// The accessibility route wins when it has text, even if the selection has
+/// some: it describes the widget that actually holds focus in the window the
+/// user is looking at, while PRIMARY is session-wide and still holds whatever
+/// was selected last in some other application. The two are never concatenated
+/// -- when they agree they describe the same selection, so combining them would
+/// report the text twice.
+///
+/// An empty answer is not an answer. A toolkit that reports a caret with a
+/// zero-width selection, or a widget that was just re-laid-out, has no text;
+/// letting that shadow PRIMARY would turn a working read into an empty one.
+pub(crate) fn choose_answer(
+    accessibility: Option<Accessibility>,
+    primary: Option<String>,
+) -> Option<Answer> {
+    if let Some(answer) = accessibility.filter(has_text) {
+        return Some(Answer {
+            text: answer.text,
+            bounds: answer.bounds.map(desktop_rect).into_iter().collect(),
+            method: RetrievalMethod::Accessibility,
+        });
+    }
+    primary.filter(|text| !text.is_empty()).map(|text| Answer {
+        text,
+        // X11 core has no geometry for a selection, and the contract says
+        // geometry is optional and never required for a text result.
+        bounds: Vec::new(),
+        method: RetrievalMethod::Primary,
+    })
+}
+
 fn malformed(operation: &'static str) -> SelectionError {
     SelectionError::new(ErrorKind::MalformedData, operation)
 }
@@ -336,6 +414,112 @@ mod tests {
                 .kind,
             ErrorKind::MalformedData
         );
+    }
+
+    // ---- route preference -------------------------------------------------
+
+    /// The rectangle `Bounds::new(left, top, 40, 16)` converts to.
+    fn rect(left: f64, top: f64) -> SelectionRect {
+        SelectionRect {
+            left,
+            top,
+            width: 40.0,
+            height: 16.0,
+        }
+    }
+
+    #[test]
+    fn the_accessibility_answer_wins_and_carries_its_rectangle() {
+        let answer = choose_answer(
+            Some(Accessibility {
+                text: "focused".into(),
+                bounds: Some(snow_atspi::Bounds::new(10, 20, 40, 16)),
+            }),
+            Some("selection".into()),
+        )
+        .unwrap();
+        assert_eq!(answer.text, "focused");
+        assert_eq!(answer.bounds, vec![rect(10.0, 20.0)]);
+        assert_eq!(answer.method, RetrievalMethod::Accessibility);
+    }
+
+    #[test]
+    fn a_negative_origin_survives_the_conversion() {
+        // A head left of or above the primary one has negative desktop
+        // coordinates; clamping them would drag every bubble to the primary
+        // head, which is exactly the bug this conversion must not have.
+        let answer = choose_answer(
+            Some(Accessibility {
+                text: "selected".into(),
+                bounds: Some(snow_atspi::Bounds::new(-1920, -200, 100, 40)),
+            }),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            answer.bounds,
+            vec![SelectionRect {
+                left: -1920.0,
+                top: -200.0,
+                width: 100.0,
+                height: 40.0,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_reading_without_bounds_is_reported_without_them() {
+        let answer = choose_answer(
+            Some(Accessibility {
+                text: "focused".into(),
+                bounds: None,
+            }),
+            None,
+        )
+        .unwrap();
+        assert_eq!(answer.text, "focused");
+        assert!(answer.bounds.is_empty());
+    }
+
+    #[test]
+    fn an_empty_accessibility_answer_does_not_shadow_the_selection() {
+        // A toolkit that reports a zero-width selection has no text; letting
+        // that shadow PRIMARY would turn a working read into an empty one.
+        for empty in [
+            Some(Accessibility {
+                text: String::new(),
+                bounds: Some(snow_atspi::Bounds::new(0, 0, 40, 16)),
+            }),
+            None,
+        ] {
+            let answer = choose_answer(empty.clone(), Some("selection".into())).unwrap();
+            assert_eq!(answer.text, "selection");
+            assert_eq!(answer.method, RetrievalMethod::Primary);
+            assert!(answer.bounds.is_empty());
+            assert!(!accessibility_answered(empty.as_ref()));
+        }
+    }
+
+    #[test]
+    fn the_routes_are_never_concatenated() {
+        // Both routes describe the same selection when they agree, so the answer
+        // is one of them and never their sum.
+        let answer = choose_answer(
+            Some(Accessibility {
+                text: "same".into(),
+                bounds: None,
+            }),
+            Some("same".into()),
+        )
+        .unwrap();
+        assert_eq!(answer.text, "same");
+    }
+
+    #[test]
+    fn no_route_answering_is_no_selection_not_an_empty_one() {
+        assert_eq!(choose_answer(None, None), None);
+        assert_eq!(choose_answer(None, Some(String::new())), None);
+        assert!(!accessibility_answered(None));
     }
 
     #[test]

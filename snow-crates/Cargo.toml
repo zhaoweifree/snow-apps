@@ -5,6 +5,7 @@ members = [
     "crates/snow-macos",
     "crates/snow-linux",
     "crates/snow-linux-c",
+    "crates/snow-atspi",
     "crates/visual-region-detector",
     "crates/snow-visual-region-detector-c",
     "crates/snow-core",

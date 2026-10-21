@@ -7,6 +7,12 @@
 //! second D-Bus connection (the *accessibility bus*) on which every toolkit
 //! publishes its widget tree.
 //!
+//! This crate stands on its own rather than living in the platform backend. Its
+//! two consumers (`snow-selected-text-c` and `snow-ui-selector-c`) are separate
+//! archives, and one of them deliberately does not depend on `snow-linux`; a
+//! single copy here is what keeps them from drifting apart. The only dependency
+//! is `zbus`, and only on Linux -- nothing in this file needs a bus at all.
+//!
 //! Everything that can be decided without a bus lives here: object references
 //! and their inheritance rule, the state values, character offsets versus bytes,
 //! extents sanity, and the search itself (bounded, cycle-safe, preferring a node
@@ -14,7 +20,7 @@
 //! is what lets this half be tested on a machine that has never run a desktop
 //! bus.
 //!
-//! Four rules in here are easy to get wrong and expensive to debug on a real
+//! Five rules in here are easy to get wrong and expensive to debug on a real
 //! machine, so they are stated here rather than buried in the transport:
 //!
 //! 1. **Text offsets are characters, not bytes.** They are UCS-4 code points,
@@ -28,14 +34,53 @@
 //!    `org.a11y.atspi.Text` and keeps the first plain one as a fallback.
 //! 4. **A state list is a list of enum values, not a bitmask.** Testing it with
 //!    `states & (1 << FOCUSED)` compiles, runs, and is silently wrong.
+//! 5. **A visit budget bounds the work, not the time.** Every visit is a round
+//!    trip to an application that may be wedged, so the walk also takes a
+//!    deadline and gives up on it. See [`WalkLimits::deadline`].
 
 use std::collections::{HashSet, VecDeque};
 use std::ops::Range;
-
-use crate::geometry::Rect;
+use std::time::Instant;
 
 #[cfg(target_os = "linux")]
 pub mod bus;
+
+#[cfg(target_os = "linux")]
+pub use bus::{AccessibilityBus, FocusReading};
+
+/// The error a caller can only get from [`AccessibilityBus::connect`].
+///
+/// Kept as one opaque message on purpose: every error here means the same thing
+/// -- "this route is unavailable, fall back to the selection" -- and a caller
+/// that branched on it would be encoding a detail of the bus. The message is
+/// for a log line, never for a decision.
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub struct AtspiError {
+    message: String,
+}
+
+#[cfg(target_os = "linux")]
+impl AtspiError {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl std::fmt::Display for AtspiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl std::error::Error for AtspiError {}
+
+#[cfg(target_os = "linux")]
+pub type AtspiResult<T> = Result<T, AtspiError>;
 
 /// The accessibility registry: owner of the desktop root object.
 pub const REGISTRY_SERVICE: &str = "org.a11y.atspi.Registry";
@@ -237,6 +282,32 @@ pub fn choose_selection(
     None
 }
 
+/// A rectangle in desktop coordinates.
+///
+/// Defined here rather than borrowed from a platform crate: the two things that
+/// consume this crate do not share a geometry type, and converting at the
+/// boundary is cheaper than agreeing on one. `ATSPI_COORD_TYPE_SCREEN` is what
+/// [`bus::AccessibilityBus::read_selection`] asks for, so these are desktop
+/// pixels -- negative for a head left of or above the primary one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Bounds {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Bounds {
+    pub const fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
 /// Turn `GetRangeExtents`'s `(iiii)` into a rectangle.
 ///
 /// A non-positive width or height is refused: toolkits return
@@ -245,12 +316,12 @@ pub fn choose_selection(
 /// **not** clamped -- a monitor left of or above the primary one has negative
 /// desktop coordinates, and clamping those would drag every bubble on such a
 /// layout to the primary head.
-pub fn extents_to_rect(extents: (i32, i32, i32, i32)) -> Option<Rect> {
+pub fn extents_to_bounds(extents: (i32, i32, i32, i32)) -> Option<Bounds> {
     let (x, y, width, height) = extents;
     if width <= 0 || height <= 0 {
         return None;
     }
-    Some(Rect::new(x, y, width as u32, height as u32))
+    Some(Bounds::new(x, y, width as u32, height as u32))
 }
 
 /// Cut `text` to at most `max_bytes`, never inside a character.
@@ -296,12 +367,43 @@ impl Focus {
 pub struct WalkLimits {
     pub max_visits: usize,
     pub max_depth: u32,
+    /// When the search must stop, whatever the visit budget says.
+    ///
+    /// A visit budget alone bounds the *work*, not the *time*: each visit is a
+    /// method call to an application that may be wedged, and the per-call
+    /// timeout is per call. One hostile tree would then spend
+    /// `max_visits x timeout` inside a stage that has a fraction of that. The
+    /// check is made before each visit, so an expired deadline always costs one
+    /// round trip rather than two.
+    pub deadline: Option<Instant>,
 }
 
 pub const DEFAULT_WALK_LIMITS: WalkLimits = WalkLimits {
     max_visits: 256,
     max_depth: 24,
+    deadline: None,
 };
+
+impl WalkLimits {
+    /// The same budgets, giving up at `deadline`.
+    pub const fn until(self, deadline: Instant) -> Self {
+        Self {
+            deadline: Some(deadline),
+            ..self
+        }
+    }
+}
+
+/// Whether an optional deadline, when there is one, has already passed.
+///
+/// The single definition behind both places that check one: the walk in
+/// [`find_focused`] and the application enumeration in
+/// [`bus::AccessibilityBus::applications`]. Two copies would drift into two
+/// answers about whether `<` or `<=` counts as expired, and only one of them
+/// could be right.
+pub fn deadline_passed(deadline: Option<Instant>) -> bool {
+    deadline.is_some_and(|deadline| Instant::now() >= deadline)
+}
 
 /// The three reads the search needs from a tree, in the order it makes them.
 ///
@@ -325,6 +427,11 @@ pub trait AccessibleSource {
 /// Cycles are real in these trees -- `Parent` points back up and some toolkits
 /// report a child twice -- so references are visited once. A defunct node ends
 /// its own branch.
+///
+/// Running out of time returns whatever the search had: `None` when nothing was
+/// found, the plain fallback when one was seen. A partial answer is still an
+/// answer -- the caller's alternative is a different route entirely, not a
+/// better position in this tree.
 pub fn find_focused(
     source: &mut impl AccessibleSource,
     roots: &[ObjectRef],
@@ -343,7 +450,7 @@ pub fn find_focused(
         if !seen.insert((node.name.clone(), node.path.clone())) {
             continue;
         }
-        if visits >= limits.max_visits {
+        if visits >= limits.max_visits || deadline_passed(limits.deadline) {
             break;
         }
         visits += 1;
@@ -397,6 +504,7 @@ pub fn match_app_by_pid(apps: &[(ObjectRef, u32)], pid: u32) -> Option<ObjectRef
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     // ---- references -----------------------------------------------------
 
@@ -557,13 +665,13 @@ mod tests {
 
     #[test]
     fn extents_need_a_positive_size() {
-        assert_eq!(extents_to_rect((10, 20, 0, 5)), None);
-        assert_eq!(extents_to_rect((10, 20, 5, 0)), None);
-        assert_eq!(extents_to_rect((0, 0, 0, 0)), None);
-        assert_eq!(extents_to_rect((-5, 5, -3, 4)), None);
+        assert_eq!(extents_to_bounds((10, 20, 0, 5)), None);
+        assert_eq!(extents_to_bounds((10, 20, 5, 0)), None);
+        assert_eq!(extents_to_bounds((0, 0, 0, 0)), None);
+        assert_eq!(extents_to_bounds((-5, 5, -3, 4)), None);
         assert_eq!(
-            extents_to_rect((10, 20, 30, 40)),
-            Some(Rect::new(10, 20, 30, 40))
+            extents_to_bounds((10, 20, 30, 40)),
+            Some(Bounds::new(10, 20, 30, 40))
         );
     }
 
@@ -572,8 +680,8 @@ mod tests {
         // A head placed left of the primary one has negative coordinates, and
         // dragging every bubble back to the primary would be visibly wrong.
         assert_eq!(
-            extents_to_rect((-1920, -200, 100, 40)),
-            Some(Rect::new(-1920, -200, 100, 40))
+            extents_to_bounds((-1920, -200, 100, 40)),
+            Some(Bounds::new(-1920, -200, 100, 40))
         );
     }
 
@@ -786,10 +894,25 @@ mod tests {
         }
         let limits = WalkLimits {
             max_visits: 4,
-            max_depth: 24,
+            ..DEFAULT_WALK_LIMITS
         };
         assert_eq!(find_focused(&mut tree, &references[..1], limits), None);
         assert!(tree.reads <= 8, "{} reads", tree.reads);
+    }
+
+    #[test]
+    fn an_expired_deadline_stops_the_walk_before_it_reads() {
+        // The visit budget bounds work; this bounds time. On a real machine a
+        // single visit is a round trip to an application that may be wedged, and
+        // the per-call timeout is per call -- so a walk that has already run out
+        // of stage budget must not spend one more call to find that out.
+        let mut tree = FakeTree::default().node(app(), &[state::FOCUSED], &[TEXT_INTERFACE], &[]);
+        let limits = DEFAULT_WALK_LIMITS.until(Instant::now() - Duration::from_millis(1));
+        assert_eq!(
+            find_focused(&mut tree, std::slice::from_ref(&app()), limits),
+            None
+        );
+        assert_eq!(tree.reads, 0, "an expired deadline still made a call");
     }
 
     #[test]
@@ -804,8 +927,8 @@ mod tests {
             .node(third.clone(), &[12], &[TEXT_INTERFACE], &[]);
 
         let too_shallow = WalkLimits {
-            max_visits: 256,
             max_depth: 1,
+            ..DEFAULT_WALK_LIMITS
         };
         assert_eq!(find_focused(&mut tree, &[app()], too_shallow), None);
 

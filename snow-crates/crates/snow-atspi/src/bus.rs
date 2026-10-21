@@ -14,12 +14,14 @@
 //! held, because the address is only an address -- application names such as
 //! `:1.42` are meaningful on the accessibility bus and nowhere else.
 //!
-//! **Every call is bounded, and by the connection rather than by a timer.**
-//! A toolkit that stopped answering would otherwise hang the caller with no way
-//! out: the capture path is synchronous. `Builder::method_timeout` makes the
-//! runtime's own call future expire, which costs nothing when it is not needed.
-//! Note what this rules out: wrapping each call in `portal::deadline` would
-//! spawn one thread per call, and a bounded search makes hundreds of calls.
+//! **Every call is bounded, and in two different ways.** A single call is bounded
+//! by the connection (`Builder::method_timeout`), which makes the runtime's own
+//! call future expire and costs nothing when it is not needed. The *search* is
+//! bounded by an [`Instant`] the caller passes, because one timeout per call
+//! multiplied by up to 256 visits is 128 seconds -- far more than the stage that
+//! called it. Note what this rules out: wrapping each call in a helper that
+//! spawns a watchdog thread would cost one thread per call, and a bounded search
+//! makes hundreds of calls.
 //!
 //! **A failed call is "no", not "abort".** Half the widgets in a real tree do
 //! not implement `Text`; asking one for its selection fails, and that failure
@@ -28,7 +30,7 @@
 //! reports an error, because "there is no accessibility bus" is a fact the
 //! caller has to act on (it falls back to the PRIMARY selection).
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use zbus::Connection;
 use zbus::connection::Builder;
@@ -36,12 +38,10 @@ use zbus::export::serde::de::DeserializeOwned;
 use zbus::wire::{OwnedObjectPath, Type};
 
 use super::{
-    AccessibleSource, DEFAULT_WALK_LIMITS, Focus, MAX_TEXT_BYTES, ObjectRef, ROOT_PATH,
-    TEXT_INTERFACE, TextSelection, choose_selection, clamp_text, extents_to_rect, find_focused,
-    match_app_by_pid,
+    AccessibleSource, AtspiError, AtspiResult, Bounds, DEFAULT_WALK_LIMITS, Focus, MAX_TEXT_BYTES,
+    ObjectRef, ROOT_PATH, TEXT_INTERFACE, TextSelection, choose_selection, clamp_text,
+    deadline_passed, extents_to_bounds, find_focused, match_app_by_pid,
 };
-use crate::error::{LinuxError, LinuxResult};
-use crate::geometry::Rect;
 
 /// The launcher on the session bus, and the one method it answers.
 const LAUNCHER_SERVICE: &str = "org.a11y.Bus";
@@ -67,7 +67,7 @@ pub struct FocusReading {
     /// Where that selection is drawn, in desktop coordinates, when the toolkit
     /// could tell. `None` is normal -- bubble placement then falls back to the
     /// pointer.
-    pub bounds: Option<Rect>,
+    pub bounds: Option<Bounds>,
 }
 
 /// A connection to the accessibility bus.
@@ -82,9 +82,12 @@ impl AccessibilityBus {
     /// is what happens on a desktop with accessibility switched off. The caller
     /// treats both as "this route is unavailable" and falls back; neither is
     /// worth retrying in-process.
-    pub fn connect() -> LinuxResult<Self> {
-        let session = zbus::block_on(Connection::session())
-            .map_err(|error| LinuxError::other(format!("cannot reach the session bus: {error}")))?;
+    pub fn connect() -> AtspiResult<Self> {
+        // The launcher call below goes over this connection, so the session
+        // connection needs the same per-call bound as the accessibility one --
+        // otherwise `GetAddress` is the one unguarded call in the crate.
+        let session = zbus::block_on(Builder::session().method_timeout(CALL_TIMEOUT).build())
+            .map_err(|error| AtspiError::new(format!("cannot reach the session bus: {error}")))?;
 
         let reply = zbus::block_on(session.call_method(
             Some(LAUNCHER_SERVICE),
@@ -94,18 +97,18 @@ impl AccessibilityBus {
             &(),
         ))
         .map_err(|error| {
-            LinuxError::other(format!(
+            AtspiError::new(format!(
                 "the accessibility bus launcher did not answer: {error}"
             ))
         })?;
 
         let address: String = reply.body().deserialize().map_err(|error| {
-            LinuxError::other(format!(
+            AtspiError::new(format!(
                 "the accessibility bus address is not a string: {error}"
             ))
         })?;
         if address.is_empty() {
-            return Err(LinuxError::other(
+            return Err(AtspiError::new(
                 "the accessibility bus launcher returned an empty address",
             ));
         }
@@ -116,7 +119,7 @@ impl AccessibilityBus {
                 .build(),
         )
         .map_err(|error| {
-            LinuxError::other(format!("cannot connect to the accessibility bus: {error}"))
+            AtspiError::new(format!("cannot connect to the accessibility bus: {error}"))
         })?;
 
         Ok(Self { connection })
@@ -127,21 +130,35 @@ impl AccessibilityBus {
     /// Applications whose name cannot be resolved to a pid are left out rather
     /// than reported with a placeholder: a zero pid would match every other
     /// zero, turning "unknown" into "wrong application".
-    pub fn applications(&self) -> Vec<(ObjectRef, u32)> {
-        self.children(&ObjectRef::desktop())
-            .into_iter()
-            .filter_map(|application| {
-                let pid = self.pid_of(&application.name)?;
-                Some((application, pid))
-            })
-            .collect()
+    ///
+    /// The list itself is unbounded -- a desktop can run any number of
+    /// applications, and each entry costs a `GetChildren` entry plus one
+    /// `GetConnectionUnixProcessID` -- so it honours `deadline` and returns what
+    /// it has when the time runs out. A truncated list can only lose the match,
+    /// which is the same outcome as the application not being there.
+    pub fn applications(&self, deadline: Option<Instant>) -> Vec<(ObjectRef, u32)> {
+        let mut applications = Vec::new();
+        for application in self.children(&ObjectRef::desktop()) {
+            if deadline_passed(deadline) {
+                break;
+            }
+            let Some(pid) = self.pid_of(&application.name) else {
+                continue;
+            };
+            applications.push((application, pid));
+        }
+        applications
     }
 
     /// The focused node inside `pid`'s application, if it has one.
-    pub fn focused(&self, pid: u32) -> Option<Focus> {
-        let application = match_app_by_pid(&self.applications(), pid)?;
+    pub fn focused(&self, pid: u32, deadline: Option<Instant>) -> Option<Focus> {
+        let application = match_app_by_pid(&self.applications(deadline), pid)?;
+        let limits = match deadline {
+            Some(deadline) => DEFAULT_WALK_LIMITS.until(deadline),
+            None => DEFAULT_WALK_LIMITS,
+        };
         let mut tree = AppTree { bus: self };
-        find_focused(&mut tree, &[application], DEFAULT_WALK_LIMITS)
+        find_focused(&mut tree, &[application], limits)
     }
 
     /// Read the selection of the focused text node inside `pid`'s application.
@@ -151,8 +168,12 @@ impl AccessibilityBus {
     /// a range the toolkit reports as empty. They are not distinguished because
     /// no caller acts differently on them -- the next route is PRIMARY either
     /// way.
-    pub fn read_selection(&self, pid: u32) -> LinuxResult<Option<FocusReading>> {
-        let Some(Focus::Text(node)) = self.focused(pid) else {
+    pub fn read_selection(
+        &self,
+        pid: u32,
+        deadline: Option<Instant>,
+    ) -> AtspiResult<Option<FocusReading>> {
+        let Some(Focus::Text(node)) = self.focused(pid, deadline) else {
             return Ok(None);
         };
         Ok(self.selection_of(&node))
@@ -190,7 +211,7 @@ impl AccessibilityBus {
                 // what an overlay drawn by this process needs.
                 &(selection.start, selection.end, 0u32),
             )
-            .and_then(extents_to_rect);
+            .and_then(extents_to_bounds);
 
         Some(FocusReading {
             text: clamp_text(&text, MAX_TEXT_BYTES).to_string(),
