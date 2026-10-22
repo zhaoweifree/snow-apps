@@ -22,6 +22,9 @@ Checked:
   * the apt package list is non-empty and names no package twice;
   * ``gates`` installs PyYAML, without which three checks in this file degrade
     to no-ops (see ``load_yaml``);
+  * ``gates`` verifies that both cargo lockfiles are current -- ``snow_rust_ffi``
+    is a second cargo project whose stale lockfile used to surface as a build
+    failure instead of a gate failure;
   * ``build`` actually invokes ``scripts/build-linux-deps.sh``, the step that
     supplies zlib-ng and libjpeg-turbo, which no distribution package provides.
 
@@ -205,6 +208,18 @@ def main() -> int:
         check("gates job installs PyYAML",
               re.search(r"pip install[^\n]*pyyaml", gates_text) is not None,
               "the workflow's own structure checks would be skipped")
+
+        # Two cargo projects live in this repository, and only one of them has
+        # its lockfile checked anywhere: `snow_rust_ffi` is a separate project
+        # with a separate Cargo.lock. A stale one used to surface ten minutes
+        # into the build job, in the FFI bundle step, as "cannot update the lock
+        # file ... because --locked was passed" -- which reads like a compile
+        # error and is not one (CI run 39705590567). The `gates` job is the one
+        # that is allowed to be red, so the check belongs there.
+        check("gates job verifies the Rust lockfiles",
+              "cargo metadata --locked" in gates_text
+              and "snow_rust_ffi/Cargo.toml" in gates_text,
+              "a stale lockfile would surface as a build failure instead")
 
         # Two of the libraries the build needs are not distribution packages
         # (§9.6.9). A job that configures without building them fails on a

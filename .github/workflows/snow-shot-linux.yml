@@ -86,6 +86,19 @@ jobs:
         with:
           workspaces: snow-crates
 
+      # `snow_rust_ffi` is a *second* cargo project with its own lockfile, and
+      # no other step in this workflow touches it. When the AT-SPI2 crates moved
+      # out of `snow-selected-text` (P3 slice 14) that lockfile went stale, and
+      # the build job only found out ten minutes later, in the FFI bundle step,
+      # as "cannot update the lock file ... because --locked was passed" (CI run
+      # 39705590567) -- which reads like a compile error and is not one. One
+      # metadata call here turns that into a one-minute failure in the job that
+      # is allowed to be red.
+      - name: Rust lockfiles are up to date
+        run: |
+          cargo metadata --locked --format-version 1 --manifest-path snow-crates/Cargo.toml > /dev/null
+          cargo metadata --locked --format-version 1 --manifest-path snow_rust_ffi/Cargo.toml > /dev/null
+
       - name: Rust unit tests (platform-independent crates)
         working-directory: snow-crates
         # -Dwarnings lives in snow-crates/.cargo/config.toml, so a warning here

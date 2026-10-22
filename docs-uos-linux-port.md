@@ -2836,6 +2836,7 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 10（`2eab250d`） | `gates` ✅ / **`Configure` ✅** / `build` ❌ | **整棵树的 Linux + Qt5 配置第一次走通**；`Build` 在 7 秒内倒，`snow_image` 的 EXR/WebP 各报一处 API 不存在 —— 发行版版本比 vcpkg 的 pin 老一代，见 9.6.12 |
 | 11（`c03eacf3`） | `gates` ✅ / `Configure` ✅ / `build` ❌ | 自编的 Imath/OpenEXR/libwebp 全过，EXR/WebP 报错消失；换成 `libheif/heif_sequences.h` 缺失与 JXL 0.7 的四个 API —— 同一条规则再扩到 highway/libjxl/libheif，见 9.6.13 |
 | 12（`2e10f9d1`） | `gates` ✅ / **deps 步骤 ❌** | 依赖构建这一步自己倒了，而且**什么都没打印**（只有 `Process completed with exit code 1`）—— `die` 的消息被重定向进了日志文件。同时暴露 `HWY_ENABLE_INSTALL` 缺失，见 9.6.14 |
+| 13（`9997a16b`） | `gates` ✅ / **`Configure` ✅** / **deps ✅** / `build` ❌ | 固定版本自编的依赖在 Linux 上第一次全绿（`snow_image` 静态库链接成功，内含 jxl/heif 编解码器）；红灯移到 **Rust FFI 的 lockfile**：`snow_rust_ffi/Cargo.lock` 早于 AT-SPI2 重构，`--locked` 拒绝更新，见 9.6.15 |
 
 **run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug**，不是缺包。Qt5 装在自定义前缀时
 `Qt5Core_DIR` 是 `<prefix>/lib/cmake/Qt5Core`，`../../../bin` 正好是 `<prefix>/bin`；但发行版的同名文件
@@ -3155,6 +3156,46 @@ run 12（`2e10f9d1`）的失败方式比错误本身更值得记：`Build the pi
 run 12 的日志把两份资产的 sha512 都打印出来了（x64 `4191bc61…`、aarch64 `6fb4fbdd…`，
 取自 CI 实际下载的那两个文件），现已回填到脚本，`check-linux-deps-pins.py` 也加了一条断言：
 任一架构的 onnxruntime 校验和为空即失败。从此这条下载链接是验证过的，不再是"打印出来等你回填"。
+
+#### 9.6.15 run 13：deps 终于绿了，红灯落到 Rust FFI 的 lockfile（2026-10-22）
+
+run 13（`9997a16b`）先证明 9.6.14 的两条修复都成立：deps 步骤在 x64 与 arm64 上**全绿**，
+`Configure` 也过了，红灯第一次落到 **`Build` 这一步的 Rust FFI 打包**上：
+
+```
+[45/611] cd .../snow_rust_ffi && cargo build --locked --package snow-shot-rust-ffi ...
+   Updating crates.io index
+error: cannot update the lock file .../snow_rust_ffi/Cargo.lock because --locked was passed to prevent this
+```
+
+**这不是编译错误。** C++ 侧的目标在前 44 步里全编过去了，其中
+`snow_image` 的静态库在 `[26/611]` 链接成功（里面是 jxl / heif / exr / webp 编解码器）
+—— 固定版本自编的那批依赖第一次在 Linux 上真的被编进了产物。
+
+**根因：仓库里有两个 cargo 工程，只有一个的 lockfile 被检查过。**
+`snow_rust_ffi` 是独立工程、独立 `Cargo.lock`；AT-SPI2 从 `snow-selected-text` 抽成
+`snow-atspi`（`a0034910`，slice 14）、控件级拾取接进 `snow-ui-selector`
+（`a20ff192`，slice 15）之后，那份 lock 再没重新生成过 —— lock 里没有 `snow-atspi`，
+`snow-selected-text` 的依赖还停在 `accessibility-sys`。它最后一次提交是 `4b7c5e08`，
+早于那两次重构。
+
+**Windows 本地为什么没暴露**：没人重编到 FFI 那一步（`windows-qt5-full` 只到 configure），
+而 `gates` job 的 `cargo test` 跑在 `snow-crates/` 那个工程上，用的是另一个 lockfile。
+**只有真的编 FFI 的 job 才会撞上** —— 这正是 build job 存在的理由。
+
+修：离线重新解析（`cargo metadata --offline`），cargo 保留既有版本、只补缺失项：
+新增 `snow-atspi` 依赖树（`async-trait` / `endi` / `futures-core` / `futures-io` /
+`hex` / `memoffset` / `ordered-stream` / `pin-project-lite` / `serde_repr`），
+`bitflags` 2.13.1→2.13.2、`rustix` 1.1.4→1.1.5 —— 与 2026-10-21 日志里记的
+"zbus 硬要求 `bitflags ≥ 2.13.2`"完全对上。
+
+**顺带把这类失败提前一个 job**：`gates` job 加一步 `cargo metadata --locked`，两个工程
+都查。lock 过期原本要等十分钟、在一个看起来像编译错误的步骤里才炸；现在是一分钟、
+在允许红的那个 job 里炸。`check-linux-ci-workflow.py` 加一条断言
+（反向验证：把 `snow_rust_ffi` 换成 `snow-crates` ⇒ FAIL）。
+
+**判据（可复用）**：一个仓库里有几个 cargo 工程，就要有几个 lockfile 检查点。
+"只有一个 lockfile 被检查"和"只有一个 lockfile 存在"是同一类错误。
 
 
 
