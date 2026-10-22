@@ -1315,7 +1315,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <td><strong>P7 硬化与 CI</strong> <em>(进行中)</em></td>
 <td>稳定与回归</td>
 <td>Wayland 会话适配；CI 增 Linux job</td>
-<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>剩余</strong>：AppImage 进 CI、PipeWire 帧消费</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>剩余</strong>：PipeWire 帧消费</td>
 </tr>
 </tbody>
 </table>
@@ -6443,7 +6443,114 @@ PUBLIC/INTERFACE 里</strong>。三项实现决定：</p>
 这个不对称不会被 configure 发现，也不会被链接发现，只会被"另一个目标恰好编译了
 这个公共头"发现 —— 而那个目标往往只在 CI 的另一条架构上存在。</p>
 <hr>
-
+<h4>9.6.25 P7 slice 6：AppImage 进 CI，runtime 用固定版本 + 校验和（2026-10-22）</h4>
+<h5>为什么之前一直没接</h5>
+<p>AppImage 是 Linux 打包路径里<strong>唯一一段从未执行过的代码</strong>：工作机上没有
+<code>appimagetool</code>，<code>cmake/SnowShotAppImage.cmake</code> 里每条 <code>COMMAND</code> 都只是被读过。
+workflow 头部原先写着"等 <code>build</code> 转绿再接"，理由是不想把真实的编译错误藏在
+一个 404 后面。run 23 之后 deps 与 Configure 两架构全绿，条件成立。</p>
+<h5>上游选型：不是口味问题</h5>
+<table>
+<thead>
+<tr>
+<th>上游</th>
+<th>状况</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AppImage/AppImageKit</code>（历史）</td>
+<td>release 全标 <code>obsolete-*</code>；appimagetool 需要 libfuse2，当前发行版已不带</td>
+</tr>
+<tr>
+<td><code>AppImage/appimagetool</code>（维护中）</td>
+<td><strong>不自带 type-2 runtime</strong>，不给 <code>--runtime-file</code> 就自己联网下一个</td>
+</tr>
+</tbody>
+</table>
+<p>第二点决定了整个设计：<strong>打包步骤联网既不 hermetic 也不可复现</strong>，而且"它下到的
+是哪一版"取决于上游那一刻的状态。所以 runtime 也自己取，并显式交过去。</p>
+<p><code>scripts/fetch-appimagetool.sh</code> 因此 pin 两样东西 —— <code>appimagetool 1.9.1</code> 与
+<code>type2-runtime 20251108</code> —— 四份 sha256（两架构各一），下载后校验 ELF
+<code>e_machine</code> 与 <code>AI\x02</code> magic。上游两个仓库都把资产挂在滚动的 <code>continuous</code>
+tag 下<strong>原地替换</strong>，所以 checksum 不能钉在那个 tag 上：钉了会自己过期，且没有
+人改过任何文件。</p>
+<p>脚本的 stdout 只输出 <code>KEY=VALUE</code>（给 <code>$GITHUB_ENV</code>），进度行全部走 stderr ——
+一行日志混进 stdout 就会变成一个畸形的环境变量。</p>
+<h5><code>--runtime-file</code> 是可选参数</h5>
+<pre><code class="language-cmake">set(_snow_appimage_runtime_args &quot;&quot;)
+if(SNOW_APPS_APPIMAGETOOL_RUNTIME)
+    if(NOT EXISTS &quot;${SNOW_APPS_APPIMAGETOOL_RUNTIME}&quot;)
+        message(FATAL_ERROR
+            &quot;SNOW_APPS_APPIMAGETOOL_RUNTIME does not exist: ...&quot;)
+    endif()
+    set(_snow_appimage_runtime_args --runtime-file &quot;${SNOW_APPS_APPIMAGETOOL_RUNTIME}&quot;)
+endif()
+</code></pre>
+<p>保持可选是因为历史上的 AppImageKit 版自带 runtime；调用方只有那个工具时可以
+留空。但路径写错必须 FATAL，"静默降级成联网下载"正是这一段要消灭的东西。</p>
+<h5>workflow 里的顺序是有含义的</h5>
+<pre><code>Upload the package (deb)  →  Fetch appimagetool  →  Build the AppImage
+                          →  Validate the AppImage  →  Upload the AppImage
+</code></pre>
+<p><code>.deb</code> 是发行版安装路径真正用的产物，所以它先打包、先上传。第三方工具（及其
+pin）失效时，当次发布至少还有可安装的产物 —— 这条顺序断言写进了门禁，不是注释。</p>
+<p><code>Build the AppImage</code> 那一步重新 configure 时<strong>必须</strong>带上
+<code>-DSNOW_APPS_PACKAGE_SNOW_SHOT=ON</code>：AppDir 是用 <code>cmake --install</code> 铺出来的，
+install 规则来自那套打包配置。脚本里 <code>SNOW_APPS_PACKAGE_APPIMAGE=ON</code> 只负责
+挂上 <code>snow-shot-appimage</code> 目标。</p>
+<p>apt 补了 <code>squashfs-tools</code> —— appimagetool 会去调 <code>mksquashfs</code>，它是另一个包。</p>
+<h5>验产物，不验工具</h5>
+<p><code>scripts/check-linux-appimage-build.py</code> 的判据全部落在<strong>产物</strong>上：</p>
+<table>
+<thead>
+<tr>
+<th>判据</th>
+<th>它能挡住什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ELF <code>e_machine</code> 等于目标架构</td>
+<td>嵌入了别架构的 runtime ⇒ 目标机上 <code>Exec format error</code>，而不是构建时失败</td>
+</tr>
+<tr>
+<td>字节 8..10 是 <code>AI\x02</code></td>
+<td>拿到的不是 type-2 AppImage</td>
+</tr>
+<tr>
+<td><code>--appimage-extract</code> 后结构完整</td>
+<td>缺 AppRun / desktop / icon / 可执行 / 随包 <code>.so</code></td>
+</tr>
+<tr>
+<td>包内 AppRun 与仓库审阅版逐字节一致</td>
+<td>打包步骤改写入口脚本</td>
+</tr>
+</tbody>
+</table>
+<p><code>--appimage-extract</code> 不需要 FUSE，所以在 runner 上能跑；这也意味着<strong>启动</strong>仍然
+没有被证明 —— 真机（UOS 20 / X11）上的 <code>--appimage-extract-and-run</code> 是另一件事，
+写在 P7 真机清单里。</p>
+<h5>门禁的扩展</h5>
+<ul>
+<li><code>check-linux-appimage.py</code> 增五条：模块接受 runtime、把 runtime 交给
+  appimagetool、缺文件时 FATAL；fetch 脚本 <code>echo</code> 出两个变量、pin 的不是滚动
+  tag、两架构各有 checksum。
+  其中"<code>echo</code> 出变量"必须匹配 <code>echo "SNOW_APPS_APPIMAGETOOL_RUNTIME=${runtime_path}"</code>
+  这一整行 —— 两个变量名在脚本的 usage 块里也出现，匹配文档文本会让门禁在
+  emit 被删掉后仍然绿（反向验证第 5 条就是这么发现的）。</li>
+<li><code>check-linux-ci-workflow.py</code> 增十一条：四个步骤都在、顺序正确、fetch 写
+  <code>$GITHUB_ENV</code>、configure 的四个参数、install 规则仍开、验证脚本被调用、
+  两架构的 ELF 机器名、<code>squashfs-tools</code> 在 apt 里、根 CMakeLists 有那个 option。
+  顺带修了它自己的一个解析坑：<code>cmake --preset</code> 后面接续行反斜杠时，剥掉
+  <code>${{ }}</code> 后正则会把 <code>\</code> 当成 preset 名 —— 现在 <code>[^-\\\s]</code> 排除它。</li>
+</ul>
+<p>反向验证：<code>revval-appimage-workflow.sh</code> 六条（删验证步骤 / 把 fetch 挪到 .deb
+上传之前 / 空掉 runtime 参数 / 关掉 install 规则 / 删 squashfs-tools / 把
+aarch64 写成 arm64），<code>revval-appimage-bundle.sh</code> 五条（换掉 <code>--runtime-file</code> /
+弱化 FATAL 文案 / 用滚动 tag / 删一份 checksum / 停掉 emit）。全部按"只为那一件
+事变红"断言，恢复后必须重新绿。</p>
+<hr>
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>

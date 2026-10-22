@@ -438,7 +438,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**剩余**：AppImage 进 CI、PipeWire 帧消费 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**剩余**：PipeWire 帧消费 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -4277,6 +4277,104 @@ Qt module visibility check passed (19 static libraries, 32 public headers, 103 Q
 **教训**：`PRIVATE` 在静态库上不是"私有"，是"链接期公开、编译期私有"。
 这个不对称不会被 configure 发现，也不会被链接发现，只会被"另一个目标恰好编译了
 这个公共头"发现 —— 而那个目标往往只在 CI 的另一条架构上存在。
+
+---
+
+#### 9.6.25 P7 slice 6：AppImage 进 CI，runtime 用固定版本 + 校验和（2026-10-22）
+
+##### 为什么之前一直没接
+
+AppImage 是 Linux 打包路径里**唯一一段从未执行过的代码**：工作机上没有
+`appimagetool`，`cmake/SnowShotAppImage.cmake` 里每条 `COMMAND` 都只是被读过。
+workflow 头部原先写着"等 `build` 转绿再接"，理由是不想把真实的编译错误藏在
+一个 404 后面。run 23 之后 deps 与 Configure 两架构全绿，条件成立。
+
+##### 上游选型：不是口味问题
+
+| 上游 | 状况 |
+|---|---|
+| `AppImage/AppImageKit`（历史） | release 全标 `obsolete-*`；appimagetool 需要 libfuse2，当前发行版已不带 |
+| `AppImage/appimagetool`（维护中） | **不自带 type-2 runtime**，不给 `--runtime-file` 就自己联网下一个 |
+
+第二点决定了整个设计：**打包步骤联网既不 hermetic 也不可复现**，而且"它下到的
+是哪一版"取决于上游那一刻的状态。所以 runtime 也自己取，并显式交过去。
+
+`scripts/fetch-appimagetool.sh` 因此 pin 两样东西 —— `appimagetool 1.9.1` 与
+`type2-runtime 20251108` —— 四份 sha256（两架构各一），下载后校验 ELF
+`e_machine` 与 `AI\x02` magic。上游两个仓库都把资产挂在滚动的 `continuous`
+tag 下**原地替换**，所以 checksum 不能钉在那个 tag 上：钉了会自己过期，且没有
+人改过任何文件。
+
+脚本的 stdout 只输出 `KEY=VALUE`（给 `$GITHUB_ENV`），进度行全部走 stderr ——
+一行日志混进 stdout 就会变成一个畸形的环境变量。
+
+##### `--runtime-file` 是可选参数
+
+```cmake
+set(_snow_appimage_runtime_args "")
+if(SNOW_APPS_APPIMAGETOOL_RUNTIME)
+    if(NOT EXISTS "${SNOW_APPS_APPIMAGETOOL_RUNTIME}")
+        message(FATAL_ERROR
+            "SNOW_APPS_APPIMAGETOOL_RUNTIME does not exist: ...")
+    endif()
+    set(_snow_appimage_runtime_args --runtime-file "${SNOW_APPS_APPIMAGETOOL_RUNTIME}")
+endif()
+```
+
+保持可选是因为历史上的 AppImageKit 版自带 runtime；调用方只有那个工具时可以
+留空。但路径写错必须 FATAL，"静默降级成联网下载"正是这一段要消灭的东西。
+
+##### workflow 里的顺序是有含义的
+
+```
+Upload the package (deb)  →  Fetch appimagetool  →  Build the AppImage
+                          →  Validate the AppImage  →  Upload the AppImage
+```
+
+`.deb` 是发行版安装路径真正用的产物，所以它先打包、先上传。第三方工具（及其
+pin）失效时，当次发布至少还有可安装的产物 —— 这条顺序断言写进了门禁，不是注释。
+
+`Build the AppImage` 那一步重新 configure 时**必须**带上
+`-DSNOW_APPS_PACKAGE_SNOW_SHOT=ON`：AppDir 是用 `cmake --install` 铺出来的，
+install 规则来自那套打包配置。脚本里 `SNOW_APPS_PACKAGE_APPIMAGE=ON` 只负责
+挂上 `snow-shot-appimage` 目标。
+
+apt 补了 `squashfs-tools` —— appimagetool 会去调 `mksquashfs`，它是另一个包。
+
+##### 验产物，不验工具
+
+`scripts/check-linux-appimage-build.py` 的判据全部落在**产物**上：
+
+| 判据 | 它能挡住什么 |
+|---|---|
+| ELF `e_machine` 等于目标架构 | 嵌入了别架构的 runtime ⇒ 目标机上 `Exec format error`，而不是构建时失败 |
+| 字节 8..10 是 `AI\x02` | 拿到的不是 type-2 AppImage |
+| `--appimage-extract` 后结构完整 | 缺 AppRun / desktop / icon / 可执行 / 随包 `.so` |
+| 包内 AppRun 与仓库审阅版逐字节一致 | 打包步骤改写入口脚本 |
+
+`--appimage-extract` 不需要 FUSE，所以在 runner 上能跑；这也意味着**启动**仍然
+没有被证明 —— 真机（UOS 20 / X11）上的 `--appimage-extract-and-run` 是另一件事，
+写在 P7 真机清单里。
+
+##### 门禁的扩展
+
+- `check-linux-appimage.py` 增五条：模块接受 runtime、把 runtime 交给
+  appimagetool、缺文件时 FATAL；fetch 脚本 `echo` 出两个变量、pin 的不是滚动
+  tag、两架构各有 checksum。
+  其中"`echo` 出变量"必须匹配 `echo "SNOW_APPS_APPIMAGETOOL_RUNTIME=${runtime_path}"`
+  这一整行 —— 两个变量名在脚本的 usage 块里也出现，匹配文档文本会让门禁在
+  emit 被删掉后仍然绿（反向验证第 5 条就是这么发现的）。
+- `check-linux-ci-workflow.py` 增十一条：四个步骤都在、顺序正确、fetch 写
+  `$GITHUB_ENV`、configure 的四个参数、install 规则仍开、验证脚本被调用、
+  两架构的 ELF 机器名、`squashfs-tools` 在 apt 里、根 CMakeLists 有那个 option。
+  顺带修了它自己的一个解析坑：`cmake --preset` 后面接续行反斜杠时，剥掉
+  `${{ }}` 后正则会把 `\` 当成 preset 名 —— 现在 `[^-\\\s]` 排除它。
+
+反向验证：`revval-appimage-workflow.sh` 六条（删验证步骤 / 把 fetch 挪到 .deb
+上传之前 / 空掉 runtime 参数 / 关掉 install 规则 / 删 squashfs-tools / 把
+aarch64 写成 arm64），`revval-appimage-bundle.sh` 五条（换掉 `--runtime-file` /
+弱化 FATAL 文案 / 用滚动 tag / 删一份 checksum / 停掉 emit）。全部按"只为那一件
+事变红"断言，恢复后必须重新绿。
 
 ---
 
