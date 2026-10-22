@@ -129,6 +129,51 @@ def main() -> int:
     check("root CMakeLists gates the module behind an option",
           "SNOW_APPS_PACKAGE_APPIMAGE" in ROOT_CMAKE.read_text(encoding="utf-8"))
 
+    # --- The runtime the AppImage embeds is supplied, not downloaded ----------
+    # The maintained appimagetool (AppImage/appimagetool) does not bundle a
+    # type-2 runtime: without `--runtime-file` it fetches one at packaging time,
+    # which makes the artefact depend on what upstream served that minute. The
+    # module has to be able to pass one through.
+    check("module accepts a runtime file",
+          "SNOW_APPS_APPIMAGETOOL_RUNTIME" in module_text,
+          "the maintained appimagetool downloads a runtime unless one is supplied")
+    check("module hands the runtime to appimagetool",
+          "--runtime-file" in module_text,
+          "the cache variable alone would never reach appimagetool")
+    check("module fails loudly on a missing runtime",
+          "SNOW_APPS_APPIMAGETOOL_RUNTIME does not exist" in module_text,
+          "a bad path has to stop the packaging, not silently fall back")
+
+    # The fetch script is what makes the two paths above exist on a clean
+    # runner; it is a separate file because the pins have to live in one place.
+    fetch = REPO / "scripts" / "fetch-appimagetool.sh"
+    if check("scripts/fetch-appimagetool.sh exists", fetch.is_file(), "missing"):
+        fetch_text = fetch.read_text(encoding="utf-8", errors="replace")
+        # Both names also appear in the script's usage block, so the checks are
+        # against the `echo` that actually writes them to stdout -- a gate that
+        # matched the documentation would stay green while the emit was gone.
+        check("fetch script emits SNOW_APPS_APPIMAGETOOL",
+              'echo "SNOW_APPS_APPIMAGETOOL=${tool_path}"' in fetch_text,
+              "the workflow appends its stdout to $GITHUB_ENV")
+        check("fetch script emits SNOW_APPS_APPIMAGETOOL_RUNTIME",
+              'echo "SNOW_APPS_APPIMAGETOOL_RUNTIME=${runtime_path}"' in fetch_text,
+              "the runtime path is what the module passes to --runtime-file")
+        # The word itself is fine in the comment that explains why the rolling
+        # tag is avoided; what matters is that no assignment or URL uses it.
+        code_lines = [
+            line for line in fetch_text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        check("fetch script pins a version rather than a rolling tag",
+              not any("continuous" in line for line in code_lines),
+              "assets under the `continuous` tag are replaced in place, so a "
+              "checksum pinned to it expires without anyone editing the file")
+        check("fetch script verifies a checksum per architecture",
+              all(name in fetch_text for name in
+                  ("APPIMAGETOOL_SHA256_x86_64", "APPIMAGETOOL_SHA256_aarch64",
+                   "RUNTIME_SHA256_x86_64", "RUNTIME_SHA256_aarch64")),
+              "a truncated or replaced download has to fail instead of shipping")
+
     if failures:
         print(f"\n{len(failures)} problem(s)")
         return 1

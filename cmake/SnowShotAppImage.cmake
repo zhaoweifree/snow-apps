@@ -96,6 +96,23 @@ function(snow_shot_add_appimage_target)
             "-DSNOW_APPS_APPIMAGETOOL=/path/to/appimagetool.")
     endif()
 
+    # The maintained appimagetool does not bundle the type-2 runtime: it
+    # downloads it live at packaging time unless one is supplied. A packaging
+    # step that reaches the network on its own is neither hermetic nor
+    # reproducible -- the runtime it would fetch is whatever upstream serves
+    # that minute. So the runtime is passed explicitly.
+    #
+    # It stays optional because the historical AppImageKit build does bundle
+    # one; a caller that only has that tool can leave the variable empty.
+    set(_snow_appimage_runtime_args "")
+    if(SNOW_APPS_APPIMAGETOOL_RUNTIME)
+        if(NOT EXISTS "${SNOW_APPS_APPIMAGETOOL_RUNTIME}")
+            message(FATAL_ERROR
+                "SNOW_APPS_APPIMAGETOOL_RUNTIME does not exist: ${SNOW_APPS_APPIMAGETOOL_RUNTIME}")
+        endif()
+        set(_snow_appimage_runtime_args --runtime-file "${SNOW_APPS_APPIMAGETOOL_RUNTIME}")
+    endif()
+
     set(_snow_apprun "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/appimage/AppRun")
     set(_snow_icon_source "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/hicolor/256x256/apps/snow-shot.png")
     # appimagetool refuses an AppDir whose root icon is not exactly the name in
@@ -126,7 +143,8 @@ function(snow_shot_add_appimage_target)
                 # Without FUSE -- containers, CI runners -- appimagetool refuses
                 # to start unless it is told to extract its own runtime instead.
                 "APPIMAGE_EXTRACT_AND_RUN=1"
-                "${SNOW_APPS_APPIMAGETOOL}" "${SNOW_SHOT_APPIMAGE_DIR}"
+                "${SNOW_APPS_APPIMAGETOOL}" ${_snow_appimage_runtime_args}
+                "${SNOW_SHOT_APPIMAGE_DIR}"
                 "${CMAKE_BINARY_DIR}/${SNOW_SHOT_APPIMAGE_FILE_NAME}"
         COMMENT "Staging the AppDir and packaging ${SNOW_SHOT_APPIMAGE_FILE_NAME}"
         VERBATIM)

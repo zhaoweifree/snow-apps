@@ -118,6 +118,84 @@ def apt_packages(text: str) -> list[str]:
     return packages
 
 
+# Matrix architecture -> the ELF machine name `check-linux-appimage-build.py`
+# expects for it. The workflow's own `--expect-arch` expression has to name these
+# two strings; a rename on either side would otherwise only show up as a wrong
+# "architecture mismatch" report from a machine nobody is watching.
+APPIMAGE_ARCHITECTURES = {"x64": "x86_64", "arm64": "aarch64"}
+
+
+def appimage_checks(jobs: dict) -> None:
+    """The AppImage packaging path has to stay wired, in this order.
+
+    Order is the assertion, not decoration: the .deb is the artefact a
+    distribution install uses, so it must be built and uploaded before a
+    third-party tool from the network enters the job. If appimagetool's pins
+    rot, the release still produced something installable that run.
+    """
+    job = jobs.get("build")
+    if job is None:
+        check("build job exists for the AppImage checks", False, "no build job")
+        return
+
+    steps = steps_of(job)
+    names = [step.get("name", "") for step in steps]
+    required = [
+        "Upload the package",
+        "Fetch appimagetool",
+        "Build the AppImage",
+        "Validate the AppImage",
+        "Upload the AppImage",
+    ]
+    missing = [name for name in required if name not in names]
+    check("build job keeps every AppImage step", not missing,
+          "missing: " + ", ".join(missing))
+    if missing:
+        return
+
+    positions = [names.index(name) for name in required]
+    check("the .deb is packaged and uploaded before appimagetool is fetched",
+          positions == sorted(positions),
+          "order is: " + " -> ".join(required))
+
+    by_name = {step.get("name", ""): step for step in steps}
+    fetch = by_name["Fetch appimagetool"].get("run", "")
+    check("Fetch appimagetool writes the pinned paths into the job environment",
+          "fetch-appimagetool.sh" in fetch and "GITHUB_ENV" in fetch,
+          "the next step reads SNOW_APPS_APPIMAGETOOL* from the environment")
+
+    pack = by_name["Build the AppImage"].get("run", "")
+    for token in (
+        "-DSNOW_APPS_PACKAGE_APPIMAGE=ON",
+        '-DSNOW_APPS_APPIMAGETOOL="$SNOW_APPS_APPIMAGETOOL"',
+        '-DSNOW_APPS_APPIMAGETOOL_RUNTIME="$SNOW_APPS_APPIMAGETOOL_RUNTIME"',
+        "--target snow-shot-appimage",
+    ):
+        check(f"Build the AppImage passes {token}", token in pack,
+              "the target is attached by the option, and the runtime has to be "
+              "handed over or appimagetool downloads one at packaging time")
+
+    # `cmake --install` walks every install rule, so the AppDir is empty without
+    # the packaging configuration the .deb step turned on.
+    check("Build the AppImage keeps the install rules enabled",
+          "-DSNOW_APPS_PACKAGE_SNOW_SHOT=ON" in pack,
+          "the AppDir is staged with cmake --install")
+
+    validate = by_name["Validate the AppImage"].get("run", "")
+    check("Validate the AppImage runs the product check",
+          "scripts/check-linux-appimage-build.py" in validate,
+          "an AppImage that is never unpacked is only a file that exists")
+    for architecture, machine in APPIMAGE_ARCHITECTURES.items():
+        check(f"Validate the AppImage names the {architecture} ELF machine",
+              f"'{machine}'" in validate,
+              f"{architecture} has to be checked as {machine}")
+
+    root_cmake = REPO / "CMakeLists.txt"
+    check("the root CMakeLists offers SNOW_APPS_PACKAGE_APPIMAGE",
+          "SNOW_APPS_PACKAGE_APPIMAGE" in root_cmake.read_text(encoding="utf-8"),
+          "the option the workflow turns on does not exist")
+
+
 def main() -> int:
     if not WORKFLOW.exists():
         check(".github/workflows/snow-shot-linux.yml exists", False, "missing")
@@ -139,12 +217,15 @@ def main() -> int:
             text = "\n".join(run_commands(job))
             literal = EXPRESSION.sub("", text)
 
-            # A preset name never starts with `-`; requiring that keeps the
-            # regex from reading the option that follows a stripped `${{ }}`
-            # placeholder as the name. `[ \t]+` rather than `\s+` keeps it from
-            # walking into the next line of the block -- which is how a stripped
-            # placeholder ends up "naming" the following `cmake` invocation.
-            for preset in re.findall(r"cmake --preset[ \t]+([^-\s]\S*)", literal):
+            # A preset name never starts with `-` or a line-continuation `\`;
+            # requiring that keeps the regex from reading the option that
+            # follows a stripped `${{ }}` placeholder, or the backslash itself,
+            # as the name. `[ \t]+` rather than `\s+` keeps it from walking into
+            # the next line of the block -- which is how a stripped placeholder
+            # ends up "naming" the following `cmake` invocation. The backslash
+            # case is the AppImage step: it wraps its configure over several
+            # lines and left `\` alone after the placeholder was stripped.
+            for preset in re.findall(r"cmake --preset[ \t]+([^-\\\s]\S*)", literal):
                 check(f"{job_name}: configure preset '{preset}' exists", preset in configure_names,
                       "not in CMakePresets.json")
                 if preset in configure_names:
@@ -325,6 +406,15 @@ def main() -> int:
             check(f"{job_name}: does not install libopencv-dev",
                   "libopencv-dev" not in packages,
                   "the distribution's OpenCV 4.6 would shadow the pinned 4.12")
+            # appimagetool shells out to mksquashfs. It is a separate package
+            # from appimagetool, and on a runner it is the only thing standing
+            # between a green build and "mksquashfs: command not found".
+            if job_name == "build":
+                check(f"{job_name}: installs squashfs-tools",
+                      "squashfs-tools" in packages,
+                      "appimagetool cannot build the squashfs without mksquashfs")
+
+        appimage_checks(jobs)
 
     if failures:
         print(f"\n{len(failures)} problem(s)")

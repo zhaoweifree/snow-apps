@@ -17,10 +17,12 @@
 #    (`desktop-file-validate`, `appstreamcli validate`) and installs the .deb
 #    into a container.
 #
-# AppImage verification is deliberately NOT here yet. It needs a third-party
-# `appimagetool` binary whose download location this repository cannot verify
-# offline; wiring it in before the job is green once would hide real compile
-# errors behind a 404. It goes in after `build` passes.
+# AppImage verification lives here too, as of the run where `build` first went
+# green: it needs a third-party `appimagetool` plus a type-2 runtime, and both
+# are now pinned by version and checksum in `scripts/fetch-appimagetool.sh`
+# rather than downloaded by the packaging tool itself. It goes *after* the .deb
+# path on purpose -- if appimagetool breaks, the release artefact that matters
+# has already been built and uploaded.
 
 name: Snow Shot Linux
 
@@ -207,7 +209,7 @@ jobs:
             libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
             libswresample-dev libswscale-dev \
             python3 \
-            dpkg-dev desktop-file-utils appstream
+            dpkg-dev desktop-file-utils appstream squashfs-tools
 
       # zlib here *is* zlib-ng (classic zlib does not define ZLIBNG_VERSION,
       # which `compression_backend.cpp` requires) and libjpeg-turbo has to be
@@ -341,6 +343,49 @@ jobs:
         with:
           name: snow-shot-${{ matrix.architecture }}-deb
           path: build/${{ matrix.preset }}/snow-shot_*.deb
+          if-no-files-found: error
+
+      # `appimagetool` is not packaged by any distribution, and the maintained
+      # upstream release does not bundle the type-2 runtime -- it downloads one
+      # at packaging time unless it is handed a file. Both are pinned by version
+      # and checksummed in `scripts/fetch-appimagetool.sh`, so this step cannot
+      # silently package whatever upstream happened to serve that minute. The
+      # script writes `KEY=VALUE` lines to stdout for exactly this use, and
+      # nothing else.
+      - name: Fetch appimagetool
+        run: bash scripts/fetch-appimagetool.sh >> "$GITHUB_ENV"
+
+      # This is the one packaging path that had never executed anywhere: the
+      # Windows workstation has no appimagetool, so every command in
+      # `cmake/SnowShotAppImage.cmake` was read but never run. The target stages
+      # an AppDir with `cmake --install` and then calls appimagetool, so the
+      # configuration has to keep the install rules the .deb step turned on.
+      - name: Build the AppImage
+        run: |
+          cmake --preset ${{ matrix.preset }} \
+            -DSNOW_APPS_PACKAGE_SNOW_SHOT=ON \
+            -DSNOW_APPS_PACKAGE_APPIMAGE=ON \
+            -DSNOW_APPS_APPIMAGETOOL="$SNOW_APPS_APPIMAGETOOL" \
+            -DSNOW_APPS_APPIMAGETOOL_RUNTIME="$SNOW_APPS_APPIMAGETOOL_RUNTIME"
+          cmake --build --preset ${{ matrix.build-preset }} --parallel 4 \
+            --target snow-shot-appimage
+
+      # The product, not the tooling: an ELF of the right machine, the type-2
+      # magic, and an unpacked tree that holds the entry, the icon and the
+      # bundled libraries -- plus an AppRun byte-identical to the reviewed one.
+      - name: Validate the AppImage
+        run: |
+          appimage="$(ls "build/${{ matrix.preset }}/snow-shot-"*.AppImage)"
+          echo "== $appimage"
+          ls -l "$appimage"
+          python3 scripts/check-linux-appimage-build.py --appimage "$appimage" \
+            --expect-arch ${{ matrix.architecture == 'x64' && 'x86_64' || 'aarch64' }}
+
+      - name: Upload the AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: snow-shot-${{ matrix.architecture }}-appimage
+          path: build/${{ matrix.preset }}/snow-shot-*.AppImage
           if-no-files-found: error
 
       # Tests come **after** the package, in the same tree, for two reasons: the
