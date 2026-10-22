@@ -5280,10 +5280,21 @@ COMMAND "${CMAKE_COMMAND}" "-DSTAGED_DIR=${SNOW_SHOT_APPIMAGE_USR}"
 读得到本身就是"导出成立"的证明。
 
 **那条被否掉的替代方案值得记下来**：把复制注册成 `install(SCRIPT ...)`，让
-`cmake --install` 与 CPack 自动都覆盖到。它更优雅，但 `CPACK_INSTALL_CMAKE_PROJECTS`
-指定了组件 `SnowShot`，没有 `COMPONENT` 的安装规则属于 `Unspecified`，可能整条
-不执行 —— 也就是说，为了修 AppImage 而把**第一次被 CI 真正验证的 deb 路径**改掉，
-风险与收益不成比例。**正在被验证的路径，不要在同一轮里重写。**
+`cmake --install` 与 CPack 自动都覆盖到。它更优雅，而且组件语义大概率也过得去
+（`install()` 没写 `COMPONENT` 时用 `CMAKE_INSTALL_DEFAULT_COMPONENT_NAME`，仓库在
+`snow_shot/CMakeLists.txt:67` 把它设成了 `SnowShot`，正好对上
+`CPACK_INSTALL_CMAKE_PROJECTS` 里那个组件名）。否掉它的理由是另外两条：
+
+* **不在同一轮里重写正在被首次验证的路径**。deb 那条链路（CPack → 暂存 →
+  `dpkg-shlibdeps`）这一轮才第一次真正跑到，把它的触发方式从
+  `CPACK_INSTALL_SCRIPTS` 换成 `install(SCRIPT)`，等于让"能不能打包"和"打包方式变了"
+  同时生效，红了分不清是谁的问题；
+* **AppImage 不该依赖 CPack 的组件语义**。它本来就不走 CPack，暂存是
+  `cmake --install`；让它的正确性取决于一个 CPack 变量和一套组件默认值，是把两条
+  独立的路绑在一起。
+
+所以是"同一份逻辑、两个显式调用方"，而不是"一个隐式覆盖两者的注册"。
+**正在被验证的路径，不要在同一轮里重写。**
 
 门禁侧新增三条，全部用 `string(FIND)` 打在机制上而不是名字上：
 
