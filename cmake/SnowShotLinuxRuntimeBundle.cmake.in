@@ -1,0 +1,150 @@
+# Bundles the project's own shared libraries into the Linux package.
+#
+# Executed by CPack as an install script (`CPACK_INSTALL_SCRIPTS`), i.e. after
+# the install tree has been staged and before the archive is built, with
+# `CPACK_TEMPORARY_DIRECTORY` pointing at that tree.
+#
+# Why this exists at all: the pinned dependencies in
+# `scripts/build-linux-deps.sh` are *self-built* -- pinned versions that no
+# distribution package provides (libjxl 0.11, OpenEXR 3.4, Imath 3.2,
+# libjpeg-turbo 3, lunasvg 3). `CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON` asks
+# `dpkg-shlibdeps` to derive `Depends:` from the ELF NEEDED entries, and a
+# shared library that belongs to no installed package makes that step fail:
+#
+#     dpkg-shlibdeps: error: cannot find library libjxl.so.0.11 needed by ...
+#
+# Shipping them is the only answer that leaves a package which starts on a
+# machine that has neither the build prefix nor those versions. The
+# alternatives were rejected in the port document: a hand-written `Depends:`
+# goes stale silently, and `SHLIBDEPS=OFF` produces a package that installs and
+# then dies at startup.
+#
+# The set is computed, not listed. `file(GET_RUNTIME_DEPENDENCIES)` walks the
+# already-staged ELF objects and resolves them against the dependency prefix,
+# which yields the *transitive* closure -- `libjxl` alone would not be enough,
+# because `libjxl` itself needs `libhwy`, and a hand-maintained list would have
+# to be corrected on the next run. Everything resolved from the dependency
+# prefix is private; everything else (glibc, Qt, FFmpeg, X11) stays a
+# `dpkg-shlibdeps` dependency, which is what makes the package installable at
+# all.
+#
+# `RPATH` is what ties the two halves together. Both the staged executables and
+# the libraries copied here have to carry `$ORIGIN/../lib` / `$ORIGIN`:
+#
+#   * the loader uses it to find the private copies at run time;
+#   * `CPackDeb.cmake` scans each binary's RUNPATH for `$ORIGIN` and turns every
+#     hit into `-l<dir>` for `dpkg-shlibdeps`, which is the only way
+#     `dpkg-shlibdeps` learns that these sonames are already inside the package.
+#
+# `DT_RUNPATH` is not inherited by an indirect dependency, so the bundled
+# libraries need their own `$ORIGIN` -- an executable's RUNPATH would only cover
+# its direct dependencies.
+
+cmake_minimum_required(VERSION 3.21)
+
+if(NOT DEFINED CPACK_TEMPORARY_DIRECTORY)
+    message(FATAL_ERROR
+        "snow-shot bundle script: CPACK_TEMPORARY_DIRECTORY is not set. "
+        "This script is meant to run through CPACK_INSTALL_SCRIPTS, not by hand.")
+endif()
+
+set(_private_lib_dir "@SNOW_SHOT_LINUX_PRIVATE_LIB_DIR@")
+set(_deps_lib_dir "@SNOW_SHOT_LINUX_DEPS_LIB_DIR@")
+set(_staged "${CPACK_TEMPORARY_DIRECTORY}")
+set(_lib_subdir "@SNOW_SHOT_LINUX_INSTALL_LIBDIR@")
+
+if(NOT _deps_lib_dir OR NOT IS_DIRECTORY "${_deps_lib_dir}")
+    message(FATAL_ERROR
+        "snow-shot bundle script: the dependency prefix is not a directory: "
+        "'${_deps_lib_dir}'. Configure with CMAKE_PREFIX_PATH pointing at the "
+        "prefix scripts/build-linux-deps.sh installed into.")
+endif()
+
+# Everything CPack is about to package, discovered rather than listed: a
+# hardcoded list of binaries would have to grow every time an executable is
+# installed, and forgetting one means its dependencies are never resolved -- the
+# library it needs is then missing from the package and `dpkg-shlibdeps` reports
+# it as an error three steps later, with no hint about the cause.
+#
+# `usr/bin` also holds helper scripts in some configurations, and
+# `file(GET_RUNTIME_DEPENDENCIES)` aborts on a non-ELF input, so the magic is
+# checked first.
+set(_executables "")
+file(GLOB _staged_programs "${_staged}/@SNOW_SHOT_LINUX_INSTALL_BINDIR@/*")
+foreach(_program IN LISTS _staged_programs)
+    if(IS_DIRECTORY "${_program}")
+        continue()
+    endif()
+    file(READ "${_program}" _magic OFFSET 0 LIMIT 4 HEX)
+    if(_magic STREQUAL "7f454c46")
+        list(APPEND _executables "${_program}")
+    endif()
+endforeach()
+
+file(GLOB _staged_libraries "${_staged}/${_lib_subdir}/*.so*")
+
+if(NOT _executables AND NOT _staged_libraries)
+    message(FATAL_ERROR "snow-shot bundle script: the staged tree has no ELF objects.")
+endif()
+
+# `DIRECTORIES` is the only place the solver may look for the private copies;
+# the default search path is still consulted for system libraries.
+file(GET_RUNTIME_DEPENDENCIES
+    EXECUTABLES ${_executables}
+    LIBRARIES ${_staged_libraries}
+    RESOLVED_DEPENDENCIES_VAR _resolved
+    UNRESOLVED_DEPENDENCIES_VAR _unresolved
+    DIRECTORIES "${_deps_lib_dir}")
+
+get_filename_component(_deps_real "${_deps_lib_dir}" REALPATH)
+
+set(_bundled "")
+foreach(_dependency IN LISTS _resolved)
+    get_filename_component(_real "${_dependency}" REALPATH)
+    get_filename_component(_dir "${_real}" DIRECTORY)
+    if(NOT _dir STREQUAL _deps_real)
+        continue()
+    endif()
+    get_filename_component(_name "${_real}" NAME)
+    set(_destination "${_staged}/${_private_lib_dir}/${_name}")
+    if(EXISTS "${_destination}")
+        continue()
+    endif()
+    file(COPY "${_real}" DESTINATION "${_staged}/${_private_lib_dir}"
+         FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                          GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    list(APPEND _bundled "${_name}")
+endforeach()
+
+# A private copy is useless if the loader cannot find it, and a bundled library
+# that needs another bundled library is exactly the case `DT_RUNPATH` does not
+# cover for its parent.
+if(_bundled)
+    foreach(_name IN LISTS _bundled)
+        file(RPATH_SET "${_staged}/${_private_lib_dir}/${_name}" "$ORIGIN")
+    endforeach()
+endif()
+
+# Only report what this run actually did. A bare "ok" hides both an empty
+# closure and a library that silently stopped being private.
+list(LENGTH _resolved _resolved_count)
+list(LENGTH _unresolved _unresolved_count)
+message(STATUS "snow-shot bundle: ${_resolved_count} resolved dependency file(s), "
+               "${_unresolved_count} unresolved")
+message(STATUS "snow-shot bundle: private libraries (${_private_lib_dir})")
+foreach(_name IN LISTS _bundled)
+    message(STATUS "snow-shot bundle:   ${_name}")
+endforeach()
+if(NOT _bundled)
+    message(WARNING
+        "snow-shot bundle: nothing was bundled. Either every dependency is a "
+        "distribution package, or the dependency prefix is wrong -- "
+        "dpkg-shlibdeps will say which one.")
+endif()
+
+# An unresolved dependency is not fatal here: `dpkg-shlibdeps` decides, and it
+# has the shlibs database this script does not. Printing them is what makes the
+# next failure readable instead of mysterious.
+foreach(_missing IN LISTS _unresolved)
+    message(STATUS "snow-shot bundle: unresolved ${_missing}")
+endforeach()

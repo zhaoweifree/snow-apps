@@ -107,6 +107,70 @@ if(CPACK_DEBIAN_PACKAGE_DEPENDS)
     math(EXPR _snow_failures "${_snow_failures} + 1")
 endif()
 
+# --- 2b. The private libraries of the project itself ------------------------
+# `dpkg-shlibdeps` fails outright on a NEEDED soname that no installed package
+# provides, and every pinned dependency of this project is in that situation
+# (`libjxl.so.0.11`, `libOpenEXR-3_4.so.33`, `liblunasvg.so.3` ...). Three
+# separate pieces have to exist for the package to build *and* run; a missing
+# one is invisible until CPack runs on a real Linux host.
+if(NOT CPACK_INSTALL_SCRIPTS)
+    message(STATUS "FAIL CPACK_INSTALL_SCRIPTS is empty: nothing would bundle the "
+                   "self-built libraries, and dpkg-shlibdeps fails on the first "
+                   "one it cannot find")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+else()
+    message(STATUS "ok   CPACK_INSTALL_SCRIPTS names the bundle script")
+    foreach(_script IN LISTS CPACK_INSTALL_SCRIPTS)
+        if(NOT EXISTS "${_script}")
+            message(STATUS "FAIL the generated bundle script does not exist: ${_script}")
+            math(EXPR _snow_failures "${_snow_failures} + 1")
+            continue()
+        endif()
+        file(READ "${_script}" _bundle_text)
+        if(_bundle_text MATCHES "@[A-Z_]+@")
+            message(STATUS "FAIL the bundle script still has an unsubstituted placeholder")
+            math(EXPR _snow_failures "${_snow_failures} + 1")
+        endif()
+        # Comments are stripped first. The template explains what these calls
+        # do, and a plain substring match on the name stays green when the call
+        # is deleted -- the same trap as the `continuous` tag check in
+        # scripts/check-linux-appimage.py, which matched its own comment.
+        string(REGEX REPLACE "#[^\n]*" "" _bundle_code "${_bundle_text}")
+        foreach(_needle
+                "GET_RUNTIME_DEPENDENCIES"
+                "CPACK_TEMPORARY_DIRECTORY"
+                "RPATH_SET")
+            if(NOT _bundle_code MATCHES "${_needle}")
+                message(STATUS "FAIL the bundle script never uses ${_needle}")
+                math(EXPR _snow_failures "${_snow_failures} + 1")
+            else()
+                message(STATUS "ok   the bundle script uses ${_needle}")
+            endif()
+        endforeach()
+    endforeach()
+endif()
+
+# The build prefix has to be named even in script mode (it is empty there), so
+# that a real configure cannot silently forget it: CPackDeb turns it into `-l`.
+if(NOT DEFINED CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS)
+    message(STATUS "FAIL CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS is not assigned")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+else()
+    message(STATUS "ok   CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS is assigned")
+endif()
+
+# The AppImage module used to set its own `INSTALL_RPATH "$ORIGIN/../lib"`, which
+# is the directory *above* the private one and ran last, undoing the packaging
+# module's RPATH. One owner, one value.
+file(READ "${_snow_repo}/cmake/SnowShotAppImage.cmake" _appimage_module)
+if(_appimage_module MATCHES "INSTALL_RPATH")
+    message(STATUS "FAIL the AppImage module sets INSTALL_RPATH itself; it has to ask "
+                   "the packaging module for the private library directory")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+else()
+    message(STATUS "ok   the AppImage module leaves INSTALL_RPATH to the packaging module")
+endif()
+
 # The same function on an arm64 host must select the arm64 package.
 set(CMAKE_SYSTEM_PROCESSOR "aarch64")
 snow_shot_configure_linux_package()

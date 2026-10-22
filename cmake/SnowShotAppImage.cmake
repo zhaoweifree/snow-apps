@@ -182,11 +182,21 @@ function(snow_shot_add_appimage_target)
 
     add_dependencies(snow-shot-appimage snow_shot)
 
-    # The executable has to find the bundled Qt libraries through its own
-    # location once the AppImage is mounted somewhere the loader never heard of.
-    # AppRun sets LD_LIBRARY_PATH as well; the RPATH is what still works if the
-    # binary is ever run out of the AppDir without going through AppRun.
-    set_target_properties(snow_shot PROPERTIES
-        INSTALL_RPATH "$ORIGIN/../lib"
-        INSTALL_RPATH_USE_LINK_PATH OFF)
+    # The executable has to find the bundled libraries through its own location
+    # once the AppImage is mounted somewhere the loader never heard of. AppRun
+    # sets LD_LIBRARY_PATH as well; the RPATH is what still works if the binary
+    # is ever run out of the AppDir without going through AppRun.
+    #
+    # The layout is not recomputed here: `snow_shot_apply_linux_private_rpath()`
+    # (SnowShotLinuxPackage.cmake) already points every installed ELF object at
+    # the private library directory, and the AppDir is staged from the same
+    # install rules. Setting a different RPATH here -- this used to say
+    # `$ORIGIN/../lib`, which is the directory *above* the private one -- would
+    # silently undo it, because this call runs last.
+    if(NOT COMMAND snow_shot_apply_linux_private_rpath)
+        message(FATAL_ERROR
+            "snow_shot_add_appimage_target: the Linux packaging module has to be "
+            "included first; it owns the private library directory and the RPATH.")
+    endif()
+    snow_shot_apply_linux_private_rpath()
 endfunction()

@@ -43,6 +43,73 @@ function(snow_shot_linux_debian_architecture out_var)
     set(${out_var} "${_snow_debian_architecture}" PARENT_SCOPE)
 endfunction()
 
+# The directory the package keeps its own shared libraries in, relative to the
+# install prefix.
+#
+# Private, not `${CMAKE_INSTALL_LIBDIR}` directly: these are pinned versions
+# (`libjxl.so.0.11`, `libImath-3_2.so.30`) that a distribution package may also
+# provide in a different version, and two packages owning the same `/usr/lib`
+# path is a packaging conflict. The RPATH below is what makes the private copy
+# reachable, so the directory name is a decision both that RPATH and the bundle
+# script read from here.
+function(snow_shot_linux_private_lib_dir out_var)
+    set(${out_var} "${CMAKE_INSTALL_LIBDIR}/snow-shot" PARENT_SCOPE)
+endfunction()
+
+# Finds the `lib` directory of the dependency prefix
+# `scripts/build-linux-deps.sh` installed into.
+#
+# The prefix arrives through `CMAKE_PREFIX_PATH` (the workflow exports it), and
+# there is exactly one entry that has a `lib` directory with shared libraries in
+# it. Guessing a fixed path would break the moment the prefix moves.
+function(snow_shot_linux_find_deps_lib_dir out_var)
+    set(_found "")
+    foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+        if(EXISTS "${_prefix}/lib")
+            file(GLOB _probe "${_prefix}/lib/*.so*")
+            if(_probe)
+                set(_found "${_prefix}/lib")
+                break()
+            endif()
+        endif()
+    endforeach()
+    set(${out_var} "${_found}" PARENT_SCOPE)
+endfunction()
+
+# Points every installed ELF object at the private library directory.
+#
+# Without this the loader searches only the system paths, so the private copies
+# are invisible at run time -- and `CPackDeb.cmake` never learns about them
+# either: it turns `$ORIGIN` in a binary's RUNPATH into `-l<dir>` for
+# `dpkg-shlibdeps`, and a binary with no RUNPATH contributes nothing, which is
+# how the first packaged build failed with `cannot find library libjxl.so.0.11`.
+#
+# Executables live in `bin/` and libraries in `lib/`, so the relative hop is not
+# the same for both. `INSTALL_RPATH_USE_LINK_PATH OFF` keeps the build tree's
+# own library paths out of the installed binary.
+function(snow_shot_apply_linux_private_rpath)
+    snow_shot_linux_private_lib_dir(_private)
+    get_filename_component(_private_name "${_private}" NAME)
+    foreach(_target IN ITEMS
+            snow_shot
+            snow_ocr_process
+            snow_shot_mcp
+            snow_shot_image_codec_backend)
+        if(NOT TARGET ${_target})
+            continue()
+        endif()
+        get_target_property(_type ${_target} TYPE)
+        if(_type STREQUAL "EXECUTABLE")
+            set(_rpath "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/${_private_name}")
+        else()
+            set(_rpath "$ORIGIN/${_private_name}")
+        endif()
+        set_target_properties(${_target} PROPERTIES
+            INSTALL_RPATH "${_rpath}"
+            INSTALL_RPATH_USE_LINK_PATH OFF)
+    endforeach()
+endfunction()
+
 # Assigns every CPACK_* variable the DEB layout needs.
 #
 # `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` is the important one. The alternative -- a
@@ -103,6 +170,63 @@ above other windows, and recognize text and tables from the same image.\n")
     # ran CPack.
     set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION TRUE)
 
+    # --- the project's own shared libraries ---------------------------------
+    # `SHLIBDEPS=ON` is only usable if every NEEDED soname either belongs to an
+    # installed distribution package or is already inside the package. The
+    # pinned dependencies are self-built (`libjxl.so.0.11`,
+    # `libOpenEXR-3_4.so.33`, `liblunasvg.so.3` ...), and no distribution
+    # package owns them, so `dpkg-shlibdeps` refuses:
+    #
+    #     dpkg-shlibdeps: error: cannot find library libjxl.so.0.11 needed by ...
+    #
+    # Three things have to agree for the package to be both buildable and
+    # runnable, which is why they are set together here:
+    #
+    #   1. the private libraries are copied into the staged tree
+    #      (`cmake/SnowShotLinuxRuntimeBundle.cmake.in`, run by CPack);
+    #   2. the installed ELF objects carry an RPATH that reaches them
+    #      (`snow_shot_apply_linux_private_rpath()`);
+    #   3. `SHLIBDEPS_PRIVATE_DIRS` names the build prefix, so the copies can be
+    #      resolved even before the RPATH hop is taken.
+    snow_shot_linux_find_deps_lib_dir(_snow_deps_lib)
+    snow_shot_linux_private_lib_dir(_snow_private_lib)
+    if(NOT _snow_deps_lib)
+        if(CMAKE_SCRIPT_MODE_FILE)
+            # The gate evaluates this function on a workstation that has no
+            # dependency prefix. The variables it checks are still assigned; the
+            # generated script reports the missing prefix if CPack ever runs.
+            message(STATUS
+                "snow-shot linux package: no dependency prefix in CMAKE_PREFIX_PATH "
+                "(script mode); the bundle script will refuse to run")
+        else()
+            message(FATAL_ERROR
+                "SNOW_APPS_PACKAGE_SNOW_SHOT needs the dependency prefix in "
+                "CMAKE_PREFIX_PATH (the `lib` directory of the tree "
+                "scripts/build-linux-deps.sh installed into). Without it the "
+                "self-built libraries cannot be bundled and dpkg-shlibdeps "
+                "fails on the first one it cannot find.")
+        endif()
+    endif()
+
+    set(_snow_bundle_script "${CMAKE_BINARY_DIR}/snow-shot-linux-runtime-bundle.cmake")
+    set(SNOW_SHOT_LINUX_DEPS_LIB_DIR "${_snow_deps_lib}")
+    set(SNOW_SHOT_LINUX_PRIVATE_LIB_DIR "${_snow_private_lib}")
+    set(SNOW_SHOT_LINUX_INSTALL_BINDIR "${CMAKE_INSTALL_BINDIR}")
+    set(SNOW_SHOT_LINUX_INSTALL_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
+    configure_file(
+        # Not `${CMAKE_CURRENT_LIST_DIR}`: inside a function body that variable is
+        # the directory of the *caller's* listfile, so the template resolved to
+        # `scripts/SnowShotLinuxRuntimeBundle.cmake.in` when the packaging gate
+        # called this function (port document §9.6.10 is the same mistake with
+        # `include()`). `CMAKE_CURRENT_FUNCTION_LIST_DIR` is the file the
+        # function was defined in, wherever it is called from.
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/SnowShotLinuxRuntimeBundle.cmake.in"
+        "${_snow_bundle_script}"
+        @ONLY)
+    set(CPACK_INSTALL_SCRIPTS "${_snow_bundle_script}")
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "${_snow_deps_lib}")
+    snow_shot_apply_linux_private_rpath()
+
     foreach(_snow_variable
             CPACK_PACKAGE_NAME
             CPACK_PACKAGE_VENDOR
@@ -128,6 +252,8 @@ above other windows, and recognize text and tables from the same image.\n")
             CPACK_DEBIAN_PACKAGE_MAINTAINER
             CPACK_DEBIAN_PACKAGE_HOMEPAGE
             CPACK_DEBIAN_PACKAGE_SHLIBDEPS
+            CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
+            CPACK_INSTALL_SCRIPTS
             CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION)
         set(${_snow_variable} "${${_snow_variable}}" PARENT_SCOPE)
     endforeach()
