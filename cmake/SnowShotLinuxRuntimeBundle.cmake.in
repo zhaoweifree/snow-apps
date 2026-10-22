@@ -190,16 +190,52 @@ endforeach()
 
 # A private copy is useless if the loader cannot find it, and a bundled library
 # that needs another bundled library is exactly the case `DT_RUNPATH` does not
-# cover for its parent.
+# cover for its parent: `libjxl.so.0.11` finds `libhwy.so` only through its own
+# RUNPATH, never through the executable's.
 #
-# `file(RPATH_SET)` takes keyword arguments (`FILE` / `NEW_RPATH`); the
-# positional form `file(RPATH_SET <file> <rpath>)` is a *different* sub-command
-# signature and CMake rejects it at CPack time with "unrecognized argument".
-if(_bundled)
-    foreach(_library IN LISTS _bundled)
-        file(RPATH_SET FILE "${_library}" NEW_RPATH "$ORIGIN")
-    endforeach()
-endif()
+# `file(RPATH_SET)` can only *rewrite* an entry that is already there --
+#
+#     No valid ELF RPATH or RUNPATH entry exists in the file;
+#
+# -- and `cmake --install` strips the build-tree RPATH, so a freshly installed
+# dependency usually has none. The libraries that must find a sibling carry
+# `$ORIGIN` because `scripts/build-linux-deps.sh` configures every dependency
+# with `-DCMAKE_INSTALL_RPATH=$ORIGIN`, and copying preserves those bytes. The
+# rewrite below is therefore for the ones that still point at an absolute path
+# (the build prefix); a missing entry is the normal case for a leaf library and
+# is counted, not raised.
+#
+# The call runs in a child CMake because that failure is fatal to the script,
+# and it has to be read as "nothing to rewrite" rather than as an error. The
+# coordinates are `FILE` / `NEW_RPATH`: the positional form
+# `file(RPATH_SET <file> <rpath>)` is a different signature and CMake rejects it
+# with "unrecognized argument".
+get_filename_component(_self_dir "${CMAKE_CURRENT_LIST_FILE}" DIRECTORY)
+set(_rpath_probe "${_self_dir}/snow-shot-set-rpath.cmake")
+file(WRITE "${_rpath_probe}"
+"file(RPATH_SET FILE \"\${RPATH_FILE}\" NEW_RPATH \"\$ORIGIN\")\n")
+set(_rewritten 0)
+set(_no_entry "")
+foreach(_library IN LISTS _bundled)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" "-DRPATH_FILE=${_library}" -P "${_rpath_probe}"
+        RESULT_VARIABLE _rpath_result
+        OUTPUT_VARIABLE _rpath_stdout
+        ERROR_VARIABLE _rpath_stderr)
+    set(_rpath_output "${_rpath_stdout}${_rpath_stderr}")
+    if(_rpath_result EQUAL 0)
+        math(EXPR _rewritten "${_rewritten} + 1")
+    elseif(_rpath_output MATCHES "No valid ELF RPATH or RUNPATH entry")
+        list(APPEND _no_entry "${_library}")
+    else()
+        message(FATAL_ERROR
+            "snow-shot bundle script: could not write \$ORIGIN into "
+            "${_library}:\n${_rpath_output}")
+    endif()
+endforeach()
+list(LENGTH _no_entry _no_entry_count)
+message(STATUS "snow-shot bundle: \$ORIGIN written into ${_rewritten} library/libraries; "
+               "${_no_entry_count} had no RUNPATH entry (leaves, kept as built)")
 
 # Only report what this run actually did. A bare "ok" hides both an empty
 # closure and a library that silently stopped being private.

@@ -274,10 +274,19 @@ configure_build_install() { # source build-dir extra cmake args...
     # it came from. `die` (rather than `return`) is what stops the builder:
     # inside the builder's subshell it ends that subshell, so the loop can
     # dump the log and the reason never gets lost behind a later assertion.
+    #
+    # `CMAKE_INSTALL_RPATH=$ORIGIN` is what makes the installed libraries usable
+    # once they are copied out of the prefix (the .deb ships them in
+    # `usr/lib/snow-shot`, the AppImage in the same subtree): `libjxl.so.0.11`
+    # finds `libhwy.so` through its own RUNPATH, because `DT_RUNPATH` is not
+    # inherited from the executable. It costs nothing at build time and it
+    # cannot be added later -- `file(RPATH_SET)` only rewrites an entry that is
+    # already there, and `cmake --install` strips the build-tree one.
     "$cmake_command" -S "$source" -B "$build" ${generator[@]+"${generator[@]}"} \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$prefix" \
         -DCMAKE_INSTALL_LIBDIR=lib \
+        '-DCMAKE_INSTALL_RPATH=$ORIGIN' \
         "$@" \
         || die "cmake configure failed: ${source}"
     "$cmake_command" --build "$build" --parallel "$jobs" \

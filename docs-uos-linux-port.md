@@ -5488,6 +5488,68 @@ configure 顶层读得到；但门禁跑的是 `cmake -P`，那个 include 从�
 **这一节与 9.6.33 是同一个错误的两次显形**：那一次是"暂存树是空的"，这一次是"暂存树指的
 是宿主机"。两次都源于**用一个看起来像路径的变量当路径**，而它回答的是另一个问题。
 
+#### 9.6.39 run 40：`file(RPATH_SET)` 只能改写，不能新增
+
+run 40 的 arm64 停在同一处，但这次的错误**证明前三步都是对的**：
+
+```text
+CMake Error at .../snow-shot-linux-runtime-bundle.cmake:200 (file):
+  file RPATH_SET could not write new RPATH:
+    .../snow-shot-1.2.8-Linux/usr/lib/snow-shot/libjxl.so.0.11
+  No valid ELF RPATH or RUNPATH entry exists in the file;
+```
+
+路径里 `_CPack_Packages/Linux/DEB/snow-shot-1.2.8-Linux/usr/lib/snow-shot/` 全对
+——`DESTDIR` 成立了；文件名是 `libjxl.so.0.11` 而不是 `libjxl.so.0.11.0`
+——soname 命名成立了；能列出这个文件说明闭包解析也成立了。红的是**最后一环**。
+
+`file(RPATH_SET)` 的语义是"改写已有的 RPATH 字符串"，不是"给文件加一条"。而
+`cmake --install` 默认**剥掉**构建树 RPATH（`INSTALL_RPATH` 为空），所以我们装进
+`<prefix>/lib` 的每个依赖库**一条 RPATH 都没有**。于是：
+
+* 这条命令在第一个私有库上就中止整个打包；
+* 更要紧的是，即使它不中止，库也拿不到 `$ORIGIN`——而 `libjxl.so.0.11` 必须靠
+  **自己的** RUNPATH 找到同目录的 `libhwy.so`，因为 `DT_RUNPATH` 不继承给间接依赖。
+
+**能在哪里加 RUNPATH，就得在哪里加。** 那是依赖构建时：
+
+```bash
+'-DCMAKE_INSTALL_RPATH=$ORIGIN'
+```
+
+放在 `configure_build_install()` 里，一条覆盖十个 CMake 依赖。此后 `file(COPY)` 复制的是
+带正确 RUNPATH 的字节，私有目录内的相互引用自然成立。
+
+打包脚本里那一步**保留**，但只用于"改写指向构建前缀的绝对路径"这种情形，并且把
+`No valid ELF RPATH or RUNPATH entry` 当作**正常**结果统计，而不是错误：
+
+```cmake
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DRPATH_FILE=${_library}" -P "${_rpath_probe}" ...)
+if(_rpath_result EQUAL 0)                       # 改写了
+elseif(_rpath_output MATCHES "No valid ELF RPATH or RUNPATH entry")
+    list(APPEND _no_entry "${_library}")        # 叶子库，保持原样
+else()                                          # 别的错才致命
+```
+
+为什么非要开子进程：这条失败在当前进程里是**致命**的，`file(RPATH_SET)` 一出错就终止脚本，
+没有"捕获"这种写法。一次打包十几个库、十几次 `cmake -P`，代价可以忽略。
+
+门禁跟着改了两处，第二处值得记：
+
+1. 新的针 `-DCMAKE_INSTALL_RPATH=$ORIGIN`（对着 `scripts/build-linux-deps.sh`），以及
+   `-DRPATH_FILE=` / `No valid ELF RPATH or RUNPATH entry`；
+2. **原有的 `RPATH_SET` 语法探针必须去掉字符串转义再执行**。调用现在写在
+   `file(WRITE ...)` 的字符串里，抽出来的文本带 `"` 和 `\$`；不还原就直接跑，探针
+   测的是自己的转义，而不是脚本的签名。
+
+反向验证扩到 **17 变异 + 1 对照**。第 17 条（删掉依赖构建的 `INSTALL_RPATH`）顺带暴露了
+反向验证脚本自己的一个洞：快照列表里没有 `build-linux-deps.sh`，一次 SIGTERM 卡在
+"改完未复位"的窗口里，下一次运行会因为基线已红而拒绝启动。**快照列表要覆盖所有会被
+改的文件，而不是"主要的那个"。**
+
+**这一节的结论可以压成一句**：`file(RPATH_SET)` 和 `$ORIGIN` 是两件事——前者修的是
+"已经指向错地方的路径"，后者要求"路径能被写进去"，而后者只有在编译期才可能。
+
 ---
 
 ## 10. 工作量 / 优先级矩阵

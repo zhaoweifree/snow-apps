@@ -197,7 +197,9 @@ else()
                 "GET_RUNTIME_DEPENDENCIES"
                 "CMAKE_INSTALL_PREFIX"
                 "RPATH_SET FILE"
-                "NEW_RPATH")
+                "NEW_RPATH"
+                "-DRPATH_FILE="
+                "No valid ELF RPATH or RUNPATH entry")
             if(NOT _bundle_code MATCHES "${_needle}")
                 message(STATUS "FAIL the bundle script never uses ${_needle}")
                 math(EXPR _snow_failures "${_snow_failures} + 1")
@@ -301,12 +303,17 @@ else()
         file(MAKE_DIRECTORY "${_rpath_probe_dir}")
         file(WRITE "${_rpath_probe_dir}/notelf.bin" "not an ELF file\n")
         string(REGEX MATCH "file\\(RPATH_SET[^)]*\\)" _rpath_call "${_bundle_code}")
+        # The call lives inside a `file(WRITE ...)` string there, so it carries the
+        # escapes of the string it is written into. Undo them before executing it,
+        # otherwise the probe tests its own escaping instead of the signature.
+        string(REPLACE "\\\"" "\"" _rpath_call "${_rpath_call}")
+        string(REPLACE "\\$" "$" _rpath_call "${_rpath_call}")
         if(NOT _rpath_call)
             message(STATUS "FAIL the bundle script has no file(RPATH_SET ...) call to probe")
             math(EXPR _snow_failures "${_snow_failures} + 1")
         else()
             file(WRITE "${_rpath_probe_dir}/probe.cmake"
-                 "set(_library \"${_rpath_probe_dir}/notelf.bin\")\n${_rpath_call}\n")
+                 "set(RPATH_FILE \"${_rpath_probe_dir}/notelf.bin\")\n${_rpath_call}\n")
             execute_process(
                 COMMAND "${CMAKE_COMMAND}" -P "${_rpath_probe_dir}/probe.cmake"
                 RESULT_VARIABLE _rpath_result
@@ -485,6 +492,24 @@ foreach(_needle
         message(STATUS "ok   the cargo executables get ${_needle} in their RUNPATH")
     endif()
 endforeach()
+
+# The bundled libraries have to be relocatable *before* they are copied.
+# `cmake --install` strips the build-tree RPATH, and `file(RPATH_SET)` can only
+# rewrite an entry that exists ("No valid ELF RPATH or RUNPATH entry exists in
+# the file"), so the only place a RUNPATH can be added is the dependency build.
+# Without it `libjxl.so.0.11` cannot find the `libhwy.so` shipped next to it:
+# `DT_RUNPATH` is not inherited from the executable.
+file(READ "${_snow_repo}/scripts/build-linux-deps.sh" _deps_script)
+string(REGEX REPLACE "#[^\n]*" "" _deps_code "${_deps_script}")
+set(_install_rpath_needle "-DCMAKE_INSTALL_RPATH=$ORIGIN")
+string(FIND "${_deps_code}" "${_install_rpath_needle}" _install_rpath_position)
+if(_install_rpath_position EQUAL -1)
+    message(STATUS "FAIL the dependency build never sets ${_install_rpath_needle}; the "
+                   "bundled libraries would have no way to find each other")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+else()
+    message(STATUS "ok   the dependency build sets CMAKE_INSTALL_RPATH")
+endif()
 
 # The same function on an arm64 host must select the arm64 package.
 set(CMAKE_SYSTEM_PROCESSOR "aarch64")

@@ -7607,6 +7607,54 @@ configure 顶层读得到；但门禁跑的是 <code>cmake -P</code>，那个 in
 <p><strong>这一节与 9.6.33 是同一个错误的两次显形</strong>：那一次是"暂存树是空的"，这一次是"暂存树指的
 是宿主机"。两次都源于<strong>用一个看起来像路径的变量当路径</strong>，而它回答的是另一个问题。</p>
 <hr>
+<h4>9.6.39 run 40：<code>file(RPATH_SET)</code> 只能改写，不能新增</h4>
+<p>run 40 的 arm64 停在同一处，但这次的错误<strong>证明前三步都是对的</strong>：</p>
+<pre><code class="language-text">CMake Error at .../snow-shot-linux-runtime-bundle.cmake:200 (file):
+  file RPATH_SET could not write new RPATH:
+    .../snow-shot-1.2.8-Linux/usr/lib/snow-shot/libjxl.so.0.11
+  No valid ELF RPATH or RUNPATH entry exists in the file;
+</code></pre>
+<p>路径里 <code>_CPack_Packages/Linux/DEB/snow-shot-1.2.8-Linux/usr/lib/snow-shot/</code> 全对
+——<code>DESTDIR</code> 成立了；文件名是 <code>libjxl.so.0.11</code> 而不是 <code>libjxl.so.0.11.0</code>
+——soname 命名成立了；能列出这个文件说明闭包解析也成立了。红的是<strong>最后一环</strong>。</p>
+<p><code>file(RPATH_SET)</code> 的语义是"改写已有的 RPATH 字符串"，不是"给文件加一条"。而
+<code>cmake --install</code> 默认<strong>剥掉</strong>构建树 RPATH（<code>INSTALL_RPATH</code> 为空），所以我们装进
+<code>&lt;prefix&gt;/lib</code> 的每个依赖库<strong>一条 RPATH 都没有</strong>。于是：</p>
+<ul>
+<li>这条命令在第一个私有库上就中止整个打包；</li>
+<li>更要紧的是，即使它不中止，库也拿不到 <code>$ORIGIN</code>——而 <code>libjxl.so.0.11</code> 必须靠
+  <strong>自己的</strong> RUNPATH 找到同目录的 <code>libhwy.so</code>，因为 <code>DT_RUNPATH</code> 不继承给间接依赖。</li>
+</ul>
+<p><strong>能在哪里加 RUNPATH，就得在哪里加。</strong> 那是依赖构建时：</p>
+<pre><code class="language-bash">'-DCMAKE_INSTALL_RPATH=$ORIGIN'
+</code></pre>
+<p>放在 <code>configure_build_install()</code> 里，一条覆盖十个 CMake 依赖。此后 <code>file(COPY)</code> 复制的是
+带正确 RUNPATH 的字节，私有目录内的相互引用自然成立。</p>
+<p>打包脚本里那一步<strong>保留</strong>，但只用于"改写指向构建前缀的绝对路径"这种情形，并且把
+<code>No valid ELF RPATH or RUNPATH entry</code> 当作<strong>正常</strong>结果统计，而不是错误：</p>
+<pre><code class="language-cmake">execute_process(COMMAND &quot;${CMAKE_COMMAND}&quot; &quot;-DRPATH_FILE=${_library}&quot; -P &quot;${_rpath_probe}&quot; ...)
+if(_rpath_result EQUAL 0)                       # 改写了
+elseif(_rpath_output MATCHES &quot;No valid ELF RPATH or RUNPATH entry&quot;)
+    list(APPEND _no_entry &quot;${_library}&quot;)        # 叶子库，保持原样
+else()                                          # 别的错才致命
+</code></pre>
+<p>为什么非要开子进程：这条失败在当前进程里是<strong>致命</strong>的，<code>file(RPATH_SET)</code> 一出错就终止脚本，
+没有"捕获"这种写法。一次打包十几个库、十几次 <code>cmake -P</code>，代价可以忽略。</p>
+<p>门禁跟着改了两处，第二处值得记：</p>
+<ol>
+<li>新的针 <code>-DCMAKE_INSTALL_RPATH=$ORIGIN</code>（对着 <code>scripts/build-linux-deps.sh</code>），以及
+   <code>-DRPATH_FILE=</code> / <code>No valid ELF RPATH or RUNPATH entry</code>；</li>
+<li><strong>原有的 <code>RPATH_SET</code> 语法探针必须去掉字符串转义再执行</strong>。调用现在写在
+   <code>file(WRITE ...)</code> 的字符串里，抽出来的文本带 <code>"</code> 和 <code>\$</code>；不还原就直接跑，探针
+   测的是自己的转义，而不是脚本的签名。</li>
+</ol>
+<p>反向验证扩到 <strong>17 变异 + 1 对照</strong>。第 17 条（删掉依赖构建的 <code>INSTALL_RPATH</code>）顺带暴露了
+反向验证脚本自己的一个洞：快照列表里没有 <code>build-linux-deps.sh</code>，一次 SIGTERM 卡在
+"改完未复位"的窗口里，下一次运行会因为基线已红而拒绝启动。<strong>快照列表要覆盖所有会被
+改的文件，而不是"主要的那个"。</strong></p>
+<p><strong>这一节的结论可以压成一句</strong>：<code>file(RPATH_SET)</code> 和 <code>$ORIGIN</code> 是两件事——前者修的是
+"已经指向错地方的路径"，后者要求"路径能被写进去"，而后者只有在编译期才可能。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
