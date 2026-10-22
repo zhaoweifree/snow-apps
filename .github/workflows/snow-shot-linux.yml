@@ -170,7 +170,10 @@ jobs:
             preset: snow-shot-linux-arm64-release
             build-preset: build-snow-shot-linux-arm64-release
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    # The pinned dependency build grew by OpenCV 4.12 (dnn + the bundled
+    # protobuf + the contrib module), which is the single most expensive
+    # library in that step; the project's own build is on top of it.
+    timeout-minutes: 180
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -191,7 +194,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git curl file \
+            build-essential cmake ninja-build pkg-config git curl file patch \
             qtbase5-dev qtbase5-private-dev qt5-qmake qttools5-dev qttools5-dev-tools qttranslations5-l10n \
             libqt5svg5-dev \
             libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkbcommon-x11-dev \
@@ -201,7 +204,6 @@ jobs:
             libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
             zlib1g-dev libtinyxml2-dev \
             libde265-dev libx265-dev libbrotli-dev liblcms2-dev \
-            libopencv-dev \
             libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
             libswresample-dev libswscale-dev \
             python3 \
@@ -220,6 +222,21 @@ jobs:
       # the only correct outcome is a loud `find_package` failure.
       # libde265/x265/brotli/lcms2 stay, as the pinned HEIF and JXL builds use
       # them as backends.
+      #
+      # `libopencv-dev` is absent for the same reason, and harder: the
+      # barcode service is written against OpenCV 4.12's `cv::barcode` (in
+      # the main `objdetect` module since 4.9) and against the in-memory
+      # `WeChatQRCode` constructor this repository adds with its own patch --
+      # 24.04 ships 4.6, whose contrib `barcode` is a different API and has no
+      # such constructor. So the script builds OpenCV 4.12.0 and
+      # opencv_contrib 4.12.0 from the same archives the vcpkg overlay port
+      # uses and applies the same patch (§9.6.20). `patch` is in the apt list
+      # for that patch; `git apply` is the fallback.
+      #
+      # The OpenCV build is static, which is also why the .deb can ship
+      # without it: a shared `libopencv_core.so.4.12` would be a shared
+      # library no distribution package owns, and `dpkg-shlibdeps` derives
+      # the Depends from the ELF NEEDED entries.
       - name: Build the pinned Linux dependencies
         run: |
           bash scripts/build-linux-deps.sh --prefix "$RUNNER_TEMP/snow-linux-deps"

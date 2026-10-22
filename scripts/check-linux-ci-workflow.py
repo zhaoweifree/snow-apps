@@ -229,6 +229,27 @@ def main() -> int:
               "scripts/build-linux-deps.sh" in build_text,
               "configure would run against whatever the distribution happens to have")
 
+        # The pinned dependency script is what supplies OpenCV 4.12 -- the
+        # distribution's 4.6 has neither the `cv::barcode` API the barcode
+        # service is written against nor the in-memory `WeChatQRCode`
+        # constructor this repository adds with its own patch (§9.6.20). A
+        # build job that stops building it would compile against the
+        # distribution's OpenCV and fail three steps later, in the middle of
+        # a translation unit that reads like a code bug.
+        deps_script = REPO / "scripts" / "build-linux-deps.sh"
+        deps_text = deps_script.read_text(encoding="utf-8") if deps_script.is_file() else ""
+        deps_loop = re.search(r"^for library in (.+?); do", deps_text, re.MULTILINE)
+        check("the pinned dependency script builds opencv",
+              deps_loop is not None and "opencv" in deps_loop.group(1).split(),
+              "the Linux build would use the distribution's OpenCV 4.6")
+        check("the pinned dependency script applies the in-memory-model patch",
+              "0024-contrib-wechat-qrcode-in-memory-models.patch" in deps_text,
+              "the upstream WeChatQRCode has no in-memory constructor")
+        check("the pinned dependency script builds opencv statically",
+              "-DBUILD_SHARED_LIBS=OFF" in deps_text,
+              "a shared libopencv_core.so.4.12 would be an unowned shared library "
+              "in the .deb and would make dpkg-shlibdeps fail")
+
         # The Rust toolchain must be installed by hand and pinned with
         # RUSTUP_TOOLCHAIN.
         #
@@ -291,6 +312,19 @@ def main() -> int:
             check(f"{job_name}: installs qtbase5-private-dev",
                   "qtbase5-private-dev" in packages,
                   "Qt5::GuiPrivate would be missing and 19 link lines would fail")
+            # The OpenCV in-memory-model patch is applied with `patch`; the
+            # script falls back to `git apply`, but `git` is already in the
+            # list for the checkout, so `patch` is the explicit dependency.
+            check(f"{job_name}: installs patch", "patch" in packages,
+                  "the OpenCV in-memory-model patch could not be applied")
+            # Two sources for the same library means a failed build silently
+            # falls back to the old one. The distribution's OpenCV is 4.6,
+            # which has neither the `cv::barcode` API nor the in-memory
+            # `WeChatQRCode` constructor the barcode service is written
+            # against (§9.6.20) -- it has to be absent.
+            check(f"{job_name}: does not install libopencv-dev",
+                  "libopencv-dev" not in packages,
+                  "the distribution's OpenCV 4.6 would shadow the pinned 4.12")
 
     if failures:
         print(f"\n{len(failures)} problem(s)")

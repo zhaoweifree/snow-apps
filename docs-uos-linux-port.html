@@ -962,7 +962,7 @@ inline int keySequenceKey(const QKeySequence&amp; s) { return s[0]; }
 <tr>
 <td>OpenCV</td>
 <td>vcpkg <code>opencv4</code>(contrib/dnn/fs/intrinsics)</td>
-<td><code>libopencv-dev</code></td>
+<td><strong>自建 4.12.0</strong>（opencv + opencv_contrib，与 overlay port 同源同补丁，见 9.6.20）；发行版的 4.6 不可用</td>
 </tr>
 <tr>
 <td>onnxruntime</td>
@@ -1315,7 +1315,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <td><strong>P7 硬化与 CI</strong> <em>(进行中)</em></td>
 <td>稳定与回归</td>
 <td>Wayland 会话适配；CI 增 Linux job</td>
-<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>剩余</strong>：Linux 侧第三方库来源未定（9.6.9：zlib-ng / libjpeg-turbo 3.1 / lunasvg / minizip-ng / onnxruntime 等发行版无 CONFIG 包）、AppImage 进 CI、PipeWire 帧消费</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>剩余</strong>：AppImage 进 CI、PipeWire 帧消费</td>
 </tr>
 </tbody>
 </table>
@@ -4793,6 +4793,11 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 <code>
 <td><code>gates</code> ✅ / <code>Configure</code> ✅ / <strong>build ❌</strong></td>
 <td>红灯首次越过兼容头、落在 <strong><code>QMimeData::retrieveData</code> 的虚函数签名</strong>上：Qt5 收 <code>QVariant::Type</code>、Qt6 收 <code>QMetaType</code>，同一份代码写不了两边 ⇒ 见 9.6.19</td>
 </tr>
+<tr>
+<td>18（<code>39745852</code>）</td>
+<td><code>gates</code> ✅ / <code>Configure</code> ✅ / <strong>build ❌</strong></td>
+<td>红灯落在 <strong>OpenCV 的两处 API 缺口</strong>上：<code>cv::barcode</code> 在发行版的 4.6 里根本不存在（它 4.9 才进主仓 <code>objdetect</code>），<code>WeChatQRCode</code> 的 <code>vector&lt;uchar&gt;</code> 构造是<strong>本项目自打的补丁</strong>、上游任何版本都没有 ⇒ 见 9.6.20</td>
+</tr>
 </tbody>
 </table>
 <p><strong>run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug</strong>，不是缺包。Qt5 装在自定义前缀时
@@ -5877,6 +5882,196 @@ class MimeDataRetrieveDataProbe final : public QMimeData {
 <li><strong>"门禁的绿"要靠反向验证来担保</strong>：一个从不报错的判据和一个正确的判据，
   在基线上长得一模一样。</li>
 <li><strong>工具的假阴性比假阳性更危险</strong>：假阳性会逼你查，假阴性会让你以为安全。</li>
+</ul>
+<h4>9.6.20 run 18：OpenCV 的两处 API 缺口，与"同一份补丁"这条硬约束（2026-10-22）</h4>
+<p>run 18（<code>39745852</code>）把红灯推到了<strong>条码识别服务</strong>上。x64 与 arm64 同时停在
+<code>[519/611]</code>，错误只有两类：</p>
+<pre><code>screenshotqrrecognitionservice.cpp:60:17: error: 'barcode' is not a member of 'cv'
+/usr/include/opencv4/opencv2/wechat_qrcode.hpp:36:13: note: candidate:
+  'cv::wechat_qrcode::WeChatQRCode::WeChatQRCode(const std::string&amp;, ...)'
+/usr/include/opencv4/opencv2/wechat_qrcode.hpp:36:45: note: no known conversion for
+  argument 1 from 'const std::vector&lt;unsigned char&gt;' to 'const std::string&amp;'
+</code></pre>
+<p>编译命令里的 <code>-isystem /usr/include/opencv4</code> 说明用的是<strong>发行版的 OpenCV 4.6</strong>。</p>
+<p><strong>诊断（三个事实，每个都要落到上游源码上，不能靠印象）：</strong></p>
+<ol>
+<li><strong><code>cv::barcode</code> 在 4.12 的主仓 <code>objdetect</code> 里</strong>，不在 contrib：
+   <code>modules/objdetect/include/opencv2/objdetect/barcode.hpp</code> 提供
+   <code>decodeWithType(img, points, decoded_info, decoded_type)</code> —— 与本工程
+   <code>screenshotqrrecognitionservice.cpp:200</code> 的调用逐字吻合。它是 <strong>4.8.0</strong> 才从
+   contrib 搬进主仓的（4.7.0 的 objdetect 里还没有 <code>barcode.hpp</code>），
+   所以 4.6 的 contrib <code>barcode</code> 是<strong>另一套 API</strong>
+   （<code>decode()</code> + <code>BarcodeType</code> 枚举），住在 <code>opencv_contrib</code> 里；
+   而 contrib 在 4.12 <strong>已经把 barcode 模块删了</strong>。</li>
+<li><strong><code>WeChatQRCode</code> 的 <code>std::vector&lt;uchar&gt;</code> 四参构造不是上游 API</strong>：
+   它来自本仓库自打的
+   <code>cmake/vcpkg-overlay-ports/opencv4/0024-contrib-wechat-qrcode-in-memory-models.patch</code>
+   （新增四参构造 + <code>SSDDetector::init(vector,vector)</code> + <code>SuperScale::init(vector,vector)</code>）。
+   ⇒ 上一轮"这个构造是 4.12 才有的"的结论<strong>作废</strong>：上游任何版本都没有，
+   只有 vcpkg 侧有。</li>
+<li>4.12 的 1D 条码解码器是<strong>自实现</strong>的
+   （<code>modules/objdetect/src/barcode_decoder/{abs,ean8,ean13,upcean}_decoder.cpp</code>），
+   <code>3rdparty/</code> 里<strong>没有 zxing</strong> ⇒ 本地编 OpenCV 的外部依赖面比预想小。</li>
+</ol>
+<p><strong>为什么不给代码打条件编译（修法 B）：</strong></p>
+<ul>
+<li>4.6 下要么<strong>丢掉 1D 条码</strong>，要么改用 <code>decode()</code> + 枚举并<strong>手写枚举→字符串映射</strong>；</li>
+<li>而 <code>readModelFile()</code> 用 <code>QFile</code> 读模型进 <code>std::vector&lt;uchar&gt;</code>，注释写明这是为了
+  绕开 OpenCV 的窄字符路径处理（Windows 非 ANSI 路径）——退到 path 构造会
+  <strong>只在 Linux 上</strong>丢掉这个能力。</li>
+</ul>
+<p>⇒ 两个平台不再是同一个程序，违背本工程"两端同源 ⇒ 行为一致"这条底线。</p>
+<p><strong>决定（修法 A）：Linux 侧本地固定版本编 OpenCV 4.12.0 + opencv_contrib 4.12.0，
+打</strong>同一份<strong> 0024 补丁</strong>，与既有的 11 个 pinned 库同构。**</p>
+<p>实现要点（<code>scripts/build-linux-deps.sh</code> 的 <code>build_opencv()</code>）：</p>
+<ul>
+<li><strong>两个归档、两个校验和</strong>：opencv 4.12.0 与 opencv_contrib 4.12.0，SHA512 与
+  <code>cmake/vcpkg-overlay-ports/opencv4/portfile.cmake</code> 里两个 <code>vcpkg_from_github</code>
+  块<strong>逐字一致</strong>。</li>
+<li><strong>同一份补丁</strong>：对 contrib 源码树 <code>patch -p1</code> 应用 0024（补丁路径就是
+  <code>modules/wechat_qrcode/...</code>，与 contrib 源码根的布局一致）；没有 <code>patch</code> 就退回
+  <code>git apply</code>。<strong>打不上就要停</strong> —— 没有那个构造，服务根本编不过。</li>
+<li><strong>模型离线化</strong>：contrib 的 <code>wechat_qrcode</code> 在 <em>configure 期</em> 下载 4 个模型。
+  脚本按同一批 URL / SHA512 预先取回，放进 OpenCV 自己的下载缓存，
+  文件名是 <code>ocv_download</code> 认的那一套（<code>&lt;md5&gt;-&lt;filename&gt;</code>，在
+  <code>&lt;OPENCV_DOWNLOAD_PATH&gt;/wechat_qrcode/</code> 下）⇒ configure 期<strong>完全不联网</strong>，
+  也不会去等那个 600 秒的下载超时。MD5 也一起校验：它只是缓存键，
+  错了不会让构建失败，只会让 configure 偷偷回网下载。</li>
+<li><strong>静态构建</strong>（<code>-DBUILD_SHARED_LIBS=OFF</code>），三个理由：
+  ① 与 Windows 侧一致（overlay port 是 <code>vcpkg_check_linkage(ONLY_STATIC_LIBRARY)</code>）；
+  ② .deb 要在 UOS 20 上跑，而 UOS 20 的 OpenCV 更旧 —— 共享的
+  <code>libopencv_core.so.4.12</code> 只能塞进包里，成为"没有包拥有的共享库"；
+  ③ <code>dpkg-shlibdeps</code> 从 ELF NEEDED 推导 Depends，一个不属于任何发行版包的
+  共享库会让这一步<strong>报错</strong>而不是警告。</li>
+<li><strong>窄化模块集</strong>：<code>-DBUILD_LIST=wechat_qrcode</code>（与 overlay port 一致），
+  只拉 core / imgproc / objdetect / dnn / contrib 模块。</li>
+<li><strong>断言的是产品结果，不是代理</strong>：
+  <code>share/opencv4/OpenCVConfig.cmake</code>、<code>opencv2/objdetect.hpp</code>、
+  <code>opencv2/wechat_qrcode.hpp</code> 三个文件存在，<strong>并且</strong>
+  <code>objdetect/barcode.hpp</code> 里有 <code>decodeWithType</code>、
+  <code>wechat_qrcode.hpp</code> 里有 <code>const std::vector&lt;uchar&gt;&amp; detector_prototxt_buffer</code>
+  —— 4.6 的安装<strong>文件齐全但这两条都没有</strong>，所以"文件存在"这种代理判据不够。</li>
+</ul>
+<p><strong>门禁（两条，都做了反向验证）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>门禁</th>
+<th>判据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/check-linux-deps-pins.py</code></td>
+<td>① opencv 的两个归档<strong>分别</strong>按 REPO 比对（"portfile 里第一个 SHA512"这条规则在这里是<strong>错的</strong> —— 第一个是补丁文件的校验和）；② 脚本引用的补丁文件与 vcpkg port 应用的是<strong>同一个</strong>；③ 脚本 pin 的 4 个 QR 模型与 <code>cmake/FetchSnowShotQrModels.cmake</code> <strong>逐字一致</strong></td>
+</tr>
+<tr>
+<td><code>scripts/check-linux-ci-workflow.py</code></td>
+<td>① apt 列表里<strong>不得</strong>再有 <code>libopencv-dev</code>（两个来源 = 构建失败时静默回落）；② 必须装 <code>patch</code>；③ <code>build-linux-deps.sh</code> 必须构建 opencv、应用那份补丁、且<strong>静态</strong>构建</td>
+</tr>
+</tbody>
+</table>
+<p><strong>反向验证（12 处变异，全部精准变红）</strong>：</p>
+<ul>
+<li>pins 门禁 7 处：主仓 SHA512 / contrib SHA512 / 主仓版本 / contrib 版本 /
+  补丁引用 / 某个模型的 SHA512 / port 不再应用补丁 —— 每处只红 1 条，
+  且红的那条正是被改的那条；</li>
+<li>workflow 门禁 5 处：把 <code>libopencv-dev</code> 加回 apt / 去掉 <code>patch</code> /
+  从构建循环里去掉 <code>opencv</code> / 换掉补丁名 / 去掉 <code>-DBUILD_SHARED_LIBS=OFF</code>
+  —— 同样各红 1 条。</li>
+</ul>
+<p><strong>本机可做的取证（提交前已经做完，不能只靠"印象"）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>待证事实</th>
+<th>取证方式</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4 个 QR 模型的 SHA512 与 MD5</td>
+<td>实下载 4 个文件实算</td>
+<td>SHA512/MD5 <strong>与 pin 逐字一致</strong>，且 MD5 与 contrib <code>CMakeLists.txt</code> 里的 <code>hash_*</code> 一致 ⇒ 缓存键也对</td>
+</tr>
+<tr>
+<td>0024 补丁能否打在 contrib 4.12 上</td>
+<td>取 contrib 4.12 的 6 个真实文件，<code>patch --dry-run -p1</code></td>
+<td><strong>6 个 hunk 全部干净应用</strong>（exit 0，无 fuzz）</td>
+</tr>
+<tr>
+<td>补丁后的头文件是否含断言要查的那一行</td>
+<td>打完后 <code>grep</code></td>
+<td><code>const std::vector&lt;uchar&gt;&amp; detector_prototxt_buffer</code> <strong>命中</strong></td>
+</tr>
+<tr>
+<td><code>BUILD_LIST=wechat_qrcode</code> 会不会把 <code>objdetect</code> 排除</td>
+<td>读 4.12 <code>cmake/OpenCVModule.cmake</code> 的白名单展开逻辑</td>
+<td>白名单沿 <code>REQ_DEPS</code>/<code>PRIVATE_REQ_DEPS</code> <strong>传递展开</strong>，而 contrib 的 <code>wechat_qrcode</code> 显式 <code>ocv_define_module(... opencv_objdetect ...)</code> ⇒ objdetect 必在</td>
+</tr>
+<tr>
+<td><code>cv::barcode</code> 到底在哪个模块</td>
+<td>列 4.12 <code>modules/</code> 顶层目录</td>
+<td><strong>没有 <code>barcode</code> 模块</strong>；它在 <code>objdetect</code> 里（<code>modules/objdetect/include/opencv2/objdetect/barcode.hpp</code> + <code>src/barcode_decoder/</code>）⇒ 本工程链的 <code>opencv_objdetect</code> 就是对的</td>
+</tr>
+<tr>
+<td>"4.9 才搬进主仓"这个说法</td>
+<td>逐版探测 <code>modules/objdetect/include/opencv2/objdetect/</code></td>
+<td><strong>4.7.0 没有 <code>barcode.hpp</code>，4.8.0 就有</strong> ⇒ 搬进来的版本是 <strong>4.8.0</strong>，不是 4.9</td>
+</tr>
+<tr>
+<td>contrib 4.6 的 barcode 是什么样</td>
+<td>取 contrib 4.6.0 的 <code>modules/barcode/include/opencv2/barcode.hpp</code></td>
+<td>确有该模块，但是 <code>decode()</code> + <code>enum BarcodeType</code>（<code>std::vector&lt;BarcodeType&gt;</code>），<strong>不是</strong> <code>decodeWithType</code> ⇒ 与本工程的调用确实不兼容</td>
+</tr>
+<tr>
+<td>contrib 4.12 还有没有 barcode</td>
+<td>探测 contrib 4.12.0 的 <code>modules/barcode/</code></td>
+<td><strong>404（已删除）</strong> ⇒ contrib 4.12 只有 <code>wechat_qrcode</code> 一个与扫码相关的模块</td>
+</tr>
+<tr>
+<td>项目侧要不要额外 include</td>
+<td>读 4.12 <code>objdetect.hpp</code> 的 include 列表</td>
+<td>第 879 行 <code>#include "opencv2/objdetect/barcode.hpp"</code> ⇒ 现有的 <code>#include &lt;opencv2/objdetect.hpp&gt;</code> 已经够</td>
+</tr>
+<tr>
+<td><code>ocv_download</code> 的缓存文件名规则</td>
+<td>读 4.12 <code>cmake/OpenCVDownload.cmake</code></td>
+<td><code>CACHE_CANDIDATE = ${OPENCV_DOWNLOAD_PATH}/${id 小写}/${MD5}-${FILENAME}</code> ⇒ 与脚本的 <code>&lt;md5&gt;-&lt;file&gt;</code> 逐字一致</td>
+</tr>
+<tr>
+<td>protobuf 从哪来</td>
+<td>读 4.12 <code>cmake/OpenCVFindProtobuf.cmake</code> 与 <code>3rdparty/</code> 列表</td>
+<td><code>BUILD_PROTOBUF=ON</code> ⇒ 用 OpenCV 自带的 <code>3rdparty/protobuf</code>（存在）；<code>WITH_FLATBUFFERS=OFF</code> 关掉 TFLite ⇒ 不需要 flatbuffers</td>
+</tr>
+</tbody>
+</table>
+<p>另外两条<strong>修正</strong>：</p>
+<ul>
+<li><code>WITH_ZLIB_NG</code> 在 4.12 的默认值就是 OFF，overlay port 里的
+  <code>-DWITH_ZLIB_NG=OFF</code> 是显式重申，不是额外要求 ⇒ 脚本不加它也不构成差异。</li>
+<li><code>OpenCVConfig.cmake.in</code> 模板里<strong>没有</strong> <code>find_dependency(Threads)</code>；
+  overlay port 的 portfile 里有 <code>find_dependency(Threads)</code> 是 <strong>vcpkg 侧</strong>的
+  依赖声明（vcpkg 会用它拼 <code>usage</code>），不是 OpenCV 导出的必需项 ⇒
+  Linux 侧不走 vcppkg 也不需要它。（OpenCV 4.12 在 UNIX 上直接把
+  <code>pthread/dl/m/rt</code> 当普通链接名传给链接器，不产生 <code>Threads::Threads</code> 依赖。）</li>
+</ul>
+<p><strong>风险与遗留</strong>：</p>
+<ul>
+<li><strong>CI 时间</strong>：OpenCV 4.12 + dnn + 自带 protobuf 是那一步里最贵的库。
+  run 18 的 x64 build job 已经用了 33 分钟（上限 120），
+  ⇒ 超时<strong>从 120 提到 180</strong>。</li>
+<li><strong>.deb 侧</strong>：静态 OpenCV 不进 ELF NEEDED，<code>dpkg-shlibdeps</code> 不受影响；
+  但 <code>libopencv-dev</code> 从 apt 列表里摘掉后，发行版那份 4.6 也不再存在 ——
+  这是有意的（见上面的判据 ①）。</li>
+<li><strong>静态导出的 imported target</strong>：<code>find_package(OpenCV CONFIG REQUIRED)</code> 之后链
+  <code>opencv_core</code> / <code>opencv_imgproc</code> / <code>opencv_objdetect</code> / <code>opencv_wechat_qrcode</code>
+  这四个 imported target —— Windows 侧的 vcpkg overlay port 走的是同一套导出
+  且已证明可用，但 Linux 侧是<strong>裸 CMake 安装</strong>，<code>OpenCVModules.cmake</code> 由
+  <code>install(EXPORT OpenCVModules ...)</code> 生成，target 名与链接项仍需 CI 实测。</li>
+<li>真正的验证仍然只能来自下一次 CI：<strong>本机没有 Linux 编译器</strong>，
+  <code>build_opencv()</code> 的 configure/build 一次都没在本机跑过。</li>
 </ul>
 <hr>
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>

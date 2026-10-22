@@ -355,7 +355,11 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/SnowSelectedText.cmake")
 # config package to the manifest-installed copy: the Rust OpenCV crates export
 # a user-level OpenCV_DIR that would otherwise shadow it. Without a vcpkg
 # toolchain (the Linux / UOS port, present only when VCPKG_TARGET_TRIPLET is
-# defined) leave OpenCV_DIR alone so CMake finds the distribution package.
+# defined) leave OpenCV_DIR alone, so CMake finds the pinned OpenCV 4.12 that
+# scripts/build-linux-deps.sh installs into the prefix (the distribution's
+# 4.6 has neither the cv::barcode API nor the in-memory WeChatQRCode
+# constructor this service is written against -- see docs-uos-linux-port.md
+# 9.6.20).
 if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
     set(OpenCV_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/opencv4" CACHE PATH
         "OpenCV package configuration directory" FORCE)

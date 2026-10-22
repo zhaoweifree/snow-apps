@@ -22,7 +22,13 @@
 #     from 24.04's 1.3.2 and from UOS 20's 0.6;
 #   * highway + libjxl + libheif -- the JXL/HEIF codecs are written against
 #     0.11 / 1.21; 24.04 carries 0.7 / 1.17, where the first does not compile
-#     and the second lacks `<libheif/heif_sequences.h>`.
+#     and the second lacks `<libheif/heif_sequences.h>`;
+#   * OpenCV -- the barcode service is written against OpenCV 4.12's
+#     `cv::barcode` (which lives in the *main* `objdetect` module since 4.9)
+#     and against the in-memory-model `WeChatQRCode` constructor that this
+#     repository adds with its own patch; 24.04 ships 4.6, whose contrib
+#     `barcode` is a different API, and the patch exists only in the vcpkg
+#     overlay port -- see the long comment above `build_opencv`.
 #
 # Windows/macOS get all of them through `cmake/vcpkg-overlay-ports/` or the
 # manifest baseline.
@@ -41,6 +47,12 @@
 # ports living in the `.tools/vcpkg` clone, which CI does not have -- so they
 # carry a copy of the pin here and `scripts/check-linux-deps-pins.py` compares
 # that copy against the clone on a workstation and fails when they drift.
+#
+# `opencv` is the one port that fetches *two* archives (the main repository
+# and `opencv_contrib`, which carries the `wechat_qrcode` module) and a patch
+# file besides, so "the first SHA512 in the portfile" is the *patch's*
+# checksum. Its pins are therefore compared per archive, by the repository
+# the `vcpkg_from_github` call names -- again in `check-linux-deps-pins.py`.
 #
 # To add one: pin version + sha512, write a `build_<name>` that ends with the
 # assertion that proves the *consumer* will find it (its CMake config file, its
@@ -171,6 +183,22 @@ unpack() { # archive work-dir
     rm -rf "$work"
     mkdir -p "$work"
     tar -xzf "$archive" -C "$work" --strip-components=1
+}
+
+# Applies a unified diff to a source tree. `patch` is the classic tool and is
+# what the vcpkg ports' patches are written for; `git apply` is the fallback
+# for images that do not ship it. Both must *fail* when the diff does not
+# apply: a silently skipped patch is how a build ends up compiling a source
+# tree that is not the one the project pinned.
+apply_patch() { # directory patch-file
+    local directory="$1" patch_file="$2"
+    if command -v patch >/dev/null 2>&1; then
+        patch --batch --forward -p1 -d "$directory" <"$patch_file"
+    elif command -v git >/dev/null 2>&1; then
+        git -C "$directory" apply -p1 --verbose "$patch_file"
+    else
+        die "neither 'patch' nor 'git' is available to apply ${patch_file}"
+    fi
 }
 
 configure_build_install() { # source build-dir extra cmake args...
@@ -747,7 +775,209 @@ build_libheif() {
     stamp libheif "$version"
 }
 
-for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime imath openexr libwebp highway libjxl libheif; do
+# --- OpenCV + opencv_contrib -----------------------------------------------
+# The barcode recognition service is the only OpenCV consumer, and it is
+# written against two APIs that Ubuntu 24.04 does not have:
+#
+#   * `cv::barcode::BarcodeDetector::decodeWithType()` -- OpenCV moved the
+#     barcode detector out of contrib and into the main `objdetect` module in
+#     4.9. 24.04 ships 4.6, where the contrib `barcode` module has a
+#     *different* API (`decode()` plus a `BarcodeType` enum) and lives in
+#     `opencv_contrib` rather than `opencv_objdetect`;
+#   * `WeChatQRCode`'s four-argument constructor that takes the models as
+#     `std::vector<uchar>` -- which is **not** an upstream API at any version:
+#     it is added by this repository's own patch
+#     `cmake/vcpkg-overlay-ports/opencv4/0024-contrib-wechat-qrcode-in-memory-models.patch`,
+#     so that the models can be loaded through a platform-aware API instead
+#     of a narrow-character path (Windows install directories that the
+#     active ANSI code page cannot represent).
+#
+# Adapting the *code* to 4.6 would mean dropping 1D barcodes or hand-writing
+# an enum-to-string mapping, and it would take the Unicode-path capability
+# away on Linux only -- the two platforms would stop being the same program.
+# So the distribution package is not an option: OpenCV 4.12.0 and
+# opencv_contrib 4.12.0 are built here, with the *same* patch the vcpkg
+# overlay port applies, so both sides compile the same code against the same
+# API.
+#
+# The build is **static**, for three reasons:
+#   * it matches the Windows side, where the overlay port is
+#     `vcpkg_check_linkage(ONLY_STATIC_LIBRARY)`;
+#   * the .deb has to run on UOS 20, whose OpenCV is older still -- a shared
+#     `libopencv_core.so.4.12` would have to be shipped inside the package
+#     and would then be a shared library no package owns;
+#   * `dpkg-shlibdeps` derives the package's Depends from the ELF NEEDED
+#     entries, and a shared OpenCV that belongs to no distribution package
+#     makes that step fail rather than warn.
+#
+# The module set is narrowed to `wechat_qrcode` exactly like the overlay port
+# (`-DBUILD_LIST=wechat_qrcode`), so the build pulls in core, imgproc,
+# objdetect, dnn and the contrib module -- and nothing else.
+opencv_version="4.12.0"
+opencv_sha512="8ac63ddd61e22cc0eaeafee4f30ae6e1cab05fc4929e2cea29070203b9ca8dfead12cc0fd7c4a87b65c1e20ec6b9ab4865a1b83fad33d114fc0708fdf107c51b"
+opencv_contrib_version="4.12.0"
+opencv_contrib_sha512="574121ca57328671741413df91fbf600cc04bb9a9beeacfb7bc20c15b2b4e8c9e031df30aafbcc34f82d85edfb098e5d008a744f4e6d833d6e47537a042045c6"
+
+# The four WeChat QR models, with the SHA512 the project's own
+# `cmake/FetchSnowShotQrModels.cmake` pins and the MD5 OpenCV's download cache
+# is keyed by (`<md5>-<filename>`). `scripts/check-linux-deps-pins.py` compares
+# the two lists, because a model that differs between the two sides is a
+# barcode that decodes on Windows and not on Linux.
+wechat_qrcode_model_url="https://raw.githubusercontent.com/WeChatCV/opencv_3rdparty/a8b69ccc738421293254aec5ddb38bd523503252"
+wechat_qrcode_models="detect.caffemodel|58d62faf8679d3f568a26a1d9f7c2e88060426a440315ca8bce7b3b5a8efa34be670afd0abfd0dd5d89f89a042a2408ea602f937080abc6910c2e497b7f5a4b8|238e2b2d6f3c18d6c3a30de0c31e23cf
+sr.caffemodel|917c6f6b84a898b8c8c85c79359e48a779c8a600de563dac2e1c5d013401e9ac9dbcd435013a4ed7a69fc936839fb189aaa3038c127d04ceb6fd3b8fd9dd67bd|cbfcd60361a73beb8c583eea7e8e6664
+detect.prototxt|2239d31a597049f358f09dbb4c0a7af0b384d9b67cfa3224f8c7e44329647cf19ee7929ac06199cca23bbbf431de0481b74ab51eace6aa20bb2e2fd19b536e49|6fb4976b32695f9f5c6305c19f12537d
+sr.prototxt|6b715ec45c3fd081e7e113e351edcef0f3d32a75f8b5a9ca2273cb5da9a1116a1b78cba45582a9acf67a7ab76dc4fcdf123f7b3a0d3de2f5c39b26ef450058b7|69db99927a70df953b471daaba03fbef"
+
+build_opencv() {
+    local version="$opencv_version"
+    local url archive contrib_url contrib_archive work build contrib_src
+    local patch_file download_cache name sha md5 model_archive actual_md5
+
+    if stamped opencv "$version"; then
+        echo "== opencv ${version}: up to date"
+        return 0
+    fi
+    echo "== opencv ${version} + opencv_contrib ${opencv_contrib_version}"
+
+    url="https://github.com/opencv/opencv/archive/refs/tags/${version}.tar.gz"
+    archive="${src_dir}/opencv-${version}.tar.gz"
+    contrib_url="https://github.com/opencv/opencv_contrib/archive/refs/tags/${opencv_contrib_version}.tar.gz"
+    contrib_archive="${src_dir}/opencv_contrib-${opencv_contrib_version}.tar.gz"
+    work="${build_root}/opencv-${version}"
+    build="${work}/cmake-build"
+    contrib_src="${work}/contrib-src"
+    patch_file="${repo_root}/cmake/vcpkg-overlay-ports/opencv4/0024-contrib-wechat-qrcode-in-memory-models.patch"
+    download_cache="${work}/downloads"
+
+    fetch "$url" "$archive"
+    verify "$archive" "$opencv_sha512"
+    fetch "$contrib_url" "$contrib_archive"
+    verify "$contrib_archive" "$opencv_contrib_sha512"
+
+    unpack "$archive" "${work}/src"
+    unpack "$contrib_archive" "$contrib_src"
+
+    # The same patch the vcpkg overlay port applies, on the same tree layout:
+    # the diff's paths are `modules/wechat_qrcode/...`, which is the layout of
+    # the opencv_contrib source root. If it does not apply, the build has to
+    # stop here -- without it the four-argument constructor does not exist and
+    # the barcode service does not compile, which is the failure this whole
+    # step exists to prevent.
+    [[ -f "$patch_file" ]] || die "the in-memory-model patch is missing: ${patch_file}"
+    apply_patch "$contrib_src" "$patch_file"
+
+    # The contrib module downloads its four models while *configuring*. They
+    # are fetched here instead -- same URLs, same SHA512 as
+    # `cmake/FetchSnowShotQrModels.cmake` -- and dropped into OpenCV's own
+    # download cache under the names `ocv_download` looks for
+    # (`<md5>-<filename>` below `<download path>/wechat_qrcode/`), so the
+    # configure step never touches the network and never waits out a
+    # 600-second download timeout.
+    mkdir -p "${download_cache}/wechat_qrcode"
+    while IFS='|' read -r name sha md5; do
+        [[ -n "$name" ]] || continue
+        model_archive="${src_dir}/wechat-qrcode-models/${name}"
+        fetch "${wechat_qrcode_model_url}/${name}" "$model_archive"
+        verify "$model_archive" "$sha"
+        # The MD5 is the *cache key* OpenCV looks the file up by, so a wrong
+        # one does not fail the build -- it silently sends the configure step
+        # back to the network. Checking it here turns that into a loud error.
+        actual_md5="$(md5sum "$model_archive" | cut -d' ' -f1)"
+        [[ "$actual_md5" == "$md5" ]] \
+            || die "QR model ${name} has md5 ${actual_md5}, expected ${md5}"
+        cp -f "$model_archive" "${download_cache}/wechat_qrcode/${md5}-${name}"
+    done <<<"$wechat_qrcode_models"
+
+    # The options are the overlay port's, minus the ones that only make sense
+    # inside vcpkg:
+    #   * the vcpkg patches are Windows- or vcpkg-specific (`0001` replaces
+    #     every download with a fatal error, `0008` swaps the in-tree quirc
+    #     for vcpkg's), so they are not applied here;
+    #   * `0009` forces `find_package(Protobuf CONFIG REQUIRED)`, which is
+    #     the opposite of what this build wants: the bundled protobuf is
+    #     built from OpenCV's own sources (`-DBUILD_PROTOBUF=ON`);
+    #   * the quirc module stays in-tree -- Ubuntu 24.04 has no `quirc`
+    #     package to swap it for;
+    #   * `OPENCV_DOWNLOAD_PATH` points at the cache the models were just
+    #     placed in.
+    configure_build_install "${work}/src" "$build" \
+        -DCMAKE_PREFIX_PATH="${prefix}" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DOPENCV_EXTRA_MODULES_PATH="${contrib_src}/modules" \
+        -DOPENCV_DOWNLOAD_PATH="${download_cache}" \
+        -DBUILD_LIST=wechat_qrcode \
+        -DBUILD_PROTOBUF=ON \
+        -DWITH_PROTOBUF=ON \
+        -DWITH_FLATBUFFERS=OFF \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_PERF_TESTS=OFF \
+        -DBUILD_DOCS=OFF \
+        -DBUILD_IPP_IW=OFF \
+        -DBUILD_ITT=OFF \
+        -DBUILD_JASPER=OFF \
+        -DBUILD_JPEG=OFF \
+        -DBUILD_OPENEXR=OFF \
+        -DBUILD_OPENJPEG=OFF \
+        -DBUILD_PNG=OFF \
+        -DBUILD_TIFF=OFF \
+        -DBUILD_WEBP=OFF \
+        -DBUILD_ZLIB=OFF \
+        -DBUILD_TBB=OFF \
+        -DBUILD_opencv_apps=OFF \
+        -DBUILD_opencv_java=OFF \
+        -DBUILD_opencv_js=OFF \
+        -DBUILD_JAVA=OFF \
+        -DBUILD_ANDROID_PROJECT=OFF \
+        -DBUILD_ANDROID_EXAMPLES=OFF \
+        -DBUILD_PACKAGE=OFF \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DOPENCV_CONFIG_INSTALL_PATH=share/opencv4 \
+        -DOPENCV_INCLUDE_INSTALL_PATH=include/opencv4 \
+        -DOPENCV_LIB_INSTALL_PATH=lib \
+        -DOPENCV_3P_LIB_INSTALL_PATH=lib/manual-link/opencv4_thirdparty \
+        -DENABLE_CONFIG_VERIFICATION=ON \
+        -DOPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION=TRUE \
+        -DWITH_QT=OFF \
+        -DWITH_OPENCL=OFF \
+        -DWITH_OPENCL_D3D11_NV=OFF \
+        -DWITH_FASTCV=OFF \
+        -DWITH_CPUFEATURES=OFF \
+        -DWITH_SPNG=OFF \
+        -DWITH_ADE=OFF \
+        -DWITH_LAPACK=OFF \
+        -DWITH_GTK=OFF \
+        -DWITH_FFMPEG=OFF \
+        -DWITH_TBB=OFF \
+        -DWITH_ITT=OFF
+
+    # The consumer's view, not the build's: `find_package(OpenCV CONFIG
+    # REQUIRED)` reads the config package, and the two headers the barcode
+    # service includes have to be there. A build that produced the libraries
+    # but not the config would still "succeed" here and fail three steps
+    # later in the project's own configure.
+    [[ -f "${prefix}/share/opencv4/OpenCVConfig.cmake" ]] \
+        || die "opencv installed no OpenCVConfig.cmake"
+    [[ -f "${prefix}/include/opencv4/opencv2/objdetect.hpp" ]] \
+        || die "opencv installed no objdetect header"
+    [[ -f "${prefix}/include/opencv4/opencv2/wechat_qrcode.hpp" ]] \
+        || die "opencv_contrib installed no wechat_qrcode header"
+
+    # The two APIs the service is written against, checked in the *installed*
+    # headers. This is the product result, not a proxy for it: a 4.6 install
+    # would have every file above and still fail to compile.
+    grep -q 'decodeWithType' "${prefix}/include/opencv4/opencv2/objdetect/barcode.hpp" \
+        || die "the installed objdetect has no decodeWithType (cv::barcode is not the 4.9+ one)"
+    grep -q 'const std::vector<uchar>& detector_prototxt_buffer' \
+        "${prefix}/include/opencv4/opencv2/wechat_qrcode.hpp" \
+        || die "the installed wechat_qrcode has no in-memory-model constructor (the patch did not take)"
+
+    stamp opencv "$version"
+}
+
+for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime imath openexr libwebp highway libjxl libheif opencv; do
     if ! selected "$library"; then
         continue
     fi
@@ -764,6 +994,7 @@ for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime imath openexr l
         highway) build_highway >"$log" 2>&1 || { cat "$log"; die "highway build failed (log: ${log})"; } ;;
         libjxl) build_libjxl >"$log" 2>&1 || { cat "$log"; die "libjxl build failed (log: ${log})"; } ;;
         libheif) build_libheif >"$log" 2>&1 || { cat "$log"; die "libheif build failed (log: ${log})"; } ;;
+        opencv) build_opencv >"$log" 2>&1 || { cat "$log"; die "opencv build failed (log: ${log})"; } ;;
     esac
     echo "   $(tail -n 1 "$log")"
 done
