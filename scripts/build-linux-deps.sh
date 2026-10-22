@@ -93,8 +93,29 @@ die() {
     # and the loop's `cat` never ran (CI run 39607822963 lost the highway error
     # exactly this way, leaving only "Process completed with exit code 1").
     # fd 3 is a saved copy of the real stderr, so the message always surfaces.
+    #
+    # `exit` ends the *whole* shell, which is why every builder now runs in a
+    # subshell (see the loop at the bottom): inside a subshell `die` ends the
+    # builder only, the loop's error branch runs, and the log is dumped. CI run
+    # 39764499751 lost the OpenCV error exactly this way -- the step said
+    # "opencv installed no OpenCVConfig.cmake" and nothing else, for a build
+    # that had failed somewhere else entirely.
     echo "error: $*" >&3
     exit 1
+}
+
+# Dumps the tail of a builder's log plus the lines that look like errors, to
+# the real stderr. The log file itself lives on the runner's disk and is gone
+# when the job ends, so this is the only copy of the reason a build failed.
+dump_log() { # log-file
+    local log="$1"
+    [[ -f "$log" ]] || return 0
+    echo "----- last 150 lines of ${log} -----" >&3
+    tail -n 150 "$log" >&3
+    echo "----- error lines in ${log} -----" >&3
+    grep -n -i -E "cmake error|fatal|error:|error [0-9]+|no space left|failed" "$log" \
+        | tail -n 40 >&3
+    true
 }
 
 while [[ $# -gt 0 ]]; do
@@ -155,6 +176,40 @@ stamp() {
     date -u +%Y-%m-%dT%H:%M:%SZ > "${stamp_dir}/$1-$2.ok"
 }
 
+# The runner's temporary directory is a finite disk and the build trees of
+# libjxl, libheif and OpenCV are large. A disk that fills up fails in the
+# middle of `tar` or `cmake`, and from the outside that is indistinguishable
+# from a build bug -- so the free space is reported before every library and
+# checked against what that library needs.
+report_free_space() { # label
+    local label="$1" avail
+    avail="$(df -Pm "${prefix}" 2>/dev/null | awk 'NR==2 {print $4}')"
+    if [[ -n "$avail" ]]; then
+        echo "   disk before ${label}: ${avail} MiB free under ${prefix}"
+    fi
+}
+
+require_free_space() { # label minimum-mib
+    local label="$1" need="$2" avail
+    avail="$(df -Pm "${prefix}" 2>/dev/null | awk 'NR==2 {print $4}')"
+    [[ -n "$avail" ]] || return 0
+    if (( avail < need )); then
+        die "not enough disk space for ${label}: ${avail} MiB free under ${prefix}, need ${need} MiB"
+    fi
+}
+
+# The build tree is scratch space: the stamp makes a rebuild a no-op, and the
+# downloaded archives stay in `<prefix>/src`, so keeping the tree only eats
+# the disk. Removing it after each library keeps the peak usage at one
+# library instead of all twelve.
+prune_build_tree() { # label
+    local label="$1" dir
+    for dir in "${build_root}/${label}-"*; do
+        [[ -d "$dir" ]] || continue
+        rm -rf "$dir"
+    done
+}
+
 # `--retry` on curl covers the flaky-proxy case this repository's workstation
 # hits constantly (502 from the sandbox proxy, intermittently); the unpacked
 # archive is what matters, not how many attempts it took.
@@ -165,9 +220,17 @@ fetch() { # url archive
     fi
     echo "  fetching $(basename "$archive")"
     mkdir -p "$(dirname "$archive")"
+    # Every helper below checks its own status instead of relying on
+    # `set -e`: a builder runs on the left-hand side of a `||` (so that the
+    # log can be dumped), and bash turns `errexit` off for the whole
+    # left-hand side of `||`. Without these checks a failed download or a
+    # failed `tar` would be ignored and the build would carry on with a
+    # half-written tree.
     curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -m 900 \
-        -o "$archive.part" "$url"
-    mv "$archive.part" "$archive"
+        -o "$archive.part" "$url" \
+        || die "download failed: ${url}"
+    mv "$archive.part" "$archive" \
+        || die "cannot move the downloaded archive into place: ${archive}"
 }
 
 verify() { # archive expected-sha512
@@ -182,7 +245,8 @@ unpack() { # archive work-dir
     local archive="$1" work="$2"
     rm -rf "$work"
     mkdir -p "$work"
-    tar -xzf "$archive" -C "$work" --strip-components=1
+    tar -xzf "$archive" -C "$work" --strip-components=1 \
+        || die "cannot unpack $(basename "$archive")"
 }
 
 # Applies a unified diff to a source tree. `patch` is the classic tool and is
@@ -193,9 +257,11 @@ unpack() { # archive work-dir
 apply_patch() { # directory patch-file
     local directory="$1" patch_file="$2"
     if command -v patch >/dev/null 2>&1; then
-        patch --batch --forward -p1 -d "$directory" <"$patch_file"
+        patch --batch --forward -p1 -d "$directory" <"$patch_file" \
+            || die "the patch does not apply: ${patch_file}"
     elif command -v git >/dev/null 2>&1; then
-        git -C "$directory" apply -p1 --verbose "$patch_file"
+        git -C "$directory" apply -p1 --verbose "$patch_file" \
+            || die "the patch does not apply: ${patch_file}"
     else
         die "neither 'patch' nor 'git' is available to apply ${patch_file}"
     fi
@@ -204,13 +270,20 @@ apply_patch() { # directory patch-file
 configure_build_install() { # source build-dir extra cmake args...
     local source="$1" build="$2"
     shift 2
+    # The three steps are checked one by one and each failure names the step
+    # it came from. `die` (rather than `return`) is what stops the builder:
+    # inside the builder's subshell it ends that subshell, so the loop can
+    # dump the log and the reason never gets lost behind a later assertion.
     "$cmake_command" -S "$source" -B "$build" ${generator[@]+"${generator[@]}"} \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$prefix" \
         -DCMAKE_INSTALL_LIBDIR=lib \
-        "$@"
-    "$cmake_command" --build "$build" --parallel "$jobs"
-    "$cmake_command" --install "$build"
+        "$@" \
+        || die "cmake configure failed: ${source}"
+    "$cmake_command" --build "$build" --parallel "$jobs" \
+        || die "cmake build failed: ${source}"
+    "$cmake_command" --install "$build" \
+        || die "cmake install failed: ${source}"
 }
 
 # --- zlib: zlib-ng in compatibility mode -----------------------------------
@@ -901,6 +974,46 @@ build_opencv() {
     #     package to swap it for;
     #   * `OPENCV_DOWNLOAD_PATH` points at the cache the models were just
     #     placed in.
+    #
+    # `ENABLE_CONFIG_VERIFICATION=ON` is the port's, and it is the reason for
+    # the long `WITH_*` list below. At the end of the configure OpenCV runs
+    # `ocv_verify_config()` (cmake/OpenCVUtils.cmake): every option that has a
+    # `VERIFY` clause is compared against the flag that says whether the
+    # dependency was really found, and a disagreement is a `FATAL_ERROR`.
+    # Run 19 died exactly there and only said "opencv installed no
+    # OpenCVConfig.cmake", because that assertion is the next statement.
+    #
+    # Two properties of `OCV_OPTION` decide what has to be written here:
+    #
+    #   * the `VERIFY` registration sits outside `if(${__condition})`, so
+    #     options that are invisible on Linux are registered too -- but they
+    #     are never `option()`-declared, their value expands to nothing and
+    #     neither branch of the verification fires. They need no entry;
+    #   * every dependency probe is guarded by its own option, and the
+    #     videoio/highgui guards live in `modules/<m>/cmake/init.cmake`,
+    #     which `ocv_glob_modules()` includes for *every* module in the first
+    #     pass -- being outside `BUILD_LIST` does not stop a detection. So an
+    #     option that is OFF is always consistent, while an option that is ON
+    #     with a missing dependency always fails.
+    #
+    # Only the second case has to be spelled out: options that default to ON
+    # and whose dependency this image does not provide. Replaying the upstream
+    # `OCV_OPTION` macro and `ocv_verify_config()` against the apt list of
+    # `.github/workflows/snow-shot-linux.yml` names exactly fifteen of them,
+    # and `scripts/check-linux-deps-opencv-options.py` keeps that set honest.
+    #
+    # `WITH_FFMPEG` is deliberately *not* turned off: the CI installs
+    # libavcodec/libavformat/libavutil/libswscale, `detect_ffmpeg.cmake` finds
+    # them through pkg-config, so the flag is true and `=OFF` would be the
+    # mismatch instead. Nothing links FFMPEG, because videoio is not in the
+    # build list. `WITH_V4L` is off although its probe (the kernel headers)
+    # would succeed -- turning it off costs nothing here and keeps the option
+    # set independent of the runner's kernel headers.
+    #
+    # `WITH_IPP=OFF` also keeps the build hermetic: with the option ON,
+    # OpenCV downloads the IPPICV package during the configure step
+    # (cmake/OpenCVFindIPP.cmake), which is a network access in the middle of
+    # a build that is supposed to be offline.
     configure_build_install "${work}/src" "$build" \
         -DCMAKE_PREFIX_PATH="${prefix}" \
         -DBUILD_SHARED_LIBS=OFF \
@@ -940,18 +1053,31 @@ build_opencv() {
         -DOPENCV_3P_LIB_INSTALL_PATH=lib/manual-link/opencv4_thirdparty \
         -DENABLE_CONFIG_VERIFICATION=ON \
         -DOPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION=TRUE \
-        -DWITH_QT=OFF \
-        -DWITH_OPENCL=OFF \
-        -DWITH_OPENCL_D3D11_NV=OFF \
+        -DWITH_AVIF=OFF \
+        -DWITH_CUDA=OFF \
+        -DWITH_CUDNN=OFF \
+        -DWITH_EIGEN=OFF \
         -DWITH_FASTCV=OFF \
-        -DWITH_CPUFEATURES=OFF \
-        -DWITH_SPNG=OFF \
-        -DWITH_ADE=OFF \
+        -DWITH_GSTREAMER=OFF \
+        -DWITH_IPP=OFF \
+        -DWITH_JASPER=OFF \
         -DWITH_LAPACK=OFF \
+        -DWITH_OPENCL=OFF \
+        -DWITH_OPENCLAMDFFT=OFF \
+        -DWITH_OPENCLAMDBLAS=OFF \
+        -DWITH_OPENCL_D3D11_NV=OFF \
+        -DWITH_OPENJPEG=OFF \
+        -DWITH_V4L=OFF \
+        -DWITH_VA=OFF \
+        -DWITH_VA_INTEL=OFF \
+        -DWITH_VTK=OFF \
+        -DWITH_QT=OFF \
         -DWITH_GTK=OFF \
-        -DWITH_FFMPEG=OFF \
         -DWITH_TBB=OFF \
-        -DWITH_ITT=OFF
+        -DWITH_ITT=OFF \
+        -DWITH_SPNG=OFF \
+        -DWITH_ZLIB_NG=OFF \
+        -DWITH_CPUFEATURES=OFF
 
     # The consumer's view, not the build's: `find_package(OpenCV CONFIG
     # REQUIRED)` reads the config package, and the two headers the barcode
@@ -982,21 +1108,35 @@ for library in zlib libjpeg-turbo lunasvg minizip-ng onnxruntime imath openexr l
         continue
     fi
     log="${log_dir}/${library}.log"
+    space_needed=1024
     case "$library" in
-        zlib) build_zlib >"$log" 2>&1 || { cat "$log"; die "zlib build failed (log: ${log})"; } ;;
-        libjpeg-turbo) build_libjpeg_turbo >"$log" 2>&1 || { cat "$log"; die "libjpeg-turbo build failed (log: ${log})"; } ;;
-        lunasvg) build_lunasvg >"$log" 2>&1 || { cat "$log"; die "lunasvg build failed (log: ${log})"; } ;;
-        minizip-ng) build_minizip_ng >"$log" 2>&1 || { cat "$log"; die "minizip-ng build failed (log: ${log})"; } ;;
-        onnxruntime) build_onnxruntime >"$log" 2>&1 || { cat "$log"; die "onnxruntime install failed (log: ${log})"; } ;;
-        imath) build_imath >"$log" 2>&1 || { cat "$log"; die "imath build failed (log: ${log})"; } ;;
-        openexr) build_openexr >"$log" 2>&1 || { cat "$log"; die "openexr build failed (log: ${log})"; } ;;
-        libwebp) build_libwebp >"$log" 2>&1 || { cat "$log"; die "libwebp build failed (log: ${log})"; } ;;
-        highway) build_highway >"$log" 2>&1 || { cat "$log"; die "highway build failed (log: ${log})"; } ;;
-        libjxl) build_libjxl >"$log" 2>&1 || { cat "$log"; die "libjxl build failed (log: ${log})"; } ;;
-        libheif) build_libheif >"$log" 2>&1 || { cat "$log"; die "libheif build failed (log: ${log})"; } ;;
-        opencv) build_opencv >"$log" 2>&1 || { cat "$log"; die "opencv build failed (log: ${log})"; } ;;
+        zlib) build_fn=build_zlib ;;
+        libjpeg-turbo) build_fn=build_libjpeg_turbo ;;
+        lunasvg) build_fn=build_lunasvg ;;
+        minizip-ng) build_fn=build_minizip_ng ;;
+        onnxruntime) build_fn=build_onnxruntime ;;
+        imath) build_fn=build_imath ;;
+        openexr) build_fn=build_openexr ;;
+        libwebp) build_fn=build_libwebp ;;
+        highway) build_fn=build_highway ;;
+        libjxl) build_fn=build_libjxl; space_needed=3072 ;;
+        libheif) build_fn=build_libheif ;;
+        opencv) build_fn=build_opencv; space_needed=4096 ;;
     esac
+
+    report_free_space "$library"
+    require_free_space "$library" "$space_needed"
+
+    # The builder runs in a subshell, so `die` inside it ends that subshell
+    # only and the error branch below can still dump the log before the
+    # script exits. Without the subshell the first `die` takes the whole
+    # script with it and the log is never printed -- which is how the OpenCV
+    # failure of CI run 39764499751 came down to a single misleading line.
+    ( "$build_fn" ) >"$log" 2>&1 \
+        || { dump_log "$log"; die "${library} build failed (log: ${log})"; }
+
     echo "   $(tail -n 1 "$log")"
+    prune_build_tree "$library"
 done
 
 env_file="${prefix}/snow-linux-deps.env"

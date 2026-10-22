@@ -82,6 +82,14 @@ echo "=== linux dependency pins"
 "$python_command" scripts/check-linux-deps-pins.py
 
 echo
+echo "=== opencv configure options"
+# OpenCV 4.12 runs `ocv_verify_config()` at the end of the configure when
+# ENABLE_CONFIG_VERIFICATION is on: every option with a VERIFY clause has to
+# agree with the dependency flag. Run 19 died there and reported only "opencv
+# installed no OpenCVConfig.cmake" (9.6.20).
+"$python_command" scripts/check-linux-deps-opencv-options.py
+
+echo
 echo "=== ffmpeg wiring"
 # ffmpeg-sys-next resolves FFmpeg through FFMPEG_DIR *before* pkg-config and
 # then looks under <FFMPEG_DIR>/include only, so one stale prefix turns a

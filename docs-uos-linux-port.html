@@ -5922,7 +5922,7 @@ class MimeDataRetrieveDataProbe final : public QMimeData {
 </ul>
 <p>⇒ 两个平台不再是同一个程序，违背本工程"两端同源 ⇒ 行为一致"这条底线。</p>
 <p><strong>决定（修法 A）：Linux 侧本地固定版本编 OpenCV 4.12.0 + opencv_contrib 4.12.0，
-打</strong>同一份<strong> 0024 补丁</strong>，与既有的 11 个 pinned 库同构。**</p>
+打</strong>同一份 0024 补丁**，与既有的 11 个 pinned 库同构。</p>
 <p>实现要点（<code>scripts/build-linux-deps.sh</code> 的 <code>build_opencv()</code>）：</p>
 <ul>
 <li><strong>两个归档、两个校验和</strong>：opencv 4.12.0 与 opencv_contrib 4.12.0，SHA512 与
@@ -6074,6 +6074,124 @@ class MimeDataRetrieveDataProbe final : public QMimeData {
   <code>build_opencv()</code> 的 configure/build 一次都没在本机跑过。</li>
 </ul>
 <hr>
+<h4>9.6.21 run 19：<code>ENABLE_CONFIG_VERIFICATION</code> 的 11 项错配，与一条从未执行过的转储（2026-10-22）</h4>
+<p>run 19（<code>39764499751</code>）和 run 18 不是同一个病：x64 与 arm64 都停在<strong>依赖脚本</strong>里，
+整段日志只有一行：</p>
+<pre><code>error: opencv installed no OpenCVConfig.cmake
+</code></pre>
+<h5>25 秒的时间线先排除掉"编译失败"</h5>
+<table>
+<thead>
+<tr>
+<th>时刻</th>
+<th>事件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>10:46:28.924</code></td>
+<td>libheif 安装完成（<code>libheif-config-version.cmake</code>）</td>
+</tr>
+<tr>
+<td><code>10:46:53.926</code></td>
+<td><code>error: opencv installed no OpenCVConfig.cmake</code></td>
+</tr>
+</tbody>
+</table>
+<p>中间 <strong>25 秒、零输出</strong>。OpenCV 那一步要下 90 MB 主仓 + contrib + 4 个模型，再解包、
+打补丁、configure、编译、安装 —— 25 秒连其中一半都装不下。所以
+<code>no OpenCVConfig.cmake</code> 不是病因：它是 <code>build_opencv()</code> 末尾的断言
+（<code>scripts/build-linux-deps.sh:961</code>），在 configure 早已死掉之后才轮到它说话。</p>
+<h5>真因：<code>-DENABLE_CONFIG_VERIFICATION=ON</code> + 11 项选项错配</h5>
+<p>这个开关是从 overlay port 抄来的（同一份源码、同一组选项）。打开后，configure
+结束前 OpenCV 会跑 <code>ocv_verify_config()</code>（<code>cmake/OpenCVUtils.cmake</code>）：</p>
+<pre><code class="language-cmake">foreach(var ${OPENCV_VERIFICATIONS})
+  set(evaluated FALSE)
+  if(${OPENCV_VERIFY_${var}})
+    set(evaluated TRUE)
+  endif()
+  if (${var} AND NOT evaluated)      # 选项 ON，依赖没找到
+    list(APPEND broken_options ${var})
+  elseif(NOT ${var} AND evaluated)   # 选项 OFF，依赖却被找到
+    list(APPEND broken_options ${var})
+  endif()
+endforeach()
+</code></pre>
+<p>两支都会 <code>FATAL_ERROR</code>。HEAD 那套选项集（run 19 实际用的）在这台机器上错 11 项：</p>
+<pre><code>WITH_AVIF  WITH_VTK  WITH_EIGEN  WITH_GSTREAMER  WITH_IPP  WITH_JASPER
+WITH_OPENJPEG  WITH_OPENCLAMDFFT  WITH_OPENCLAMDBLAS  WITH_VA  WITH_VA_INTEL
+</code></pre>
+<h5>为什么真正的报错没进日志</h5>
+<p><code>configure_build_install</code> 在 HEAD 里<strong>没有 <code>|| die</code></strong>，而调用点写的是
+<code>cmd || { cat "$log"; die ...; }</code> —— <code>||</code> 的左侧在 <code>errexit</code> 下被放行，
+<code>die</code> 又直接 <code>exit 1</code> 退掉整个脚本，于是 <code>cat "$log"</code> 从来没有执行过：
+<strong>设计上"失败时转储日志"的那段代码是死代码</strong>，ci 上只剩最末端那句断言。</p>
+<p>修法（本轮）：<code>fetch</code> / <code>unpack</code> / <code>apply_patch</code> / <code>configure_build_install</code> 各自
+<code>|| die</code>；每个库在子 shell 里构建，失败时 <code>dump_log</code> 把该库的日志尾部打到 fd 3；
+<code>die</code> 保留 fd 3 而不是 <code>stderr</code>（<code>stderr</code> 已被 <code>2&gt;&amp;1 | tee</code> 收走）。</p>
+<h5>怎么把"必须显式 OFF 的集合"算准</h5>
+<p>人工推理在这一步反复出错，所以改成<strong>复刻实验</strong>：把上游的 <code>OCV_OPTION</code> 宏与
+<code>ocv_verify_config()</code> <strong>逐字提取</strong>（不是手抄）到 <code>lab_real.cmake</code>，用本机 cmake
+4.2.3 跑 <code>-P</code>，喂三样东西 —— 根 <code>CMakeLists.txt</code> 里全部 <code>OCV_OPTION</code> 块（逐字）、
+Linux/x86_64 平台变量模型、按 workflow apt 清单推出的 <code>HAVE_*</code> 结果集。
+让 cmake 自己算出错配集合：</p>
+<table>
+<thead>
+<tr>
+<th>输入</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>不给任何 <code>-D</code>（纯默认）</td>
+<td><strong>15 项</strong>：<code>AVIF EIGEN GSTREAMER GTK IPP ITT JASPER LAPACK OPENCL OPENCLAMDBLAS OPENCLAMDFFT OPENJPEG VA VA_INTEL VTK</code></td>
+</tr>
+<tr>
+<td>run 19 的选项集</td>
+<td><strong>11 项</strong>（上表）</td>
+</tr>
+<tr>
+<td>本轮修后</td>
+<td><code>VERIFY_RESULT: OK</code></td>
+</tr>
+</tbody>
+</table>
+<p>实验过程本身纠正了两个结论，值得记下来：</p>
+<ul>
+<li><strong><code>VERIFY</code> 选项是 84 项，不是 70 项。</strong> 根 <code>CMakeLists.txt</code> 里有 7 项（<code>WITH_EIGEN</code>
+  <code>WITH_FFMPEG</code> <code>WITH_IPP</code> <code>WITH_VA</code> <code>WITH_VA_INTEL</code> <code>WITH_OPENCL</code> <code>WITH_OPENCLAMDFFT</code>）
+  是<strong>跨行写法</strong>，<code>OCV_OPTION(WITH_X "..." (EXPR</code> 换行后才写 <code>VISIBLE_IF</code> / <code>VERIFY</code>，
+  单行正则全部漏掉 —— 漏项会让"默认 ON 却判不出来"。</li>
+<li><strong>"模块不在 <code>BUILD_LIST</code> 里，检测就不会跑"是错的。</strong> <code>ocv_glob_modules()</code> 的第一遍
+  （<code>cmake/OpenCVModule.cmake</code> 的 <code>_add_modules_1</code>）对<strong>所有</strong>模块无条件 include
+  <code>modules/&lt;m&gt;/cmake/init.cmake</code>，videoio / highgui 的后端探测因此照样执行，
+  <code>BUILD_LIST=wechat_qrcode</code> 挡不住。真正起作用的是 <code>add_backend(&lt;id&gt; &lt;OPTION&gt;)</code>
+  里那个 <code>if(${OPTION})</code>。</li>
+</ul>
+<p>由此得到<strong>单向规则</strong>：选项 OFF 永远自洽（不探测、标志位留空），只有"默认 ON 且依赖
+不存在"才必须写出来。<code>WITH_FFMPEG</code> 正属于相反的一类：CI 装了
+<code>libavcodec/libavformat/libavutil/libswscale</code>，<code>detect_ffmpeg.cmake</code> 用 pkg-config
+找得到 ⇒ 标志位为真 ⇒ <strong><code>-DWITH_FFMPEG=OFF</code> 才是错配</strong>，本轮把它去掉。</p>
+<p>同一类里还有一条更隐蔽的：<code>-DWITH_ADE=OFF</code>。OpenCV 4.12 <strong>没有 <code>WITH_ADE</code> 这个选项</strong>
+（90 个 <code>WITH_*</code> 里没有它），cmake 对未知 <code>-D</code> 一声不响 —— 这行等于没写。</p>
+<h5>门禁：<code>scripts/check-linux-deps-opencv-options.py</code></h5>
+<p>四条判据：15 项必须写 <code>=OFF</code>（缺一行就红）；<code>build_opencv()</code> 里每个 <code>-DWITH_*</code>
+必须在 4.12 的 90 个声明里（防拼错、防上游改名）；<code>ENABLE_CONFIG_VERIFICATION</code>
+必须与 overlay port 一致；<code>WITH_IPP</code> / <code>OBSENSOR_USE_ORBBEC_SDK</code> 必须 OFF
+（两者都会在 configure 中途联网下载，<code>cmake/OpenCVFindIPP.cmake</code>、
+<code>3rdparty/orbbecsdk/orbbecsdk.cmake</code>）。</p>
+<p>反向验证 <code>.workbuddy/uos-port/revval-opencv-options.sh</code> 五条：删 <code>-DWITH_VTK=OFF</code>、
+改 <code>=ON</code>、插回 <code>-DWITH_ADE=OFF</code>、<code>-DWITH_IPP</code> 翻 ON、去掉
+<code>-DENABLE_CONFIG_VERIFICATION</code> —— 每条都必须<strong>只</strong>为那一件事变红，恢复后必须回绿。</p>
+<h5>仍未闭环的一点</h5>
+<p>25 秒窗口说明失败发生在 <strong>下载/校验/configure 的极早期</strong>，而"A 项选项错配导致
+configure 失败"通常也要几十秒（<code>OBSENSOR_USE_ORBBEC_SDK</code> 之外的检测 + 试编译）。
+本轮已让 <code>opencv.log</code> 在失败时被转储，下一次 CI 的日志尾部会直接给出答案：
+若是 curl 返回码，说明是下载；若是 <code>ocv_verify_config</code> 的 <code>FATAL_ERROR</code>，
+说明就是选项集；两者都可能，但<strong>只有日志能定</strong>。</p>
+<hr>
+
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>

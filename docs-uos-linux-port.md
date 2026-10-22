@@ -3791,7 +3791,7 @@ screenshotqrrecognitionservice.cpp:60:17: error: 'barcode' is not a member of 'c
 ⇒ 两个平台不再是同一个程序，违背本工程"两端同源 ⇒ 行为一致"这条底线。
 
 **决定（修法 A）：Linux 侧本地固定版本编 OpenCV 4.12.0 + opencv_contrib 4.12.0，
-打**同一份** 0024 补丁**，与既有的 11 个 pinned 库同构。**
+打**同一份 0024 补丁**，与既有的 11 个 pinned 库同构。
 
 实现要点（`scripts/build-linux-deps.sh` 的 `build_opencv()`）：
 
@@ -3879,6 +3879,118 @@ screenshotqrrecognitionservice.cpp:60:17: error: 'barcode' is not a member of 'c
   `install(EXPORT OpenCVModules ...)` 生成，target 名与链接项仍需 CI 实测。
 - 真正的验证仍然只能来自下一次 CI：**本机没有 Linux 编译器**，
   `build_opencv()` 的 configure/build 一次都没在本机跑过。
+
+#### 9.6.21 run 19：`ENABLE_CONFIG_VERIFICATION` 的 11 项错配，与一条从未执行过的转储（2026-10-22）
+
+run 19（`39764499751`）和 run 18 不是同一个病：x64 与 arm64 都停在**依赖脚本**里，
+整段日志只有一行：
+
+```
+error: opencv installed no OpenCVConfig.cmake
+```
+
+##### 25 秒的时间线先排除掉"编译失败"
+
+| 时刻 | 事件 |
+|---|---|
+| `10:46:28.924` | libheif 安装完成（`libheif-config-version.cmake`） |
+| `10:46:53.926` | `error: opencv installed no OpenCVConfig.cmake` |
+
+中间 **25 秒、零输出**。OpenCV 那一步要下 90 MB 主仓 + contrib + 4 个模型，再解包、
+打补丁、configure、编译、安装 —— 25 秒连其中一半都装不下。所以
+`no OpenCVConfig.cmake` 不是病因：它是 `build_opencv()` 末尾的断言
+（`scripts/build-linux-deps.sh:961`），在 configure 早已死掉之后才轮到它说话。
+
+##### 真因：`-DENABLE_CONFIG_VERIFICATION=ON` + 11 项选项错配
+
+这个开关是从 overlay port 抄来的（同一份源码、同一组选项）。打开后，configure
+结束前 OpenCV 会跑 `ocv_verify_config()`（`cmake/OpenCVUtils.cmake`）：
+
+```cmake
+foreach(var ${OPENCV_VERIFICATIONS})
+  set(evaluated FALSE)
+  if(${OPENCV_VERIFY_${var}})
+    set(evaluated TRUE)
+  endif()
+  if (${var} AND NOT evaluated)      # 选项 ON，依赖没找到
+    list(APPEND broken_options ${var})
+  elseif(NOT ${var} AND evaluated)   # 选项 OFF，依赖却被找到
+    list(APPEND broken_options ${var})
+  endif()
+endforeach()
+```
+
+两支都会 `FATAL_ERROR`。HEAD 那套选项集（run 19 实际用的）在这台机器上错 11 项：
+
+```
+WITH_AVIF  WITH_VTK  WITH_EIGEN  WITH_GSTREAMER  WITH_IPP  WITH_JASPER
+WITH_OPENJPEG  WITH_OPENCLAMDFFT  WITH_OPENCLAMDBLAS  WITH_VA  WITH_VA_INTEL
+```
+
+##### 为什么真正的报错没进日志
+
+`configure_build_install` 在 HEAD 里**没有 `|| die`**，而调用点写的是
+`cmd || { cat "$log"; die ...; }` —— `||` 的左侧在 `errexit` 下被放行，
+`die` 又直接 `exit 1` 退掉整个脚本，于是 `cat "$log"` 从来没有执行过：
+**设计上"失败时转储日志"的那段代码是死代码**，ci 上只剩最末端那句断言。
+
+修法（本轮）：`fetch` / `unpack` / `apply_patch` / `configure_build_install` 各自
+`|| die`；每个库在子 shell 里构建，失败时 `dump_log` 把该库的日志尾部打到 fd 3；
+`die` 保留 fd 3 而不是 `stderr`（`stderr` 已被 `2>&1 | tee` 收走）。
+
+##### 怎么把"必须显式 OFF 的集合"算准
+
+人工推理在这一步反复出错，所以改成**复刻实验**：把上游的 `OCV_OPTION` 宏与
+`ocv_verify_config()` **逐字提取**（不是手抄）到 `lab_real.cmake`，用本机 cmake
+4.2.3 跑 `-P`，喂三样东西 —— 根 `CMakeLists.txt` 里全部 `OCV_OPTION` 块（逐字）、
+Linux/x86_64 平台变量模型、按 workflow apt 清单推出的 `HAVE_*` 结果集。
+让 cmake 自己算出错配集合：
+
+| 输入 | 结果 |
+|---|---|
+| 不给任何 `-D`（纯默认） | **15 项**：`AVIF EIGEN GSTREAMER GTK IPP ITT JASPER LAPACK OPENCL OPENCLAMDBLAS OPENCLAMDFFT OPENJPEG VA VA_INTEL VTK` |
+| run 19 的选项集 | **11 项**（上表） |
+| 本轮修后 | `VERIFY_RESULT: OK` |
+
+实验过程本身纠正了两个结论，值得记下来：
+
+- **`VERIFY` 选项是 84 项，不是 70 项。** 根 `CMakeLists.txt` 里有 7 项（`WITH_EIGEN`
+  `WITH_FFMPEG` `WITH_IPP` `WITH_VA` `WITH_VA_INTEL` `WITH_OPENCL` `WITH_OPENCLAMDFFT`）
+  是**跨行写法**，`OCV_OPTION(WITH_X "..." (EXPR` 换行后才写 `VISIBLE_IF` / `VERIFY`，
+  单行正则全部漏掉 —— 漏项会让"默认 ON 却判不出来"。
+- **"模块不在 `BUILD_LIST` 里，检测就不会跑"是错的。** `ocv_glob_modules()` 的第一遍
+  （`cmake/OpenCVModule.cmake` 的 `_add_modules_1`）对**所有**模块无条件 include
+  `modules/<m>/cmake/init.cmake`，videoio / highgui 的后端探测因此照样执行，
+  `BUILD_LIST=wechat_qrcode` 挡不住。真正起作用的是 `add_backend(<id> <OPTION>)`
+  里那个 `if(${OPTION})`。
+
+由此得到**单向规则**：选项 OFF 永远自洽（不探测、标志位留空），只有"默认 ON 且依赖
+不存在"才必须写出来。`WITH_FFMPEG` 正属于相反的一类：CI 装了
+`libavcodec/libavformat/libavutil/libswscale`，`detect_ffmpeg.cmake` 用 pkg-config
+找得到 ⇒ 标志位为真 ⇒ **`-DWITH_FFMPEG=OFF` 才是错配**，本轮把它去掉。
+
+同一类里还有一条更隐蔽的：`-DWITH_ADE=OFF`。OpenCV 4.12 **没有 `WITH_ADE` 这个选项**
+（90 个 `WITH_*` 里没有它），cmake 对未知 `-D` 一声不响 —— 这行等于没写。
+
+##### 门禁：`scripts/check-linux-deps-opencv-options.py`
+
+四条判据：15 项必须写 `=OFF`（缺一行就红）；`build_opencv()` 里每个 `-DWITH_*`
+必须在 4.12 的 90 个声明里（防拼错、防上游改名）；`ENABLE_CONFIG_VERIFICATION`
+必须与 overlay port 一致；`WITH_IPP` / `OBSENSOR_USE_ORBBEC_SDK` 必须 OFF
+（两者都会在 configure 中途联网下载，`cmake/OpenCVFindIPP.cmake`、
+`3rdparty/orbbecsdk/orbbecsdk.cmake`）。
+
+反向验证 `.workbuddy/uos-port/revval-opencv-options.sh` 五条：删 `-DWITH_VTK=OFF`、
+改 `=ON`、插回 `-DWITH_ADE=OFF`、`-DWITH_IPP` 翻 ON、去掉
+`-DENABLE_CONFIG_VERIFICATION` —— 每条都必须**只**为那一件事变红，恢复后必须回绿。
+
+##### 仍未闭环的一点
+
+25 秒窗口说明失败发生在 **下载/校验/configure 的极早期**，而"A 项选项错配导致
+configure 失败"通常也要几十秒（`OBSENSOR_USE_ORBBEC_SDK` 之外的检测 + 试编译）。
+本轮已让 `opencv.log` 在失败时被转储，下一次 CI 的日志尾部会直接给出答案：
+若是 curl 返回码，说明是下载；若是 `ocv_verify_config` 的 `FATAL_ERROR`，
+说明就是选项集；两者都可能，但**只有日志能定**。
 
 ---
 
