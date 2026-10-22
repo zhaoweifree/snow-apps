@@ -235,7 +235,7 @@ snow_shot_appimage_architecture(_arch PROCESSOR \"${_processor}\")\n")
     endif()
 endforeach()
 
-snow_shot_appimage_layout()
+snow_shot_appimage_layout(APP_SOURCE_DIR "${_snow_repo}/snow_shot")
 snow_expect("appimage file name" "snow-shot-1.2.8-x86_64.AppImage"
             "${SNOW_SHOT_APPIMAGE_FILE_NAME}")
 snow_expect("appimage install prefix" "${CMAKE_BINARY_DIR}/appimage/snow_shot-1.2.8-x86_64.AppDir/usr"
@@ -243,6 +243,22 @@ snow_expect("appimage install prefix" "${CMAKE_BINARY_DIR}/appimage/snow_shot-1.
 # appimagetool reads the entry and the icon from the AppDir root, and the icon
 # has to be named exactly what Icon= says.
 snow_expect("appimage root icon name" "snow-shot.png" "${SNOW_SHOT_APPIMAGE_ICON_NAME}")
+
+# The two files staged into the AppDir have to exist where the layout says they
+# are. They used to be built from `${CMAKE_CURRENT_SOURCE_DIR}` inside a function
+# the *root* CMakeLists calls, so both resolved to `<repo>/packaging/...` and
+# `<repo>/resources/...`; nothing caught it, and the configure that turned the
+# option on reported a missing icon that was sitting under `snow_shot/` all
+# along. This check is the one that would have said so.
+foreach(_staged APPRUN_SOURCE ICON_SOURCE)
+    if(EXISTS "${SNOW_SHOT_APPIMAGE_${_staged}}")
+        message(STATUS "ok   appimage ${_staged} exists")
+    else()
+        message(STATUS "FAIL appimage ${_staged} does not exist: "
+                       "${SNOW_SHOT_APPIMAGE_${_staged}}")
+        math(EXPR _snow_failures "${_snow_failures} + 1")
+    endif()
+endforeach()
 
 file(READ "${_snow_repo}/CMakeLists.txt" _snow_root_cmake)
 string(FIND "${_snow_root_cmake}" "snow_shot_add_appimage_target()" _snow_position)

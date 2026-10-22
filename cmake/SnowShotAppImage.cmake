@@ -40,22 +40,43 @@ function(snow_shot_appimage_architecture out_var)
     set(${out_var} "${_snow_architecture}" PARENT_SCOPE)
 endfunction()
 
-# Computes the AppDir layout and the output file name.
+# Computes the AppDir layout, the two files staged into it, and the output name.
 #
 # Returns, in the caller's scope:
 #
-#   SNOW_SHOT_APPIMAGE_ARCH        appimagetool's ARCH value
-#   SNOW_SHOT_APPIMAGE_FILE_NAME   snow-shot-<version>-<arch>.AppImage
-#   SNOW_SHOT_APPIMAGE_DIR         the staged AppDir (what gets deleted first)
-#   SNOW_SHOT_APPIMAGE_USR         the AppDir's usr/ prefix, i.e. the install prefix
-#   SNOW_SHOT_APPIMAGE_DESKTOP     the entry, as shipped by the install rules
-#   SNOW_SHOT_APPIMAGE_ICON_NAME   the icon file name at the AppDir root
+#   SNOW_SHOT_APPIMAGE_ARCH            appimagetool's ARCH value
+#   SNOW_SHOT_APPIMAGE_FILE_NAME       snow-shot-<version>-<arch>.AppImage
+#   SNOW_SHOT_APPIMAGE_DIR             the staged AppDir (what gets deleted first)
+#   SNOW_SHOT_APPIMAGE_USR             the AppDir's usr/ prefix, i.e. the install prefix
+#   SNOW_SHOT_APPIMAGE_DESKTOP         the entry, as shipped by the install rules
+#   SNOW_SHOT_APPIMAGE_ICON_NAME       the icon file name at the AppDir root
+#   SNOW_SHOT_APPIMAGE_APPRUN_SOURCE   the reviewed launcher in the source tree
+#   SNOW_SHOT_APPIMAGE_ICON_SOURCE     the 256x256 PNG staged as the root icon
+#
+# Where the source files live is an argument, not `${CMAKE_CURRENT_SOURCE_DIR}`.
+# That variable is the directory of the CMakeLists.txt being processed, and the
+# only caller lives in the root one -- so the two paths resolved to
+# `<repo>/packaging/...` and `<repo>/resources/...`, neither of which exists.
+# The configure that turned the option on died on the icon check and told the
+# reader to generate icons that were already there. When APP_SOURCE_DIR is
+# omitted the answer comes from the target itself, which always knows its own
+# directory; the gate passes it explicitly so it can run in script mode.
 #
 # The version in the file name is the numeric triple, not `SNOW_SHOT_VERSION`:
 # a pre-release suffix such as `-rc1` is legal in a file name but makes the
 # name disagree with what the release tag claims.
 function(snow_shot_appimage_layout)
+    cmake_parse_arguments(_snow "" "APP_SOURCE_DIR" "" ${ARGN})
     snow_shot_appimage_architecture(_snow_architecture)
+    if(_snow_APP_SOURCE_DIR)
+        set(_snow_app_dir "${_snow_APP_SOURCE_DIR}")
+    elseif(TARGET snow_shot)
+        get_target_property(_snow_app_dir snow_shot SOURCE_DIR)
+    else()
+        message(FATAL_ERROR
+            "snow_shot_appimage_layout: no APP_SOURCE_DIR and no snow_shot target. "
+            "In script mode pass APP_SOURCE_DIR <path to snow_shot/>.")
+    endif()
     set(_snow_dir "${CMAKE_BINARY_DIR}/appimage/snow_shot-${SNOW_SHOT_VERSION_NUMERIC}-${_snow_architecture}.AppDir")
     set(SNOW_SHOT_APPIMAGE_ARCH "${_snow_architecture}" PARENT_SCOPE)
     set(SNOW_SHOT_APPIMAGE_FILE_NAME
@@ -64,6 +85,10 @@ function(snow_shot_appimage_layout)
     set(SNOW_SHOT_APPIMAGE_USR "${_snow_dir}/usr" PARENT_SCOPE)
     set(SNOW_SHOT_APPIMAGE_DESKTOP "${_snow_dir}/usr/share/applications/snow-shot.desktop" PARENT_SCOPE)
     set(SNOW_SHOT_APPIMAGE_ICON_NAME "snow-shot.png" PARENT_SCOPE)
+    set(SNOW_SHOT_APPIMAGE_APPRUN_SOURCE
+        "${_snow_app_dir}/packaging/linux/appimage/AppRun" PARENT_SCOPE)
+    set(SNOW_SHOT_APPIMAGE_ICON_SOURCE
+        "${_snow_app_dir}/resources/icons/hicolor/256x256/apps/snow-shot.png" PARENT_SCOPE)
 endfunction()
 
 # Attaches the `snow-shot-appimage` target.
@@ -113,8 +138,14 @@ function(snow_shot_add_appimage_target)
         set(_snow_appimage_runtime_args --runtime-file "${SNOW_APPS_APPIMAGETOOL_RUNTIME}")
     endif()
 
-    set(_snow_apprun "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/appimage/AppRun")
-    set(_snow_icon_source "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/hicolor/256x256/apps/snow-shot.png")
+    set(_snow_apprun "${SNOW_SHOT_APPIMAGE_APPRUN_SOURCE}")
+    set(_snow_icon_source "${SNOW_SHOT_APPIMAGE_ICON_SOURCE}")
+    # Both checks are here rather than in `snow_shot_appimage_layout()` so the
+    # gate can call the layout with a deliberately empty directory and still
+    # compare the strings it computes.
+    if(NOT EXISTS "${_snow_apprun}")
+        message(FATAL_ERROR "Missing ${_snow_apprun}, the AppImage entry point.")
+    endif()
     # appimagetool refuses an AppDir whose root icon is not exactly the name in
     # the entry's Icon=. The 256x256 PNG is the largest fixed size we ship, and
     # the scalable SVG next to it in the package is not what appimagetool reads.
