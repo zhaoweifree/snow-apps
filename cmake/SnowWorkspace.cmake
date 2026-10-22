@@ -55,8 +55,27 @@ function(snow_workspace_configure_paths)
     endif()
     set(SNOW_VCPKG_INSTALLED_DIR "${_vcpkg_installed_default}" CACHE PATH
         "vcpkg installed tree used by the active build preset.")
-    set(SNOW_FFMPEG_ROOT "${SNOW_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}" CACHE PATH
-        "vcpkg installation prefix containing FFmpeg.")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Linux takes FFmpeg from the distribution (port document §5.1), so the
+        # prefix is *not* a vcpkg tree: vcpkg never runs on Linux, and
+        # ".tools/vcpkg/installed/x64-linux" does not exist. Pointing
+        # SNOW_FFMPEG_ROOT at it was harmless as long as nothing read it -- but
+        # RustStaticLibrary.cmake exports it as FFMPEG_DIR, and ffmpeg-sys-next
+        # gives FFMPEG_DIR priority over pkg-config: it then looks for headers
+        # under <FFMPEG_DIR>/include only, bypassing the distribution packages
+        # entirely. That is how CI run 39707846164 failed with
+        # "libavfilter/avfilter.h: No such file or directory" on a machine that
+        # had libavfilter-dev installed.
+        #
+        # An empty value means "let pkg-config find the system FFmpeg"; see
+        # scripts/check-linux-ffmpeg-wiring.py, which fails the build when this
+        # default regresses to a vcpkg path.
+        set(SNOW_FFMPEG_ROOT "" CACHE PATH
+            "Prefix containing a prebuilt FFmpeg. Leave empty on Linux so that pkg-config finds the distribution FFmpeg.")
+    else()
+        set(SNOW_FFMPEG_ROOT "${SNOW_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}" CACHE PATH
+            "vcpkg installation prefix containing FFmpeg.")
+    endif()
 
     foreach(_required_dir IN ITEMS
         SNOW_ANT_DESIGN_SOURCE_DIR

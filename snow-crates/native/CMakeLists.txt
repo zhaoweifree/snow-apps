@@ -28,7 +28,12 @@ if(SNOW_MEDIA_BUILD_RECORDING)
     if(DEFINED ENV{FFMPEG_DIR})
         set(ENV{PKG_CONFIG_PATH} "$ENV{FFMPEG_DIR}/lib/pkgconfig")
     endif()
-    pkg_check_modules(SNOW_MEDIA_FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat libavutil libswscale libswresample)
+    # libavfilter is not optional: ffmpeg-next's "filter" feature maps to
+    # CARGO_FEATURE_AVFILTER, and ffmpeg-sys-next's build script exits with
+    # "The libavfilter library is required" when the module is missing. The
+    # Rust archive therefore carries avfilter_* symbols, and this C library
+    # has to link them.
+    pkg_check_modules(SNOW_MEDIA_FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat libavfilter libavutil libswscale libswresample)
     target_link_libraries(snow_recording_c INTERFACE snow_capture_c PkgConfig::SNOW_MEDIA_FFMPEG)
     if(APPLE)
         add_executable(snow_recording_c_smoke c_recording_smoke.c)

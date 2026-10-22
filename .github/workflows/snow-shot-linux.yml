@@ -140,6 +140,15 @@ jobs:
       # The dependency list is docs-uos-linux-port.md §9.1 plus the packaging
       # tools. Every entry is a distribution package: the Linux presets set no
       # toolchain file, so vcpkg never runs on this side (P2 decision).
+      #
+      # The libav*-dev packages are FFmpeg's development files. The Rust
+      # recording/export chain depends on ffmpeg-next, whose build script
+      # resolves the libraries through pkg-config; the C++ side links the same
+      # six modules. 24.04 ships FFmpeg 6.1.1 (libavcodec 60.31), which
+      # ffmpeg-next 9.0.0 supports -- it selects the pre-7.0 channel-layout
+      # path when the ffmpeg_7_0 feature is absent. The project does not pin
+      # FFmpeg 9.0 on Linux the way the vcpkg overlay port does on Windows,
+      # because port document §5.1 puts the distribution packages first.
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -155,6 +164,8 @@ jobs:
             zlib1g-dev libtinyxml2-dev \
             libde265-dev libx265-dev libbrotli-dev liblcms2-dev \
             libopencv-dev \
+            libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
+            libswresample-dev libswscale-dev \
             python3 \
             dpkg-dev desktop-file-utils appstream
 

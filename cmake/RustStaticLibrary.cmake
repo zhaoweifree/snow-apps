@@ -166,6 +166,11 @@ function(snow_add_rust_static_libraries batch_name)
     if(NOT DEFINED SNOW_FFMPEG_ROOT OR SNOW_FFMPEG_ROOT STREQUAL "")
         if(DEFINED ENV{FFMPEG_DIR} AND NOT "$ENV{FFMPEG_DIR}" STREQUAL "")
             set(SNOW_FFMPEG_ROOT "$ENV{FFMPEG_DIR}")
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            # Linux takes FFmpeg from the distribution (port document §5.1).
+            # An empty prefix is the signal for "let pkg-config find it"; it
+            # must not fall back to the vcpkg tree, which does not exist here.
+            set(SNOW_FFMPEG_ROOT "")
         elseif(DEFINED VCPKG_INSTALLED_DIR AND NOT VCPKG_INSTALLED_DIR STREQUAL "")
             set(SNOW_FFMPEG_ROOT "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
         else()
@@ -242,9 +247,15 @@ function(snow_add_rust_static_libraries batch_name)
         "VCPKG_ROOT=${SNOW_VCPKG_ROOT}"
         "VCPKGRS_TRIPLET=${VCPKG_TARGET_TRIPLET}"
         "VCPKGRS_DYNAMIC=${_vcpkg_dynamic}"
-        "FFMPEG_DIR=${SNOW_FFMPEG_ROOT}"
         "CARGO_TARGET_DIR=${SNOW_RUST_CARGO_TARGET_DIR}"
     )
+    # FFMPEG_DIR must be *absent*, not empty, when there is no prebuilt FFmpeg
+    # prefix. ffmpeg-sys-next's build script branches on `env::var("FFMPEG_DIR")`
+    # succeeding, so an empty value still selects the prebuilt branch, where it
+    # searches <FFMPEG_DIR>/include alone and never falls back to pkg-config.
+    if(NOT SNOW_FFMPEG_ROOT STREQUAL "")
+        list(APPEND _cargo_environment "FFMPEG_DIR=${SNOW_FFMPEG_ROOT}")
+    endif()
     snow_windows_rust_environment(_windows_cargo_environment "${SNOW_RUST_TARGET}")
     list(APPEND _cargo_environment ${_windows_cargo_environment})
     if(APPLE)

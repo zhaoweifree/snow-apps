@@ -8251,7 +8251,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         src/presentation/services/screenshotclipboardservice.cpp)
     target_link_libraries(snow-shot-standalone-translation-tests PRIVATE
         snow_shot_settings snow_shot_image_codec)
-    if(WIN32)
+    if(TARGET PkgConfig::SNOW_SHOT_FFMPEG)
         target_link_libraries(snow-shot-standalone-translation-tests PRIVATE PkgConfig::SNOW_SHOT_FFMPEG)
     endif()
     target_compile_definitions(snow-shot-standalone-translation-tests PRIVATE
@@ -8267,7 +8267,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         src/presentation/services/screenshotclipboardservice.cpp)
     target_link_libraries(snow-shot-translation-page-streaming-tests PRIVATE
         snow_shot_settings snow_shot_image_codec)
-    if(WIN32)
+    if(TARGET PkgConfig::SNOW_SHOT_FFMPEG)
         target_link_libraries(snow-shot-translation-page-streaming-tests PRIVATE
             PkgConfig::SNOW_SHOT_FFMPEG)
     endif()
@@ -8649,7 +8649,7 @@ if(SNOW_SHOT_BUILD_BENCHMARKS)
         src/presentation/services/screenshotclipboardservice.cpp)
     target_link_libraries(snow-shot-translation-page-streaming-benchmark PRIVATE
         snow_shot_settings snow_shot_image_codec)
-    if(WIN32)
+    if(TARGET PkgConfig::SNOW_SHOT_FFMPEG)
         target_link_libraries(snow-shot-translation-page-streaming-benchmark PRIVATE
             PkgConfig::SNOW_SHOT_FFMPEG)
     endif()
@@ -8887,7 +8887,7 @@ if(WIN32 AND SNOW_SHOT_BUILD_BENCHMARKS)
         Qt::Widgets
         Psapi
     )
-    if(WIN32)
+    if(TARGET PkgConfig::SNOW_SHOT_FFMPEG)
         target_link_libraries(snow-shot-history-performance-benchmark PRIVATE
             PkgConfig::SNOW_SHOT_FFMPEG
         )
@@ -9569,6 +9569,19 @@ if(WIN32)
     )
 endif()
 
+# FFmpeg is a hard dependency of the Rust recording/export chain
+# (snow-recording-export -> ffmpeg-next -> ffmpeg-sys-next), which is linked
+# into the Rust FFI bundle. The bundle is a static archive, so the C++ side has
+# to resolve the av* symbols itself: every final executable that reaches the
+# bundle needs the FFmpeg libraries on its link line.
+#
+# The module list is the one ffmpeg-sys-next's build script probes through
+# pkg-config: libavutil and libavcodec unconditionally, plus libavformat,
+# libavfilter, libswscale and libswresample for the features this project
+# enables (snow-crates/Cargo.toml: ffmpeg-next with codec/format/filter/
+# software-resampling/software-scaling). libavfilter is not optional: the
+# "filter" feature maps to CARGO_FEATURE_AVFILTER, and without it the Rust
+# build script exits with "The libavfilter library is required".
 if(WIN32)
     set(SNOW_SHOT_FFMPEG_BIN_DIR
         "${SNOW_FFMPEG_ROOT}/bin"
@@ -9598,6 +9611,19 @@ if(WIN32)
     pkg_check_modules(SNOW_SHOT_FFMPEG REQUIRED IMPORTED_TARGET GLOBAL ${_snow_ffmpeg_modules})
     set(ENV{PKG_CONFIG_PATH} "${_SNOW_SHOT_SAVED_PKG_CONFIG_PATH}")
     unset(_SNOW_SHOT_SAVED_PKG_CONFIG_PATH)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Linux takes FFmpeg from the distribution (port document §5.1), so the
+    # .pc files are the ones the distribution installs -- there is no prefix to
+    # point PKG_CONFIG_PATH at. The same module list applies, and it is the
+    # list ffmpeg-sys-next probes; a mismatch shows up as "libavfilter not
+    # found" from the Rust build script rather than as a configure error.
+    find_package(PkgConfig REQUIRED)
+    set(_snow_ffmpeg_modules libavfilter libavformat libavcodec libswresample libswscale libavutil)
+    pkg_check_modules(SNOW_SHOT_FFMPEG REQUIRED IMPORTED_TARGET GLOBAL ${_snow_ffmpeg_modules})
+    unset(_snow_ffmpeg_modules)
+endif()
+
+if(TARGET PkgConfig::SNOW_SHOT_FFMPEG)
     # Canvas-only consumers also reach recording symbols in the bundled archive.
     foreach(_snow_rust_bundle IN ITEMS snow_shot_rust_ffi_bundle snow_shot_full_rust_ffi_bundle)
         if(TARGET ${_snow_rust_bundle})
@@ -9608,8 +9634,10 @@ if(WIN32)
     target_link_libraries(snow_shot PRIVATE PkgConfig::SNOW_SHOT_FFMPEG)
     if(TARGET snow-shot-screen-recording-controller-tests)
         target_link_libraries(snow-shot-screen-recording-controller-tests PRIVATE PkgConfig::SNOW_SHOT_FFMPEG)
-        set_property(TEST snow-shot-screen-recording-controller-tests snow-shot-recording-effects-preview-tests APPEND PROPERTY
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${SNOW_FFMPEG_ROOT}/bin")
+        if(WIN32)
+            set_property(TEST snow-shot-screen-recording-controller-tests snow-shot-recording-effects-preview-tests APPEND PROPERTY
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${SNOW_FFMPEG_ROOT}/bin")
+        endif()
     endif()
     if(TARGET snow-shot-screenshot-canvas-renderer-tests)
         target_link_libraries(snow-shot-screenshot-canvas-renderer-tests PRIVATE
@@ -9637,12 +9665,17 @@ if(WIN32)
         if(TARGET ${_snow_shot_ocr_background_target})
             target_link_libraries(${_snow_shot_ocr_background_target} PRIVATE
                 PkgConfig::SNOW_SHOT_FFMPEG)
-            set_property(TEST ${_snow_shot_ocr_background_target} APPEND PROPERTY
-                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${SNOW_FFMPEG_ROOT}/bin")
+            if(WIN32)
+                set_property(TEST ${_snow_shot_ocr_background_target} APPEND PROPERTY
+                    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${SNOW_FFMPEG_ROOT}/bin")
+            endif()
         endif()
     endforeach()
     unset(_snow_shot_ocr_background_target)
-    if(EXISTS "${SNOW_SHOT_FFMPEG_BIN_DIR}" AND NOT SNOW_SHOT_RELEASE_STATIC)
+    # The FFmpeg DLLs are a Windows-only packaging concern: the vcpkg build
+    # ships them next to the import libraries, and the Linux build links the
+    # distribution's shared objects, which dpkg-shlibdeps records as Depends.
+    if(WIN32 AND EXISTS "${SNOW_SHOT_FFMPEG_BIN_DIR}" AND NOT SNOW_SHOT_RELEASE_STATIC)
         set(SNOW_SHOT_FFMPEG_DLL_PATTERNS
             "avcodec-*.dll"
             "avdevice-*.dll"

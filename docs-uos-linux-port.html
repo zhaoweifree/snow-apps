@@ -1347,6 +1347,14 @@ sudo apt install -y libgl1-mesa-dev libxcb-xinerama0-dev libxkbcommon-dev libxkb
 # 它们是自编 HEIF / JXL 的后端。
 sudo apt install -y libpng-dev libjpeg-dev libwebp-dev libgif-dev libtiff-dev \
     libde265-dev libx265-dev libbrotli-dev liblcms2-dev zlib1g-dev libtinyxml2-dev
+# FFmpeg（录制/导出链的绑定，§5.1 决定 Linux 用发行版包）
+# Rust 侧 ffmpeg-next -&gt; ffmpeg-sys-next 的 build 脚本按 pkg-config 找这六个模块；
+# C++ 侧链接同一组。libavfilter 不是可选项：ffmpeg-next 的 &quot;filter&quot; feature
+# 对应 CARGO_FEATURE_AVFILTER，缺它时 build 脚本直接 exit(1)。
+# 24.04 是 FFmpeg 6.1.1（libavcodec 60.31），ffmpeg-next 9.0.0 支持：探测不到
+# ffmpeg_7_0 时会自动走 7.0 之前的 channel-layout 分支（legacy_channel_layout.rs）。
+sudo apt install -y libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
+    libswresample-dev libswscale-dev
 # 可选：OCR
 sudo apt install -y libopencv-dev
 </code></pre>
@@ -4765,6 +4773,11 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 <code>
 <td><code>gates</code> ✅ / <strong><code>Configure</code> ✅</strong> / <strong>deps ✅</strong> / <code>build</code> ❌</td>
 <td>固定版本自编的依赖在 Linux 上第一次全绿（<code>snow_image</code> 静态库链接成功，内含 jxl/heif 编解码器）；红灯移到 <strong>Rust FFI 的 lockfile</strong>：<code>snow_rust_ffi/Cargo.lock</code> 早于 AT-SPI2 重构，<code>--locked</code> 拒绝更新，见 9.6.15</td>
 </tr>
+<tr>
+<td>14（<code>39707846</code>）</td>
+<td><code>gates</code> ✅ / <strong><code>Configure</code> ✅</strong> / <strong>deps ✅</strong> / <code>build</code> ❌</td>
+<td>lockfile 修好后红灯落到 <strong>Rust FFI 的 FFmpeg 绑定</strong>：<code>libavfilter/avfilter.h: No such file or directory</code> —— 错误指向头文件，实际是<strong>搜索路径被 <code>FFMPEG_DIR</code> 劫持</strong>，见 9.6.16</td>
+</tr>
 </tbody>
 </table>
 <p><strong>run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug</strong>，不是缺包。Qt5 装在自定义前缀时
@@ -5164,6 +5177,204 @@ error: cannot update the lock file .../snow_rust_ffi/Cargo.lock because --locked
 <p><strong>判据（可复用）</strong>：一个仓库里有几个 cargo 工程，就要有几个 lockfile 检查点。
 "只有一个 lockfile 被检查"和"只有一个 lockfile 存在"是同一类错误。</p>
 <hr>
+<h4>9.6.16 run 14：错误指向头文件，实际是搜索路径被劫持（2026-10-22）</h4>
+<p>run 14（<code>39707846</code>）把 lockfile 修好后，红灯第一次落到 <strong>Rust FFI 的 FFmpeg 绑定</strong>上：</p>
+<pre><code>cargo:rustc-link-search=native=/home/runner/work/snow-apps/snow-apps/.tools/vcpkg/installed/x64-linux
+cargo:rustc-link-lib=dylib=avcodec
+cargo:rustc-link-lib=dylib=avfilter
+...
+check.c:771:18: fatal error: libavfilter/avfilter.h: No such file or directory
+</code></pre>
+<p><strong>第一眼看上去是"CI 机器没装 libavfilter-dev"</strong>。但 CI 的 apt 清单里当时<strong>根本没列</strong> <code>libav*-dev</code>
+（这是真的漏了），而更关键的是：<strong>就算装了也不会被找到</strong>。错误里的
+<code>rustc-link-search</code> 指向 <code>.tools/vcpkg/installed/x64-linux</code> —— 一个<strong>在 Linux 上根本不存在</strong>的目录。</p>
+<p><strong>根因链（从 <code>cmake/SnowWorkspace.cmake</code> 到 bindgen 找不到头文件，四步）</strong>：</p>
+<ol>
+<li><code>cmake/SnowWorkspace.cmake</code> 无条件设
+   <code>SNOW_FFMPEG_ROOT = ${SNOW_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}</code> ⇒ Linux 上得到
+   <code>.tools/vcpkg/installed/x64-linux</code>（不存在）。<strong>vcpkg 在 Linux 上根本不跑</strong>。</li>
+<li><code>cmake/RustStaticLibrary.cmake</code> 把 <code>SNOW_FFMPEG_ROOT</code> 当作 <code>FFMPEG_DIR</code> 传给 cargo。</li>
+<li><code>ffmpeg-sys-next</code> 9.0.0 的 build 脚本<strong>四段式</strong>优先级：
+   <code>build</code> feature → <strong><code>FFMPEG_DIR</code></strong> → vcpkg → pkg-config。<strong><code>FFMPEG_DIR</code> 压过 pkg-config</strong>。</li>
+<li>走 <code>FFMPEG_DIR</code> 分支时，include 目录<strong>只有</strong> <code>&lt;FFMPEG_DIR&gt;/include</code>（原样返回
+   <code>vec![ffmpeg_dir.join("include")]</code>），native lib 目录按 arch 选 <code>lib/amd64</code> / <code>lib/arm64</code>，
+   然后直接发 <code>cargo:rustc-link-lib</code> —— <strong>全程不调用 <code>pkg_config</code></strong>。</li>
+</ol>
+<p>⇒ 结论：<strong><code>FFMPEG_DIR</code> 一旦被设置，pkg-config 就永远不会被问到。</strong></p>
+<p><strong>空串陷阱</strong>：<code>env::var("FFMPEG_DIR")</code> 对 <code>FFMPEG_DIR=""</code> <strong>仍然返回 <code>Ok</code></strong> ⇒ build 脚本照样走
+prebuilt 分支，而 <code>PathBuf::from("")</code> 会得到<strong>相对路径</strong> <code>include</code> / <code>lib</code>。
+所以正确做法是<strong>完全不导出这个变量</strong>，不是导出空值。</p>
+<p><strong>路线选择（两条都排除）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>路线</th>
+<th>代价</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux 侧门控掉整条 recording 链</td>
+<td><code>snow-recording-c</code> 4157 行 Rust <strong>无任何 Linux 桩</strong>；C++ 侧 <strong>139 处</strong> <code>snow_recording_*</code> 引用跨 8 个文件；<code>snow-recording-export</code> / <code>-runtime</code> <strong>无条件</strong>依赖 ffmpeg-next</td>
+<td>与 9.5 的 A 类归因冲突（这类失败"与 Linux 移植无关"），且规模远超"修一个红灯" ⇒ 排除</td>
+</tr>
+<tr>
+<td>自编 FFmpeg 9.0</td>
+<td>需要 bin2c host 工具、nasm、16 个 vcpkg patch、双架构各自长编译</td>
+<td>与 §5.1「Linux 用发行版 <code>libavcodec-dev</code>」的既定决策相悖 ⇒ 排除</td>
+</tr>
+<tr>
+<td><strong>Linux 用发行版 <code>libav*-dev</code></strong></td>
+<td>apt 装 6 个包</td>
+<td><strong>采纳</strong>（§5.1 早已拍板）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>采纳前逐条核实的事实</strong>（全部从本地 <code>~/.cargo/registry</code> 的 crate 源码逐字读出来，不靠文档站）：</p>
+<ol>
+<li><code>ffmpeg-sys-next</code> 9.0.0 <strong>没有任何最低版本断言</strong>（无 <code>assert!(version &gt;= ...)</code>、无
+   <code>pkg_config::atleast_version</code>）⇒ 6.1 不会被版本门挡住。</li>
+<li><code>ffmpeg-next</code> 9.0.0 <strong>官方支持 FFmpeg &lt; 7.0</strong>：<code>src/util/mod.rs</code> 里
+   <code>#[cfg_attr(feature = "ffmpeg_7_0", path = "channel_layout.rs")]</code> /
+   <code>#[cfg_attr(not(feature = "ffmpeg_7_0"), path = "legacy_channel_layout.rs")]</code>。</li>
+<li>项目实际用到的 API 在 legacy 路径<strong>全部存在</strong>：<code>channel_layout()</code> /
+   <code>set_channel_layout()</code>（<code>codec/decoder/audio.rs</code>、<code>codec/encoder/audio.rs</code>）、
+   <code>channel_layouts()</code>（<code>codec/audio.rs</code>，三个 cfg 分支下都有）。</li>
+<li>Ubuntu 24.04 = FFmpeg <strong>6.1.1</strong>（libavcodec <strong>60.31</strong>）⇒ 命中 <code>ffmpeg_6_1</code> 阈值（60.31）、
+   <strong>不</strong>命中 <code>ffmpeg_7_0</code>（61.3）⇒ 正好走 legacy 分支。</li>
+<li>pkg-config 探测的模块集合 = <code>libavutil</code> + <code>libavcodec</code>（<strong>无条件</strong>）+
+   按 feature 的 <code>libavformat</code> / <code>libavfilter</code> / <code>libswscale</code> / <code>libswresample</code>
+   ⇒ 与 C++ 侧 Windows 块原有的列表<strong>逐字相同</strong>，也正是本工程 feature 集对应的集合。</li>
+<li><code>ffmpeg-sys-next</code> 用 bindgen 生成绑定 ⇒ Linux 上需要 libclang。
+   CI 的 apt 日志显示 <code>libclang1-15t64</code> 已随 <code>libopencv-dev</code> <strong>间接装上</strong>，<code>clang-sys v1.9.1</code>
+   正常编译 ⇒ <strong>不需要新增包</strong>。</li>
+</ol>
+<p><strong>改了什么（5 个源文件）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cmake/SnowWorkspace.cmake</code></td>
+<td>Linux 分支把 <code>SNOW_FFMPEG_ROOT</code> 默认成<strong>空</strong>（=「让 pkg-config 找系统 FFmpeg」），不再指 vcpkg 树；非 Linux 分支不变</td>
+</tr>
+<tr>
+<td><code>cmake/RustStaticLibrary.cmake</code></td>
+<td>推导逻辑加 Linux 分支（不回落 vcpkg）；<code>FFMPEG_DIR</code> <strong>仅在非空时</strong>才 <code>list(APPEND)</code> 到 cargo 环境</td>
+</tr>
+<tr>
+<td><code>snow_shot/CMakeLists.txt</code></td>
+<td>ffmpeg 的 <code>pkg_check_modules</code> 从 <code>if(WIN32)</code> 里<strong>提出来</strong>，变成 <code>if(WIN32) / elseif(Linux) / endif()</code> 三段式；链接块由 <code>if(WIN32)</code> 改为 <code>if(TARGET PkgConfig::SNOW_SHOT_FFMPEG)</code>（跨平台）；DLL 收集块加 <code>WIN32</code> 守卫；两处 Windows 专属的 <code>PATH=</code> 注入加 <code>if(WIN32)</code> 守卫</td>
+</tr>
+<tr>
+<td><code>snow-crates/native/CMakeLists.txt</code></td>
+<td><code>pkg_check_modules(SNOW_MEDIA_FFMPEG ...)</code> <strong>补上 <code>libavfilter</code></strong> —— Rust 侧明确 link <code>avfilter</code>，C 库漏了它符号就悬空</td>
+</tr>
+<tr>
+<td><code>.github/workflows/snow-shot-linux.yml</code></td>
+<td>apt 清单加 6 个 <code>libav*-dev</code> 包</td>
+</tr>
+</tbody>
+</table>
+<p><strong>C++ 侧的镜像问题</strong>：Rust bundle 是<strong>静态归档</strong>，携带 <code>av*</code> 符号 ⇒ 最终可执行文件必须自己把
+<code>libav*</code> 放上链接行。而 <code>snow_shot/CMakeLists.txt</code> 原先把 ffmpeg 的 <code>pkg_check_modules</code> 与全部链接语句
+<strong>整块关在 <code>if(WIN32)</code> 内</strong> ⇒ Linux 上 C++ 侧压根不链接 ffmpeg，链接期才会炸。
+Rust 静态库的 bundle 传播机制
+（<code>target_link_libraries(${_snow_rust_bundle} INTERFACE PkgConfig::SNOW_SHOT_FFMPEG)</code>）
+会自动把依赖传给所有链接该 bundle 的 target。</p>
+<p><strong>门禁：<code>scripts/check-linux-ffmpeg-wiring.py</code>（28 项）</strong>，已接进 <code>scripts/check-linux-packaging.sh</code>
+⇒ 自动进 <code>gates</code> job。它查 5 个面：SnowWorkspace 的 Linux 默认值 / RustStaticLibrary 的 Linux 推导
+与 <code>FFMPEG_DIR</code> 条件导出 / snow_shot 的 Linux 探测与模块列表 / native CMake 的 <code>libavfilter</code> /
+CI apt 与文档 §9.1 的包清单。</p>
+<p><strong>这门禁自己被反向验证改掉了两处 —— 两次都是"假门禁"</strong>：</p>
+<ol>
+<li><strong>定位错分支</strong>。第一版用 <code>re.search(r'elseif\(CMAKE_SYSTEM_NAME STREQUAL "Linux"\)...')</code>
+   找 Linux 分支，但 <code>re.search</code> 找的是<strong>文件里第一处</strong>：<code>RustStaticLibrary.cmake:120</code> 是
+   <strong>Rust target 推导</strong>（<code>aarch64-unknown-linux-gnu</code>），<code>SnowWorkspace.cmake:36</code> 是 <strong>vcpkg triplet</strong>
+   —— 都跟 FFmpeg 无关。门禁当时"全绿"是<strong>蒙对的</strong>：它检查的是那两个分支里没有 <code>VCPKG_INSTALLED_DIR</code>。
+   ⇒ 改成<strong>解析 if/elseif/else/endif 嵌套</strong>，按分支结构定位。</li>
+<li><strong>守卫判据是子串匹配</strong>。<code>if(TARGET PkgConfig::SNOW_SHOT_FFMPEG)</code> 在 <code>snow_shot/CMakeLists.txt</code> 里
+   <strong>出现 5 次</strong>。用 <code>in</code> 判断"链接没有被限制在 Windows"⇒ 给其中<strong>任意一处</strong>加 <code>AND WIN32</code>，
+   另外 4 处仍然满足子串 ⇒ 门禁照样绿。
+   ⇒ 改成<strong>记录每条语句所处的守卫链</strong>（scope chain），断言链上没有 <code>WIN32</code>。</li>
+</ol>
+<p>顺带加了一条<strong>解析器自洽性断言</strong>：三个 CMake 文件的 <code>if()</code> / <code>endif()</code> 数量必须相等 ——
+解析器一旦失步，之后所有分支定位都是虚构的。（这条断言当场抓出了门禁自己的一处 bug：
+<code>_command_balance</code> 用了未 strip 的行，缩进导致 <code>if(</code> 漏计。）</p>
+<p><strong>反向验证：13/13 变异全红、1/1 基线绿</strong>（<code>.workbuddy/uos-port/reverse-verify-ffmpeg-wiring.py</code>）。
+13 个变异就是<strong>当初让 run 14 变红的那些代码</strong>，不是合成的：</p>
+<table>
+<thead>
+<tr>
+<th>变异</th>
+<th>门禁的判据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux 默认值改回 vcpkg 路径</td>
+<td>"the Linux SNOW_FFMPEG_ROOT default does not point at the vcpkg tree"</td>
+</tr>
+<tr>
+<td>Linux 默认值改成非空路径</td>
+<td>"the Linux SNOW_FFMPEG_ROOT default is empty"</td>
+</tr>
+<tr>
+<td>Linux 推导回落 vcpkg</td>
+<td>"the Linux SNOW_FFMPEG_ROOT derivation does not reach for vcpkg"</td>
+</tr>
+<tr>
+<td>Linux 推导改成非空</td>
+<td>"the Linux SNOW_FFMPEG_ROOT derivation leaves the prefix empty"</td>
+</tr>
+<tr>
+<td><code>FFMPEG_DIR</code> 改回无条件导出</td>
+<td>"RustStaticLibrary.cmake only exports FFMPEG_DIR when the prefix is set"</td>
+</tr>
+<tr>
+<td>Linux 分支的 <code>PkgConfig</code> 从 REQUIRED 降级</td>
+<td>"the Linux branch requires pkg-config"</td>
+</tr>
+<tr>
+<td>Linux 分支删掉 <code>pkg_check_modules</code></td>
+<td>"snow_shot/CMakeLists.txt probes FFmpeg on Linux"</td>
+</tr>
+<tr>
+<td>Linux 模块列表删 <code>libavfilter</code></td>
+<td>"every module ffmpeg-sys-next probes is in the CMake module list"</td>
+</tr>
+<tr>
+<td>链接块加回 <code>AND WIN32</code></td>
+<td>"the Rust FFI bundle carries the FFmpeg dependency on every platform (no WIN32 guard)"</td>
+</tr>
+<tr>
+<td>bundle 不再 <code>INTERFACE</code> FFmpeg</td>
+<td>"the Rust FFI bundle carries the FFmpeg dependency on every platform"</td>
+</tr>
+<tr>
+<td>native CMake 删 <code>libavfilter</code></td>
+<td>"the C library probes every module the Rust side links"</td>
+</tr>
+<tr>
+<td>apt 清单删 <code>libavfilter-dev</code></td>
+<td>"the CI workflow installs libavfilter-dev"</td>
+</tr>
+<tr>
+<td>文档 §9.1 删 <code>libavfilter-dev</code></td>
+<td>"the port document lists the FFmpeg development packages"</td>
+</tr>
+</tbody>
+</table>
+<p><strong>判据（可复用）</strong>：错误信息指向<strong>头文件缺失</strong>时，先问"搜索路径对不对"，再问"包装没装"。
+一个变量（<code>FFMPEG_DIR</code>）能静默地把整条 pkg-config 解析链<strong>旁路</strong>掉，
+而它的错误表现是"某个头文件找不到" —— 两者之间没有任何提示。</p>
+<hr>
+
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>

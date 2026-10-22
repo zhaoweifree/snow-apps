@@ -80,3 +80,11 @@ echo "=== linux dependency pins"
 # The imath/openexr/libwebp pins are *copies* of vcpkg builtin ports (CI has no
 # clone). A stale copy compiles an old API against a newer snow_image (9.6.12).
 "$python_command" scripts/check-linux-deps-pins.py
+
+echo
+echo "=== ffmpeg wiring"
+# ffmpeg-sys-next resolves FFmpeg through FFMPEG_DIR *before* pkg-config and
+# then looks under <FFMPEG_DIR>/include only, so one stale prefix turns a
+# machine with libavfilter-dev installed into a build that cannot find the
+# headers (run 13, 9.6.16).
+"$python_command" scripts/check-linux-ffmpeg-wiring.py
