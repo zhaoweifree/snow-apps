@@ -438,7 +438,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**AppImage 路径的前两处"从未执行过的代码"已修**：`Fetch appimagetool` 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 指向仓库根（9.6.31）。**剩余**：Qt 进 Linux 安装树（AppRun 已假定 `usr/plugins` 存在，而部署块仍是 `if(WIN32 …)`，见 9.6.31）；PipeWire 帧消费 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**AppImage 路径的前两处"从未执行过的代码"已修**：`Fetch appimagetool` 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 指向仓库根（9.6.31）。**私有库随包带的三件套已落代码**（闭包复制 + RPATH + `SHLIBDEPS_PRIVATE_DIRS`，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：`file(RPATH_SET)` 的关键字签名、私有库必须按 soname 而非 `REALPATH` 命名（9.6.34）。**剩余**：Qt 进 Linux 安装树（AppRun 已假定 `usr/plugins` 存在，而部署块仍是 `if(WIN32 …)`，见 9.6.31）；PipeWire 帧消费 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -5145,6 +5145,100 @@ CMake Error: Could not open file for write in copy operation
 直接失败。改成 `${CMAKE_CURRENT_BINARY_DIR}/snow-packaging-build`，开头清空、结束删除。
 
 **"这个值无所谓"是一个会被后续改动推翻的断言，而且推翻它的人不会去看那行注释。**
+
+#### 9.6.34 run 37 未到 CPack 就已被静态读码拦下：`file(RPATH_SET)` 的签名，与"私有库按 soname 命名"
+
+run 37（`39857689984`，`62faa028`）在 `Build and package arm64` 的
+`Build the pinned Linux dependencies` 上跑着，按纪律"等它说话"的同时把 9.6.33 写下的
+暂存脚本从头读了一遍 —— 两处都会在第 11 步 `Build the Debian package` 才炸，而那时前面的
+依赖编译已经烧掉二十多分钟。
+
+**其一：`file(RPATH_SET)` 不是位置参数。**
+
+```cmake
+file(RPATH_SET "${_staged}/${_private_lib_dir}/${_name}" "$ORIGIN")   # 错
+```
+
+实测（本机 CMake 4.2.3）：
+
+```
+file RPATH_SET given unrecognized argument "/…/libjxl.so.0.11"
+```
+
+正确形态是关键字参数：
+
+```cmake
+file(RPATH_SET FILE "<file>" NEW_RPATH "<rpath>")     # 对
+```
+
+值得记一笔的是 `RPATH_SET` **根本不在 `file()` 的文档列表里**（`cmake --help-command file`
+搜 `RPATH` 零命中）—— 它是 2.6 时代遗留下来、4.2 仍在实现的子命令。所以"签名对不对"不是
+对文档的断言，而是对解释器的断言，这与 9.6.28 / 9.6.30 / 9.6.31 / 9.6.32 那一族
+（"写下来了"vs"能成立"）是同一种病，但检查手段还得再退一格：**文档里查不到的东西，
+只能让解释器自己回答**。
+
+于是门禁里那把"检查脚本里有没有 `RPATH_SET`"的文本针，改成把脚本里那次调用**原文抽出来**
+真跑一遍：
+
+```cmake
+string(REGEX MATCH "file\\(RPATH_SET[^)]*\\)" _rpath_call "${_bundle_code}")
+file(WRITE "${_rpath_probe_dir}/probe.cmake"
+     "set(_library \"${_rpath_probe_dir}/notelf.bin\")\n${_rpath_call}\n")
+```
+
+只读它的**拒绝**，三种结果对应三种病因：
+
+| 探针输出 | 结论 |
+|---|---|
+| `unrecognized argument` | 写下来的签名这版 CMake 不认 |
+| `does not recognize sub-command` | 这版 CMake 已经没有 `RPATH_SET` |
+| 其他（非 ELF 文件写不进去） | 调用**解析通过**，只是载荷不对 |
+
+第一版探针是**把签名写死在门禁里**的：它对非 ELF 文件跑一次，绿灯。反向验证第 7 条
+（把模板的调用改成 `… NEW_RPATH "$ORIGIN" TRAILING`）把它照出原形 —— **文本针全绿、
+探针也绿**，因为它验的是"门禁自己会不会用这个语法"，不是"脚本会不会"。改成提取式后
+同一变异立刻红在 `is not a signature this CMake parses`。**这就是"变异没打中目标"的
+镜像形态：变异打中了目标，探针没测目标。**
+
+**其二：私有库按 soname 命名，不是按 `REALPATH` 的文件名。**
+
+9.6.33 的复制循环是：
+
+```cmake
+get_filename_component(_real "${_dependency}" REALPATH)
+get_filename_component(_name "${_real}" NAME)      # ← 错在这一行
+```
+
+依赖前缀里 `libjxl.so.0.11` 是指向 `libjxl.so.0.11.0` 的软链，而
+`GET_RUNTIME_DEPENDENCIES` 解析的是 NEEDED 里的 **soname**：`_dependency` 的 basename
+是 `libjxl.so.0.11`，`REALPATH` 的 basename 是 `libjxl.so.0.11.0`。按后者复制，包里就只有
+`libjxl.so.0.11.0`，而 `snow_shot` 的每一个 NEEDED 都写着 `libjxl.so.0.11` ——
+**loader 找不到它，`dpkg-shlibdeps` 也不认它**（它按 soname 查 shlibs 与包内容）。
+症状是包能装、`dpkg -c` 看着有库、一启动 `cannot open shared object file`，
+比 `cannot find library` 难查得多，因为打包步骤全绿。
+
+改成按 `_dependency` 取 NAME，`file(COPY)` 后用 `file(RENAME)` 把 `REALPATH` 那个版本名
+改回 soname。门禁加一条来源断言（`string(FIND)` + 中括号参数，避开正则里的 `${`）：
+
+```cmake
+set(_soname_needle [=[get_filename_component(_soname "${_dependency}" NAME)]=])
+```
+
+反向验证从 5 变异 + 1 对照扩到 **7 变异 + 1 对照**，全部通过：
+
+```
+ok    control (committed modules): green
+ok    no install script: red on "CPACK_INSTALL_SCRIPTS is empty"
+ok    no dependency resolution: red on "never uses GET_RUNTIME_DEPENDENCIES"
+ok    private libraries without RPATH: red on "never uses RPATH_SET"
+ok    flat-only prefix probe: red on "dependency prefix probe finds"
+ok    AppImage module setting its own RPATH: red on "sets INSTALL_RPATH itself"
+ok    bundled copy named after the real file: red on "not named after the resolved soname"
+ok    RPATH_SET with an argument the parser rejects: red on "is not a signature this CMake parses"
+```
+
+一句话概括这一节：**`$ORIGIN` 让 loader 找到库，soname 让 `dpkg-shlibdeps` 认识库，
+两者都错在"文件叫什么名字"上，而不是"有没有写"。**
 
 ---
 
