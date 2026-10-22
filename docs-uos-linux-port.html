@@ -4778,6 +4778,16 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 <code>
 <td><code>gates</code> ✅ / <strong><code>Configure</code> ✅</strong> / <strong>deps ✅</strong> / <code>build</code> ❌</td>
 <td>lockfile 修好后红灯落到 <strong>Rust FFI 的 FFmpeg 绑定</strong>：<code>libavfilter/avfilter.h: No such file or directory</code> —— 错误指向头文件，实际是<strong>搜索路径被 <code>FFMPEG_DIR</code> 劫持</strong>，见 9.6.16</td>
 </tr>
+<tr>
+<td>15（<code>39715098</code>）</td>
+<td><code>gates</code> ✅ / <code>Configure</code> ✅ / <strong>deps ✅</strong> / <strong>build ❌</strong></td>
+<td>FFmpeg 修好后红灯回到 <strong>C++ 侧</strong>，而且落在<strong>被 force-include 进每个 TU 的兼容头</strong>里：<code>-Wundef</code>（版本宏先测后定义）+ 4 处 <code>-Wsign-conversion</code>（掩码跨有符号/无符号域）。<strong>x64 侧是代码缺陷</strong>，<strong>arm64 侧是 rustup 组件冲突的环境 flake</strong>，见 9.6.17</td>
+</tr>
+<tr>
+<td>16（<code>39734199</code>）</td>
+<td><code>gates</code> ✅</td>
+<td><code>qt_compat.h</code> 修好后红灯首次越过兼容头；<code>gates</code> 一次全绿（含新增门禁），build 结果见 9.6.18</td>
+</tr>
 </tbody>
 </table>
 <p><strong>run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug</strong>，不是缺包。Qt5 装在自定义前缀时
@@ -5374,6 +5384,40 @@ CI apt 与文档 §9.1 的包清单。</p>
 一个变量（<code>FFMPEG_DIR</code>）能静默地把整条 pkg-config 解析链<strong>旁路</strong>掉，
 而它的错误表现是"某个头文件找不到" —— 两者之间没有任何提示。</p>
 <hr>
+<h4>9.6.17 run 15：一个"从未执行过的分支"，和四个跨符号域的掩码（2026-10-22）</h4>
+<p>run 15（<code>39715098</code>）把 FFmpeg 修好后，红灯第一次回到 <strong>C++ 侧</strong>。但它落在的位置很说明问题：</p>
+<pre><code>[344/611] Building CXX object CMakeFiles/snow_shot.dir/snow_shot/src/presentation/services/languagemanager.cpp.o
+[346/611] Building CXX object CMakeFiles/snow_shot.dir/snow_shot/src/presentation/services/windowshortcutmanager.cpp.o
+</code></pre>
+<p><strong>只编了 2 个 TU 就停了</strong>（611 步里的第 344、346 步）⇒ 后面 <strong>267 步根本没跑到</strong>，
+同类缺陷<strong>很可能还有</strong>。而这 2 个 TU 的报错<strong>全在同一个文件</strong>：</p>
+<pre><code>snow_shot/include/snow_shot/compat/qt_compat.h:91:5: error: &quot;SNOW_QT5&quot; is not defined, evaluates to 0 [-Werror=undef]
+snow_shot/include/snow_shot/compat/qt_compat.h:194:54: error: conversion to 'unsigned int' from 'int' may change the sign of the result [-Werror=sign-conversion]
+snow_shot/include/snow_shot/compat/qt_compat.h:195:40: error: conversion to 'unsigned int' from 'int' may change the sign of the result [-Werror=sign-conversion]
+snow_shot/include/snow_shot/compat/qt_compat.h:278:51: error: conversion to 'uint' {aka 'unsigned int'} from 'int' may change the sign of the result [-Werror=sign-conversion]
+snow_shot/include/snow_shot/compat/qt_compat.h:745:51: error: conversion to 'uint' {aka 'unsigned int'} from 'int' may change the sign of the result [-Werror=sign-conversion]
+</code></pre>
+<p><code>qt_compat.h</code> 是<strong>被 force-include 进每一个 C++ TU 的那个头</strong>
+（<code>cmake/SnowQt.cmake</code>：Qt5 路线下 <code>-include</code> / <code>/FI</code>）⇒ 它的每一个缺陷都会在
+<strong>每一个</strong> TU 上放大，包括第三方 target 和 QtCore-only target。</p>
+<p><strong>第一处：一个从未执行过的分支（<code>-Wundef</code>）</strong></p>
+<p>原文件第 91 行是 <code>#if SNOW_QT5</code>，而 <code>#define SNOW_QT5</code> 在<strong>第 113 / 129 行</strong>。
+按 C 的规则，<strong>未定义宏在 <code>#if</code> 中按 0 求值</strong> ⇒ 这一整块在<strong>所有平台上</strong>都是死代码。</p>
+<p>于是有两条结论，第二条更严重：</p>
+<ol>
+<li><code>#if SNOW_QT5</code> 里的 <code>#include &lt;QVector&gt;</code> <strong>从未生效</strong>；</li>
+<li><code>SnowRoleList</code> 之所以还能编过，<strong>纯属侥幸</strong> —— 上面第 72 行的 <code>&lt;QList&gt;</code>
+   经 <code>qlist.h:48</code> 传递包含了 <code>qvector.h</code>。</li>
+</ol>
+<p><strong>"看起来存在"的分支可能从未执行过</strong>，这比编译错误危险得多：它不会报错，
+只会让某段代码悄悄失去意义。而 <code>-Wundef</code> 正是把这件事变成硬错误的开关
+（<code>cmake/ProjectWarnings.cmake</code> 的警告集里有它）⇒ <strong>GCC/Clang 上第一次编就必然红</strong>。</p>
+<p>修法：把版本判定整块<strong>上移到第一个 <code>#if</code> 之前</strong>。</p>
+<p><strong>第二处：掩码跨越了有符号/无符号域（<code>-Wsign-conversion</code>，4 处）</strong></p>
+<p><code>Qt::KeyboardModifierMask = 0xfe000000</code> <strong>装不进有符号 int</strong> ⇒
+<code>Qt::KeyboardModifier</code> 的底层类型是 <code>unsigned int</code>。而更要命的是 <code>qflags.h</code>：</p>
+<p>```cpp
+// C:/Qt/5.15.2/msvc2019_64/include/QtCore/qflags.h:103-112</p>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

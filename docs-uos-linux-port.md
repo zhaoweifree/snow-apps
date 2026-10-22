@@ -2846,6 +2846,8 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 12（`2e10f9d1`） | `gates` ✅ / **deps 步骤 ❌** | 依赖构建这一步自己倒了，而且**什么都没打印**（只有 `Process completed with exit code 1`）—— `die` 的消息被重定向进了日志文件。同时暴露 `HWY_ENABLE_INSTALL` 缺失，见 9.6.14 |
 | 13（`9997a16b`） | `gates` ✅ / **`Configure` ✅** / **deps ✅** / `build` ❌ | 固定版本自编的依赖在 Linux 上第一次全绿（`snow_image` 静态库链接成功，内含 jxl/heif 编解码器）；红灯移到 **Rust FFI 的 lockfile**：`snow_rust_ffi/Cargo.lock` 早于 AT-SPI2 重构，`--locked` 拒绝更新，见 9.6.15 |
 | 14（`39707846`） | `gates` ✅ / **`Configure` ✅** / **deps ✅** / `build` ❌ | lockfile 修好后红灯落到 **Rust FFI 的 FFmpeg 绑定**：`libavfilter/avfilter.h: No such file or directory` —— 错误指向头文件，实际是**搜索路径被 `FFMPEG_DIR` 劫持**，见 9.6.16 |
+| 15（`39715098`） | `gates` ✅ / `Configure` ✅ / **deps ✅** / **build ❌** | FFmpeg 修好后红灯回到 **C++ 侧**，而且落在**被 force-include 进每个 TU 的兼容头**里：`-Wundef`（版本宏先测后定义）+ 4 处 `-Wsign-conversion`（掩码跨有符号/无符号域）。**x64 侧是代码缺陷**，**arm64 侧是 rustup 组件冲突的环境 flake**，见 9.6.17 |
+| 16（`39734199`） | `gates` ✅ | `qt_compat.h` 修好后红灯首次越过兼容头；`gates` 一次全绿（含新增门禁），build 结果见 9.6.18 |
 
 **run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug**，不是缺包。Qt5 装在自定义前缀时
 `Qt5Core_DIR` 是 `<prefix>/lib/cmake/Qt5Core`，`../../../bin` 正好是 `<prefix>/bin`；但发行版的同名文件
@@ -3327,6 +3329,153 @@ CI apt 与文档 §9.1 的包清单。
 **判据（可复用）**：错误信息指向**头文件缺失**时，先问"搜索路径对不对"，再问"包装没装"。
 一个变量（`FFMPEG_DIR`）能静默地把整条 pkg-config 解析链**旁路**掉，
 而它的错误表现是"某个头文件找不到" —— 两者之间没有任何提示。
+
+---
+
+#### 9.6.17 run 15：一个"从未执行过的分支"，和四个跨符号域的掩码（2026-10-22）
+
+run 15（`39715098`）把 FFmpeg 修好后，红灯第一次回到 **C++ 侧**。但它落在的位置很说明问题：
+
+```
+[344/611] Building CXX object CMakeFiles/snow_shot.dir/snow_shot/src/presentation/services/languagemanager.cpp.o
+[346/611] Building CXX object CMakeFiles/snow_shot.dir/snow_shot/src/presentation/services/windowshortcutmanager.cpp.o
+```
+
+**只编了 2 个 TU 就停了**（611 步里的第 344、346 步）⇒ 后面 **267 步根本没跑到**，
+同类缺陷**很可能还有**。而这 2 个 TU 的报错**全在同一个文件**：
+
+```
+snow_shot/include/snow_shot/compat/qt_compat.h:91:5: error: "SNOW_QT5" is not defined, evaluates to 0 [-Werror=undef]
+snow_shot/include/snow_shot/compat/qt_compat.h:194:54: error: conversion to 'unsigned int' from 'int' may change the sign of the result [-Werror=sign-conversion]
+snow_shot/include/snow_shot/compat/qt_compat.h:195:40: error: conversion to 'unsigned int' from 'int' may change the sign of the result [-Werror=sign-conversion]
+snow_shot/include/snow_shot/compat/qt_compat.h:278:51: error: conversion to 'uint' {aka 'unsigned int'} from 'int' may change the sign of the result [-Werror=sign-conversion]
+snow_shot/include/snow_shot/compat/qt_compat.h:745:51: error: conversion to 'uint' {aka 'unsigned int'} from 'int' may change the sign of the result [-Werror=sign-conversion]
+```
+
+`qt_compat.h` 是**被 force-include 进每一个 C++ TU 的那个头**
+（`cmake/SnowQt.cmake`：Qt5 路线下 `-include` / `/FI`）⇒ 它的每一个缺陷都会在
+**每一个** TU 上放大，包括第三方 target 和 QtCore-only target。
+
+**第一处：一个从未执行过的分支（`-Wundef`）**
+
+原文件第 91 行是 `#if SNOW_QT5`，而 `#define SNOW_QT5` 在**第 113 / 129 行**。
+按 C 的规则，**未定义宏在 `#if` 中按 0 求值** ⇒ 这一整块在**所有平台上**都是死代码。
+
+于是有两条结论，第二条更严重：
+
+1. `#if SNOW_QT5` 里的 `#include <QVector>` **从未生效**；
+2. `SnowRoleList` 之所以还能编过，**纯属侥幸** —— 上面第 72 行的 `<QList>`
+   经 `qlist.h:48` 传递包含了 `qvector.h`。
+
+**"看起来存在"的分支可能从未执行过**，这比编译错误危险得多：它不会报错，
+只会让某段代码悄悄失去意义。而 `-Wundef` 正是把这件事变成硬错误的开关
+（`cmake/ProjectWarnings.cmake` 的警告集里有它）⇒ **GCC/Clang 上第一次编就必然红**。
+
+修法：把版本判定整块**上移到第一个 `#if` 之前**。
+
+**第二处：掩码跨越了有符号/无符号域（`-Wsign-conversion`，4 处）**
+
+`Qt::KeyboardModifierMask = 0xfe000000` **装不进有符号 int** ⇒
+`Qt::KeyboardModifier` 的底层类型是 `unsigned int`。而更要命的是 `qflags.h`：
+
+```cpp
+// C:/Qt/5.15.2/msvc2019_64/include/QtCore/qflags.h:103-112
+#if defined(Q_CC_MSVC) || defined(Q_CLANG_QDOC)
+    typedef int Int;                        // MSVC 恒为 int
+#else
+    typedef typename std::conditional<
+            std::is_unsigned<typename std::underlying_type<Enum>::type>::value,
+            unsigned int, signed int
+        >::type Int;                        // GCC/Clang 随枚举底层类型走
+#endif
+```
+
+⇒ **GCC/Clang 上 `QFlags<KeyboardModifier>::Int` 也是 `unsigned int`**
+⇒ `combined & mask` 的常规算术转换把 `int` 提升为 `unsigned int`
+⇒ 报 `conversion to 'unsigned int' from 'int'`。
+
+**为什么 Windows 本地永远看不见**：Qt 自己在 `qflags.h:49` 写了
+"Microsoft Visual Studio has buggy behavior when it comes to unsigned enums:
+even if the enum is unsigned, the enum tags are always signed"
+⇒ MSVC 上枚举标签按有符号处理，`Int` 又恒为 `int` ⇒ 整条路径在 MSVC 上是干净的。
+**这不是我们代码的运气，是编译器的差异**。
+
+修法与 **Qt 6.12 官方 `qnamespace.h:1945/1950` 的写法对齐**：
+
+```cpp
+const int modifierMask = static_cast<int>(Qt::KeyboardModifierMask);
+return QKeyCombination(Qt::KeyboardModifiers(combined & modifierMask),
+                       Qt::Key(combined & ~modifierMask));
+```
+
+官方也是 `~int(Qt::KeyboardModifierMask)` —— 先把掩码拉回有符号域再掩。
+
+**第三处：`QKeySequence::operator[]` 收 `uint`（2 处）**
+
+两版 Qt 的签名一致：
+
+```
+Qt 5.15.2  QtGui/qkeysequence.h:187   int operator[](uint i) const;
+Qt 6.12.0  QtGui/qkeysequence.h:153   QKeyCombination operator[](uint i) const;
+```
+
+⇒ 传 `int index` 触发 `conversion to 'uint' from 'int'`。修法：`static_cast<uint>(index)`。
+`uint` 在两版均为全局作用域（Qt5 `qglobal.h:275`、Qt6 `qtypes.h:40` 经 `qglobal.h:36` 引入）。
+
+**本机验证（比推理更硬）**：本机没有 GCC（`which g++ gcc clang++` 全空，`wsl.exe` 命中沙箱黑名单），
+所以用 **MSVC 单独编译这个头**，两版 Qt 各一次：
+
+| 验证 | 手段 | 结果 |
+|---|---|---|
+| 改动没破坏 Windows 构建 | MSVC 19.44 对 Qt 5.15.2 / Qt 6.12.0 各编一个覆盖全部两个分支的 TU | 两版都过（`/W4 /permissive- /std:c++20`） |
+| 修法语义等价 | `constexpr` + `static_assert` 比对修复前后两种写法 | 逐位相等（含符号位 `0x80000000`、纯修饰键、高位键码 `0x01000000` 三组输入） |
+| Windows 本地确实是盲区 | 把**修复前**的写法原样编进 MSVC `/W4` | **一声不吭** ⇒ 坐实只有 Linux CI 能发现 |
+
+**门禁：`scripts/check-qt-compat-macro-order.py`（7 项）**，已接进
+`scripts/check-linux-packaging.sh` ⇒ 自动进 `gates` job。它追踪兼容头自身的
+`#define` / `#undef`，拦截"先测后定义"，并要求 `<QVector>` 在 Qt5 分支可达、
+两个版本宏同块定义且取 0/1 字面量。
+
+**这门禁自己被反向验证改掉了两处 —— 两次都是"假门禁"**：
+
+1. **头文件名被当成宏**。`__has_include(<QtGlobal>)` 里的 `QtGlobal`
+   被裸标识符正则当成"被测试的宏"⇒ 误报 8 条。
+   ⇒ 改成**整体移除 `__has_include(...)` 的参数列表**再扫。
+2. **`#if` / `#else` 两支各一次 `#define` 被误判为"重复定义"**。
+   `#define SNOW_QT5 0` 与 `#define SNOW_QT5 1` 分处两支是**正常正确写法**。
+   ⇒ 改成「两个宏在**同一个 `#if` 块**内（行距 < 8）」+「每个定义都是 0/1 字面量」两条判据。
+
+**反向验证：3/3 变异全红、1/1 基线绿**：
+
+| 变异 | 门禁的判据 |
+|---|---|
+| 把版本宏定义**移回** `<QVector>` include 之后（还原 run 15 的原始形态） | "SNOW_QT5 is not defined before the #if" + "SNOW_QT5 defined at line 105, tested at line 98" |
+| 删掉 `#include <QVector>` | "the compat header includes <QVector> for the Qt5 branch" |
+| 把 `SNOW_QT5` 定义成 `2` | "every SNOW_QT5/SNOW_QT6 definition is a 0/1 literal" |
+
+每次恢复源文件后都 `touch` 更新 mtime，确认最终 `EXIT=0`。
+
+**arm64 侧是环境 flake，不是代码缺陷**：
+
+```
+error: failed to install component: 'clippy-preview-aarch64-unknown-linux-gnu',
+       detected conflict: 'bin/cargo-clippy'
+```
+
+aarch64 runner 镜像上 `1.97.1-aarch64-unknown-linux-gnu` 处于**半安装状态**
+⇒ `dtolnay/rust-toolchain@stable` 装 clippy 时与残留文件冲突。
+run 14 用**同一个 action** 是成功的 ⇒ 环境 flake。
+
+**判据（可复用）**：
+
+- **"未定义宏在 `#if` 中按 0 求值"** —— 一段看起来存在的代码可能从未执行过。
+  开了 `-Wundef` 的工程里，这类缺陷**必然在 GCC 上第一次编译就红**。
+- **跨有符号/无符号域的掩码**：枚举值超出 `int` 范围 ⇒ 底层类型变 `unsigned`
+  ⇒ `int & unsigned` 触发常规算术转换 ⇒ `-Wsign-conversion`。
+  **MSVC 上枚举标签永远按有符号处理**，所以这类缺陷在 Windows 本地是隐形的。
+- **只在 Linux CI 暴露的缺陷，本地唯一的硬验证手段是"用能复现的那套编译器编"**；
+  没有 GCC 时，退而求其次的**编译期 `static_assert` 等价性证明**
+  仍然强于纯源码推理。
 
 ---
 
