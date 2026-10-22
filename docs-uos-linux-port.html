@@ -6653,6 +6653,34 @@ screenrecordingcontroller.cpp:1820: error: 'setWindowExcludedFromCapture' is not
 接续行反斜杠时，剥掉 <code>${{ }}</code> 之后正则把 <code>\</code> 读成 preset 名（9.6.25 的 AppImage
 步骤正好是多行 configure）。已把 preset 名的首字符类改成 <code>[^-\\\s]</code>。</p>
 <hr>
+<h4>9.6.27 一轮 CI 被文档提交杀掉：<code>paths-ignore</code> 漏了渲染出来的 HTML</h4>
+<h5>现象</h5>
+<p>run 25（<code>39814151585</code>，<code>678f4efe</code>）刚跑到 <code>gates</code> 的第 9 步就变成 <code>cancelled</code>。
+紧接着 run 26（<code>39814429526</code>）出现在队列里，而它的 commit 是 <code>2fd80f5d</code> ——
+一个只改了 <code>docs-uos-linux-port.md</code> 与 <code>docs-uos-linux-port.html</code> 的文档提交。</p>
+<h5>定因</h5>
+<p>workflow 的过滤条件是：</p>
+<pre><code class="language-yaml">paths-ignore:
+  - &quot;docs*/**&quot;
+  - &quot;*.md&quot;
+  - &quot;.workbuddy/**&quot;
+</code></pre>
+<p><code>docs-uos-linux-port.html</code> 在<strong>仓库根目录</strong>，既不是 <code>docs*/**</code>（那是目录），
+也不匹配 <code>*.md</code>。于是文档提交满足"有受影响的路径"，起了一次完整 build；
+<code>concurrency</code> 组的 <code>cancel-in-progress: true</code> 随即把正在跑的那一轮掐掉。</p>
+<p>这本身不是第一次：移植文档从一开始就有 <code>.md</code> 与 <code>.html</code> 两份，<code>*.html</code> 只是
+一直没被想起来。<strong>能看见的代价是半小时的构建</strong>，看不见的代价是"到底哪一轮才
+是有效结果"这件事变得可疑。</p>
+<h5>修法</h5>
+<p><code>push</code> 与 <code>pull_request</code> 都补 <code>"*.html"</code>，并把这个清单写成门禁的一条判据：</p>
+<pre><code class="language-python">IGNORED_DOCUMENTATION_PATTERNS = (&quot;*.md&quot;, &quot;*.html&quot;)
+</code></pre>
+<p>反向验证第 7 条：把 <code>*.html</code> 从两个 trigger 里删掉，门禁必须两条都红
+（<code>push:</code> 与 <code>pull_request:</code> 各一条），且只红这两条。</p>
+<p><strong>教训</strong>：<code>paths-ignore</code> 是"哪些改动不值得跑"，它的正确性不来自直觉而来自
+仓库里实际存在哪些产物 —— 这里恰好是一个"文档双份渲染 + 分支保护 + 并发取消"
+三者叠加才会显形的问题。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

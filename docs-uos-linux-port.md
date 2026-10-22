@@ -4477,6 +4477,50 @@ screenrecordingcontroller.cpp:1820: error: 'setWindowExcludedFromCapture' is not
 
 ---
 
+#### 9.6.27 一轮 CI 被文档提交杀掉：`paths-ignore` 漏了渲染出来的 HTML
+
+##### 现象
+
+run 25（`39814151585`，`678f4efe`）刚跑到 `gates` 的第 9 步就变成 `cancelled`。
+紧接着 run 26（`39814429526`）出现在队列里，而它的 commit 是 `2fd80f5d` ——
+一个只改了 `docs-uos-linux-port.md` 与 `docs-uos-linux-port.html` 的文档提交。
+
+##### 定因
+
+workflow 的过滤条件是：
+
+```yaml
+paths-ignore:
+  - "docs*/**"
+  - "*.md"
+  - ".workbuddy/**"
+```
+
+`docs-uos-linux-port.html` 在**仓库根目录**，既不是 `docs*/**`（那是目录），
+也不匹配 `*.md`。于是文档提交满足"有受影响的路径"，起了一次完整 build；
+`concurrency` 组的 `cancel-in-progress: true` 随即把正在跑的那一轮掐掉。
+
+这本身不是第一次：移植文档从一开始就有 `.md` 与 `.html` 两份，`*.html` 只是
+一直没被想起来。**能看见的代价是半小时的构建**，看不见的代价是"到底哪一轮才
+是有效结果"这件事变得可疑。
+
+##### 修法
+
+`push` 与 `pull_request` 都补 `"*.html"`，并把这个清单写成门禁的一条判据：
+
+```python
+IGNORED_DOCUMENTATION_PATTERNS = ("*.md", "*.html")
+```
+
+反向验证第 7 条：把 `*.html` 从两个 trigger 里删掉，门禁必须两条都红
+（`push:` 与 `pull_request:` 各一条），且只红这两条。
+
+**教训**：`paths-ignore` 是"哪些改动不值得跑"，它的正确性不来自直觉而来自
+仓库里实际存在哪些产物 —— 这里恰好是一个"文档双份渲染 + 分支保护 + 并发取消"
+三者叠加才会显形的问题。
+
+---
+
 ## 10. 工作量 / 优先级矩阵
 
 | 编号 | 工作项 | 规模 | 风险 | 优先级 |
