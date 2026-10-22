@@ -144,3 +144,13 @@ echo "=== rust target error message"
 # on the Linux runners, and threw cargo's own output away. The remedy has to
 # name the right platform and carry cargo's words (run 15, 9.6.17).
 "$python_command" scripts/check-rust-target-error.py
+
+echo
+echo "=== rust archive names"
+# A Rust static library registration's OUTPUT_NAME is a promise about the file
+# cargo writes, and nothing checked it: `snow-linux-c` was registered as
+# `snow_linux_platform`, so the imported target pointed at an archive that is
+# never created and the build died at the link step with "cannot find
+# cargo/aarch64-unknown-linux-gnu/release/libsnow_linux_platform.a" after all
+# 608 translation units had compiled (run 27).
+"$python_command" scripts/check-rust-archive-names.py

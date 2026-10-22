@@ -336,8 +336,16 @@ endif()
 # pure-Rust snow-linux crate and is therefore covered by the cross-target check.
 if(UNIX AND NOT APPLE)
     if(NOT TARGET snow_linux_platform)
+        # OUTPUT_NAME is the archive *file stem* Cargo writes, not a label:
+        # cargo names it after the crate's library name, which for
+        # `snow-linux-c` (no [lib] name) is `snow_linux_c`. Naming it
+        # `snow_linux_platform` here made the imported target point at
+        # `libsnow_linux_platform.a`, which nothing ever creates - and the
+        # mismatch only surfaces at link time, on an architecture whose link
+        # step nobody runs locally (CI run 27). scripts/check-rust-archive-names.py
+        # keeps the two in step.
         snow_add_rust_static_library(snow_linux_platform PACKAGE snow-linux-c
-            MANIFEST_DIR "${SNOW_SHOT_CAPTURE_CRATES_DIR}" OUTPUT_NAME snow_linux_platform)
+            MANIFEST_DIR "${SNOW_SHOT_CAPTURE_CRATES_DIR}" OUTPUT_NAME snow_linux_c)
     endif()
     if(NOT TARGET snow_shot_linux_platform)
         add_library(snow_shot_linux_platform INTERFACE)
