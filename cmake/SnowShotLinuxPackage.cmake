@@ -52,6 +52,12 @@ endfunction()
 # path is a packaging conflict. The RPATH below is what makes the private copy
 # reachable, so the directory name is a decision both that RPATH and the bundle
 # script read from here.
+#
+# Reads the cached `CMAKE_INSTALL_LIBDIR`, which `snow_shot_configure_linux_package()`
+# fills by including `GNUInstallDirs` itself (script mode never runs the include in
+# `snow_shot/CMakeLists.txt`, and an empty value here returns an absolute
+# `/snow-shot` that every consumer accepts without complaint). No include of its
+# own: the cache makes it a no-op, and a no-op cannot be reverse-verified.
 function(snow_shot_linux_private_lib_dir out_var)
     set(${out_var} "${CMAKE_INSTALL_LIBDIR}/snow-shot" PARENT_SCOPE)
 endfunction()
@@ -107,6 +113,9 @@ endfunction()
 # the same for both. `INSTALL_RPATH_USE_LINK_PATH OFF` keeps the build tree's
 # own library paths out of the installed binary.
 function(snow_shot_apply_linux_private_rpath)
+    # `CMAKE_INSTALL_LIBDIR` comes from the cache that
+    # `snow_shot_configure_linux_package()` fills; the AppImage module calls this
+    # after it, by construction.
     snow_shot_linux_private_lib_dir(_private)
     get_filename_component(_private_name "${_private}" NAME)
     foreach(_target IN ITEMS
@@ -138,6 +147,16 @@ endfunction()
 # run `dpkg-shlibdeps` over the staged binaries derives the list from what the
 # executable actually links against, which is the only version that stays true.
 function(snow_shot_configure_linux_package)
+    # `GNUInstallDirs` caches `CMAKE_INSTALL_<dir>`, so a real configure sees the
+    # values from `snow_shot/CMakeLists.txt` here through the cache. Script mode
+    # (`cmake -P`, i.e. scripts/check-linux-packaging.cmake) never ran that
+    # include, so the values were empty there and everything below degraded
+    # silently: the private library directory became `/snow-shot` (absolute,
+    # outside the prefix), the RPATH lost its `lib` hop, and the substituted
+    # bindir became the empty string -- which turned the staged glob into
+    # `${_staged}//*`, the staging *root*, whose only entries are directories.
+    # Including it here makes the gate see exactly what a configure sees.
+    include(GNUInstallDirs)
     # Script mode (`cmake -P`) has no targets at all, which is how
     # scripts/check-linux-packaging.cmake evaluates this function on a host that
     # cannot build the Linux target. The guard only exists for real configure
@@ -236,6 +255,9 @@ above other windows, and recognize text and tables from the same image.\n")
     set(SNOW_SHOT_LINUX_PRIVATE_LIB_DIR "${_snow_private_lib}")
     set(SNOW_SHOT_LINUX_INSTALL_BINDIR "${CMAKE_INSTALL_BINDIR}")
     set(SNOW_SHOT_LINUX_INSTALL_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
+    # The bundle script has to tell "a directory on this machine" from "the prefix
+    # inside the package", and the only way to do that is to know the latter.
+    set(SNOW_SHOT_LINUX_PACKAGE_PREFIX "${CPACK_PACKAGING_INSTALL_PREFIX}")
     configure_file(
         # Not `${CMAKE_CURRENT_LIST_DIR}`: inside a function body that variable is
         # the directory of the *caller's* listfile, so the template resolved to

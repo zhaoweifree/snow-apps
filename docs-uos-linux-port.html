@@ -7514,6 +7514,99 @@ endif()
 <p><strong>这一节的教训与 9.6.30/9.6.28 同源，但方向相反</strong>：那几条是"写下来了但没验证能成立"，
 这一条是"验证了内容但没验证时机"。<strong>一个钩子的名字不是它的顺序说明书。</strong></p>
 <hr>
+<h4>9.6.38 run 39：<code>CMAKE_INSTALL_PREFIX</code> 不是暂存树，是包内的前缀</h4>
+<p><code>Build</code> 两架构照旧全绿，第 11 步换了个错误，而且比上一次更难看：</p>
+<pre><code class="language-text">CPack: - Install project: snow_apps []
+CMake Error at .../snow-shot-linux-runtime-bundle.cmake:97 (file):
+  file failed to open for reading (File name too long):
+
+    /usr/bin/[;/usr/bin/aa-enabled;/usr/bin/aa-exec;/usr/bin/aa-features-abi;…（43 447 字符）
+</code></pre>
+<p><strong>两件事同时错。</strong></p>
+<p><strong>第一件：钩子正确了，路径没正确。</strong> 安装规则里的 <code>CMAKE_INSTALL_PREFIX</code> 是<strong>包内</strong>前缀
+<code>/usr</code>（<code>CPACK_PACKAGING_INSTALL_PREFIX</code>），暂存树要通过 <strong>DESTDIR 机制</strong>到达。
+<code>CPACK_SET_DESTDIR</code> 的文档把这个二分说得很清楚：</p>
+<blockquote>
+<p>没有 <code>CPACK_SET_DESTDIR</code> 时，CPack 用 <code>CPACK_PACKAGING_INSTALL_PREFIX</code> 作为前缀；
+设了它则用 <code>CMAKE_INSTALL_PREFIX</code>。</p>
+</blockquote>
+<p>而 CPack 的本地安装<strong>一律</strong>走 DESTDIR：生成的每条安装规则都把 <code>$ENV{DESTDIR}</code> 拼进
+destination。一个安装脚本要读暂存树，就得做同样的事：</p>
+<pre><code class="language-cmake">set(_staged &quot;$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}&quot;)
+</code></pre>
+<p>只取后半截的后果不是"路径差一层"，而是<strong>去读构建机自己的 <code>/usr/bin</code></strong>——三千个条目。
+真让那个循环跑完，包会把构建机的库打进去，那比失败糟糕得多。</p>
+<p>因此 <code>DESTDIR</code> 为空、而前缀又等于包内前缀时，脚本<strong>拒绝执行</strong>，不退回前缀。
+这是唯一一个"宁可红、不可猜"的取舍点：没有暂存树这件事本身就该被说出来。</p>
+<p><strong>第二件：<code>file(GLOB)</code> 的结果会被一个 <code>[</code> 弄成单元素列表。</strong> 报错里那 43 KB 是
+"文件名"，说明 <code>foreach(IN LISTS …)</code> 只跑了一次、<code>_program</code> 是整串。本地复现，两行就够：</p>
+<pre><code class="language-cmake"># 目录里两个文件：`[` 和 `aa`
+file(GLOB _p &quot;.../bin2/*&quot;)
+list(LENGTH _p _n)      # =&gt; 1
+message(&quot;${_p}&quot;)        # =&gt; C:/…/bin2/[;C:/…/bin2/aa
+</code></pre>
+<p><code>length=1</code> 而值里仍带 <code>;</code> —— 分隔符被转义了，<code>IN LISTS</code> 于是把它当一个元素。
+<code>/usr/bin/[</code> 这个文件在每台 Debian 系机器上都存在（<code>[</code> 是 test 的内建），
+所以这不是理论问题：<strong>只要 glob 到宿主的 <code>/usr/bin</code>，就一定会撞上它</strong>。
+换成我们自己的暂存树后不会再有 <code>[</code>，但这个坑值得留个守卫：每个元素先查
+<code>EXISTS</code>，塌缩时给出<strong>一句话</strong>而不是 43 KB。</p>
+<p><strong>第三件（本地门禁的执行探针抓到的，未上 CI）：<code>cmake -P</code> 模式下 <code>CMAKE_INSTALL_BINDIR</code> 是空的。</strong>
+<code>GNUInstallDirs</code> 只在 <code>snow_shot/CMakeLists.txt</code> 里 include，它填的是<strong>缓存</strong>，所以真实
+configure 顶层读得到；但门禁跑的是 <code>cmake -P</code>，那个 include 从没执行过，模块于是把空串
+替换进模板，glob 变成 <code>${_staged}//*</code> —— 暂存树的根，里面全是目录，<code>LIST_DIRECTORIES false</code>
+一过滤就是零个 ELF 对象。<strong>这一条不是 run 39 的原因，是"修完第一件之后会立刻撞上的下一件"</strong>，
+被"真的把脚本跑一遍"抓住，而不是被文本断言抓住。修法是让模块自己 <code>include(GNUInstallDirs)</code>
+（缓存使真实 configure 里它是空操作），并且只放<strong>一处</strong>——放在 <code>private_lib_dir</code> 和
+<code>apply_linux_private_rpath</code> 里的副本是空操作，而<strong>空操作无法反向验证</strong>，所以不留。</p>
+<p>门禁因此多了两条<strong>执行</strong>断言（不只是读文本）：</p>
+<table>
+<thead>
+<tr>
+<th>执行</th>
+<th>期望</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>空 DESTDIR + 包内前缀</td>
+<td><code>there is no staging tree</code></td>
+</tr>
+<tr>
+<td>暂存树里有名为 <code>[</code> 的文件</td>
+<td><code>a glob result is not a file</code>（一句话，无 ENAMETOOLONG）</td>
+</tr>
+</tbody>
+</table>
+<p>反向验证扩到 <strong>14 变异 + 1 对照</strong>，新增四条：</p>
+<table>
+<thead>
+<tr>
+<th>变异</th>
+<th>红在</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>暂存根去掉 <code>$ENV{DESTDIR}</code>（run 39 原形）</td>
+<td><code>does not build its staging tree from DESTDIR</code></td>
+</tr>
+<tr>
+<td>空 DESTDIR 退回包内前缀</td>
+<td><code>there is no staging tree</code></td>
+</tr>
+<tr>
+<td>glob 绕过校验 helper</td>
+<td><code>was not reported readably</code></td>
+</tr>
+<tr>
+<td>去掉 <code>include(GNUInstallDirs)</code></td>
+<td><code>does not name</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>这一节与 9.6.33 是同一个错误的两次显形</strong>：那一次是"暂存树是空的"，这一次是"暂存树指的
+是宿主机"。两次都源于<strong>用一个看起来像路径的变量当路径</strong>，而它回答的是另一个问题。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

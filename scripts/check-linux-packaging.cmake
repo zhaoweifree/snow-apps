@@ -230,6 +230,56 @@ else()
         else()
             message(STATUS "ok   the bundle script honours the STAGED_DIR override")
         endif()
+        # `CMAKE_INSTALL_PREFIX` is the prefix *inside* the package, not a
+        # directory on the build host: with `CPACK_SET_DESTDIR` off, CPack passes
+        # the packaging prefix (`/usr`) and reaches the staging tree through the
+        # DESTDIR mechanism, which is also what every generated install rule
+        # applies to its destination. Taking the prefix alone pointed the glob at
+        # the host's `/usr/bin` (run 39: 3000 entries, and the loop handed
+        # `file(READ)` a 43 KB "file name"). Two needles, because either one
+        # alone leaves a script that reads the host.
+        foreach(_needle
+                [=[set(_staged "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")]=]
+                "there is no staging tree")
+            string(FIND "${_bundle_code}" "${_needle}" _staging_position)
+            if(_staging_position EQUAL -1)
+                message(STATUS "FAIL the bundle script does not build its staging tree from "
+                               "DESTDIR (missing: ${_needle})")
+                math(EXPR _snow_failures "${_snow_failures} + 1")
+            else()
+                message(STATUS "ok   the bundle script builds its staging tree from DESTDIR")
+            endif()
+        endforeach()
+        # Every staged glob goes through the helper, which is what turns a
+        # collapsed `file(GLOB)` result (see _snow_staged_paths) into a sentence
+        # instead of an ENAMETOOLONG.
+        foreach(_needle
+                "_snow_staged_paths(_staged_programs"
+                "_snow_staged_paths(_staged_libraries")
+            string(FIND "${_bundle_code}" "${_needle}" _glob_position)
+            if(_glob_position EQUAL -1)
+                message(STATUS "FAIL the bundle script does not validate the glob behind "
+                               "${_needle}")
+                math(EXPR _snow_failures "${_snow_failures} + 1")
+            else()
+                message(STATUS "ok   the bundle script validates the glob behind ${_needle}")
+            endif()
+        endforeach()
+        # The bindir has to be the real one. This gate runs in script mode, where
+        # nothing ever ran `GNUInstallDirs`, so the module substitutes whatever it
+        # finds -- and an empty value turns the glob into `${_staged}//*`: the
+        # staging root, whose entries are all directories, which reports "no ELF
+        # objects" for a tree full of binaries.
+        include(GNUInstallDirs)
+        set(_bindir_needle "_staged}/${CMAKE_INSTALL_BINDIR}/*")
+        string(FIND "${_bundle_code}" "${_bindir_needle}" _bindir_position)
+        if(_bindir_position EQUAL -1)
+            message(STATUS "FAIL the staged glob does not name '${CMAKE_INSTALL_BINDIR}'; "
+                           "CMAKE_INSTALL_BINDIR is empty where the packaging module reads it")
+            math(EXPR _snow_failures "${_snow_failures} + 1")
+        else()
+            message(STATUS "ok   the staged glob names ${CMAKE_INSTALL_BINDIR}")
+        endif()
         # --- `file(RPATH_SET)` has to parse with this CMake ------------------
         # The text needles above only prove that the keywords are written down.
         # `RPATH_SET` is not in the documented `file()` list any more -- it is a
@@ -300,6 +350,66 @@ snow_shot_linux_find_deps_lib_dir(_probe_empty)
 snow_expect("dependency prefix probe rejects an empty prefix" "" "${_probe_empty}")
 set(CMAKE_PREFIX_PATH "${_saved_prefix_path}")
 
+# --- 2d. Execute the generated script ---------------------------------------
+# The text needles above can only prove that the calls are written down. Run 39
+# was a script that *did* have a staging-root branch and still read the build
+# host's `/usr/bin`, so the two properties that matter are checked by running
+# the artifact:
+#
+#   * no DESTDIR and the packaging prefix -> refuse, never read the host;
+#   * a staging tree with a file named `[`  -> one readable line.
+#
+# The second one is about the interpreter, not about this script: when a glob
+# match is named `[`, `file(GLOB)` returns a *single* element whose value still
+# contains the list separators (`list(LENGTH)` = 1), so `foreach(IN LISTS)` runs
+# once with the whole string and `file(READ)` fails with `(File name too long)`
+# naming no file at all -- 43 KB of paths in the CI log and no cause.
+function(snow_shot_run_bundle script)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" ${ARGN} -P "${script}"
+        RESULT_VARIABLE _run_result
+        OUTPUT_VARIABLE _run_stdout
+        ERROR_VARIABLE _run_stderr)
+    set(SNOW_SHOT_RUN_OUTPUT "${_run_stdout}${_run_stderr}" PARENT_SCOPE)
+    set(SNOW_SHOT_RUN_RESULT "${_run_result}" PARENT_SCOPE)
+endfunction()
+
+snow_shot_run_bundle("${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}"
+                     "-DCMAKE_INSTALL_PREFIX=${CPACK_PACKAGING_INSTALL_PREFIX}")
+if(SNOW_SHOT_RUN_OUTPUT MATCHES "there is no staging tree")
+    message(STATUS "ok   the bundle script refuses to read the packaging prefix as a tree")
+else()
+    message(STATUS "FAIL a bundle script without DESTDIR did not refuse the packaging "
+                   "prefix: ${SNOW_SHOT_RUN_OUTPUT}")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+endif()
+
+# Regenerated against a prefix that has one of the pinned libraries, so the
+# script gets past its dependency check and reaches the glob under test.
+set(_bundle_probe_deps "${CMAKE_BINARY_DIR}/bundle-probe-deps")
+file(MAKE_DIRECTORY "${_bundle_probe_deps}/lib/x86_64-linux-gnu")
+file(WRITE "${_bundle_probe_deps}/lib/x86_64-linux-gnu/liblunasvg.so.3" "")
+set(CMAKE_PREFIX_PATH "${_bundle_probe_deps}")
+snow_shot_configure_linux_package()
+
+set(_bundle_probe_tree "${CMAKE_BINARY_DIR}/bundle-probe-tree")
+file(MAKE_DIRECTORY "${_bundle_probe_tree}/bin")
+file(WRITE "${_bundle_probe_tree}/bin/aa" "not an ELF file\n")
+file(WRITE "${_bundle_probe_tree}/bin/[" "not an ELF file\n")
+snow_shot_run_bundle("${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}"
+                     "-DSTAGED_DIR=${_bundle_probe_tree}")
+if(SNOW_SHOT_RUN_OUTPUT MATCHES "a glob result is not a file")
+    message(STATUS "ok   a collapsed glob result is reported in one line")
+else()
+    message(STATUS "FAIL a file named '[' in the staging tree was not reported readably: "
+                   "${SNOW_SHOT_RUN_OUTPUT}")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+endif()
+
+# Put the script back to the state the rest of this gate inspects.
+set(CMAKE_PREFIX_PATH "${_saved_prefix_path}")
+snow_shot_configure_linux_package()
+
 # The build prefix has to be named even in script mode (it is empty there), so
 # that a real configure cannot silently forget it: CPackDeb turns it into `-l`.
 if(NOT DEFINED CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS)
@@ -356,7 +466,13 @@ endforeach()
 # are silent: the package builds, installs, and the helper fails at spawn time.
 file(READ "${_snow_repo}/cmake/RustStaticLibrary.cmake" _rust_module)
 string(REGEX REPLACE "#[^\n]*" "" _rust_code "${_rust_module}")
+# The full relative path, not just its last component. With an empty
+# `CMAKE_INSTALL_LIBDIR` the function returns `/snow-shot` -- an *absolute* path
+# outside the install prefix -- and every consumer still "works": the RPATH ends
+# up as `$ORIGIN/..//snow-shot` and the bundle script copies into
+# `<staged>//snow-shot`. Only the value itself shows it.
 snow_shot_linux_private_lib_dir(_gate_private)
+snow_expect("private library directory" "${CMAKE_INSTALL_LIBDIR}/snow-shot" "${_gate_private}")
 get_filename_component(_gate_private_name "${_gate_private}" NAME)
 foreach(_needle
         "-Wl,-rpath,"

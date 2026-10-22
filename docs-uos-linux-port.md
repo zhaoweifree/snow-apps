@@ -5410,6 +5410,84 @@ endif()
 **这一节的教训与 9.6.30/9.6.28 同源，但方向相反**：那几条是"写下来了但没验证能成立"，
 这一条是"验证了内容但没验证时机"。**一个钩子的名字不是它的顺序说明书。**
 
+#### 9.6.38 run 39：`CMAKE_INSTALL_PREFIX` 不是暂存树，是包内的前缀
+
+`Build` 两架构照旧全绿，第 11 步换了个错误，而且比上一次更难看：
+
+```text
+CPack: - Install project: snow_apps []
+CMake Error at .../snow-shot-linux-runtime-bundle.cmake:97 (file):
+  file failed to open for reading (File name too long):
+
+    /usr/bin/[;/usr/bin/aa-enabled;/usr/bin/aa-exec;/usr/bin/aa-features-abi;…（43 447 字符）
+```
+
+**两件事同时错。**
+
+**第一件：钩子正确了，路径没正确。** 安装规则里的 `CMAKE_INSTALL_PREFIX` 是**包内**前缀
+`/usr`（`CPACK_PACKAGING_INSTALL_PREFIX`），暂存树要通过 **DESTDIR 机制**到达。
+`CPACK_SET_DESTDIR` 的文档把这个二分说得很清楚：
+
+> 没有 `CPACK_SET_DESTDIR` 时，CPack 用 `CPACK_PACKAGING_INSTALL_PREFIX` 作为前缀；
+> 设了它则用 `CMAKE_INSTALL_PREFIX`。
+
+而 CPack 的本地安装**一律**走 DESTDIR：生成的每条安装规则都把 `$ENV{DESTDIR}` 拼进
+destination。一个安装脚本要读暂存树，就得做同样的事：
+
+```cmake
+set(_staged "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+```
+
+只取后半截的后果不是"路径差一层"，而是**去读构建机自己的 `/usr/bin`**——三千个条目。
+真让那个循环跑完，包会把构建机的库打进去，那比失败糟糕得多。
+
+因此 `DESTDIR` 为空、而前缀又等于包内前缀时，脚本**拒绝执行**，不退回前缀。
+这是唯一一个"宁可红、不可猜"的取舍点：没有暂存树这件事本身就该被说出来。
+
+**第二件：`file(GLOB)` 的结果会被一个 `[` 弄成单元素列表。** 报错里那 43 KB 是
+"文件名"，说明 `foreach(IN LISTS …)` 只跑了一次、`_program` 是整串。本地复现，两行就够：
+
+```cmake
+# 目录里两个文件：`[` 和 `aa`
+file(GLOB _p ".../bin2/*")
+list(LENGTH _p _n)      # => 1
+message("${_p}")        # => C:/…/bin2/[;C:/…/bin2/aa
+```
+
+`length=1` 而值里仍带 `;` —— 分隔符被转义了，`IN LISTS` 于是把它当一个元素。
+`/usr/bin/[` 这个文件在每台 Debian 系机器上都存在（`[` 是 test 的内建），
+所以这不是理论问题：**只要 glob 到宿主的 `/usr/bin`，就一定会撞上它**。
+换成我们自己的暂存树后不会再有 `[`，但这个坑值得留个守卫：每个元素先查
+`EXISTS`，塌缩时给出**一句话**而不是 43 KB。
+
+**第三件（本地门禁的执行探针抓到的，未上 CI）：`cmake -P` 模式下 `CMAKE_INSTALL_BINDIR` 是空的。**
+`GNUInstallDirs` 只在 `snow_shot/CMakeLists.txt` 里 include，它填的是**缓存**，所以真实
+configure 顶层读得到；但门禁跑的是 `cmake -P`，那个 include 从没执行过，模块于是把空串
+替换进模板，glob 变成 `${_staged}//*` —— 暂存树的根，里面全是目录，`LIST_DIRECTORIES false`
+一过滤就是零个 ELF 对象。**这一条不是 run 39 的原因，是"修完第一件之后会立刻撞上的下一件"**，
+被"真的把脚本跑一遍"抓住，而不是被文本断言抓住。修法是让模块自己 `include(GNUInstallDirs)`
+（缓存使真实 configure 里它是空操作），并且只放**一处**——放在 `private_lib_dir` 和
+`apply_linux_private_rpath` 里的副本是空操作，而**空操作无法反向验证**，所以不留。
+
+门禁因此多了两条**执行**断言（不只是读文本）：
+
+| 执行 | 期望 |
+|---|---|
+| 空 DESTDIR + 包内前缀 | `there is no staging tree` |
+| 暂存树里有名为 `[` 的文件 | `a glob result is not a file`（一句话，无 ENAMETOOLONG） |
+
+反向验证扩到 **14 变异 + 1 对照**，新增四条：
+
+| 变异 | 红在 |
+|---|---|
+| 暂存根去掉 `$ENV{DESTDIR}`（run 39 原形） | `does not build its staging tree from DESTDIR` |
+| 空 DESTDIR 退回包内前缀 | `there is no staging tree` |
+| glob 绕过校验 helper | `was not reported readably` |
+| 去掉 `include(GNUInstallDirs)` | `does not name` |
+
+**这一节与 9.6.33 是同一个错误的两次显形**：那一次是"暂存树是空的"，这一次是"暂存树指的
+是宿主机"。两次都源于**用一个看起来像路径的变量当路径**，而它回答的是另一个问题。
+
 ---
 
 ## 10. 工作量 / 优先级矩阵

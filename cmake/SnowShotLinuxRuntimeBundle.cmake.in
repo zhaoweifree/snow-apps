@@ -1,8 +1,8 @@
 # Bundles the project's own shared libraries into the Linux package.
 #
-# Executed by CPack as an install script (`CPACK_INSTALL_SCRIPTS`), i.e. after
-# the install tree has been staged and before the archive is built, with
-# `CPACK_TEMPORARY_DIRECTORY` pointing at that tree.
+# Executed as an install rule, i.e. after the install rules above it have filled
+# the staging tree and before the archive is built. The tree is reached through
+# `$ENV{DESTDIR}` (CPack's mechanism), not through `CMAKE_INSTALL_PREFIX`.
 #
 # Why this exists at all: the pinned dependencies in
 # `scripts/build-linux-deps.sh` are *self-built* -- pinned versions that no
@@ -45,8 +45,8 @@ cmake_minimum_required(VERSION 3.21)
 # Two callers, one script:
 #
 #   * the .deb: `install(SCRIPT ...)` in SnowShotLinuxPackage.cmake, run by
-#     `cmake_install.cmake` with `CMAKE_INSTALL_PREFIX` pointing at the staging
-#     tree CPack asked for;
+#     `cmake_install.cmake` with `DESTDIR` pointing at the tree CPack asked for
+#     and `CMAKE_INSTALL_PREFIX` at the prefix *inside* the package;
 #   * the `snow-shot-appimage` target, by hand, with `-DSTAGED_DIR=` on the
 #     install prefix it just filled (`cmake --install` never runs CPack, and
 #     CPack never runs for the AppImage).
@@ -57,15 +57,33 @@ cmake_minimum_required(VERSION 3.21)
 # objects". An install rule, besides running after the rules above it, also runs
 # for the AppImage's `cmake --install` -- which is the other half of why the
 # AppDir used to hold no shared library at all.
+# The staging tree is *not* `CMAKE_INSTALL_PREFIX`. Under CPack the prefix is the
+# packaging prefix (`CPACK_PACKAGING_INSTALL_PREFIX`, `/usr` here) and the tree
+# CPack fills is reached through the DESTDIR mechanism -- every generated install
+# rule applies `$ENV{DESTDIR}` to its destination, and an install script has to
+# do the same. Reading the prefix alone pointed this script at the *host*
+# `/usr/bin`: 3000 entries, and the loop below handed `file(READ)` a 43 KB
+# "file name" (run 39). It also would have bundled the build machine's
+# libraries had the loop survived.
+#
+# An empty DESTDIR together with the packaging prefix is refused rather than
+# degraded to the prefix: that combination means the caller is not staging
+# anything, and reading `/usr` as if it were a package tree is never right.
 if(DEFINED STAGED_DIR AND NOT STAGED_DIR STREQUAL "")
     set(_staged "${STAGED_DIR}")
-elseif(DEFINED CMAKE_INSTALL_PREFIX AND NOT CMAKE_INSTALL_PREFIX STREQUAL "")
+elseif(DEFINED ENV{DESTDIR} AND NOT "$ENV{DESTDIR}" STREQUAL "")
+    set(_staged "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+elseif(DEFINED CMAKE_INSTALL_PREFIX AND NOT CMAKE_INSTALL_PREFIX STREQUAL ""
+        AND NOT CMAKE_INSTALL_PREFIX MATCHES "^@SNOW_SHOT_LINUX_PACKAGE_PREFIX@/?$")
+    # CPack has been seen to point the prefix straight at the staging tree. Take
+    # that when it happens, but never when the prefix is the packaging prefix.
     set(_staged "${CMAKE_INSTALL_PREFIX}")
 else()
     message(FATAL_ERROR
-        "snow-shot bundle script: neither STAGED_DIR nor CMAKE_INSTALL_PREFIX is "
-        "set, so there is nothing to bundle into. Run it as an install rule, or "
-        "pass -DSTAGED_DIR=<install prefix>.")
+        "snow-shot bundle script: there is no staging tree. DESTDIR is empty and "
+        "CMAKE_INSTALL_PREFIX is '@SNOW_SHOT_LINUX_PACKAGE_PREFIX@', which is the "
+        "prefix inside the package, not a directory on this machine. Run this "
+        "through CPack (it sets DESTDIR), or pass -DSTAGED_DIR=<install prefix>.")
 endif()
 
 set(_private_lib_dir "@SNOW_SHOT_LINUX_PRIVATE_LIB_DIR@")
@@ -88,19 +106,40 @@ endif()
 # `usr/bin` also holds helper scripts in some configurations, and
 # `file(GET_RUNTIME_DEPENDENCIES)` aborts on a non-ELF input, so the magic is
 # checked first.
+#
+# The existence check inside the helper is not redundant with the glob. When one
+# of the matches is named `[`, `file(GLOB)` returns a single element whose value
+# still contains the list separators (measured on CMake 4.2: the two files `[`
+# and `aa` give `list(LENGTH)` = 1 and a value that prints as `…/[...;/…/aa`).
+# `foreach(IN LISTS)` then runs once with the whole string, `file(READ)` fails
+# with `(File name too long)` -- naming no file at all -- and the 43 KB line it
+# prints buries the cause. Checking every entry turns that into one sentence.
+function(_snow_staged_paths out_var)
+    file(GLOB _entries LIST_DIRECTORIES false ${ARGN})
+    foreach(_entry IN LISTS _entries)
+        if(NOT EXISTS "${_entry}")
+            string(LENGTH "${_entry}" _entry_length)
+            string(SUBSTRING "${_entry}" 0 80 _entry_head)
+            message(FATAL_ERROR
+                "snow-shot bundle script: a glob result is not a file: "
+                "${_entry_length} characters starting with '${_entry_head}'. "
+                "`file(GLOB)` collapses its result into one element when a match "
+                "is named '[', and the pattern was: ${ARGN}")
+        endif()
+    endforeach()
+    set(${out_var} "${_entries}" PARENT_SCOPE)
+endfunction()
+
 set(_executables "")
-file(GLOB _staged_programs "${_staged}/@SNOW_SHOT_LINUX_INSTALL_BINDIR@/*")
+_snow_staged_paths(_staged_programs "${_staged}/@SNOW_SHOT_LINUX_INSTALL_BINDIR@/*")
 foreach(_program IN LISTS _staged_programs)
-    if(IS_DIRECTORY "${_program}")
-        continue()
-    endif()
     file(READ "${_program}" _magic OFFSET 0 LIMIT 4 HEX)
     if(_magic STREQUAL "7f454c46")
         list(APPEND _executables "${_program}")
     endif()
 endforeach()
 
-file(GLOB _staged_libraries "${_staged}/${_lib_subdir}/*.so*")
+_snow_staged_paths(_staged_libraries "${_staged}/${_lib_subdir}/*.so*")
 
 if(NOT _executables AND NOT _staged_libraries)
     message(FATAL_ERROR "snow-shot bundle script: the staged tree has no ELF objects.")
