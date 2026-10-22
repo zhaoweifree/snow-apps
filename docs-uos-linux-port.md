@@ -4750,6 +4750,89 @@ crate 还在" —— 免得门禁守着一个已经消失的前提。
 
 ---
 
+#### 9.6.30 `Fetch appimagetool` 一个参数都没传：门禁断言了"写下来了"，没断言"能成立"
+
+上一节的两个修复推上去后，`Fetch appimagetool` 这一步是 AppImage 路径第一次
+真正执行。它在第一行就死了：
+
+```
+error: --arch is required
+```
+
+原因不是脚本写错，而是 workflow 调用它时**没给任何参数**：
+
+```yaml
+- name: Fetch appimagetool
+  run: bash scripts/fetch-appimagetool.sh >> "$GITHUB_ENV"
+```
+
+`--arch` 与 `--dest` 在脚本里都是必填，两者都没有默认值，也都是不能猜的：
+
+* `--arch` 决定取哪两份资产（appimagetool 与 type-2 runtime 各自按 ELF machine
+  分档），默认成 host 架构在交叉产物的语境里就是错的；
+* `--dest` 决定落点，而脚本 stdout 输出的两个绝对路径会被直接交给
+  `-DSNOW_APPS_APPIMAGETOOL=` / `-DSNOW_APPS_APPIMAGETOOL_RUNTIME=`，
+  由 `snow_shot_add_appimage_target()` 再拼进 `--runtime-file`。
+
+##### 为什么门禁没抓到
+
+`scripts/check-linux-ci-workflow.py` 当时对这一步的断言只有两条：
+
+```python
+check("Fetch appimagetool writes the pinned paths into the job environment",
+      "fetch-appimagetool.sh" in fetch and "GITHUB_ENV" in fetch, ...)
+```
+
+也就是说它检查的是"**这一步写了脚本名、写了 `$GITHUB_ENV`**"，而唯一会失败
+的那件事 —— 调用有没有给参数 —— 不在断言里。这与 9.6.28（`OUTPUT_NAME` 被当
+标签、没人核对 cargo 真会写出那个文件）是同一类错误：断言落在"声明存在"上，
+而不是"声明能成立"上。
+
+##### 顺带暴露的第二件事：两个词汇表
+
+workflow 用 `x64` / `arm64` 命名产物（artifact 名、preset 名），appimagetool
+与 runtime release 用 `x86_64` / `aarch64`。原来只有 `Validate the AppImage`
+做了映射，而且是内联三元：
+
+```yaml
+--expect-arch ${{ matrix.architecture == 'x64' && 'x86_64' || 'aarch64' }}
+```
+
+`Fetch` 步骤没有这行，于是同一个映射"在一处存在、在另一处不存在"，而缺失不会
+被任何静态检查发现。改法是把映射搬进 matrix：
+
+```yaml
+- architecture: x64
+  appimage-arch: x86_64
+```
+
+`Fetch` 与 `Validate` 都读 `matrix.appimage-arch`，两个词汇表之间只剩一个来源。
+
+##### 门禁新增四条判据
+
+| 判据 | 为什么 |
+|---|---|
+| `Fetch` 的 `run` 里出现 `--arch` | 脚本拒绝猜架构 |
+| `Fetch` 的 `run` 里出现 `--dest` | 脚本 stdout 输出的是绝对路径，落点不能由它编 |
+| matrix 的 `appimage-arch` 逐架构等于 ELF machine 名 | 映射写错（比如写成 `arm64`）与映射缺失一样只在 runner 上显形 |
+| `Fetch` 与 `Validate` 都引用 `matrix.appimage-arch` | 一个词汇表一个来源，内联三元回归即红 |
+
+##### 反向验证
+
+4 变异 + 1 对照全过：删 `--arch`、删 `--dest`、把 matrix 的值改回 workflow 的
+拼写（`arm64`）、把 `Validate` 改回硬编码 `x86_64`。
+
+变异**改文本不改行数**：删整行会让 YAML 的结构（续行反斜杠）失效，门禁会在
+"workflow parses as YAML" 就红，后面的断言根本没跑 —— 那样的"变红"不证明任何事。
+
+##### 教训
+
+"这一步写对了"和"这一步跑起来会成功"是两件事。前者可以用 `in` 断言，后者需要
+断言**参数、取值、来源**三者同时成立。凡是"调用一个自己写的脚本"，脚本的必填项
+就必须出现在门禁里 —— 因为必填项存在的理由，正是作者当时认为它不能猜。
+
+---
+
 ## 10. 工作量 / 优先级矩阵
 
 | 编号 | 工作项 | 规模 | 风险 | 优先级 |

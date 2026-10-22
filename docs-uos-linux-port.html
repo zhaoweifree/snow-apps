@@ -6916,6 +6916,82 @@ crate 还在" —— 免得门禁守着一个已经消失的前提。</p>
 是文件名承诺却没人核对；<code>CPU_DISPATCH</code> 决定归档内容却没人核对；静态库不报
 未解析符号，于是"deps 绿"只证明 <code>ar</code> 跑完了，不证明产物可用。</p>
 <hr>
+<h4>9.6.30 <code>Fetch appimagetool</code> 一个参数都没传：门禁断言了"写下来了"，没断言"能成立"</h4>
+<p>上一节的两个修复推上去后，<code>Fetch appimagetool</code> 这一步是 AppImage 路径第一次
+真正执行。它在第一行就死了：</p>
+<pre><code>error: --arch is required
+</code></pre>
+<p>原因不是脚本写错，而是 workflow 调用它时<strong>没给任何参数</strong>：</p>
+<pre><code class="language-yaml">- name: Fetch appimagetool
+  run: bash scripts/fetch-appimagetool.sh &gt;&gt; &quot;$GITHUB_ENV&quot;
+</code></pre>
+<p><code>--arch</code> 与 <code>--dest</code> 在脚本里都是必填，两者都没有默认值，也都是不能猜的：</p>
+<ul>
+<li><code>--arch</code> 决定取哪两份资产（appimagetool 与 type-2 runtime 各自按 ELF machine
+  分档），默认成 host 架构在交叉产物的语境里就是错的；</li>
+<li><code>--dest</code> 决定落点，而脚本 stdout 输出的两个绝对路径会被直接交给
+  <code>-DSNOW_APPS_APPIMAGETOOL=</code> / <code>-DSNOW_APPS_APPIMAGETOOL_RUNTIME=</code>，
+  由 <code>snow_shot_add_appimage_target()</code> 再拼进 <code>--runtime-file</code>。</li>
+</ul>
+<h5>为什么门禁没抓到</h5>
+<p><code>scripts/check-linux-ci-workflow.py</code> 当时对这一步的断言只有两条：</p>
+<pre><code class="language-python">check(&quot;Fetch appimagetool writes the pinned paths into the job environment&quot;,
+      &quot;fetch-appimagetool.sh&quot; in fetch and &quot;GITHUB_ENV&quot; in fetch, ...)
+</code></pre>
+<p>也就是说它检查的是"<strong>这一步写了脚本名、写了 <code>$GITHUB_ENV</code></strong>"，而唯一会失败
+的那件事 —— 调用有没有给参数 —— 不在断言里。这与 9.6.28（<code>OUTPUT_NAME</code> 被当
+标签、没人核对 cargo 真会写出那个文件）是同一类错误：断言落在"声明存在"上，
+而不是"声明能成立"上。</p>
+<h5>顺带暴露的第二件事：两个词汇表</h5>
+<p>workflow 用 <code>x64</code> / <code>arm64</code> 命名产物（artifact 名、preset 名），appimagetool
+与 runtime release 用 <code>x86_64</code> / <code>aarch64</code>。原来只有 <code>Validate the AppImage</code>
+做了映射，而且是内联三元：</p>
+<pre><code class="language-yaml">--expect-arch ${{ matrix.architecture == 'x64' &amp;&amp; 'x86_64' || 'aarch64' }}
+</code></pre>
+<p><code>Fetch</code> 步骤没有这行，于是同一个映射"在一处存在、在另一处不存在"，而缺失不会
+被任何静态检查发现。改法是把映射搬进 matrix：</p>
+<pre><code class="language-yaml">- architecture: x64
+  appimage-arch: x86_64
+</code></pre>
+<p><code>Fetch</code> 与 <code>Validate</code> 都读 <code>matrix.appimage-arch</code>，两个词汇表之间只剩一个来源。</p>
+<h5>门禁新增四条判据</h5>
+<table>
+<thead>
+<tr>
+<th>判据</th>
+<th>为什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Fetch</code> 的 <code>run</code> 里出现 <code>--arch</code></td>
+<td>脚本拒绝猜架构</td>
+</tr>
+<tr>
+<td><code>Fetch</code> 的 <code>run</code> 里出现 <code>--dest</code></td>
+<td>脚本 stdout 输出的是绝对路径，落点不能由它编</td>
+</tr>
+<tr>
+<td>matrix 的 <code>appimage-arch</code> 逐架构等于 ELF machine 名</td>
+<td>映射写错（比如写成 <code>arm64</code>）与映射缺失一样只在 runner 上显形</td>
+</tr>
+<tr>
+<td><code>Fetch</code> 与 <code>Validate</code> 都引用 <code>matrix.appimage-arch</code></td>
+<td>一个词汇表一个来源，内联三元回归即红</td>
+</tr>
+</tbody>
+</table>
+<h5>反向验证</h5>
+<p>4 变异 + 1 对照全过：删 <code>--arch</code>、删 <code>--dest</code>、把 matrix 的值改回 workflow 的
+拼写（<code>arm64</code>）、把 <code>Validate</code> 改回硬编码 <code>x86_64</code>。</p>
+<p>变异<strong>改文本不改行数</strong>：删整行会让 YAML 的结构（续行反斜杠）失效，门禁会在
+"workflow parses as YAML" 就红，后面的断言根本没跑 —— 那样的"变红"不证明任何事。</p>
+<h5>教训</h5>
+<p>"这一步写对了"和"这一步跑起来会成功"是两件事。前者可以用 <code>in</code> 断言，后者需要
+断言<strong>参数、取值、来源</strong>三者同时成立。凡是"调用一个自己写的脚本"，脚本的必填项
+就必须出现在门禁里 —— 因为必填项存在的理由，正是作者当时认为它不能猜。</p>
+<hr>
+
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>
