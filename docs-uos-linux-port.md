@@ -5017,6 +5017,137 @@ if app_run.is_file() and reviewed.is_file():
 
 ---
 
+#### 9.6.33 run 34：Build 两架构全绿，红落到 `dpkg-shlibdeps` —— §9.6.9 那条"等 build 绿了再定"到期了
+
+run 34（`39843647757`）是个分界：`Build` 步骤在 **x64 与 arm64 上都是 success**。
+上一节的链接两处修复成立 —— `-Wl,--allow-multiple-definition` 只挂在
+`snow_shot_linux_platform` 的 INTERFACE 上，OpenCV 的 CPU 探测从"抄来的 TRUE"改回
+`FALSE`，608 个编译单元之后的那条 `ld` 命令第一次走完。
+
+红落在下一步，仍是两个架构一起：
+
+```
+dpkg-shlibdeps: error: cannot find library libjxl.so.0.11 needed by ...
+dpkg-shlibdeps: error: cannot find library libjxl_threads.so.0.11 needed by ...
+dpkg-shlibdeps: error: cannot find library libOpenEXR-3_4.so.33 needed by ...
+dpkg-shlibdeps: error: cannot find library libIex-3_4.so.33 needed by ...
+dpkg-shlibdeps: error: cannot find library libImath-3_2.so.30 needed by ...
+dpkg-shlibdeps: error: cannot find library libjpeg.so.62 needed by ...
+dpkg-shlibdeps: error: cannot find library libturbojpeg.so.0 needed by ...
+dpkg-shlibdeps: error: cannot find library liblunasvg.so.3 needed by ...
+```
+
+八个 soname，全部来自 `scripts/build-linux-deps.sh` 自建的固定版本（§9.6.9–9.6.13），
+没有任何发行版包拥有它们。
+
+##### 这不是新发现，是一条早写下的欠账
+
+§9.6.9 里对 OpenCV 为什么必须静态，第三条理由就是这件事：
+
+> ③ `dpkg-shlibdeps` 从 ELF NEEDED 推导 Depends，一个不属于任何发行版包的共享库会
+> 让这一步**报错**而不是警告。
+
+以及同一节末尾：
+
+> 运行时链接谁，还没定。……要么静态链进包，要么随包带 `libz-ng` 并设 rpath —— 这是
+> 打包决定，**等 `build` 绿了再定**。
+
+`build` 现在绿了，欠账到期。**这一节的价值不在于新知识，而在于那条"等 X 绿了再定"
+的记号真的被兑现了** —— 它没有变成"以后再说"，也没有变成一条没人认领的注释。
+
+##### 两条被否掉的路
+
+| 方案 | 为什么不行 |
+|---|---|
+| 手写 `Depends:` | 会静默过期：以后多链一个 Qt 模块，包照样装得上，一启动就 `error while loading shared libraries` |
+| `SHLIBDEPS=OFF` | 打出一个**装得上、跑不起来**的包，比构建失败更糟 |
+
+所以只剩随包带。三件事必须**同时**成立，缺一件都只在 CPack 真正跑起来时才发现：
+
+1. **把闭包算出来并复制**。`cmake/SnowShotLinuxRuntimeBundle.cmake.in` 作为
+   `CPACK_INSTALL_SCRIPTS` 在暂存树上运行，用 `file(GET_RUNTIME_DEPENDENCIES)`
+   解析整棵暂存树，只复制"解析结果落在依赖前缀里"的那些。手写清单会在下一轮因为
+   `libjxl` 自己需要 `libhwy` 而漏 —— 闭包不是一层。
+2. **给安装后的 ELF 加 RPATH**。`snow_shot_apply_linux_private_rpath()`：
+   可执行文件 `$ORIGIN/../lib/snow-shot`，库 `$ORIGIN/snow-shot`。
+   `DT_RUNPATH` **不继承给间接依赖**，所以随包的库自己也得有 —— 否则
+   `libjxl` 找到 `libhwy` 只能靠运气。
+3. **`CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS` 指向依赖前缀**。
+
+##### RPATH 是这三者的关节
+
+`CPackDeb.cmake` 的 `dpkg-shlibdeps` 调用是：
+
+```cmake
+execute_process(COMMAND "${SHLIBDEPS_EXECUTABLE}" ${PRIVATE_SEARCH_DIR_OPTIONS}
+                        ${IGNORE_MISSING_INFO_FLAG} -O ${CPACK_DEB_BINARY_FILES} ...)
+```
+
+`PRIVATE_SEARCH_DIR_OPTIONS` 由两处生成：用户给的
+`CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS`，**以及每个二进制的 RUNPATH 中带
+`$ORIGIN` 的条目**（会结合打包目录展开）。也就是说，随包的库要"算进包内"，唯一的
+自动渠道就是 RPATH。第一次构建的红，本质是"二进制没有 RUNPATH ⇒ 一个 `-l` 都没有"。
+
+`--ignore-missing-info` 确实会被传入（CPack 先探 `dpkg-shlibdeps --help` 是否支持），
+所以"找到了库但没有任何包拥有它"是**不报错**的 —— 这正是随包带能成立的前提。
+
+##### 顺带修掉的一处覆盖
+
+`snow_shot_add_appimage_target()` 里原本自己设
+`INSTALL_RPATH "$ORIGIN/../lib"`（比私有目录高一层），而它在打包模块之后执行，
+**会把上面那条覆盖掉**。改成调用同一个函数：私有目录与 RPATH 只有一处定义。
+
+##### 门禁（第 2b 节，5 条）
+
+| 判据 | 为什么 |
+|---|---|
+| `CPACK_INSTALL_SCRIPTS` 非空 | 否则没有任何一步会把自建库放进包里 |
+| 生成的脚本存在、无残留 `@…@` | `configure_file` 的占位符没替换时会静默生成一个坏脚本 |
+| 剥掉注释后仍出现 `GET_RUNTIME_DEPENDENCIES` / `CPACK_TEMPORARY_DIRECTORY` / `RPATH_SET` | 模板的注释**解释了**这三个名字，直接子串匹配会在调用被删掉时保持绿 |
+| `CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS` 已赋值 | 少一个 `-l` 就可能下一轮才红 |
+| AppImage 模块里不再出现 `INSTALL_RPATH` | 两个所有者 = 后执行的那个说了算 |
+
+"剥注释再匹配"是这一节最实际的一条经验：**模板/脚本里解释自己用法的注释，会让
+基于函数名的断言永远为真。**
+
+##### 反向验证
+
+4 变异 + 1 对照全过。其中一条变异第一版是错的：`replace(..., 1)` 命中的是模板注释里
+那个函数名，真正的调用还在，门禁保持绿 ⇒ 断言"变成红"失败。**"变异没打中目标"必须
+当成失败处理**，否则反向验证会退化成一次自我安慰。
+
+##### 途中被自己的门禁抓到的第三次同族错误
+
+`snow_shot_configure_linux_package()` 里 `configure_file("${CMAKE_CURRENT_LIST_DIR}/…")`
+—— 函数体里 `CMAKE_CURRENT_LIST_DIR` 是**调用方**的目录（§9.6.10 同一个坑），于是模板
+被解析成 `scripts/SnowShotLinuxRuntimeBundle.cmake.in`：
+
+```
+CMake Error: File .../scripts/SnowShotLinuxRuntimeBundle.cmake.in does not exist.
+```
+
+改用 `CMAKE_CURRENT_FUNCTION_LIST_DIR`。§9.6.31 的 `CMAKE_CURRENT_SOURCE_DIR` 是同一个
+坑的第三个变量名 —— 三者可以合成一句：**函数体里任何 `CMAKE_CURRENT_*` 都在回答"谁在
+调用我"。**
+
+##### 还有一处：门禁自己的"不存在的构建目录"
+
+同一轮 gates job 也红了（本地绿）：
+
+```
+CMake Error: Could not open file for write in copy operation
+/nonexistent/snow-build/snow-shot-linux-runtime-bundle.cmake.tmp
+```
+
+`scripts/check-linux-packaging.cmake` 把 `CMAKE_BINARY_DIR` 设成字面量
+`/nonexistent/snow-build`，因为所有被断言的路径都由它拼出来、值本身无所谓 —— 直到
+打包模块开始往它里面 `configure_file`。Windows 把那条路径解析到了可写的地方，Linux
+直接失败。改成 `${CMAKE_CURRENT_BINARY_DIR}/snow-packaging-build`，开头清空、结束删除。
+
+**"这个值无所谓"是一个会被后续改动推翻的断言，而且推翻它的人不会去看那行注释。**
+
+---
+
 ## 10. 工作量 / 优先级矩阵
 
 | 编号 | 工作项 | 规模 | 风险 | 优先级 |
