@@ -88,6 +88,21 @@
 #include <type_traits>
 #include <utility>
 
+// The version macros have to be defined *before* the first #if that tests
+// them. They used to sit below the <QVector> include, which made that
+// include dead code on every platform: `#if SNOW_QT5` on an undefined macro
+// evaluates to 0, and with -Wundef in the warning set it is a hard error
+// (CI run 39715098658: "SNOW_QT5" is not defined, evaluates to 0). The Qt5
+// branch of <QVector> below therefore never ran, and `SnowRoleList` only
+// compiled because <QList> drags in qvector.h by itself.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#  define SNOW_QT6 1
+#  define SNOW_QT5 0
+#else
+#  define SNOW_QT6 0
+#  define SNOW_QT5 1
+#endif
+
 #if SNOW_QT5
 // Qt5 keeps QVector as a distinct class; Qt6 aliases it to QList.
 #  include <QVector>
@@ -108,9 +123,9 @@
 #  include <QKeySequence>
 #endif
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#  define SNOW_QT6 1
-#  define SNOW_QT5 0
+// The version macros are defined above (before the <QVector> include), so
+// this block only selects the headers that differ between the two.
+#if SNOW_QT6
 // QKeyCombination and QEnterEvent live in QtGui, which a QtCore-only target
 // (snow_shot_diagnostics is one) never gets on its include path. This header is
 // force-included into every TU, so the includes below must be gated exactly like
@@ -125,8 +140,6 @@
 #  endif
 #  include <QLatin1StringView>
 #else
-#  define SNOW_QT6 0
-#  define SNOW_QT5 1
 #  include <QLatin1String>
 // QEnterEvent exists in QtGui since Qt 5.14, but it is NOT part of the Qt5
 // virtual signature (QWidget::enterEvent() still takes a QEvent*). The class is
@@ -191,8 +204,18 @@ public:
 
     [[nodiscard]] static constexpr QKeyCombination fromCombined(int combined) noexcept
     {
-        return QKeyCombination(Qt::KeyboardModifiers(combined & Qt::KeyboardModifierMask),
-                               Qt::Key(combined & ~Qt::KeyboardModifierMask));
+        // Qt::KeyboardModifierMask is 0xfe000000, which does not fit in a
+        // signed int. GCC and Clang therefore give Qt::KeyboardModifier an
+        // 'unsigned int' underlying type, so the usual arithmetic conversions
+        // would promote the int operand to unsigned int -- exactly what
+        // -Wsign-conversion rejects (CI run 39715098658). Converting the mask
+        // to int first keeps the whole masking in the signed domain; the bit
+        // pattern of the mask is unchanged. Qt 6.12 does the same in
+        // qnamespace.h: QKeyCombination::key() masks with
+        // '~int(Qt::KeyboardModifierMask)'.
+        const int modifierMask = static_cast<int>(Qt::KeyboardModifierMask);
+        return QKeyCombination(Qt::KeyboardModifiers(combined & modifierMask),
+                               Qt::Key(combined & ~modifierMask));
     }
 
     [[nodiscard]] friend constexpr bool operator==(const QKeyCombination& lhs,
@@ -273,9 +296,13 @@ using snow::compat::QKeyCombination;
 [[nodiscard]] inline QKeyCombination snowKeyCombination(const QKeySequence& sequence, int index = 0)
 {
 #if SNOW_QT6
-    return sequence[index];
+    // QKeySequence::operator[] takes a 'uint' in both Qt 5.15 and Qt 6.12
+    // (Qt5: int operator[](uint i); Qt6: QKeyCombination operator[](uint i);),
+    // so the int index has to be cast explicitly -- passing it straight
+    // through is a -Wsign-conversion error on GCC/Clang.
+    return sequence[static_cast<uint>(index)];
 #else
-    return QKeyCombination::fromCombined(sequence[index]);
+    return QKeyCombination::fromCombined(sequence[static_cast<uint>(index)]);
 #endif
 }
 
@@ -738,11 +765,13 @@ using snow::compat::snowConnectSingleShot;
 [[nodiscard]] inline QKeyCombination snowKeySequenceAt(const QKeySequence& sequence, int index)
 {
 #if SNOW_QT6
-    return sequence[index];
+    // 'uint' index: see snowKeyCombination() above -- QKeySequence::operator[]
+    // takes a uint on both Qt 5.15 and Qt 6.12.
+    return sequence[static_cast<uint>(index)];
 #else
     // Qt5 stores the packed int that Qt6's fromCombined()/toCombined() pair was
     // introduced to replace, so this is a lossless re-interpretation.
-    return QKeyCombination::fromCombined(sequence[index]);
+    return QKeyCombination::fromCombined(sequence[static_cast<uint>(index)]);
 #endif
 }
 

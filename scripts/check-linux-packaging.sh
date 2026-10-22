@@ -88,3 +88,11 @@ echo "=== ffmpeg wiring"
 # machine with libavfilter-dev installed into a build that cannot find the
 # headers (run 13, 9.6.16).
 "$python_command" scripts/check-linux-ffmpeg-wiring.py
+
+echo
+echo "=== qt compat macro order"
+# The compat header is force-included into every C++ TU, and it used to test
+# SNOW_QT5 before defining it: an undefined macro in #if evaluates to 0, so
+# the Qt5 branch was dead code on every platform and -Wundef turned it into
+# a hard error on GCC (run 15, 9.6.17).
+"$python_command" scripts/check-qt-compat-macro-order.py
