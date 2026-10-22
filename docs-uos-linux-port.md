@@ -5355,6 +5355,61 @@ list(INSERT _cargo_environment 0
 `/<这个名字>`。改名只改一处就会红。反向验证第 11 条（删掉那个 `list(INSERT …)`）
 红在 `never get -Wl,-rpath,`。
 
+#### 9.6.37 run 38：Build 两架构全绿，`CPACK_INSTALL_SCRIPTS` 在**装之前**跑
+
+run 38 的 `Build` 在 x64 与 arm64 都过了（608 个单元 + 链接），红落在第 11 步
+`Build the Debian package`，一行就说完：
+
+```
+CPack: Install projects
+CPack: - Install scripts: …/snow-shot-linux-runtime-bundle.cmake
+CPack: - Install script:  …/snow-shot-linux-runtime-bundle.cmake
+CMake Error at …/snow-shot-linux-runtime-bundle.cmake:87 (message):
+  snow-shot bundle script: the staged tree has no ELF objects.
+```
+
+这句是 9.6.33 特意写下的 FATAL（"暂存树里没有 ELF 对象"）。它成立，原因是
+**`CPACK_INSTALL_SCRIPTS` 在安装项目之前运行**：
+
+```text
+CPack 的顺序：预安装目标 → CPACK_INSTALL_SCRIPTS → 已安装目录 → CMake 安装项目
+```
+
+脚本被调起来时 `${CPACK_TEMPORARY_DIRECTORY}/usr/bin` 还是空的，于是两个 glob 都是空的。
+换句话说，**这个钩子问的是"装之前"，而我们做的是"装之后"的事**。
+（这也解释了为什么它从未在别人项目里被当成"后处理"用。）
+
+**解法是回到 9.6.35 否掉的那个方案，但理由换了。** 那里否掉 `install(SCRIPT ...)`
+是为了不重写正在被首次验证的 deb 路径；现在 run 38 用一条错误证明
+`CPACK_INSTALL_SCRIPTS` 本身就是错的钩子，所以换成安装规则，并且**两个消费方同时受益**：
+
+```cmake
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    install(SCRIPT "${_snow_bundle_script}" COMPONENT "${CPACK_COMPONENTS_ALL}")
+endif()
+```
+
+`COMPONENT` 不是修饰。CPack 被 `CPACK_INSTALL_CMAKE_PROJECTS` 告知"只装 `SnowShot`
+组件"，而没有 `COMPONENT` 的规则会落到 `CMAKE_INSTALL_DEFAULT_COMPONENT_NAME` ——
+这个变量是在 `snow_shot/CMakeLists.txt:67` 设的，**目录作用域**，够不到顶层。
+少了这个参数，规则对 .deb 被静默跳过、对 `cmake --install` 照常执行，
+两条路会给出不同结果。门禁为此加了一条：`install(SCRIPT … COMPONENT` 必须出现。
+
+脚本的暂存根从 `CPACK_TEMPORARY_DIRECTORY` 改成 `CMAKE_INSTALL_PREFIX` —— 后者是
+安装规则唯一能保证存在的那个（CPack 与 `cmake --install --prefix` 都设它）。
+`-DSTAGED_DIR=` 覆盖保留：AppImage 目标仍然显式跑一遍同一个脚本，两条路互为兜底。
+
+反向验证扩到 **13 变异 + 1 对照**，新增三条都对着这次的机制：
+
+| 变异 | 红在 |
+|---|---|
+| 删掉 `install(SCRIPT …)` | `never registers the bundle script as an install rule` |
+| 改回 `CPACK_INSTALL_SCRIPTS`（run 38 原形） | `still uses CPACK_INSTALL_SCRIPTS` |
+| 去掉 `COMPONENT` 参数 | `has no COMPONENT` |
+
+**这一节的教训与 9.6.30/9.6.28 同源，但方向相反**：那几条是"写下来了但没验证能成立"，
+这一条是"验证了内容但没验证时机"。**一个钩子的名字不是它的顺序说明书。**
+
 ---
 
 ## 10. 工作量 / 优先级矩阵

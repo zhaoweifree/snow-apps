@@ -246,7 +246,25 @@ above other windows, and recognize text and tables from the same image.\n")
         "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/SnowShotLinuxRuntimeBundle.cmake.in"
         "${_snow_bundle_script}"
         @ONLY)
-    set(CPACK_INSTALL_SCRIPTS "${_snow_bundle_script}")
+    # An install rule, not `CPACK_INSTALL_SCRIPTS`. CPack runs those scripts
+    # *before* it installs the project -- run 38's staging tree was empty when
+    # the script ran, and it refused with "the staged tree has no ELF objects".
+    # It also has no effect on `cmake --install`, which is how the AppImage
+    # stages its AppDir. This rule runs after the install rules above it, which
+    # include every file the package ships, and it runs for both consumers.
+    #
+    # Guarded because `install()` is not scriptable: the packaging gate calls
+    # this function in `cmake -P` mode to inspect the values it assigns.
+    #
+    # `COMPONENT` is not decoration. CPack is told to install the component
+    # `SnowShot` (`CPACK_INSTALL_CMAKE_PROJECTS`), and a rule with no component
+    # falls back to `CMAKE_INSTALL_DEFAULT_COMPONENT_NAME` -- which the project
+    # sets inside `snow_shot/CMakeLists.txt`, a *directory* scope that does not
+    # reach this one. Without the argument this rule would be `Unspecified` and
+    # silently skipped for the .deb while still running for `cmake --install`.
+    if(NOT CMAKE_SCRIPT_MODE_FILE)
+        install(SCRIPT "${_snow_bundle_script}" COMPONENT "${CPACK_COMPONENTS_ALL}")
+    endif()
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "${_snow_deps_lib}")
     snow_shot_apply_linux_private_rpath()
 
@@ -276,7 +294,6 @@ above other windows, and recognize text and tables from the same image.\n")
             CPACK_DEBIAN_PACKAGE_HOMEPAGE
             CPACK_DEBIAN_PACKAGE_SHLIBDEPS
             CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
-            CPACK_INSTALL_SCRIPTS
             CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION
             SNOW_SHOT_LINUX_BUNDLE_SCRIPT)
         set(${_snow_variable} "${${_snow_variable}}" PARENT_SCOPE)

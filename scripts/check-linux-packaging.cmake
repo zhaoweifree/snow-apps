@@ -128,14 +128,51 @@ endif()
 # (`libjxl.so.0.11`, `libOpenEXR-3_4.so.33`, `liblunasvg.so.3` ...). Three
 # separate pieces have to exist for the package to build *and* run; a missing
 # one is invisible until CPack runs on a real Linux host.
-if(NOT CPACK_INSTALL_SCRIPTS)
-    message(STATUS "FAIL CPACK_INSTALL_SCRIPTS is empty: nothing would bundle the "
-                   "self-built libraries, and dpkg-shlibdeps fails on the first "
-                   "one it cannot find")
+#
+# The hook is `install(SCRIPT ...)`, not `CPACK_INSTALL_SCRIPTS`. The latter is
+# executed *before* the project is installed (run 38: the script ran, found an
+# empty staging tree and reported "the staged tree has no ELF objects"), and it
+# does not run at all for `cmake --install`, which is how the AppImage stages its
+# AppDir. An install rule runs after the install rules that precede it and runs
+# for both consumers.
+set(_module_text_source "${_snow_repo}/cmake/SnowShotLinuxPackage.cmake")
+file(READ "${_module_text_source}" _module_text)
+string(REGEX REPLACE "#[^\n]*" "" _module_code "${_module_text}")
+if(NOT _module_code MATCHES "install\\(SCRIPT")
+    message(STATUS "FAIL the packaging module never registers the bundle script as an "
+                   "install rule; CPACK_INSTALL_SCRIPTS runs before the tree exists")
     math(EXPR _snow_failures "${_snow_failures} + 1")
 else()
-    message(STATUS "ok   CPACK_INSTALL_SCRIPTS names the bundle script")
-    foreach(_script IN LISTS CPACK_INSTALL_SCRIPTS)
+    message(STATUS "ok   the bundle script runs as an install rule")
+endif()
+# A rule with no COMPONENT belongs to the top-level directory's default
+# component, which is `Unspecified` -- `CMAKE_INSTALL_DEFAULT_COMPONENT_NAME` is
+# set inside `snow_shot/CMakeLists.txt` and does not reach the top level. CPack
+# installs only `SnowShot`, so the rule would be skipped for the .deb and still
+# run for `cmake --install`: the two consumers would disagree.
+if(_module_code MATCHES "install\\(SCRIPT[^)]*COMPONENT")
+    message(STATUS "ok   the install rule names its component")
+else()
+    message(STATUS "FAIL the bundle install rule has no COMPONENT; CPack installs only "
+                   "SnowShot and would skip it")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+endif()
+
+if(_module_code MATCHES "CPACK_INSTALL_SCRIPTS")
+    message(STATUS "FAIL the packaging module still uses CPACK_INSTALL_SCRIPTS; it runs "
+                   "before the staged tree is filled")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+else()
+    message(STATUS "ok   the packaging module does not use CPACK_INSTALL_SCRIPTS")
+endif()
+if(NOT SNOW_SHOT_LINUX_BUNDLE_SCRIPT)
+    message(STATUS "FAIL the packaging function exported no bundle script path: nothing "
+                   "would bundle the self-built libraries, and dpkg-shlibdeps fails on "
+                   "the first one it cannot find")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+else()
+    message(STATUS "ok   the packaging function exports the bundle script")
+    foreach(_script IN ITEMS "${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}")
         if(NOT EXISTS "${_script}")
             message(STATUS "FAIL the generated bundle script does not exist: ${_script}")
             math(EXPR _snow_failures "${_snow_failures} + 1")
@@ -158,7 +195,7 @@ else()
         # probe below is what makes the keyword form non-negotiable.
         foreach(_needle
                 "GET_RUNTIME_DEPENDENCIES"
-                "CPACK_TEMPORARY_DIRECTORY"
+                "CMAKE_INSTALL_PREFIX"
                 "RPATH_SET FILE"
                 "NEW_RPATH")
             if(NOT _bundle_code MATCHES "${_needle}")

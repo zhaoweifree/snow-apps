@@ -44,24 +44,28 @@ cmake_minimum_required(VERSION 3.21)
 
 # Two callers, one script:
 #
-#   * CPack runs it through `CPACK_INSTALL_SCRIPTS` with
-#     `CPACK_TEMPORARY_DIRECTORY` pointing at the staged .deb tree;
-#   * the `snow-shot-appimage` target runs it by hand with `-DSTAGED_DIR=` on the
-#     install prefix it just filled, because the AppDir is produced by
-#     `cmake --install` and CPack is not involved there at all. Without this the
-#     AppDir held the executable, the entry and the icon but not one shared
-#     library -- `scripts/check-linux-appimage-build.py` asks for the bundled
-#     libraries precisely because an AppImage that cannot load `libjxl` is not a
-#     product.
+#   * the .deb: `install(SCRIPT ...)` in SnowShotLinuxPackage.cmake, run by
+#     `cmake_install.cmake` with `CMAKE_INSTALL_PREFIX` pointing at the staging
+#     tree CPack asked for;
+#   * the `snow-shot-appimage` target, by hand, with `-DSTAGED_DIR=` on the
+#     install prefix it just filled (`cmake --install` never runs CPack, and
+#     CPack never runs for the AppImage).
+#
+# It used to hang off `CPACK_INSTALL_SCRIPTS`. Run 38 showed what that hook
+# actually is: CPack executes those scripts *before* installing the project, so
+# this script found an empty tree and refused with "the staged tree has no ELF
+# objects". An install rule, besides running after the rules above it, also runs
+# for the AppImage's `cmake --install` -- which is the other half of why the
+# AppDir used to hold no shared library at all.
 if(DEFINED STAGED_DIR AND NOT STAGED_DIR STREQUAL "")
     set(_staged "${STAGED_DIR}")
-elseif(DEFINED CPACK_TEMPORARY_DIRECTORY AND NOT CPACK_TEMPORARY_DIRECTORY STREQUAL "")
-    set(_staged "${CPACK_TEMPORARY_DIRECTORY}")
+elseif(DEFINED CMAKE_INSTALL_PREFIX AND NOT CMAKE_INSTALL_PREFIX STREQUAL "")
+    set(_staged "${CMAKE_INSTALL_PREFIX}")
 else()
     message(FATAL_ERROR
-        "snow-shot bundle script: neither STAGED_DIR nor CPACK_TEMPORARY_DIRECTORY "
-        "is set, so there is nothing to bundle into. Run it through "
-        "CPACK_INSTALL_SCRIPTS, or pass -DSTAGED_DIR=<install prefix>.")
+        "snow-shot bundle script: neither STAGED_DIR nor CMAKE_INSTALL_PREFIX is "
+        "set, so there is nothing to bundle into. Run it as an install rule, or "
+        "pass -DSTAGED_DIR=<install prefix>.")
 endif()
 
 set(_private_lib_dir "@SNOW_SHOT_LINUX_PRIVATE_LIB_DIR@")

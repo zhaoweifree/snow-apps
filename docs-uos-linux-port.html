@@ -7457,6 +7457,63 @@ list(INSERT _cargo_environment 0
 <code>/&lt;这个名字&gt;</code>。改名只改一处就会红。反向验证第 11 条（删掉那个 <code>list(INSERT …)</code>）
 红在 <code>never get -Wl,-rpath,</code>。</p>
 <hr>
+<h4>9.6.37 run 38：Build 两架构全绿，<code>CPACK_INSTALL_SCRIPTS</code> 在<strong>装之前</strong>跑</h4>
+<p>run 38 的 <code>Build</code> 在 x64 与 arm64 都过了（608 个单元 + 链接），红落在第 11 步
+<code>Build the Debian package</code>，一行就说完：</p>
+<pre><code>CPack: Install projects
+CPack: - Install scripts: …/snow-shot-linux-runtime-bundle.cmake
+CPack: - Install script:  …/snow-shot-linux-runtime-bundle.cmake
+CMake Error at …/snow-shot-linux-runtime-bundle.cmake:87 (message):
+  snow-shot bundle script: the staged tree has no ELF objects.
+</code></pre>
+<p>这句是 9.6.33 特意写下的 FATAL（"暂存树里没有 ELF 对象"）。它成立，原因是
+<strong><code>CPACK_INSTALL_SCRIPTS</code> 在安装项目之前运行</strong>：</p>
+<pre><code class="language-text">CPack 的顺序：预安装目标 → CPACK_INSTALL_SCRIPTS → 已安装目录 → CMake 安装项目
+</code></pre>
+<p>脚本被调起来时 <code>${CPACK_TEMPORARY_DIRECTORY}/usr/bin</code> 还是空的，于是两个 glob 都是空的。
+换句话说，<strong>这个钩子问的是"装之前"，而我们做的是"装之后"的事</strong>。
+（这也解释了为什么它从未在别人项目里被当成"后处理"用。）</p>
+<p><strong>解法是回到 9.6.35 否掉的那个方案，但理由换了。</strong> 那里否掉 <code>install(SCRIPT ...)</code>
+是为了不重写正在被首次验证的 deb 路径；现在 run 38 用一条错误证明
+<code>CPACK_INSTALL_SCRIPTS</code> 本身就是错的钩子，所以换成安装规则，并且<strong>两个消费方同时受益</strong>：</p>
+<pre><code class="language-cmake">if(NOT CMAKE_SCRIPT_MODE_FILE)
+    install(SCRIPT &quot;${_snow_bundle_script}&quot; COMPONENT &quot;${CPACK_COMPONENTS_ALL}&quot;)
+endif()
+</code></pre>
+<p><code>COMPONENT</code> 不是修饰。CPack 被 <code>CPACK_INSTALL_CMAKE_PROJECTS</code> 告知"只装 <code>SnowShot</code>
+组件"，而没有 <code>COMPONENT</code> 的规则会落到 <code>CMAKE_INSTALL_DEFAULT_COMPONENT_NAME</code> ——
+这个变量是在 <code>snow_shot/CMakeLists.txt:67</code> 设的，<strong>目录作用域</strong>，够不到顶层。
+少了这个参数，规则对 .deb 被静默跳过、对 <code>cmake --install</code> 照常执行，
+两条路会给出不同结果。门禁为此加了一条：<code>install(SCRIPT … COMPONENT</code> 必须出现。</p>
+<p>脚本的暂存根从 <code>CPACK_TEMPORARY_DIRECTORY</code> 改成 <code>CMAKE_INSTALL_PREFIX</code> —— 后者是
+安装规则唯一能保证存在的那个（CPack 与 <code>cmake --install --prefix</code> 都设它）。
+<code>-DSTAGED_DIR=</code> 覆盖保留：AppImage 目标仍然显式跑一遍同一个脚本，两条路互为兜底。</p>
+<p>反向验证扩到 <strong>13 变异 + 1 对照</strong>，新增三条都对着这次的机制：</p>
+<table>
+<thead>
+<tr>
+<th>变异</th>
+<th>红在</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>删掉 <code>install(SCRIPT …)</code></td>
+<td><code>never registers the bundle script as an install rule</code></td>
+</tr>
+<tr>
+<td>改回 <code>CPACK_INSTALL_SCRIPTS</code>（run 38 原形）</td>
+<td><code>still uses CPACK_INSTALL_SCRIPTS</code></td>
+</tr>
+<tr>
+<td>去掉 <code>COMPONENT</code> 参数</td>
+<td><code>has no COMPONENT</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>这一节的教训与 9.6.30/9.6.28 同源，但方向相反</strong>：那几条是"写下来了但没验证能成立"，
+这一条是"验证了内容但没验证时机"。<strong>一个钩子的名字不是它的顺序说明书。</strong></p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
