@@ -56,23 +56,42 @@ function(snow_shot_linux_private_lib_dir out_var)
     set(${out_var} "${CMAKE_INSTALL_LIBDIR}/snow-shot" PARENT_SCOPE)
 endfunction()
 
-# Finds the `lib` directory of the dependency prefix
-# `scripts/build-linux-deps.sh` installed into.
+# Finds the directory the pinned dependencies' shared libraries were installed
+# into.
 #
-# The prefix arrives through `CMAKE_PREFIX_PATH` (the workflow exports it), and
-# there is exactly one entry that has a `lib` directory with shared libraries in
-# it. Guessing a fixed path would break the moment the prefix moves.
+# Guessing `${prefix}/lib` is not enough: `GNUInstallDirs` picks `lib64` or
+# `lib/<triplet>` depending on the host and on what the library's own build
+# system decided, and the first version of this function failed exactly that way
+# on the runner ("no dependency prefix in CMAKE_PREFIX_PATH") while OpenCV was
+# being found in that same prefix two lines earlier.
+#
+# So the probe is a *library*, found recursively: `lunasvg` is one of the pinned
+# builds and no distribution package provides it, which makes it a reliable
+# marker for "the tree scripts/build-linux-deps.sh installed".
 function(snow_shot_linux_find_deps_lib_dir out_var)
     set(_found "")
+    set(_searched "")
     foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
-        if(EXISTS "${_prefix}/lib")
-            file(GLOB _probe "${_prefix}/lib/*.so*")
-            if(_probe)
-                set(_found "${_prefix}/lib")
-                break()
-            endif()
+        list(APPEND _searched "${_prefix}")
+        file(GLOB_RECURSE _probe
+            "${_prefix}/lib*/liblunasvg.so*"
+            "${_prefix}/lib*/libjxl.so*")
+        if(_probe)
+            list(GET _probe 0 _first)
+            get_filename_component(_found "${_first}" DIRECTORY)
+            break()
         endif()
     endforeach()
+    if(NOT _found AND EXISTS "$ENV{CMAKE_PREFIX_PATH}")
+        set(_env_prefix "$ENV{CMAKE_PREFIX_PATH}")
+        file(GLOB_RECURSE _probe "${_env_prefix}/lib*/liblunasvg.so*")
+        if(_probe)
+            list(GET _probe 0 _first)
+            get_filename_component(_found "${_first}" DIRECTORY)
+        endif()
+        list(APPEND _searched "env:${_env_prefix}")
+    endif()
+    set(SNOW_SHOT_LINUX_DEPS_SEARCHED "${_searched}" PARENT_SCOPE)
     set(${out_var} "${_found}" PARENT_SCOPE)
 endfunction()
 
@@ -200,11 +219,12 @@ above other windows, and recognize text and tables from the same image.\n")
                 "(script mode); the bundle script will refuse to run")
         else()
             message(FATAL_ERROR
-                "SNOW_APPS_PACKAGE_SNOW_SHOT needs the dependency prefix in "
-                "CMAKE_PREFIX_PATH (the `lib` directory of the tree "
-                "scripts/build-linux-deps.sh installed into). Without it the "
-                "self-built libraries cannot be bundled and dpkg-shlibdeps "
-                "fails on the first one it cannot find.")
+                "SNOW_APPS_PACKAGE_SNOW_SHOT needs the directory the pinned "
+                "dependencies were installed into, and no CMAKE_PREFIX_PATH entry "
+                "contains liblunasvg.so / libjxl.so. Searched: "
+                "${SNOW_SHOT_LINUX_DEPS_SEARCHED}. Without it the self-built "
+                "libraries cannot be bundled and dpkg-shlibdeps fails on the first "
+                "one it cannot find.")
         endif()
     endif()
 

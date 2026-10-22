@@ -165,6 +165,28 @@ else()
     endforeach()
 endif()
 
+# The dependency-prefix probe has to survive a non-flat layout. The first version
+# looked for `<prefix>/lib/*.so*`, and the runner's prefix has the libraries in
+# `lib/<triplet>/`: the search returned nothing and the configure died with "no
+# dependency prefix in CMAKE_PREFIX_PATH" while `find_package(OpenCV)` was finding
+# OpenCV in that very tree two lines earlier (run 36).
+set(_fake_prefix "${CMAKE_BINARY_DIR}/fake-deps-prefix")
+file(MAKE_DIRECTORY "${_fake_prefix}/lib/aarch64-linux-gnu")
+file(WRITE "${_fake_prefix}/lib/aarch64-linux-gnu/liblunasvg.so.3" "")
+set(_saved_prefix_path "${CMAKE_PREFIX_PATH}")
+set(CMAKE_PREFIX_PATH "${_fake_prefix}")
+snow_shot_linux_find_deps_lib_dir(_probe_dir)
+snow_expect("dependency prefix probe finds lib/<triplet>"
+            "${_fake_prefix}/lib/aarch64-linux-gnu" "${_probe_dir}")
+
+# A prefix without any of the pinned libraries must yield nothing, so the caller
+# fails loudly instead of pointing at an arbitrary directory.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/empty-deps-prefix/lib")
+set(CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/empty-deps-prefix")
+snow_shot_linux_find_deps_lib_dir(_probe_empty)
+snow_expect("dependency prefix probe rejects an empty prefix" "" "${_probe_empty}")
+set(CMAKE_PREFIX_PATH "${_saved_prefix_path}")
+
 # The build prefix has to be named even in script mode (it is empty there), so
 # that a real configure cannot silently forget it: CPackDeb turns it into `-l`.
 if(NOT DEFINED CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS)
