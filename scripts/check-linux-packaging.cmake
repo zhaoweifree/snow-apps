@@ -151,10 +151,16 @@ else()
         # is deleted -- the same trap as the `continuous` tag check in
         # scripts/check-linux-appimage.py, which matched its own comment.
         string(REGEX REPLACE "#[^\n]*" "" _bundle_code "${_bundle_text}")
+        # `RPATH_SET FILE` / `NEW_RPATH` as two needles, not the bare name: the
+        # positional form `file(RPATH_SET <file> <rpath>)` names the sub-command
+        # too and still aborts CPack with "unrecognized argument", which is
+        # exactly what the first version of this script did. The functional
+        # probe below is what makes the keyword form non-negotiable.
         foreach(_needle
                 "GET_RUNTIME_DEPENDENCIES"
                 "CPACK_TEMPORARY_DIRECTORY"
-                "RPATH_SET")
+                "RPATH_SET FILE"
+                "NEW_RPATH")
             if(NOT _bundle_code MATCHES "${_needle}")
                 message(STATUS "FAIL the bundle script never uses ${_needle}")
                 math(EXPR _snow_failures "${_snow_failures} + 1")
@@ -162,6 +168,65 @@ else()
                 message(STATUS "ok   the bundle script uses ${_needle}")
             endif()
         endforeach()
+        # The copy has to be named after the soname the loader asks for, which is
+        # the name `GET_RUNTIME_DEPENDENCIES` resolved -- not the name of the file
+        # the symlink points at. Taking the name from `REALPATH` ships
+        # `libjxl.so.0.11.0` in a package whose every NEEDED entry says
+        # `libjxl.so.0.11`, and the binary then fails at startup on the target
+        # machine, long after this gate could have said so.
+        set(_soname_needle [=[get_filename_component(_soname "${_dependency}" NAME)]=])
+        string(FIND "${_bundle_code}" "${_soname_needle}" _soname_position)
+        if(_soname_position EQUAL -1)
+            message(STATUS "FAIL the bundled copy is not named after the resolved soname")
+            math(EXPR _snow_failures "${_snow_failures} + 1")
+        else()
+            message(STATUS "ok   the bundled copy is named after the resolved soname")
+        endif()
+        # --- `file(RPATH_SET)` has to parse with this CMake ------------------
+        # The text needles above only prove that the keywords are written down.
+        # `RPATH_SET` is not in the documented `file()` list any more -- it is a
+        # leftover from the 2.6 era that still works in 4.2 -- so its signature
+        # is a fact about the interpreter, and a call shape the gate accepts can
+        # still abort CPack with "unrecognized argument" (which is what the first
+        # version of this script did, with the positional form).
+        #
+        # The call is therefore lifted out of the script under test and executed
+        # for real against a non-ELF file. A probe that retyped the signature
+        # here would only prove that this gate knows the syntax, never that the
+        # script does: mutating the script left such a probe green.
+        #
+        # Only the *rejection* is read: "unrecognized argument" means the
+        # signature is wrong, "does not recognize sub-command" means this CMake
+        # no longer has it, and anything else means the call parsed and merely
+        # failed on the payload -- a text file is not an ELF object.
+        set(_rpath_probe_dir "${CMAKE_BINARY_DIR}/rpath-probe")
+        file(MAKE_DIRECTORY "${_rpath_probe_dir}")
+        file(WRITE "${_rpath_probe_dir}/notelf.bin" "not an ELF file\n")
+        string(REGEX MATCH "file\\(RPATH_SET[^)]*\\)" _rpath_call "${_bundle_code}")
+        if(NOT _rpath_call)
+            message(STATUS "FAIL the bundle script has no file(RPATH_SET ...) call to probe")
+            math(EXPR _snow_failures "${_snow_failures} + 1")
+        else()
+            file(WRITE "${_rpath_probe_dir}/probe.cmake"
+                 "set(_library \"${_rpath_probe_dir}/notelf.bin\")\n${_rpath_call}\n")
+            execute_process(
+                COMMAND "${CMAKE_COMMAND}" -P "${_rpath_probe_dir}/probe.cmake"
+                RESULT_VARIABLE _rpath_result
+                OUTPUT_VARIABLE _rpath_stdout
+                ERROR_VARIABLE _rpath_stderr)
+            set(_rpath_output "${_rpath_stdout}${_rpath_stderr}")
+            if(_rpath_output MATCHES "does not recognize sub-command")
+                message(STATUS "FAIL this CMake has no file(RPATH_SET): ${_rpath_output}")
+                math(EXPR _snow_failures "${_snow_failures} + 1")
+            elseif(_rpath_output MATCHES "unrecognized argument")
+                message(STATUS "FAIL the script's ${_rpath_call} is not a signature "
+                               "this CMake parses: ${_rpath_output}")
+                math(EXPR _snow_failures "${_snow_failures} + 1")
+            else()
+                message(STATUS "ok   the script's file(RPATH_SET ...) parses (probe exit "
+                               "${_rpath_result})")
+            endif()
+        endif()
     endforeach()
 endif()
 

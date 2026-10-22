@@ -105,23 +105,41 @@ foreach(_dependency IN LISTS _resolved)
     if(NOT _dir STREQUAL _deps_real)
         continue()
     endif()
-    get_filename_component(_name "${_real}" NAME)
-    set(_destination "${_staged}/${_private_lib_dir}/${_name}")
-    if(EXISTS "${_destination}")
-        continue()
+    # The name to ship under is the one the *loader asks for*, not the one the
+    # file happens to have. A dependency prefix installs `libjxl.so.0.11` as a
+    # symlink to `libjxl.so.0.11.0`, and `GET_RUNTIME_DEPENDENCIES` resolves the
+    # NEEDED soname, so the entry above carries `libjxl.so.0.11` while its
+    # `REALPATH` carries the version. Copying the real file under its own name
+    # puts `libjxl.so.0.11.0` in the package, and both the loader and
+    # `dpkg-shlibdeps` keep looking for `libjxl.so.0.11` -- a package that
+    # installs and then dies with "cannot open shared object file".
+    get_filename_component(_soname "${_dependency}" NAME)
+    get_filename_component(_real_name "${_real}" NAME)
+    set(_private_dir "${_staged}/${_private_lib_dir}")
+    set(_destination "${_private_dir}/${_soname}")
+    if(NOT EXISTS "${_destination}")
+        file(COPY "${_real}" DESTINATION "${_private_dir}"
+             FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                              GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+        if(NOT _real_name STREQUAL _soname)
+            file(RENAME "${_private_dir}/${_real_name}" "${_destination}")
+        endif()
     endif()
-    file(COPY "${_real}" DESTINATION "${_staged}/${_private_lib_dir}"
-         FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                          GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-    list(APPEND _bundled "${_name}")
+    # Appended even when the file was already there: the RPATH loop below has to
+    # cover every private library present, not only the ones this run copied.
+    list(APPEND _bundled "${_destination}")
 endforeach()
 
 # A private copy is useless if the loader cannot find it, and a bundled library
 # that needs another bundled library is exactly the case `DT_RUNPATH` does not
 # cover for its parent.
+#
+# `file(RPATH_SET)` takes keyword arguments (`FILE` / `NEW_RPATH`); the
+# positional form `file(RPATH_SET <file> <rpath>)` is a *different* sub-command
+# signature and CMake rejects it at CPack time with "unrecognized argument".
 if(_bundled)
-    foreach(_name IN LISTS _bundled)
-        file(RPATH_SET "${_staged}/${_private_lib_dir}/${_name}" "$ORIGIN")
+    foreach(_library IN LISTS _bundled)
+        file(RPATH_SET FILE "${_library}" NEW_RPATH "$ORIGIN")
     endforeach()
 endif()
 
@@ -132,7 +150,8 @@ list(LENGTH _unresolved _unresolved_count)
 message(STATUS "snow-shot bundle: ${_resolved_count} resolved dependency file(s), "
                "${_unresolved_count} unresolved")
 message(STATUS "snow-shot bundle: private libraries (${_private_lib_dir})")
-foreach(_name IN LISTS _bundled)
+foreach(_library IN LISTS _bundled)
+    get_filename_component(_name "${_library}" NAME)
     message(STATUS "snow-shot bundle:   ${_name}")
 endforeach()
 if(NOT _bundled)
