@@ -352,6 +352,25 @@ if(UNIX AND NOT APPLE)
         target_link_libraries(snow_shot_linux_platform INTERFACE snow_linux_platform)
         target_include_directories(snow_shot_linux_platform INTERFACE
             "${SNOW_SHOT_CAPTURE_CRATES_DIR}/crates/snow-linux-c/include")
+        # Two Rust staticlibs in one link means two copies of the Rust runtime,
+        # because `crate-type = ["staticlib"]` bundles every dependency -
+        # including `std` - into the archive. MSVC folds the duplicate COMDATs
+        # and ld64 never sees the pair (Windows and macOS link only one Rust
+        # archive), so Linux is the first platform where it matters:
+        #
+        #   multiple definition of `rust_eh_personality'
+        #   multiple definition of `std::panicking::EMPTY_PANIC'
+        #   multiple definition of `std::sys::args::unix::imp::ARGV_INIT_ARRAY'
+        #       (both sides: the same std build, same object name;
+        #        CI run 29)
+        #
+        # The flag is attached to this INTERFACE target on purpose: only the
+        # targets that pull the second Rust archive get it, not the whole
+        # project. The real fix is one Rust link unit per image - the crates
+        # live in two Cargo workspaces today, so merging them is its own
+        # change (port document 9.6.29).
+        target_link_options(snow_shot_linux_platform INTERFACE
+            "-Wl,--allow-multiple-definition")
     endif()
 endif()
 

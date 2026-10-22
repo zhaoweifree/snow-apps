@@ -261,6 +261,29 @@ def main() -> int:
              "downloads the Orbbec SDK (3rdparty/orbbecsdk/orbbecsdk.cmake) "
              "while configuring")
 
+    # 5. Processor detection decides the code the archives contain, and a static
+    #    archive does not report unresolved symbols, so a wrong value here only
+    #    fails at the link of the consuming executable (run 29):
+    #
+    #      undefined reference to `cv::dnn::opt_NEON::convBlock_F32(int, ...)`
+    #
+    #    `OpenCVDetectCXXCompiler.cmake` skips the block that sets X86_64 /
+    #    AARCH64 from CMAKE_SYSTEM_PROCESSOR when this is true, and expects the
+    #    caller to pass them instead. Nothing here does. Without them neither
+    #    the x86 nor the ARM branch of `OpenCVCompilerOptimizations.cmake`
+    #    matches, CPU_DISPATCH stays empty, and CPU_BASELINE falls back to
+    #    DETECT -- which on aarch64 puts NEON in the baseline, defines
+    #    CV_TRY_NEON, and leaves the dispatched implementation ungenerated.
+    skip_detection = options.get("OPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION")
+    if skip_detection is not None and skip_detection.upper() in (
+            "ON", "TRUE", "YES", "Y", "1"):
+        fail("OPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION has to stay FALSE: with it on, "
+             "X86_64/AARCH64 are never set, CPU_DISPATCH stays empty and the "
+             "dispatched CPU implementations are not generated")
+    elif skip_detection is None:
+        fail("OPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION is not stated: write it out as "
+             "FALSE so that it cannot drift back to the vcpkg-port value")
+
     if _failures:
         print(f"{_failures} OpenCV option check(s) failed")
         return 1

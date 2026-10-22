@@ -154,3 +154,12 @@ echo "=== rust archive names"
 # cargo/aarch64-unknown-linux-gnu/release/libsnow_linux_platform.a" after all
 # 608 translation units had compiled (run 27).
 "$python_command" scripts/check-rust-archive-names.py
+
+echo
+echo "=== rust runtime duplication"
+# `crate-type = ["staticlib"]` bundles std, so two Rust archives in one image
+# mean two copies of the runtime. MSVC folds them and ld64 never sees the pair;
+# GNU ld stops with "multiple definition of rust_eh_personality" (run 29). The
+# workaround has to stay on the INTERFACE target that pulls the second archive,
+# not at project scope.
+"$python_command" scripts/check-linux-rust-runtime-duplication.py

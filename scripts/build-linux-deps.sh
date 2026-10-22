@@ -1036,6 +1036,31 @@ build_opencv() {
     # OpenCV downloads the IPPICV package during the configure step
     # (cmake/OpenCVFindIPP.cmake), which is a network access in the middle of
     # a build that is supposed to be offline.
+    #
+    # `OPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION` must stay FALSE (it is written
+    # out rather than left to the default so that it cannot drift back). With
+    # it TRUE, `cmake/OpenCVDetectCXXCompiler.cmake` skips the block that sets
+    # `X86_64` / `AARCH64` from `CMAKE_SYSTEM_PROCESSOR` -- the comment there
+    # says those variables are then "passed through cache / CMake's command
+    # line", which is for cross builds and which nothing here does. Without
+    # them `OpenCVCompilerOptimizations.cmake` matches neither the x86 nor the
+    # ARM branch, so `CPU_DISPATCH` stays empty and the fallback sets
+    # `CPU_BASELINE=DETECT`; on aarch64 DETECT enables NEON in the baseline,
+    # which defines `CV_TRY_NEON`, so the dnn convolution code calls
+    # `opt_NEON::convBlock_F32` -- an implementation that only exists in a
+    # dispatched translation unit, and no dispatched unit was generated:
+    #
+    #   undefined reference to `cv::dnn::opt_NEON::convBlock_F32(int, ...)`
+    #   undefined reference to `cv::dnn::opt_NEON::convBlockMR1_F32(int, ...)`
+    #       (CI run 29, arm64 link)
+    #
+    # A static library does not report unresolved symbols, so the archive was
+    # "built" a dozen runs ago and the defect only surfaced when the executable
+    # finally linked. With detection on, aarch64 gets the upstream defaults
+    # (`CPU_BASELINE=DETECT`, `CPU_DISPATCH=NEON_FP16;NEON_BF16;NEON_DOTPROD`)
+    # and x64 gets `CPU_BASELINE=SSE3` plus the usual dispatch list, which is
+    # also what makes the shipped archive portable instead of tuned to the
+    # runner's CPU.
     configure_build_install "${work}/src" "$build" \
         -DCMAKE_PREFIX_PATH="${prefix}" \
         -DBUILD_SHARED_LIBS=OFF \
@@ -1074,7 +1099,7 @@ build_opencv() {
         -DOPENCV_LIB_INSTALL_PATH=lib \
         -DOPENCV_3P_LIB_INSTALL_PATH=lib/manual-link/opencv4_thirdparty \
         -DENABLE_CONFIG_VERIFICATION=ON \
-        -DOPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION=TRUE \
+        -DOPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION=FALSE \
         -DWITH_ADE=OFF \
         -DWITH_AVIF=OFF \
         -DWITH_CUDA=OFF \
