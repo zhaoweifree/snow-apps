@@ -182,6 +182,17 @@ else()
         else()
             message(STATUS "ok   the bundled copy is named after the resolved soname")
         endif()
+        # The staged root has to be the one the caller named. A bare `STAGED_DIR`
+        # substring match would stay green on a script that mentions the override
+        # in a message and then ignores it.
+        set(_staged_needle [=[set(_staged "${STAGED_DIR}")]=])
+        string(FIND "${_bundle_code}" "${_staged_needle}" _staged_position)
+        if(_staged_position EQUAL -1)
+            message(STATUS "FAIL the bundle script ignores the STAGED_DIR override")
+            math(EXPR _snow_failures "${_snow_failures} + 1")
+        else()
+            message(STATUS "ok   the bundle script honours the STAGED_DIR override")
+        endif()
         # --- `file(RPATH_SET)` has to parse with this CMake ------------------
         # The text needles above only prove that the keywords are written down.
         # `RPATH_SET` is not in the documented `file()` list any more -- it is a
@@ -273,10 +284,41 @@ else()
     message(STATUS "ok   the AppImage module leaves INSTALL_RPATH to the packaging module")
 endif()
 
+# The AppDir is staged by `cmake --install`, which knows nothing about CPack's
+# install scripts -- so the private libraries only reach it because the target
+# runs the same bundle script itself, on the prefix it just filled.
+#
+# Leaving that out was not hypothetical: the AppDir would hold the executable,
+# the entry and the icon and not one `*.so*`, the executable's `$ORIGIN/../lib/`
+# `snow-shot` RUNPATH would resolve to an empty directory, and the AppImage would
+# be a file that installs and cannot start. `check-linux-appimage-build.py` asks
+# for the bundled libraries for that reason, but that answer only arrives after
+# a twenty-minute build.
+string(REGEX REPLACE "#[^\n]*" "" _appimage_code "${_appimage_module}")
+foreach(_needle
+        "-DSTAGED_DIR="
+        "SNOW_SHOT_LINUX_BUNDLE_SCRIPT"
+        "--install")
+    string(FIND "${_appimage_code}" "${_needle}" _appimage_position)
+    if(_appimage_position EQUAL -1)
+        message(STATUS "FAIL the AppImage target never uses ${_needle}")
+        math(EXPR _snow_failures "${_snow_failures} + 1")
+    else()
+        message(STATUS "ok   the AppImage target uses ${_needle}")
+    endif()
+endforeach()
+
 # The same function on an arm64 host must select the arm64 package.
 set(CMAKE_SYSTEM_PROCESSOR "aarch64")
 snow_shot_configure_linux_package()
 snow_expect("arm64 host architecture" "arm64" "${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}")
+# Read after the call, so this also proves the path leaves the function's scope:
+# the AppImage target is attached from CMakeLists.txt, not from inside it, and an
+# unexported variable there expands to nothing and fails at build time with
+# `cmake -P: no file given`.
+snow_expect("the bundle script path leaves the packaging function"
+            "${CMAKE_BINARY_DIR}/snow-shot-linux-runtime-bundle.cmake"
+            "${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}")
 set(CMAKE_SYSTEM_PROCESSOR "x86_64")
 
 # --- 3. The freedesktop files are installed, not just present ----------------

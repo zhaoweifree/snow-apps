@@ -153,12 +153,33 @@ function(snow_shot_add_appimage_target)
         message(FATAL_ERROR
             "Missing ${_snow_icon_source}. Run: python3 scripts/gen-linux-icons.py")
     endif()
+    # Checked here and not inside the custom target: an empty `-P` argument only
+    # fails once the whole build has already run, and the message would be
+    # `cmake -P: no file given`.
+    if(NOT SNOW_SHOT_LINUX_BUNDLE_SCRIPT)
+        message(FATAL_ERROR
+            "snow_shot_add_appimage_target: snow_shot_configure_linux_package() has "
+            "to run first; it generates the script that puts the private libraries "
+            "into the AppDir.")
+    endif()
 
     add_custom_target(snow-shot-appimage
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${SNOW_SHOT_APPIMAGE_DIR}"
         COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}"
                 --prefix "${SNOW_SHOT_APPIMAGE_USR}"
                 --config "$<CONFIG>"
+        # The AppDir is staged by `cmake --install`, and CPack -- the only other
+        # thing that knows how to fill the private library directory -- is not
+        # part of this path. So the same script CPack runs as an install script
+        # is run here by hand, on the prefix that was just filled.
+        #
+        # Skipping it produced an AppDir with the executable, the entry, the icon
+        # and no shared library at all: the executable's RUNPATH points at
+        # `../lib/snow-shot`, which would have been empty, and
+        # `check-linux-appimage-build.py` asks for the bundled libraries because
+        # an AppImage whose `libjxl` is missing is not a product.
+        COMMAND "${CMAKE_COMMAND}" "-DSTAGED_DIR=${SNOW_SHOT_APPIMAGE_USR}"
+                -P "${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}"
         COMMAND "${CMAKE_COMMAND}" -E copy "${_snow_apprun}" "${SNOW_SHOT_APPIMAGE_DIR}/AppRun"
         COMMAND "${CMAKE_COMMAND}" -E copy "${SNOW_SHOT_APPIMAGE_DESKTOP}"
                 "${SNOW_SHOT_APPIMAGE_DIR}/snow-shot.desktop"

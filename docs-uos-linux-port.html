@@ -7349,6 +7349,65 @@ ok    RPATH_SET with an argument the parser rejects: red on &quot;is not a signa
 <p>一句话概括这一节：<strong><code>$ORIGIN</code> 让 loader 找到库，soname 让 <code>dpkg-shlibdeps</code> 认识库，
 两者都错在"文件叫什么名字"上，而不是"有没有写"。</strong></p>
 <hr>
+<h4>9.6.35 AppDir 里一个 <code>.so</code> 都没有：<code>cmake --install</code> 不认识 <code>CPACK_INSTALL_SCRIPTS</code></h4>
+<p>9.6.33 把私有库的复制写成了 <strong>CPack install script</strong>。而 AppImage 的暂存走的是
+另一条路：</p>
+<pre><code class="language-cmake">add_custom_target(snow-shot-appimage
+    COMMAND cmake --install &lt;build&gt; --prefix &lt;AppDir&gt;/usr    # ← install 规则
+    COMMAND ... appimagetool ...)
+</code></pre>
+<p><code>cmake --install</code> <strong>只认 <code>install()</code> 规则</strong>，<code>CPACK_INSTALL_SCRIPTS</code> 是 CPack 自己的
+变量。于是 AppDir 里有可执行文件、桌面项、图标，<strong>没有任何 <code>*.so*</code></strong>：
+可执行文件的 <code>$ORIGIN/../lib/snow-shot</code> RUNPATH 指向一个空目录，
+<code>scripts/check-linux-appimage-build.py</code> 的 <em>"the package bundles shared libraries"</em>
+会在第 16 步失败 —— 而那时整个构建已经跑完二十多分钟。</p>
+<p>修法不是把 AppImage 也改成走 CPack，而是让<strong>同一个脚本有两个调用方</strong>：</p>
+<pre><code class="language-cmake"># SnowShotLinuxRuntimeBundle.cmake.in
+if(DEFINED STAGED_DIR AND NOT STAGED_DIR STREQUAL &quot;&quot;)
+    set(_staged &quot;${STAGED_DIR}&quot;)                        # AppImage 直接给前缀
+elseif(DEFINED CPACK_TEMPORARY_DIRECTORY AND NOT CPACK_TEMPORARY_DIRECTORY STREQUAL &quot;&quot;)
+    set(_staged &quot;${CPACK_TEMPORARY_DIRECTORY}&quot;)          # CPack 给暂存树
+</code></pre>
+<pre><code class="language-cmake"># SnowShotAppImage.cmake，紧跟在 --install 之后
+COMMAND &quot;${CMAKE_COMMAND}&quot; &quot;-DSTAGED_DIR=${SNOW_SHOT_APPIMAGE_USR}&quot;
+        -P &quot;${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}&quot;
+</code></pre>
+<p>脚本路径必须<strong>离开</strong> <code>snow_shot_configure_linux_package()</code> 的作用域：调用它的是
+<code>CMakeLists.txt</code>（不是它自己），未导出的变量在那里展开成空串，失败信息是
+<code>cmake -P: no file given</code>，且发生在构建末尾。所以转发列表里加了
+<code>SNOW_SHOT_LINUX_BUNDLE_SCRIPT</code>，门禁也改成<strong>调用之后</strong>再读这个变量 ——
+读得到本身就是"导出成立"的证明。</p>
+<p><strong>那条被否掉的替代方案值得记下来</strong>：把复制注册成 <code>install(SCRIPT ...)</code>，让
+<code>cmake --install</code> 与 CPack 自动都覆盖到。它更优雅，但 <code>CPACK_INSTALL_CMAKE_PROJECTS</code>
+指定了组件 <code>SnowShot</code>，没有 <code>COMPONENT</code> 的安装规则属于 <code>Unspecified</code>，可能整条
+不执行 —— 也就是说，为了修 AppImage 而把<strong>第一次被 CI 真正验证的 deb 路径</strong>改掉，
+风险与收益不成比例。<strong>正在被验证的路径，不要在同一轮里重写。</strong></p>
+<p>门禁侧新增三条，全部用 <code>string(FIND)</code> 打在机制上而不是名字上：</p>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>打的是</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AppImage 目标出现 <code>-DSTAGED_DIR=</code></td>
+<td>库真的被复制进 AppDir</td>
+</tr>
+<tr>
+<td>AppImage 目标出现 <code>SNOW_SHOT_LINUX_BUNDLE_SCRIPT</code></td>
+<td>用的是那一个脚本</td>
+</tr>
+<tr>
+<td>剥注释后仍有 <code>set(_staged "${STAGED_DIR}")</code></td>
+<td>覆盖真的被采纳（只提不采纳会被抓住）</td>
+</tr>
+</tbody>
+</table>
+<p>反向验证扩到 <strong>10 变异 + 1 对照</strong>，新增的三条分别对应"AppDir 没有库""路径没导出"
+"提了 STAGED_DIR 却仍用 CPack 目录"，全部红在预期文案上。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

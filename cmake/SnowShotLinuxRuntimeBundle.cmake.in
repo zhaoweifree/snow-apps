@@ -42,15 +42,30 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-if(NOT DEFINED CPACK_TEMPORARY_DIRECTORY)
+# Two callers, one script:
+#
+#   * CPack runs it through `CPACK_INSTALL_SCRIPTS` with
+#     `CPACK_TEMPORARY_DIRECTORY` pointing at the staged .deb tree;
+#   * the `snow-shot-appimage` target runs it by hand with `-DSTAGED_DIR=` on the
+#     install prefix it just filled, because the AppDir is produced by
+#     `cmake --install` and CPack is not involved there at all. Without this the
+#     AppDir held the executable, the entry and the icon but not one shared
+#     library -- `scripts/check-linux-appimage-build.py` asks for the bundled
+#     libraries precisely because an AppImage that cannot load `libjxl` is not a
+#     product.
+if(DEFINED STAGED_DIR AND NOT STAGED_DIR STREQUAL "")
+    set(_staged "${STAGED_DIR}")
+elseif(DEFINED CPACK_TEMPORARY_DIRECTORY AND NOT CPACK_TEMPORARY_DIRECTORY STREQUAL "")
+    set(_staged "${CPACK_TEMPORARY_DIRECTORY}")
+else()
     message(FATAL_ERROR
-        "snow-shot bundle script: CPACK_TEMPORARY_DIRECTORY is not set. "
-        "This script is meant to run through CPACK_INSTALL_SCRIPTS, not by hand.")
+        "snow-shot bundle script: neither STAGED_DIR nor CPACK_TEMPORARY_DIRECTORY "
+        "is set, so there is nothing to bundle into. Run it through "
+        "CPACK_INSTALL_SCRIPTS, or pass -DSTAGED_DIR=<install prefix>.")
 endif()
 
 set(_private_lib_dir "@SNOW_SHOT_LINUX_PRIVATE_LIB_DIR@")
 set(_deps_lib_dir "@SNOW_SHOT_LINUX_DEPS_LIB_DIR@")
-set(_staged "${CPACK_TEMPORARY_DIRECTORY}")
 set(_lib_subdir "@SNOW_SHOT_LINUX_INSTALL_LIBDIR@")
 
 if(NOT _deps_lib_dir OR NOT IS_DIRECTORY "${_deps_lib_dir}")

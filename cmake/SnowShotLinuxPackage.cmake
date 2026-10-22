@@ -229,6 +229,9 @@ above other windows, and recognize text and tables from the same image.\n")
     endif()
 
     set(_snow_bundle_script "${CMAKE_BINARY_DIR}/snow-shot-linux-runtime-bundle.cmake")
+    # The AppImage target runs the same script on its own prefix (see
+    # `snow_shot_add_appimage_target()`), so the path has to leave this function.
+    set(SNOW_SHOT_LINUX_BUNDLE_SCRIPT "${_snow_bundle_script}")
     set(SNOW_SHOT_LINUX_DEPS_LIB_DIR "${_snow_deps_lib}")
     set(SNOW_SHOT_LINUX_PRIVATE_LIB_DIR "${_snow_private_lib}")
     set(SNOW_SHOT_LINUX_INSTALL_BINDIR "${CMAKE_INSTALL_BINDIR}")
@@ -274,7 +277,8 @@ above other windows, and recognize text and tables from the same image.\n")
             CPACK_DEBIAN_PACKAGE_SHLIBDEPS
             CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
             CPACK_INSTALL_SCRIPTS
-            CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION)
+            CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION
+            SNOW_SHOT_LINUX_BUNDLE_SCRIPT)
         set(${_snow_variable} "${${_snow_variable}}" PARENT_SCOPE)
     endforeach()
 endfunction()

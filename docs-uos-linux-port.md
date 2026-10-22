@@ -5240,6 +5240,62 @@ ok    RPATH_SET with an argument the parser rejects: red on "is not a signature 
 一句话概括这一节：**`$ORIGIN` 让 loader 找到库，soname 让 `dpkg-shlibdeps` 认识库，
 两者都错在"文件叫什么名字"上，而不是"有没有写"。**
 
+#### 9.6.35 AppDir 里一个 `.so` 都没有：`cmake --install` 不认识 `CPACK_INSTALL_SCRIPTS`
+
+9.6.33 把私有库的复制写成了 **CPack install script**。而 AppImage 的暂存走的是
+另一条路：
+
+```cmake
+add_custom_target(snow-shot-appimage
+    COMMAND cmake --install <build> --prefix <AppDir>/usr    # ← install 规则
+    COMMAND ... appimagetool ...)
+```
+
+`cmake --install` **只认 `install()` 规则**，`CPACK_INSTALL_SCRIPTS` 是 CPack 自己的
+变量。于是 AppDir 里有可执行文件、桌面项、图标，**没有任何 `*.so*`**：
+可执行文件的 `$ORIGIN/../lib/snow-shot` RUNPATH 指向一个空目录，
+`scripts/check-linux-appimage-build.py` 的 *"the package bundles shared libraries"*
+会在第 16 步失败 —— 而那时整个构建已经跑完二十多分钟。
+
+修法不是把 AppImage 也改成走 CPack，而是让**同一个脚本有两个调用方**：
+
+```cmake
+# SnowShotLinuxRuntimeBundle.cmake.in
+if(DEFINED STAGED_DIR AND NOT STAGED_DIR STREQUAL "")
+    set(_staged "${STAGED_DIR}")                        # AppImage 直接给前缀
+elseif(DEFINED CPACK_TEMPORARY_DIRECTORY AND NOT CPACK_TEMPORARY_DIRECTORY STREQUAL "")
+    set(_staged "${CPACK_TEMPORARY_DIRECTORY}")          # CPack 给暂存树
+```
+
+```cmake
+# SnowShotAppImage.cmake，紧跟在 --install 之后
+COMMAND "${CMAKE_COMMAND}" "-DSTAGED_DIR=${SNOW_SHOT_APPIMAGE_USR}"
+        -P "${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}"
+```
+
+脚本路径必须**离开** `snow_shot_configure_linux_package()` 的作用域：调用它的是
+`CMakeLists.txt`（不是它自己），未导出的变量在那里展开成空串，失败信息是
+`cmake -P: no file given`，且发生在构建末尾。所以转发列表里加了
+`SNOW_SHOT_LINUX_BUNDLE_SCRIPT`，门禁也改成**调用之后**再读这个变量 ——
+读得到本身就是"导出成立"的证明。
+
+**那条被否掉的替代方案值得记下来**：把复制注册成 `install(SCRIPT ...)`，让
+`cmake --install` 与 CPack 自动都覆盖到。它更优雅，但 `CPACK_INSTALL_CMAKE_PROJECTS`
+指定了组件 `SnowShot`，没有 `COMPONENT` 的安装规则属于 `Unspecified`，可能整条
+不执行 —— 也就是说，为了修 AppImage 而把**第一次被 CI 真正验证的 deb 路径**改掉，
+风险与收益不成比例。**正在被验证的路径，不要在同一轮里重写。**
+
+门禁侧新增三条，全部用 `string(FIND)` 打在机制上而不是名字上：
+
+| 断言 | 打的是 |
+|---|---|
+| AppImage 目标出现 `-DSTAGED_DIR=` | 库真的被复制进 AppDir |
+| AppImage 目标出现 `SNOW_SHOT_LINUX_BUNDLE_SCRIPT` | 用的是那一个脚本 |
+| 剥注释后仍有 `set(_staged "${STAGED_DIR}")` | 覆盖真的被采纳（只提不采纳会被抓住） |
+
+反向验证扩到 **10 变异 + 1 对照**，新增的三条分别对应"AppDir 没有库""路径没导出"
+"提了 STAGED_DIR 却仍用 CPack 目录"，全部红在预期文案上。
+
 ---
 
 ## 10. 工作量 / 优先级矩阵
