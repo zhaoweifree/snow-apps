@@ -145,16 +145,20 @@ def main() -> int:
         check("the package bundles shared libraries", bool(libs), listing)
 
         # The entry that ends up in the package must be the reviewed one. The
-        # file lives at the repository root (`packaging/linux/appimage/AppRun`,
-        # the path `cmake/SnowShotAppImage.cmake` copies from), not under
-        # `snow_shot/`: looking in the wrong place made this check silently
-        # skip, which is worse than not having it.
-        reviewed = REPO / "packaging" / "linux" / "appimage" / "AppRun"
+        # reviewed file lives under `snow_shot/packaging/linux/appimage/AppRun`
+        # -- `snow_shot_add_appimage_target()` copies it from the snow_shot
+        # target's own source directory. An earlier version of this check looked
+        # for it at the repository root, where no `packaging/` directory has
+        # ever existed, so the comparison was skipped and the check "passed"
+        # without comparing anything. `scripts/check-linux-appimage.py` now
+        # resolves every `REPO / "..."` chain in this file against the working
+        # tree, so a wrong anchor fails on the workstation instead of here.
+        reviewed = REPO / "snow_shot" / "packaging" / "linux" / "appimage" / "AppRun"
         check("the reviewed AppRun exists in the repository", reviewed.is_file(), str(reviewed))
         if app_run.is_file() and reviewed.is_file():
             check("the packaged AppRun is the reviewed one",
                   app_run.read_bytes() == reviewed.read_bytes(),
-                  "the packaged AppRun differs from packaging/linux/appimage/AppRun")
+                  "the packaged AppRun differs from snow_shot/packaging/linux/appimage/AppRun")
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

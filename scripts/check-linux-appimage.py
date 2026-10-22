@@ -20,6 +20,7 @@ Usage: ``python scripts/check-linux-appimage.py`` (the shell entry point
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -29,8 +30,57 @@ REPO = Path(__file__).resolve().parent.parent
 APPRUN = REPO / "snow_shot" / "packaging" / "linux" / "appimage" / "AppRun"
 MODULE = REPO / "cmake" / "SnowShotAppImage.cmake"
 ROOT_CMAKE = REPO / "CMakeLists.txt"
+BUILD_CHECK = REPO / "scripts" / "check-linux-appimage-build.py"
 
 failures: list[str] = []
+
+
+def _path_chain(node: ast.AST):
+    """Flatten `REPO / "a" / "b"` into ["REPO", "a", "b"], or None.
+
+    Anything that is not a literal segment (a variable, an f-string) makes the
+    whole chain unresolvable from here and returns None.
+    """
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left = _path_chain(node.left)
+        right = _path_chain(node.right)
+        if left is None or right is None:
+            return None
+        return left + right
+    if isinstance(node, ast.Name) and node.id == "REPO":
+        return ["REPO"]
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    return None
+
+
+def repo_relative_chains(path: Path):
+    """Yield (source text, resolved path) for every `REPO / "..."` chain in a file.
+
+    Parsed with `ast` rather than with a regex on purpose: a regex matches the
+    chain inside a comment just as happily as the real expression, and the
+    comment that documents this very check produced a chain (`REPO / "..."`)
+    that resolved to the repository itself on a host where trailing dots are
+    normalised away. Only real expressions are interesting.
+    """
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    chains = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+            continue
+        parts = _path_chain(node)
+        if not parts or parts[0] != "REPO" or len(parts) < 2:
+            continue
+        chains.setdefault(tuple(parts[1:]), ast.get_source_segment(text, node) or "")
+    # An outer chain contains its own left half; keep only the longest form.
+    longest = []
+    for parts in chains:
+        if any(other != parts and other[:len(parts)] == parts for other in chains):
+            continue
+        longest.append(parts)
+    for parts in longest:
+        yield chains[parts].strip(), REPO.joinpath(*parts)
 
 
 def check(label: str, condition: bool, detail: str = "") -> bool:
@@ -173,6 +223,17 @@ def main() -> int:
                   ("APPIMAGETOOL_SHA256_x86_64", "APPIMAGETOOL_SHA256_aarch64",
                    "RUNTIME_SHA256_x86_64", "RUNTIME_SHA256_aarch64")),
               "a truncated or replaced download has to fail instead of shipping")
+
+    # Every `REPO / "a" / "b"` chain in the product validator has to resolve.
+    # That script runs on a CI runner holding a real AppImage, and nothing else
+    # parses it first: when its reviewed-AppRun anchor pointed at the repository
+    # root (no `packaging/` has ever lived there) the comparison silently
+    # skipped, so the check reported success without comparing two files. This
+    # resolves the literals against the working tree, which is the only place
+    # the mistake is visible without a Linux package.
+    for chain, resolved in repo_relative_chains(BUILD_CHECK):
+        check(f"{BUILD_CHECK.name} resolves {chain}", resolved.exists(),
+              f"{chain} -> {resolved}")
 
     if failures:
         print(f"\n{len(failures)} problem(s)")
