@@ -7087,6 +7087,14 @@ endif()
 <p>这是 P7 的独立一项，不在本节修：它会改变安装树的内容，需要自己的一轮验证。
 在此之前 <code>Validate the AppImage</code> 只验结构（ELF、magic、AppRun 字节一致），
 <strong>不声称"能启动"</strong> —— 这一点必须写在文档里，而不是留在"应该没问题"里。</p>
+<h5>与附录 A.2 / A.3 的关系（不要把这条读成"该在 24.04 上打包 Qt"）</h5>
+<p>附录 A.3 的结论没变：<strong>AppImage 打不进 glibc</strong>，能否在 UOS 20 上跑取决于构建主机的
+glibc 基线，而不是取决于 Qt 打没打进去。所以在当前的 <code>ubuntu-24.04</code> runner 上把 Qt
+塞进 AppDir，只是让一个"必定因 <code>GLIBC_2.34 not found</code> 失败"的包看起来更完整。</p>
+<p>这条要修的地方在<strong>未来的 2.28 构建根</strong>：那里 Qt 必须来自身边（系统里的 Qt 是老的、
+且与自建版本不一致），而安装规则现在是 <code>if(WIN32 …)</code>，一份都不会进 AppDir。
+两件事分开记：<em>打包路径已通</em>（本节与 9.6.30、9.6.32）与 <em>产物可在目标机运行</em>
+（取决于 2.28 构建根 + Qt 进安装树），后者仍未开始。</p>
 <hr>
 <h4>9.6.32 同一个错锚点还在产物校验器里：<code>is_file()</code> 返回 False 时，检查整段被跳过</h4>
 <p>改完 9.6.31 顺手看 <code>Validate the AppImage</code> 调的那个脚本，同一个仓库根锚点又出现一次：</p>
@@ -7126,7 +7134,6 @@ if app_run.is_file() and reviewed.is_file():
 "因为前面没找到"写清楚，要么把它变成断言本身的一部分。这次两者都缺 ——
 于是"暂存路径错"和"内容不一致"两个不同的问题，在日志里长得一样。</p>
 <hr>
-
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>
