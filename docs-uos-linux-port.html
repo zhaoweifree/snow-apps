@@ -4786,7 +4786,12 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 <code>
 <tr>
 <td>16（<code>39734199</code>）</td>
 <td><code>gates</code> ✅</td>
-<td><code>qt_compat.h</code> 修好后红灯首次越过兼容头；<code>gates</code> 一次全绿（含新增门禁），build 结果见 9.6.18</td>
+<td><code>qt_compat.h</code> 修好后红灯首次越过兼容头；<code>gates</code> 一次全绿（含新增门禁）。<strong>x64 的 Build 被新 push 顶掉（concurrency），没跑完</strong> ⇒ build 结果实际来自 run 17，见 9.6.18</td>
+</tr>
+<tr>
+<td>17（<code>39736061</code>）</td>
+<td><code>gates</code> ✅ / <code>Configure</code> ✅ / <strong>build ❌</strong></td>
+<td>红灯首次越过兼容头、落在 <strong><code>QMimeData::retrieveData</code> 的虚函数签名</strong>上：Qt5 收 <code>QVariant::Type</code>、Qt6 收 <code>QMetaType</code>，同一份代码写不了两边 ⇒ 见 9.6.19</td>
 </tr>
 </tbody>
 </table>
@@ -5416,9 +5421,464 @@ snow_shot/include/snow_shot/compat/qt_compat.h:745:51: error: conversion to 'uin
 <p><strong>第二处：掩码跨越了有符号/无符号域（<code>-Wsign-conversion</code>，4 处）</strong></p>
 <p><code>Qt::KeyboardModifierMask = 0xfe000000</code> <strong>装不进有符号 int</strong> ⇒
 <code>Qt::KeyboardModifier</code> 的底层类型是 <code>unsigned int</code>。而更要命的是 <code>qflags.h</code>：</p>
-<p>```cpp
-// C:/Qt/5.15.2/msvc2019_64/include/QtCore/qflags.h:103-112</p>
-
+<pre><code class="language-cpp">// C:/Qt/5.15.2/msvc2019_64/include/QtCore/qflags.h:103-112
+#if defined(Q_CC_MSVC) || defined(Q_CLANG_QDOC)
+    typedef int Int;                        // MSVC 恒为 int
+#else
+    typedef typename std::conditional&lt;
+            std::is_unsigned&lt;typename std::underlying_type&lt;Enum&gt;::type&gt;::value,
+            unsigned int, signed int
+        &gt;::type Int;                        // GCC/Clang 随枚举底层类型走
+#endif
+</code></pre>
+<p>⇒ <strong>GCC/Clang 上 <code>QFlags&lt;KeyboardModifier&gt;::Int</code> 也是 <code>unsigned int</code></strong>
+⇒ <code>combined &amp; mask</code> 的常规算术转换把 <code>int</code> 提升为 <code>unsigned int</code>
+⇒ 报 <code>conversion to 'unsigned int' from 'int'</code>。</p>
+<p><strong>为什么 Windows 本地永远看不见</strong>：Qt 自己在 <code>qflags.h:49</code> 写了
+"Microsoft Visual Studio has buggy behavior when it comes to unsigned enums:
+even if the enum is unsigned, the enum tags are always signed"
+⇒ MSVC 上枚举标签按有符号处理，<code>Int</code> 又恒为 <code>int</code> ⇒ 整条路径在 MSVC 上是干净的。
+<strong>这不是我们代码的运气，是编译器的差异</strong>。</p>
+<p>修法与 <strong>Qt 6.12 官方 <code>qnamespace.h:1945/1950</code> 的写法对齐</strong>：</p>
+<pre><code class="language-cpp">const int modifierMask = static_cast&lt;int&gt;(Qt::KeyboardModifierMask);
+return QKeyCombination(Qt::KeyboardModifiers(combined &amp; modifierMask),
+                       Qt::Key(combined &amp; ~modifierMask));
+</code></pre>
+<p>官方也是 <code>~int(Qt::KeyboardModifierMask)</code> —— 先把掩码拉回有符号域再掩。</p>
+<p><strong>第三处：<code>QKeySequence::operator[]</code> 收 <code>uint</code>（2 处）</strong></p>
+<p>两版 Qt 的签名一致：</p>
+<pre><code>Qt 5.15.2  QtGui/qkeysequence.h:187   int operator[](uint i) const;
+Qt 6.12.0  QtGui/qkeysequence.h:153   QKeyCombination operator[](uint i) const;
+</code></pre>
+<p>⇒ 传 <code>int index</code> 触发 <code>conversion to 'uint' from 'int'</code>。修法：<code>static_cast&lt;uint&gt;(index)</code>。
+<code>uint</code> 在两版均为全局作用域（Qt5 <code>qglobal.h:275</code>、Qt6 <code>qtypes.h:40</code> 经 <code>qglobal.h:36</code> 引入）。</p>
+<p><strong>本机验证（比推理更硬）</strong>：本机没有 GCC（<code>which g++ gcc clang++</code> 全空，<code>wsl.exe</code> 命中沙箱黑名单），
+所以用 <strong>MSVC 单独编译这个头</strong>，两版 Qt 各一次：</p>
+<table>
+<thead>
+<tr>
+<th>验证</th>
+<th>手段</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>改动没破坏 Windows 构建</td>
+<td>MSVC 19.44 对 Qt 5.15.2 / Qt 6.12.0 各编一个覆盖全部两个分支的 TU</td>
+<td>两版都过（<code>/W4 /permissive- /std:c++20</code>）</td>
+</tr>
+<tr>
+<td>修法语义等价</td>
+<td><code>constexpr</code> + <code>static_assert</code> 比对修复前后两种写法</td>
+<td>逐位相等（含符号位 <code>0x80000000</code>、纯修饰键、高位键码 <code>0x01000000</code> 三组输入）</td>
+</tr>
+<tr>
+<td>Windows 本地确实是盲区</td>
+<td>把<strong>修复前</strong>的写法原样编进 MSVC <code>/W4</code></td>
+<td><strong>一声不吭</strong> ⇒ 坐实只有 Linux CI 能发现</td>
+</tr>
+</tbody>
+</table>
+<p><strong>门禁：<code>scripts/check-qt-compat-macro-order.py</code>（7 项）</strong>，已接进
+<code>scripts/check-linux-packaging.sh</code> ⇒ 自动进 <code>gates</code> job。它追踪兼容头自身的
+<code>#define</code> / <code>#undef</code>，拦截"先测后定义"，并要求 <code>&lt;QVector&gt;</code> 在 Qt5 分支可达、
+两个版本宏同块定义且取 0/1 字面量。</p>
+<p><strong>这门禁自己被反向验证改掉了两处 —— 两次都是"假门禁"</strong>：</p>
+<ol>
+<li><strong>头文件名被当成宏</strong>。<code>__has_include(&lt;QtGlobal&gt;)</code> 里的 <code>QtGlobal</code>
+   被裸标识符正则当成"被测试的宏"⇒ 误报 8 条。
+   ⇒ 改成<strong>整体移除 <code>__has_include(...)</code> 的参数列表</strong>再扫。</li>
+<li><strong><code>#if</code> / <code>#else</code> 两支各一次 <code>#define</code> 被误判为"重复定义"</strong>。
+   <code>#define SNOW_QT5 0</code> 与 <code>#define SNOW_QT5 1</code> 分处两支是<strong>正常正确写法</strong>。
+   ⇒ 改成「两个宏在<strong>同一个 <code>#if</code> 块</strong>内（行距 &lt; 8）」+「每个定义都是 0/1 字面量」两条判据。</li>
+</ol>
+<p><strong>反向验证：3/3 变异全红、1/1 基线绿</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>变异</th>
+<th>门禁的判据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>把版本宏定义<strong>移回</strong> <code>&lt;QVector&gt;</code> include 之后（还原 run 15 的原始形态）</td>
+<td>"SNOW_QT5 is not defined before the #if" + "SNOW_QT5 defined at line 105, tested at line 98"</td>
+</tr>
+<tr>
+<td>删掉 <code>#include &lt;QVector&gt;</code></td>
+<td>"the compat header includes <QVector> for the Qt5 branch"</td>
+</tr>
+<tr>
+<td>把 <code>SNOW_QT5</code> 定义成 <code>2</code></td>
+<td>"every SNOW_QT5/SNOW_QT6 definition is a 0/1 literal"</td>
+</tr>
+</tbody>
+</table>
+<p>每次恢复源文件后都 <code>touch</code> 更新 mtime，确认最终 <code>EXIT=0</code>。</p>
+<p><strong>arm64 侧是环境 flake，不是代码缺陷</strong>：</p>
+<pre><code>error: failed to install component: 'clippy-preview-aarch64-unknown-linux-gnu',
+       detected conflict: 'bin/cargo-clippy'
+</code></pre>
+<p>aarch64 runner 镜像上 <code>1.97.1-aarch64-unknown-linux-gnu</code> 处于<strong>半安装状态</strong>
+⇒ <code>dtolnay/rust-toolchain@stable</code> 装 clippy 时与残留文件冲突。
+run 14 用<strong>同一个 action</strong> 是成功的 ⇒ 环境 flake。</p>
+<blockquote>
+<p><strong>run 17 的实测结论（2026-10-22 补）</strong>：这一条当时只写到了"是 flake"，
+没写"那 arm64 到底有没有过"。事实是<strong>run 17 的 arm64 <code>Configure</code> 步骤成功了</strong>
+（job 列表里 <code>9. Configure</code> 是 success，红灯在 <code>10. Build</code>）⇒
+<strong>加固方向是对的，但那是"降窗"而不是"治本"</strong>：
+把 <code>dtolnay/rust-toolchain@stable</code> 换成手写的
+<code>rustup toolchain install 1.97.1 --profile minimal --no-self-update --force-non-host</code>
+加上 <code>RUSTUP_TOOLCHAIN=1.97.1</code>，只是让 clippy 组件<strong>不参与那次安装</strong>，
+从而不撞上镜像里的残留文件；真正的病根是
+<a href="https://github.com/rust-lang/rustup/issues/3530">rust-lang/rustup#3530</a>
+那个"非宿主 target 的组件安装会连 <code>rust-std</code> 一起回滚"的 bug。
+<strong>含义</strong>：这条 flake 随时可能复发，CI 红了要先看是不是这条，
+别误当成自己的代码又坏了。</p>
+<p><strong>完整因果链（run 15 arm64 全过程）</strong>：</p>
+<ol>
+<li><code>dtolnay/rust-toolchain@stable</code> 装 clippy → 与镜像残留的 <code>bin/cargo-clippy</code> 冲突；</li>
+<li>rustup 回滚这次安装，而<strong>回滚把已装好的 <code>rust-std</code> 一起删了</strong>（#3530）；</li>
+<li><code>snow_detect_rust_target()</code> 随后探到 target 不存在 ⇒ CMake 报
+   "Rust target ... is not installed or usable"；</li>
+<li><strong>错误指向了 target，而病根在工具链安装</strong> ⇒ 这正是 9.6.19 那个
+   错误消息门禁要治的病（消息必须给对平台的真正补救办法，
+   并把 cargo 自己的输出带上，而不是丢掉）。</li>
+</ol>
+</blockquote>
+<p><strong>判据（可复用）</strong>：</p>
+<ul>
+<li><strong>"未定义宏在 <code>#if</code> 中按 0 求值"</strong> —— 一段看起来存在的代码可能从未执行过。
+  开了 <code>-Wundef</code> 的工程里，这类缺陷<strong>必然在 GCC 上第一次编译就红</strong>。</li>
+<li><strong>跨有符号/无符号域的掩码</strong>：枚举值超出 <code>int</code> 范围 ⇒ 底层类型变 <code>unsigned</code>
+  ⇒ <code>int &amp; unsigned</code> 触发常规算术转换 ⇒ <code>-Wsign-conversion</code>。
+  <strong>MSVC 上枚举标签永远按有符号处理</strong>，所以这类缺陷在 Windows 本地是隐形的。</li>
+<li><strong>只在 Linux CI 暴露的缺陷，本地唯一的硬验证手段是"用能复现的那套编译器编"</strong>；
+  没有 GCC 时，退而求其次的<strong>编译期 <code>static_assert</code> 等价性证明</strong>
+  仍然强于纯源码推理。</li>
+</ul>
+<h4>9.6.18 run 16 / 17：红灯第一次越过兼容头（2026-10-22）</h4>
+<p>run 16（<code>39734199355</code>）与 run 17（<code>39736061339</code>）是一次推送的两个连续状态，
+把它们放在一起看才有意义 —— <strong>run 16 的 build 根本没跑完</strong>。</p>
+<table>
+<thead>
+<tr>
+<th>run</th>
+<th>SHA</th>
+<th>gates</th>
+<th>Configure</th>
+<th>Build</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>16（<code>39734199</code>）</td>
+<td><code>81fe9bf3</code></td>
+<td>✅</td>
+<td>✅</td>
+<td><strong>cancelled</strong></td>
+<td><code>qt_compat.h</code> 修好后红灯首次越过兼容头；<code>gates</code> 一次全绿（含新增门禁）。但 x64 的 Build 在第 10 步被<strong>新 push 顶掉</strong></td>
+</tr>
+<tr>
+<td>17（<code>39736061</code>）</td>
+<td><code>87409bbc</code></td>
+<td>✅</td>
+<td>✅</td>
+<td>❌</td>
+<td>红灯落在 <code>screenshotclipboardservice.cpp:97</code> 的 <code>retrieveData</code> 上，见 9.6.19</td>
+</tr>
+</tbody>
+</table>
+<p><strong>"被新 push 顶掉"这件事本身值得记一笔</strong>。GitHub Actions 的 <code>concurrency</code> 组是
+<code>${{ github.workflow }}-${{ github.ref }}</code> ⇒ <strong>同一分支的第二次 push 会取消第一次还在跑的 run</strong>。
+于是：</p>
+<ul>
+<li>run 16 的 <code>gates</code> 跑完了（绿），<code>Configure</code> 跑完了（绿），<code>Build</code> 被取消；</li>
+<li><strong>run 16 的 Build 没有给出任何结论</strong> —— 它不是"通过了"，是"没跑"。</li>
+</ul>
+<p>⇒ <strong>"gates ✅" 这一栏对 build 没有背书作用</strong>，两个 run 必须一起读。</p>
+<p>run 17 的实际位置：<strong><code>[487/611]</code>（x64）/<code>[487/608]</code>（arm64）</strong>，
+比 run 15 的 <code>[346/611]</code> 前进了 <strong>141 步</strong> ⇒ 兼容头那一关是真的过了，
+而且是<strong>两个架构同时过</strong>（arm64 的 <code>Configure</code> 也成功了，见 9.6.17 的补注）。</p>
+<p><strong>run 17 的 arm64 有一件 run 15 没有的事</strong>：<code>Install Rust toolchain</code> 与 <code>Configure</code> 都是
+success，红灯同样落在 <code>10. Build</code> ⇒ <strong>arm64 的环境 flake 这次没复发</strong>，
+印证了 9.6.17 补注里的"那是 flake、加固只是降窗"。</p>
+<h4>9.6.19 run 17：Qt5 / Qt6 的虚函数签名分歧，与一个平台守卫造成的结构性盲区（2026-10-22）</h4>
+<p>run 17 的红灯，两条日志（x64 / arm64）<strong>逐字相同</strong>：</p>
+<pre><code>snow_shot/src/presentation/services/screenshotclipboardservice.cpp:97:14: error:
+  'QVariant {anonymous}::PngClipboardMimeData::retrieveData(const QString&amp;, QMetaType) const'
+  marked 'override', but does not override
+snow_shot/src/presentation/services/screenshotclipboardservice.cpp:103:46: error:
+  cannot convert 'QMetaType' to 'QVariant::Type'
+</code></pre>
+<p><strong>根因：两版 Qt 的这个虚函数签名不同。</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>第二参数类型</th>
+<th>声明位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Qt 5.15.2</td>
+<td><code>QVariant::Type</code></td>
+<td><code>QtCore/qmimedata.h:88</code>（<code>protected</code>）</td>
+</tr>
+<tr>
+<td>Qt 6.12.0</td>
+<td><code>QMetaType</code></td>
+<td><code>QtCore/qmimedata.h:53</code>（<code>protected</code>）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>而 Qt 6 根本没有 <code>QVariant::Type</code> 这个枚举</strong> —— <code>QtCore/qvariant.h</code> 里搜不到 <code>enum Type</code>
+（它在 Qt 6 被 <code>QMetaType</code> 取代了）⇒ <strong>两种拼法不可能在同一个 TU 里共存</strong>，
+一份源码必须有一个随版本切换的写法。</p>
+<p><strong>这个缺陷为什么在 Windows 本地看不见（结构性盲区）</strong>：</p>
+<pre><code class="language-cpp">// snow_shot/src/presentation/services/screenshotclipboardservice.cpp
+#if !defined(Q_OS_WIN)
+    class PngClipboardMimeData final : public QMimeData {   // ← 整个类在守卫里
+        ...
+        QVariant retrieveData(const QString&amp; mime, QMetaType type) const override { ... }
+    };
+#endif
+</code></pre>
+<p>Windows 本地走 Qt 6，<strong>这个类根本不参与编译</strong> ⇒ 缺陷在本地是隐形的，
+只有 Linux CI（Qt 5.15.13）能撞出来。</p>
+<p>⇒ <strong>"Windows 编得过"不等于"Linux 编得过"</strong>，尤其当 Linux 侧多了一层平台守卫。
+这是 9.6.17 那条判据的同一个家族：<strong>看不见的代码面 = 盲区</strong>。</p>
+<p><strong>修法（三处一起，缺一不可）</strong>：</p>
+<ol>
+<li><strong>兼容头加类型别名</strong>（<code>snow_shot/include/snow_shot/compat/qt_compat.h</code>）：</li>
+</ol>
+<p><code>cpp
+   #if SNOW_QT6
+   using SnowMimeDataType = QMetaType;
+   #else
+   using SnowMimeDataType = QVariant::Type;
+   #endif</code></p>
+<ol start="2">
+<li>
+<p><strong>两处调用点改用别名</strong> —— 业务代码 <code>screenshotclipboardservice.cpp:97</code>
+   <strong>和测试代码 <code>screenshot_clipboard_content_tests.cpp:826</code></strong>。
+   第二处是<strong>门禁抓出来的</strong>（见下），不是编译器抓的。</p>
+</li>
+<li>
+<p><strong>兼容头里加 probe 类</strong>（关键一步，见下）。</p>
+</li>
+</ol>
+<p><strong>probe 类：怎么把结构性盲区变成每条路线都编译到</strong></p>
+<p><code>qt_compat.h</code> 是被 <strong>force-include</strong> 进<strong>每一个</strong> C++ TU 的
+（<code>cmake/SnowQt.cmake:146-150</code>：Qt5 走 <code>-include</code>、Windows 走 <code>/FI</code>；
+<strong>Qt6 路线也注入</strong>，见 <code>SnowQt.cmake:125-135</code> 的中文注释）⇒
+<strong>把 probe 类放进兼容头，任何路线都会编译它</strong>：</p>
+<pre><code class="language-cpp">namespace snow_compat_probe {
+class MimeDataRetrieveDataProbe final : public QMimeData {
+  protected:
+    QVariant retrieveData(const QString&amp; mimetype, SnowMimeDataType type) const override {
+        return QMimeData::retrieveData(mimetype, type);
+    }
+};
+}
+</code></pre>
+<p>⇒ <strong>签名一旦写错，每条路线（Windows/Qt6、Linux/Qt5）都会立刻红</strong>，
+而不是等到某个平台守卫的另一侧才暴露。</p>
+<p><strong><code>static_assert</code> 精确锁定别名 == 基类签名</strong>：</p>
+<pre><code class="language-cpp">static_assert(std::is_same_v&lt;decltype(&amp;QMimeData::retrieveData),
+                             QVariant (QMimeData::*)(const QString&amp;, SnowMimeDataType) const&gt;,
+              &quot;SnowMimeDataType must match QMimeData::retrieveData&quot;);
+</code></pre>
+<p><strong>坑</strong>：<code>&amp;QMimeData::retrieveData</code> 是 <strong>protected</strong> ⇒ <strong>只能在派生类体内取地址</strong>，
+写在类外是 C2248。⇒ 这条 <code>static_assert</code> <strong>必须放在派生类里</strong>（本轮就踩了）。</p>
+<p><strong>本机双版本编译验证</strong>（没有 GCC，用 MSVC 19.44 各编一次）：</p>
+<table>
+<thead>
+<tr>
+<th>验证</th>
+<th>手段</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>别名在两版都成立</td>
+<td>MSVC 对 Qt 5.15.2 / Qt 6.12.0 各编一个含两个 probe 的 TU</td>
+<td>两版 <code>CL_EXIT=0</code>，<code>/W4</code> 无警告</td>
+</tr>
+<tr>
+<td>别名<strong>精确等于</strong>基类签名</td>
+<td>两个类内 <code>static_assert</code></td>
+<td>两版都过</td>
+</tr>
+<tr>
+<td>盲区确实关上了</td>
+<td>把 Qt6 分支的别名故意改成 <code>QVariant::Type</code></td>
+<td><strong>Qt6 立刻红</strong>（C3668 + C2664 + <code>static_assert</code> 失败），Qt5 仍绿（变异只动 Qt6 分支）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>反向验证的读法</strong>：变异只动 Qt6 分支 ⇒ <strong>只有 Qt6 那条路红</strong>才是对的。
+如果两版都红，说明变异泄漏到了公共部分 ⇒ 判据本身有问题。
+报错点在 <code>qt_compat.h(2149)</code> ⇒ <strong>证明 probe 确实在每个 TU 里编译</strong>。</p>
+<p><strong>门禁 1：<code>scripts/check-qt5-qt6-virtual-signatures.py</code>（6 项）</strong>，
+已接进 <code>scripts/check-linux-packaging.sh</code> ⇒ 自动进 <code>gates</code> job。</p>
+<p>它做两件事：<strong>(a)</strong> 要求分歧虚函数在兼容头里有别名，且别名<strong>同时</strong>覆盖两版类型；
+<strong>(b)</strong> 扫全源码树，要求<strong>每一处</strong>覆盖都写成版本无关的形式。</p>
+<p><strong>反向验证 4/4 全精准变红</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>变异</th>
+<th>变红的判据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>业务代码改回 <code>QMetaType</code></td>
+<td>"every override of a Qt5/Qt6 divergent virtual is version-neutral"</td>
+</tr>
+<tr>
+<td>测试代码改回 <code>QMetaType</code></td>
+<td>同上（<strong>这一条是门禁抓出来的真缺陷</strong>，编译器当时没报，因为测试 TU 在报错文件之后才编）</td>
+</tr>
+<tr>
+<td>兼容头 Qt5 分支别名写错</td>
+<td>"… shim alias covers both Qt versions"</td>
+</tr>
+<tr>
+<td>删掉整个别名定义</td>
+<td>"has a shim alias in the compat header" + "covers both Qt versions"</td>
+</tr>
+</tbody>
+</table>
+<p><strong>门禁自己踩的三个坑（都是"假门禁"，跟 9.6.17 那两次同一家族）</strong>：</p>
+<ol>
+<li><strong>"别名覆盖两版"只匹配单行</strong> ⇒ 别名定义跨两行就漏判
+   ⇒ 改成收集<strong>全部</strong> <code>using &lt;alias&gt; = ...;</code> 体再判。</li>
+<li><strong>版本守卫识别有 bug</strong>（<code>#if</code> / <code>#else</code> 两支处理不对）
+   ⇒ 改成标准栈式逐行扫描（<code>#if</code> push、<code>#endif</code> pop、判 <code>any(stack)</code>）。</li>
+<li><strong><code>offset</code> 取到文件里第一个匹配</strong>，不是当前那一处 override
+   ⇒ 新增 <code>offset_of_line()</code>。</li>
+</ol>
+<p><strong>门禁 2：<code>scripts/check-rust-target-error.cmake</code> + <code>.py</code>（17 项）</strong> —— 见下。</p>
+<p><strong>方法论：全量 diff 两套本地 Qt 头文件</strong></p>
+<p>不要靠撞编译错误来找同类缺陷。做法是<strong>扫项目实际派生的 Qt 基类</strong>，
+把两版头文件里的虚函数签名逐一比对。工具在
+<code>.workbuddy/uos-port/qt-override-scan.py</code>（本地，不入库）。</p>
+<p>扫项目派生的 <strong>41 个</strong> Qt 基类，结果：</p>
+<table>
+<thead>
+<tr>
+<th>虚函数</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>QMimeData::retrieveData</code></td>
+<td><strong>真缺陷</strong> ⇒ 已修（本文）</td>
+</tr>
+<tr>
+<td><code>QAbstractNativeEventFilter::nativeEventFilter</code></td>
+<td>已是版本无关（既有垫片 <code>snowNativeEventResult</code>），<code>pinnedwindowplatform.cpp:271</code> 在 <code>#if QT_VERSION &lt; 6</code> 分支内用 <code>long*</code> ⇒ 正确</td>
+</tr>
+<tr>
+<td><code>QIODevice::open</code></td>
+<td>项目<strong>未覆盖</strong> ⇒ 无影响</td>
+</tr>
+<tr>
+<td><code>QThread::run</code></td>
+<td><strong>假阳性</strong>（两版 <code>qthread.h</code> 都有 <code>virtual void run();</code>）⇒ 类名归属被内嵌类污染</td>
+</tr>
+</tbody>
+</table>
+<p><strong>这个 diff 工具自己也踩了两次假阴性</strong>：</p>
+<ol>
+<li><strong>逐行解析漏检跨行声明</strong> —— Qt5 的 <code>retrieveData</code> 声明<strong>跨两行</strong>
+   ⇒ 改成按 <code>;</code> 切分语句。</li>
+<li><strong>切分后忘了把 <code>;</code> 加回去</strong> ⇒ lookahead <code>(?=[;{])</code> 再也匹配不到
+   ⇒ <strong>0 差异的假阴性</strong>（比假阳性更危险：它说"没问题"）。
+   ⇒ 切完必须把 <code>;</code> 补回每个 chunk。</li>
+</ol>
+<p>⇒ <strong>判据"没报错"和判据"报对了"要分开验证</strong>。门禁的红是"有差异"，
+但<strong>门禁的绿不能证明没有差异</strong> —— 除非做过反向验证。</p>
+<h4>9.6.19.1 附带修掉的门禁：Rust target 探针的错误消息（run 15 遗留）</h4>
+<p>run 15 的 arm64 flake（见 9.6.17）让 CMake 报了
+"Rust target ... is not installed or usable" —— <strong>错误指向了 target，而病根在工具链安装</strong>。
+本轮把 <code>cmake/RustStaticLibrary.cmake</code> 的那段消息重写了：</p>
+<ul>
+<li><strong>Linux 分支给 rustup 命令</strong>（不是 <code>bootstrap.ps1</code> —— 那是 Windows 脚本，Linux 上没有）；</li>
+<li><strong>Windows 分支保留 <code>bootstrap.ps1</code></strong>；</li>
+<li><strong>把 cargo 自己的输出带上</strong>（原来 <code>ERROR_QUIET</code> 直接丢掉了），
+  消息里出现 "cargo said:" + cargo 的原文。</li>
+</ul>
+<p><strong>门禁做法</strong>：<code>scripts/check-rust-target-error.cmake</code> 从
+<code>cmake/RustStaticLibrary.cmake</code> 里<strong>真的把那段代码抽出来执行</strong>
+（<strong>不是抄一份</strong> —— 抄的那份测的是抄件，不是代码）。</p>
+<p><strong>抽取的实现难度远超预期</strong>：</p>
+<ul>
+<li>CMake <strong>不能捕获 <code>message(FATAL_ERROR)</code></strong> ⇒ 夹具必须<strong>自己被杀掉</strong>，
+  文本落到 stderr，退出码非零 ⇒ 断言交给<strong>外部 Python 驱动器</strong>。
+  （夹具自调用子进程会触发本机沙箱的 SIGTERM，CI 上同样脆弱。）</li>
+<li><strong>不能按行切分模块文本</strong> —— 那会破坏块内的多行字符串字面量
+  （CMake 靠相邻字面量隐式拼接）。
+  ⇒ 改用 <code>string(FIND)</code> + <code>string(SUBSTRING)</code> 在<strong>原始文本</strong>上定位。</li>
+<li>找配对的 <code>endif()</code> 要<strong>数嵌套</strong>（<code>if</code> / <code>endif</code> 逐个匹配），
+  且<strong>首个 token 就是守卫自己</strong>（初始深度已经是 1）⇒ 要跳过首个 token。</li>
+<li><code>list(GET)</code> 是 0-based，<code>while(_index LESS _line_count)</code> + 先自增 ⇒ <strong>越界</strong>。</li>
+</ul>
+<p><strong>修完还暴露了生产代码的一个真缺陷</strong>：<code>set(_rust_remedy "..." "--target ...")</code>
+是 <strong><code>set()</code> 的列表语义</strong>（两个值用 <code>;</code> 连接），不是隐式拼接 ⇒
+消息里真的出现了 <code>;--target x86_64-unknown-linux-gnu</code>。
+⇒ 改成 <code>string(CONCAT _rust_remedy "..." "--target ${SNOW_RUST_TARGET}")</code>。</p>
+<p><strong>判据（17 项全绿）</strong> 里专门加了两条抓这个：
+"linux message carries the full rustup --target flag" +
+"linux message has no list separator in the remedy"。</p>
+<p><strong>反向验证 2/2 精准变红</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>变异</th>
+<th>变红的判据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux 分支改回 <code>bootstrap.ps1</code></td>
+<td><strong>恰好 2 条</strong>（linux rustup 命令 + 不含 bootstrap.ps1），Windows 侧不受影响</td>
+</tr>
+<tr>
+<td>恢复 <code>ERROR_QUIET</code>（丢 cargo 输出）</td>
+<td><strong>恰好 1 条</strong>（linux 含 cargo stderr 文本）</td>
+</tr>
+<tr>
+<td><code>string(CONCAT</code> 改回 <code>set()</code> 两参数</td>
+<td><strong>恰好 2 条</strong>（linux + unix 的分号判据）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Unix <code>.sh</code> 分支在本机也被完整验证</strong>：Windows 上 <code>execute_process</code> 不能直接跑 <code>.sh</code>
+⇒ 找 Git Bash 的 <code>sh.exe</code>，用 <code>.bat</code> 包装驱动它 ⇒ <strong>CI 的 Unix 分支不再是
+"只会在 CI 上跑"的那一条</strong>。</p>
+<p><strong>夹具的落盘位置也修了一处</strong>：<code>cmake -P</code> 模式下 <code>CMAKE_CURRENT_BINARY_DIR</code> 就是 cwd
+⇒ 夹具每次运行都会在<strong>仓库根</strong>扔一个 <code>fake-cargo/</code> 目录。
+⇒ 改到系统临时目录（<code>$TMPDIR</code> / <code>$TEMP</code>）。</p>
+<p><strong>判据（可复用）</strong>：</p>
+<ul>
+<li><strong>"Windows 编得过"不等于"Linux 编得过"</strong> —— 平台守卫会让整类代码在一边完全不编译。
+  想关闭这类盲区，就往<strong>每个 TU 都会 force-include 的那个头</strong>里放 probe。</li>
+<li><strong>CMake 的 <code>set()</code> 多参数是列表语义</strong>，<code>string(CONCAT)</code> 才是拼接。
+  错误消息里出现 <code>;</code> 就是这个。</li>
+<li><strong>"门禁的绿"要靠反向验证来担保</strong>：一个从不报错的判据和一个正确的判据，
+  在基线上长得一模一样。</li>
+<li><strong>工具的假阴性比假阳性更危险</strong>：假阳性会逼你查，假阴性会让你以为安全。</li>
+</ul>
+<hr>
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>

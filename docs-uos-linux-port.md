@@ -2847,7 +2847,8 @@ CI 只是顺带的产物。在那台机器到手之前，GitHub 镜像跑 `gates
 | 13（`9997a16b`） | `gates` ✅ / **`Configure` ✅** / **deps ✅** / `build` ❌ | 固定版本自编的依赖在 Linux 上第一次全绿（`snow_image` 静态库链接成功，内含 jxl/heif 编解码器）；红灯移到 **Rust FFI 的 lockfile**：`snow_rust_ffi/Cargo.lock` 早于 AT-SPI2 重构，`--locked` 拒绝更新，见 9.6.15 |
 | 14（`39707846`） | `gates` ✅ / **`Configure` ✅** / **deps ✅** / `build` ❌ | lockfile 修好后红灯落到 **Rust FFI 的 FFmpeg 绑定**：`libavfilter/avfilter.h: No such file or directory` —— 错误指向头文件，实际是**搜索路径被 `FFMPEG_DIR` 劫持**，见 9.6.16 |
 | 15（`39715098`） | `gates` ✅ / `Configure` ✅ / **deps ✅** / **build ❌** | FFmpeg 修好后红灯回到 **C++ 侧**，而且落在**被 force-include 进每个 TU 的兼容头**里：`-Wundef`（版本宏先测后定义）+ 4 处 `-Wsign-conversion`（掩码跨有符号/无符号域）。**x64 侧是代码缺陷**，**arm64 侧是 rustup 组件冲突的环境 flake**，见 9.6.17 |
-| 16（`39734199`） | `gates` ✅ | `qt_compat.h` 修好后红灯首次越过兼容头；`gates` 一次全绿（含新增门禁），build 结果见 9.6.18 |
+| 16（`39734199`） | `gates` ✅ | `qt_compat.h` 修好后红灯首次越过兼容头；`gates` 一次全绿（含新增门禁）。**x64 的 Build 被新 push 顶掉（concurrency），没跑完** ⇒ build 结果实际来自 run 17，见 9.6.18 |
+| 17（`39736061`） | `gates` ✅ / `Configure` ✅ / **build ❌** | 红灯首次越过兼容头、落在 **`QMimeData::retrieveData` 的虚函数签名**上：Qt5 收 `QVariant::Type`、Qt6 收 `QMetaType`，同一份代码写不了两边 ⇒ 见 9.6.19 |
 
 **run 7 暴露的是本工程的第一个"只在 multiarch 布局下错"的 bug**，不是缺包。Qt5 装在自定义前缀时
 `Qt5Core_DIR` 是 `<prefix>/lib/cmake/Qt5Core`，`../../../bin` 正好是 `<prefix>/bin`；但发行版的同名文件
@@ -3466,6 +3467,29 @@ aarch64 runner 镜像上 `1.97.1-aarch64-unknown-linux-gnu` 处于**半安装状
 ⇒ `dtolnay/rust-toolchain@stable` 装 clippy 时与残留文件冲突。
 run 14 用**同一个 action** 是成功的 ⇒ 环境 flake。
 
+> **run 17 的实测结论（2026-10-22 补）**：这一条当时只写到了"是 flake"，
+> 没写"那 arm64 到底有没有过"。事实是**run 17 的 arm64 `Configure` 步骤成功了**
+> （job 列表里 `9. Configure` 是 success，红灯在 `10. Build`）⇒
+> **加固方向是对的，但那是"降窗"而不是"治本"**：
+> 把 `dtolnay/rust-toolchain@stable` 换成手写的
+> `rustup toolchain install 1.97.1 --profile minimal --no-self-update --force-non-host`
+> 加上 `RUSTUP_TOOLCHAIN=1.97.1`，只是让 clippy 组件**不参与那次安装**，
+> 从而不撞上镜像里的残留文件；真正的病根是
+> [rust-lang/rustup#3530](https://github.com/rust-lang/rustup/issues/3530)
+> 那个"非宿主 target 的组件安装会连 `rust-std` 一起回滚"的 bug。
+> **含义**：这条 flake 随时可能复发，CI 红了要先看是不是这条，
+> 别误当成自己的代码又坏了。
+>
+> **完整因果链（run 15 arm64 全过程）**：
+>
+> 1. `dtolnay/rust-toolchain@stable` 装 clippy → 与镜像残留的 `bin/cargo-clippy` 冲突；
+> 2. rustup 回滚这次安装，而**回滚把已装好的 `rust-std` 一起删了**（#3530）；
+> 3. `snow_detect_rust_target()` 随后探到 target 不存在 ⇒ CMake 报
+>    "Rust target ... is not installed or usable"；
+> 4. **错误指向了 target，而病根在工具链安装** ⇒ 这正是 9.6.19 那个
+>    错误消息门禁要治的病（消息必须给对平台的真正补救办法，
+>    并把 cargo 自己的输出带上，而不是丢掉）。
+
 **判据（可复用）**：
 
 - **"未定义宏在 `#if` 中按 0 求值"** —— 一段看起来存在的代码可能从未执行过。
@@ -3476,6 +3500,250 @@ run 14 用**同一个 action** 是成功的 ⇒ 环境 flake。
 - **只在 Linux CI 暴露的缺陷，本地唯一的硬验证手段是"用能复现的那套编译器编"**；
   没有 GCC 时，退而求其次的**编译期 `static_assert` 等价性证明**
   仍然强于纯源码推理。
+
+#### 9.6.18 run 16 / 17：红灯第一次越过兼容头（2026-10-22）
+
+run 16（`39734199355`）与 run 17（`39736061339`）是一次推送的两个连续状态，
+把它们放在一起看才有意义 —— **run 16 的 build 根本没跑完**。
+
+| run | SHA | gates | Configure | Build | 说明 |
+|---|---|---|---|---|---|
+| 16（`39734199`） | `81fe9bf3` | ✅ | ✅ | **cancelled** | `qt_compat.h` 修好后红灯首次越过兼容头；`gates` 一次全绿（含新增门禁）。但 x64 的 Build 在第 10 步被**新 push 顶掉** |
+| 17（`39736061`） | `87409bbc` | ✅ | ✅ | ❌ | 红灯落在 `screenshotclipboardservice.cpp:97` 的 `retrieveData` 上，见 9.6.19 |
+
+**"被新 push 顶掉"这件事本身值得记一笔**。GitHub Actions 的 `concurrency` 组是
+`${{ github.workflow }}-${{ github.ref }}` ⇒ **同一分支的第二次 push 会取消第一次还在跑的 run**。
+于是：
+
+- run 16 的 `gates` 跑完了（绿），`Configure` 跑完了（绿），`Build` 被取消；
+- **run 16 的 Build 没有给出任何结论** —— 它不是"通过了"，是"没跑"。
+
+⇒ **"gates ✅" 这一栏对 build 没有背书作用**，两个 run 必须一起读。
+
+run 17 的实际位置：**`[487/611]`（x64）/`[487/608]`（arm64）**，
+比 run 15 的 `[346/611]` 前进了 **141 步** ⇒ 兼容头那一关是真的过了，
+而且是**两个架构同时过**（arm64 的 `Configure` 也成功了，见 9.6.17 的补注）。
+
+**run 17 的 arm64 有一件 run 15 没有的事**：`Install Rust toolchain` 与 `Configure` 都是
+success，红灯同样落在 `10. Build` ⇒ **arm64 的环境 flake 这次没复发**，
+印证了 9.6.17 补注里的"那是 flake、加固只是降窗"。
+
+#### 9.6.19 run 17：Qt5 / Qt6 的虚函数签名分歧，与一个平台守卫造成的结构性盲区（2026-10-22）
+
+run 17 的红灯，两条日志（x64 / arm64）**逐字相同**：
+
+```
+snow_shot/src/presentation/services/screenshotclipboardservice.cpp:97:14: error:
+  'QVariant {anonymous}::PngClipboardMimeData::retrieveData(const QString&, QMetaType) const'
+  marked 'override', but does not override
+snow_shot/src/presentation/services/screenshotclipboardservice.cpp:103:46: error:
+  cannot convert 'QMetaType' to 'QVariant::Type'
+```
+
+**根因：两版 Qt 的这个虚函数签名不同。**
+
+| | 第二参数类型 | 声明位置 |
+|---|---|---|
+| Qt 5.15.2 | `QVariant::Type` | `QtCore/qmimedata.h:88`（`protected`） |
+| Qt 6.12.0 | `QMetaType` | `QtCore/qmimedata.h:53`（`protected`） |
+
+**而 Qt 6 根本没有 `QVariant::Type` 这个枚举** —— `QtCore/qvariant.h` 里搜不到 `enum Type`
+（它在 Qt 6 被 `QMetaType` 取代了）⇒ **两种拼法不可能在同一个 TU 里共存**，
+一份源码必须有一个随版本切换的写法。
+
+**这个缺陷为什么在 Windows 本地看不见（结构性盲区）**：
+
+```cpp
+// snow_shot/src/presentation/services/screenshotclipboardservice.cpp
+#if !defined(Q_OS_WIN)
+    class PngClipboardMimeData final : public QMimeData {   // ← 整个类在守卫里
+        ...
+        QVariant retrieveData(const QString& mime, QMetaType type) const override { ... }
+    };
+#endif
+```
+
+Windows 本地走 Qt 6，**这个类根本不参与编译** ⇒ 缺陷在本地是隐形的，
+只有 Linux CI（Qt 5.15.13）能撞出来。
+
+⇒ **"Windows 编得过"不等于"Linux 编得过"**，尤其当 Linux 侧多了一层平台守卫。
+这是 9.6.17 那条判据的同一个家族：**看不见的代码面 = 盲区**。
+
+**修法（三处一起，缺一不可）**：
+
+1. **兼容头加类型别名**（`snow_shot/include/snow_shot/compat/qt_compat.h`）：
+
+   ```cpp
+   #if SNOW_QT6
+   using SnowMimeDataType = QMetaType;
+   #else
+   using SnowMimeDataType = QVariant::Type;
+   #endif
+   ```
+
+2. **两处调用点改用别名** —— 业务代码 `screenshotclipboardservice.cpp:97`
+   **和测试代码 `screenshot_clipboard_content_tests.cpp:826`**。
+   第二处是**门禁抓出来的**（见下），不是编译器抓的。
+
+3. **兼容头里加 probe 类**（关键一步，见下）。
+
+**probe 类：怎么把结构性盲区变成每条路线都编译到**
+
+`qt_compat.h` 是被 **force-include** 进**每一个** C++ TU 的
+（`cmake/SnowQt.cmake:146-150`：Qt5 走 `-include`、Windows 走 `/FI`；
+**Qt6 路线也注入**，见 `SnowQt.cmake:125-135` 的中文注释）⇒
+**把 probe 类放进兼容头，任何路线都会编译它**：
+
+```cpp
+namespace snow_compat_probe {
+class MimeDataRetrieveDataProbe final : public QMimeData {
+  protected:
+    QVariant retrieveData(const QString& mimetype, SnowMimeDataType type) const override {
+        return QMimeData::retrieveData(mimetype, type);
+    }
+};
+}
+```
+
+⇒ **签名一旦写错，每条路线（Windows/Qt6、Linux/Qt5）都会立刻红**，
+而不是等到某个平台守卫的另一侧才暴露。
+
+**`static_assert` 精确锁定别名 == 基类签名**：
+
+```cpp
+static_assert(std::is_same_v<decltype(&QMimeData::retrieveData),
+                             QVariant (QMimeData::*)(const QString&, SnowMimeDataType) const>,
+              "SnowMimeDataType must match QMimeData::retrieveData");
+```
+
+**坑**：`&QMimeData::retrieveData` 是 **protected** ⇒ **只能在派生类体内取地址**，
+写在类外是 C2248。⇒ 这条 `static_assert` **必须放在派生类里**（本轮就踩了）。
+
+**本机双版本编译验证**（没有 GCC，用 MSVC 19.44 各编一次）：
+
+| 验证 | 手段 | 结果 |
+|---|---|---|
+| 别名在两版都成立 | MSVC 对 Qt 5.15.2 / Qt 6.12.0 各编一个含两个 probe 的 TU | 两版 `CL_EXIT=0`，`/W4` 无警告 |
+| 别名**精确等于**基类签名 | 两个类内 `static_assert` | 两版都过 |
+| 盲区确实关上了 | 把 Qt6 分支的别名故意改成 `QVariant::Type` | **Qt6 立刻红**（C3668 + C2664 + `static_assert` 失败），Qt5 仍绿（变异只动 Qt6 分支） |
+
+**反向验证的读法**：变异只动 Qt6 分支 ⇒ **只有 Qt6 那条路红**才是对的。
+如果两版都红，说明变异泄漏到了公共部分 ⇒ 判据本身有问题。
+报错点在 `qt_compat.h(2149)` ⇒ **证明 probe 确实在每个 TU 里编译**。
+
+**门禁 1：`scripts/check-qt5-qt6-virtual-signatures.py`（6 项）**，
+已接进 `scripts/check-linux-packaging.sh` ⇒ 自动进 `gates` job。
+
+它做两件事：**(a)** 要求分歧虚函数在兼容头里有别名，且别名**同时**覆盖两版类型；
+**(b)** 扫全源码树，要求**每一处**覆盖都写成版本无关的形式。
+
+**反向验证 4/4 全精准变红**：
+
+| 变异 | 变红的判据 |
+|---|---|
+| 业务代码改回 `QMetaType` | "every override of a Qt5/Qt6 divergent virtual is version-neutral" |
+| 测试代码改回 `QMetaType` | 同上（**这一条是门禁抓出来的真缺陷**，编译器当时没报，因为测试 TU 在报错文件之后才编） |
+| 兼容头 Qt5 分支别名写错 | "… shim alias covers both Qt versions" |
+| 删掉整个别名定义 | "has a shim alias in the compat header" + "covers both Qt versions" |
+
+**门禁自己踩的三个坑（都是"假门禁"，跟 9.6.17 那两次同一家族）**：
+
+1. **"别名覆盖两版"只匹配单行** ⇒ 别名定义跨两行就漏判
+   ⇒ 改成收集**全部** `using <alias> = ...;` 体再判。
+2. **版本守卫识别有 bug**（`#if` / `#else` 两支处理不对）
+   ⇒ 改成标准栈式逐行扫描（`#if` push、`#endif` pop、判 `any(stack)`）。
+3. **`offset` 取到文件里第一个匹配**，不是当前那一处 override
+   ⇒ 新增 `offset_of_line()`。
+
+**门禁 2：`scripts/check-rust-target-error.cmake` + `.py`（17 项）** —— 见下。
+
+**方法论：全量 diff 两套本地 Qt 头文件**
+
+不要靠撞编译错误来找同类缺陷。做法是**扫项目实际派生的 Qt 基类**，
+把两版头文件里的虚函数签名逐一比对。工具在
+`.workbuddy/uos-port/qt-override-scan.py`（本地，不入库）。
+
+扫项目派生的 **41 个** Qt 基类，结果：
+
+| 虚函数 | 结论 |
+|---|---|
+| `QMimeData::retrieveData` | **真缺陷** ⇒ 已修（本文） |
+| `QAbstractNativeEventFilter::nativeEventFilter` | 已是版本无关（既有垫片 `snowNativeEventResult`），`pinnedwindowplatform.cpp:271` 在 `#if QT_VERSION < 6` 分支内用 `long*` ⇒ 正确 |
+| `QIODevice::open` | 项目**未覆盖** ⇒ 无影响 |
+| `QThread::run` | **假阳性**（两版 `qthread.h` 都有 `virtual void run();`）⇒ 类名归属被内嵌类污染 |
+
+**这个 diff 工具自己也踩了两次假阴性**：
+
+1. **逐行解析漏检跨行声明** —— Qt5 的 `retrieveData` 声明**跨两行**
+   ⇒ 改成按 `;` 切分语句。
+2. **切分后忘了把 `;` 加回去** ⇒ lookahead `(?=[;{])` 再也匹配不到
+   ⇒ **0 差异的假阴性**（比假阳性更危险：它说"没问题"）。
+   ⇒ 切完必须把 `;` 补回每个 chunk。
+
+⇒ **判据"没报错"和判据"报对了"要分开验证**。门禁的红是"有差异"，
+但**门禁的绿不能证明没有差异** —— 除非做过反向验证。
+
+#### 9.6.19.1 附带修掉的门禁：Rust target 探针的错误消息（run 15 遗留）
+
+run 15 的 arm64 flake（见 9.6.17）让 CMake 报了
+"Rust target ... is not installed or usable" —— **错误指向了 target，而病根在工具链安装**。
+本轮把 `cmake/RustStaticLibrary.cmake` 的那段消息重写了：
+
+- **Linux 分支给 rustup 命令**（不是 `bootstrap.ps1` —— 那是 Windows 脚本，Linux 上没有）；
+- **Windows 分支保留 `bootstrap.ps1`**；
+- **把 cargo 自己的输出带上**（原来 `ERROR_QUIET` 直接丢掉了），
+  消息里出现 "cargo said:" + cargo 的原文。
+
+**门禁做法**：`scripts/check-rust-target-error.cmake` 从
+`cmake/RustStaticLibrary.cmake` 里**真的把那段代码抽出来执行**
+（**不是抄一份** —— 抄的那份测的是抄件，不是代码）。
+
+**抽取的实现难度远超预期**：
+
+- CMake **不能捕获 `message(FATAL_ERROR)`** ⇒ 夹具必须**自己被杀掉**，
+  文本落到 stderr，退出码非零 ⇒ 断言交给**外部 Python 驱动器**。
+  （夹具自调用子进程会触发本机沙箱的 SIGTERM，CI 上同样脆弱。）
+- **不能按行切分模块文本** —— 那会破坏块内的多行字符串字面量
+  （CMake 靠相邻字面量隐式拼接）。
+  ⇒ 改用 `string(FIND)` + `string(SUBSTRING)` 在**原始文本**上定位。
+- 找配对的 `endif()` 要**数嵌套**（`if` / `endif` 逐个匹配），
+  且**首个 token 就是守卫自己**（初始深度已经是 1）⇒ 要跳过首个 token。
+- `list(GET)` 是 0-based，`while(_index LESS _line_count)` + 先自增 ⇒ **越界**。
+
+**修完还暴露了生产代码的一个真缺陷**：`set(_rust_remedy "..." "--target ...")`
+是 **`set()` 的列表语义**（两个值用 `;` 连接），不是隐式拼接 ⇒
+消息里真的出现了 `;--target x86_64-unknown-linux-gnu`。
+⇒ 改成 `string(CONCAT _rust_remedy "..." "--target ${SNOW_RUST_TARGET}")`。
+
+**判据（17 项全绿）** 里专门加了两条抓这个：
+"linux message carries the full rustup --target flag" +
+"linux message has no list separator in the remedy"。
+
+**反向验证 2/2 精准变红**：
+
+| 变异 | 变红的判据 |
+|---|---|
+| Linux 分支改回 `bootstrap.ps1` | **恰好 2 条**（linux rustup 命令 + 不含 bootstrap.ps1），Windows 侧不受影响 |
+| 恢复 `ERROR_QUIET`（丢 cargo 输出） | **恰好 1 条**（linux 含 cargo stderr 文本） |
+| `string(CONCAT` 改回 `set()` 两参数 | **恰好 2 条**（linux + unix 的分号判据） |
+
+**Unix `.sh` 分支在本机也被完整验证**：Windows 上 `execute_process` 不能直接跑 `.sh`
+⇒ 找 Git Bash 的 `sh.exe`，用 `.bat` 包装驱动它 ⇒ **CI 的 Unix 分支不再是
+"只会在 CI 上跑"的那一条**。
+
+**夹具的落盘位置也修了一处**：`cmake -P` 模式下 `CMAKE_CURRENT_BINARY_DIR` 就是 cwd
+⇒ 夹具每次运行都会在**仓库根**扔一个 `fake-cargo/` 目录。
+⇒ 改到系统临时目录（`$TMPDIR` / `$TEMP`）。
+
+**判据（可复用）**：
+
+- **"Windows 编得过"不等于"Linux 编得过"** —— 平台守卫会让整类代码在一边完全不编译。
+  想关闭这类盲区，就往**每个 TU 都会 force-include 的那个头**里放 probe。
+- **CMake 的 `set()` 多参数是列表语义**，`string(CONCAT)` 才是拼接。
+  错误消息里出现 `;` 就是这个。
+- **"门禁的绿"要靠反向验证来担保**：一个从不报错的判据和一个正确的判据，
+  在基线上长得一模一样。
+- **工具的假阴性比假阳性更危险**：假阳性会逼你查，假阴性会让你以为安全。
 
 ---
 
