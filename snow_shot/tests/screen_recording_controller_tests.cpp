@@ -1840,8 +1840,15 @@ std::vector<uint32_t> prepareExpectedRecordingExclusions(ScreenshotToolPalette* 
     std::vector<uint32_t> expected;
     if (captureToolbar)
         return expected;
+    // Linux has no native window-capture exclusion, so the controller never
+    // enrols the toolbar and the expected list stays empty. The resolver that
+    // would produce an id does not exist on that platform.
+#if defined(Q_OS_WIN) || defined(_WIN32) || defined(Q_OS_MACOS)
     if (auto id = snow_shot::platform::captureWindowId(toolbarPalette->window()))
         expected.push_back(*id);
+#else
+    Q_UNUSED(toolbarPalette);
+#endif
     return expected;
 }
 

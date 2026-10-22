@@ -1052,8 +1052,15 @@ struct ScreenRecordingController::Impl {
             if (!automationOptions.value(QStringLiteral("capture_toolbar"))
                      .toBool(settings.captureToolbarInRecording())) {
                 excludeToolbarFromCapture();
+                // Only the platforms with a native exclusion API can name the
+                // windows to hide. On Linux `captureExclusion` was built with an
+                // empty setter, so `exclude()` never enrolled anything and this
+                // list is empty by construction -- but the resolver itself does
+                // not exist there (see `windowcaptureexclusion.h`).
+#if defined(Q_OS_WIN) || defined(_WIN32) || defined(Q_OS_MACOS)
                 excludedWindowIds =
                     captureExclusion.windowIds(snow_shot::platform::captureWindowId);
+#endif
             }
             const auto previewRetirement = audioPreviewRetirement;
             SnowCaptureDirectRecordingConfig config{
@@ -1817,11 +1824,22 @@ struct ScreenRecordingController::Impl {
     bool guardToolbarSurface(QWidget* surface) {
         if (!toolbarPopupsExcluded)
             return true;
+        // Hiding a window from a screen capture is a native capability: Windows
+        // has `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` and macOS has
+        // `SCContentFilter`. X11/Wayland have neither, so there is nothing to
+        // call and nothing that failed -- treating it as an error would abort a
+        // recording that is otherwise fine. The toolbar simply appears in the
+        // video on Linux, which is the degradation the port document records
+        // for this capability.
+#if defined(Q_OS_WIN) || defined(_WIN32) || defined(Q_OS_MACOS)
         if (!surface || !snow_shot::platform::setWindowExcludedFromCapture(surface, true)) {
             reportToolbarExclusionError();
             return false;
         }
         static_cast<void>(captureExclusion.exclude(surface));
+#else
+        Q_UNUSED(surface);
+#endif
 #ifdef Q_OS_MACOS
         if (!recordingSession || sessionStatus.busy())
             return false;

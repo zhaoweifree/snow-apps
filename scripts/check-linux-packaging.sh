@@ -106,6 +106,14 @@ echo "=== qt module visibility"
 "$python_command" scripts/check-linux-qt-module-visibility.py
 
 echo
+echo "=== windows-only platform symbols"
+# `platform::setWindowExcludedFromCapture` and `platform::captureWindowId` are
+# defined inside `#if defined(Q_OS_WIN)`; a translation unit that calls them
+# unguarded compiles on Windows and fails on Linux with "'X' is not a member of
+# 'snow_shot::platform'" (run 24, 594/608).
+"$python_command" scripts/check-linux-windows-only-platform-symbols.py
+
+echo
 echo "=== ffmpeg wiring"
 # ffmpeg-sys-next resolves FFmpeg through FFMPEG_DIR *before* pkg-config and
 # then looks under <FFMPEG_DIR>/include only, so one stale prefix turns a
