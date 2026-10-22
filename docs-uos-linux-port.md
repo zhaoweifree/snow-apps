@@ -438,7 +438,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**剩余**：PipeWire 帧消费 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）。**剩余**：PipeWire 帧消费 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -4518,6 +4518,122 @@ IGNORED_DOCUMENTATION_PATTERNS = ("*.md", "*.html")
 **教训**：`paths-ignore` 是"哪些改动不值得跑"，它的正确性不来自直觉而来自
 仓库里实际存在哪些产物 —— 这里恰好是一个"文档双份渲染 + 分支保护 + 并发取消"
 三者叠加才会显形的问题。
+
+---
+
+#### 9.6.28 run 27：608/608 编译全过，红落到链接 —— 一个从没人核对过的文件名（2026-10-22）
+
+##### 现象
+
+run 27（`39816795355`，`2fd80f5d`）的 arm64 job 走完了全部编译单元：
+
+```
+[595/608] Building CXX object .../screenrecordingcontroller.cpp.o
+...
+[607/608] Linking CXX executable snow_shot/snow_shot
+```
+
+然后死在链接：
+
+```
+/usr/bin/ld: cannot find cargo/aarch64-unknown-linux-gnu/release/libsnow_linux_platform.a:
+No such file or directory
+collect2: error: ld returned 1 exit status
+```
+
+这是本轮第一次红在链接而不是编译 —— C++ 侧的编译问题已经清零。
+
+##### 先排除"相对路径"这个假嫌疑
+
+链接行里 `cargo/aarch64-unknown-linux-gnu/release/libsnow_linux_platform.a`
+看着像相对路径，但同一条命令行里还有
+`cargo/full/aarch64-unknown-linux-gnu/release/libsnow_shot_rust_ffi.a`，那个是
+存在的。**ninja 打印的路径本来就相对于 build 根目录**，而链接那一步的 cwd 正是
+`build/snow-shot-linux-arm64-release`，所以两者都解析成绝对路径。路径没错。
+
+##### 定因：`OUTPUT_NAME` 是对文件的承诺，而 cargo 用的是另一个名字
+
+`snow_add_rust_static_library` 不编译任何东西，它只是登记一个 IMPORTED STATIC
+目标：
+
+```cmake
+set_target_properties("${_target_name}" PROPERTIES
+    IMPORTED_LOCATION "${SNOW_RUST_CARGO_TARGET_DIR}/${SNOW_RUST_TARGET}/${_profile}/lib${_output_stem}.a")
+add_dependencies("${_target_name}" "${batch_name}_build")   # 这条才跑 cargo build
+```
+
+`batch_name_build` 里只有两件事：`cargo build` 与（可选）`objcopy
+--remove-section=.drectve`。**没有任何复制或改名**。而 cargo 的产物名由 crate 的
+库名决定 —— `[lib] name`，缺省是包名把连字符换成下划线：
+
+```toml
+# snow-crates/crates/snow-linux-c/Cargo.toml
+[package]
+name = "snow-linux-c"
+[lib]
+crate-type = ["staticlib", "rlib"]     # 没有 name
+```
+
+于是 cargo 写的是 `libsnow_linux_c.a`，而登记处写的是：
+
+```cmake
+snow_add_rust_static_library(snow_linux_platform PACKAGE snow-linux-c
+    MANIFEST_DIR "${SNOW_SHOT_CAPTURE_CRATES_DIR}" OUTPUT_NAME snow_linux_platform)
+```
+
+`OUTPUT_NAME` 被当成了标签，实际它被拼进 `IMPORTED_LOCATION`。两个 `-c`/`_c`
+之差，`ld` 找不到文件。日志也印证 cargo 确实编译过：`Compiling snow-linux` /
+`Compiling snow-linux-c` 都在，只是落成了另一个名字。
+
+其余 13 处登记都是对的，因为它们的 `OUTPUT_NAME` 恰好等于包名下划线化
+（`snow-capture-c` → `snow_capture_c` …）。**只有这一个 crate 的名字和 CMake
+目标名不一致**，而它偏偏只存在于 `if(UNIX AND NOT APPLE)` 里，且是 P3 才加的
+目标 —— 直到 run 27 才有第一个 job 走到链接这一步。
+
+##### 修法
+
+```cmake
+snow_add_rust_static_library(snow_linux_platform PACKAGE snow-linux-c
+    MANIFEST_DIR "${SNOW_SHOT_CAPTURE_CRATES_DIR}" OUTPUT_NAME snow_linux_c)
+```
+
+CMake 目标名保持 `snow_linux_platform`（消费方与 INTERFACE 包装 `snow_shot_linux_platform`
+都不动），只把"文件叫什么"改成 cargo 实际写出的名字。
+
+##### 新门禁 `scripts/check-rust-archive-names.py`
+
+判据：每一处 `snow_add_rust_static_library` / `snow_add_rust_static_libraries`
+登记的 `OUTPUT_NAME`，必须等于该包 `Cargo.toml` 推出的库名（`[lib] name`，缺省
+包名，连字符换下划线）。
+
+三项实现决定：
+
+1. **读 `[lib] name`，不只看包名** —— 门禁跟着 cargo 的规则走，将来谁真去改
+   `[lib] name`，门禁也跟得上（反向验证第 5 条就是这个方向）。
+2. **包找不到 Cargo.toml = 失败**，不是跳过。这一类的盲区正是"跳过"造成的。
+3. **变量实参的转发调用跳过** —— `snow_add_rust_static_library` 自己体内那一处
+   `PACKAGE "${SNOW_RUST_PACKAGE}"` 是包装器，它的每个调用点各自被检查。
+
+顺带检查批量登记的两条一致性：`OUTPUT_NAMES` 条数与 `PACKAGES` 相等。
+
+实测：`Rust archive name check passed (14 registration(s), 44 crate(s) indexed, 1 forwarding argument(s) skipped)`。
+
+##### 反向验证（4 变异 + 2 对照，全过）
+
+| # | 变异 | 期望 |
+|---|---|---|
+| 1 | 把 `OUTPUT_NAME snow_linux_c` 改回 `snow_linux_platform` | 只红这一条，且点名 `libsnow_linux_platform.a` |
+| 2 | 批量登记里 `snow_ui_selector_c` → `snow_ui_selector` | 只红这一条 |
+| 3 | `PACKAGE snow-linux-c` → `snow-linux-cc` | 只红"没有 Cargo.toml" |
+| 4 | 批量 `OUTPUT_NAMES` 删掉一条 | 只红"2 entries for 3 packages" |
+| 5 | 对照：给 `[lib]` 写上 `name = "snow_linux_c"` | 必须仍绿（证明门禁读的是 `[lib] name`） |
+| 6 | 对照：只加行尾注释 | 必须仍绿 |
+
+**教训**：`OUTPUT_NAME` 被读成了"标签"，但它被拼进 `IMPORTED_LOCATION`，是一个
+**对文件的承诺**。这个承诺没有任何环节校验：configure 时文件还没生成；编译期
+根本用不到它；只有链接会查，而链接只在那条"本机没人跑"的平台上发生。这和
+9.6.24 的 `PRIVATE` 是同一类错误 —— **声明与事实之间没有回路**，只能靠门禁
+补上。
 
 ---
 

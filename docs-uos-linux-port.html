@@ -1315,7 +1315,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <td><strong>P7 硬化与 CI</strong> <em>(进行中)</em></td>
 <td>稳定与回归</td>
 <td>Wayland 会话适配；CI 增 Linux job</td>
-<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>剩余</strong>：PipeWire 帧消费</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）。<strong>剩余</strong>：PipeWire 帧消费</td>
 </tr>
 </tbody>
 </table>
@@ -6680,6 +6680,120 @@ screenrecordingcontroller.cpp:1820: error: 'setWindowExcludedFromCapture' is not
 <p><strong>教训</strong>：<code>paths-ignore</code> 是"哪些改动不值得跑"，它的正确性不来自直觉而来自
 仓库里实际存在哪些产物 —— 这里恰好是一个"文档双份渲染 + 分支保护 + 并发取消"
 三者叠加才会显形的问题。</p>
+<hr>
+<h4>9.6.28 run 27：608/608 编译全过，红落到链接 —— 一个从没人核对过的文件名（2026-10-22）</h4>
+<h5>现象</h5>
+<p>run 27（<code>39816795355</code>，<code>2fd80f5d</code>）的 arm64 job 走完了全部编译单元：</p>
+<pre><code>[595/608] Building CXX object .../screenrecordingcontroller.cpp.o
+...
+[607/608] Linking CXX executable snow_shot/snow_shot
+</code></pre>
+<p>然后死在链接：</p>
+<pre><code>/usr/bin/ld: cannot find cargo/aarch64-unknown-linux-gnu/release/libsnow_linux_platform.a:
+No such file or directory
+collect2: error: ld returned 1 exit status
+</code></pre>
+<p>这是本轮第一次红在链接而不是编译 —— C++ 侧的编译问题已经清零。</p>
+<h5>先排除"相对路径"这个假嫌疑</h5>
+<p>链接行里 <code>cargo/aarch64-unknown-linux-gnu/release/libsnow_linux_platform.a</code>
+看着像相对路径，但同一条命令行里还有
+<code>cargo/full/aarch64-unknown-linux-gnu/release/libsnow_shot_rust_ffi.a</code>，那个是
+存在的。<strong>ninja 打印的路径本来就相对于 build 根目录</strong>，而链接那一步的 cwd 正是
+<code>build/snow-shot-linux-arm64-release</code>，所以两者都解析成绝对路径。路径没错。</p>
+<h5>定因：<code>OUTPUT_NAME</code> 是对文件的承诺，而 cargo 用的是另一个名字</h5>
+<p><code>snow_add_rust_static_library</code> 不编译任何东西，它只是登记一个 IMPORTED STATIC
+目标：</p>
+<pre><code class="language-cmake">set_target_properties(&quot;${_target_name}&quot; PROPERTIES
+    IMPORTED_LOCATION &quot;${SNOW_RUST_CARGO_TARGET_DIR}/${SNOW_RUST_TARGET}/${_profile}/lib${_output_stem}.a&quot;)
+add_dependencies(&quot;${_target_name}&quot; &quot;${batch_name}_build&quot;)   # 这条才跑 cargo build
+</code></pre>
+<p><code>batch_name_build</code> 里只有两件事：<code>cargo build</code> 与（可选）<code>objcopy
+--remove-section=.drectve</code>。<strong>没有任何复制或改名</strong>。而 cargo 的产物名由 crate 的
+库名决定 —— <code>[lib] name</code>，缺省是包名把连字符换成下划线：</p>
+<pre><code class="language-toml"># snow-crates/crates/snow-linux-c/Cargo.toml
+[package]
+name = &quot;snow-linux-c&quot;
+[lib]
+crate-type = [&quot;staticlib&quot;, &quot;rlib&quot;]     # 没有 name
+</code></pre>
+<p>于是 cargo 写的是 <code>libsnow_linux_c.a</code>，而登记处写的是：</p>
+<pre><code class="language-cmake">snow_add_rust_static_library(snow_linux_platform PACKAGE snow-linux-c
+    MANIFEST_DIR &quot;${SNOW_SHOT_CAPTURE_CRATES_DIR}&quot; OUTPUT_NAME snow_linux_platform)
+</code></pre>
+<p><code>OUTPUT_NAME</code> 被当成了标签，实际它被拼进 <code>IMPORTED_LOCATION</code>。两个 <code>-c</code>/<code>_c</code>
+之差，<code>ld</code> 找不到文件。日志也印证 cargo 确实编译过：<code>Compiling snow-linux</code> /
+<code>Compiling snow-linux-c</code> 都在，只是落成了另一个名字。</p>
+<p>其余 13 处登记都是对的，因为它们的 <code>OUTPUT_NAME</code> 恰好等于包名下划线化
+（<code>snow-capture-c</code> → <code>snow_capture_c</code> …）。<strong>只有这一个 crate 的名字和 CMake
+目标名不一致</strong>，而它偏偏只存在于 <code>if(UNIX AND NOT APPLE)</code> 里，且是 P3 才加的
+目标 —— 直到 run 27 才有第一个 job 走到链接这一步。</p>
+<h5>修法</h5>
+<pre><code class="language-cmake">snow_add_rust_static_library(snow_linux_platform PACKAGE snow-linux-c
+    MANIFEST_DIR &quot;${SNOW_SHOT_CAPTURE_CRATES_DIR}&quot; OUTPUT_NAME snow_linux_c)
+</code></pre>
+<p>CMake 目标名保持 <code>snow_linux_platform</code>（消费方与 INTERFACE 包装 <code>snow_shot_linux_platform</code>
+都不动），只把"文件叫什么"改成 cargo 实际写出的名字。</p>
+<h5>新门禁 <code>scripts/check-rust-archive-names.py</code></h5>
+<p>判据：每一处 <code>snow_add_rust_static_library</code> / <code>snow_add_rust_static_libraries</code>
+登记的 <code>OUTPUT_NAME</code>，必须等于该包 <code>Cargo.toml</code> 推出的库名（<code>[lib] name</code>，缺省
+包名，连字符换下划线）。</p>
+<p>三项实现决定：</p>
+<ol>
+<li><strong>读 <code>[lib] name</code>，不只看包名</strong> —— 门禁跟着 cargo 的规则走，将来谁真去改
+   <code>[lib] name</code>，门禁也跟得上（反向验证第 5 条就是这个方向）。</li>
+<li><strong>包找不到 Cargo.toml = 失败</strong>，不是跳过。这一类的盲区正是"跳过"造成的。</li>
+<li><strong>变量实参的转发调用跳过</strong> —— <code>snow_add_rust_static_library</code> 自己体内那一处
+   <code>PACKAGE "${SNOW_RUST_PACKAGE}"</code> 是包装器，它的每个调用点各自被检查。</li>
+</ol>
+<p>顺带检查批量登记的两条一致性：<code>OUTPUT_NAMES</code> 条数与 <code>PACKAGES</code> 相等。</p>
+<p>实测：<code>Rust archive name check passed (14 registration(s), 44 crate(s) indexed, 1 forwarding argument(s) skipped)</code>。</p>
+<h5>反向验证（4 变异 + 2 对照，全过）</h5>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>变异</th>
+<th>期望</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>把 <code>OUTPUT_NAME snow_linux_c</code> 改回 <code>snow_linux_platform</code></td>
+<td>只红这一条，且点名 <code>libsnow_linux_platform.a</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>批量登记里 <code>snow_ui_selector_c</code> → <code>snow_ui_selector</code></td>
+<td>只红这一条</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>PACKAGE snow-linux-c</code> → <code>snow-linux-cc</code></td>
+<td>只红"没有 Cargo.toml"</td>
+</tr>
+<tr>
+<td>4</td>
+<td>批量 <code>OUTPUT_NAMES</code> 删掉一条</td>
+<td>只红"2 entries for 3 packages"</td>
+</tr>
+<tr>
+<td>5</td>
+<td>对照：给 <code>[lib]</code> 写上 <code>name = "snow_linux_c"</code></td>
+<td>必须仍绿（证明门禁读的是 <code>[lib] name</code>）</td>
+</tr>
+<tr>
+<td>6</td>
+<td>对照：只加行尾注释</td>
+<td>必须仍绿</td>
+</tr>
+</tbody>
+</table>
+<p><strong>教训</strong>：<code>OUTPUT_NAME</code> 被读成了"标签"，但它被拼进 <code>IMPORTED_LOCATION</code>，是一个
+<strong>对文件的承诺</strong>。这个承诺没有任何环节校验：configure 时文件还没生成；编译期
+根本用不到它；只有链接会查，而链接只在那条"本机没人跑"的平台上发生。这和
+9.6.24 的 <code>PRIVATE</code> 是同一类错误 —— <strong>声明与事实之间没有回路</strong>，只能靠门禁
+补上。</p>
 <hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
