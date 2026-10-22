@@ -4378,6 +4378,105 @@ aarch64 写成 arm64），`revval-appimage-bundle.sh` 五条（换掉 `--runtime
 
 ---
 
+#### 9.6.26 run 24：QtDBus 修法成立，红推到 594/608 的一个"不存在的平台能力"（2026-10-22）
+
+##### 9.6.24 的修法确认成立
+
+run 24（`39808314409`，`e0174299`）失败那一行的编译命令里，Qt 相关标志多了两个：
+
+```
+-DQT_DBUS_LIB ... -isystem /usr/include/aarch64-linux-gnu/qt5/QtDBus
+```
+
+`PRIVATE` → `PUBLIC` 之后，QtDBus 的 include 目录确实到了消费方。同一处代码此前
+报的是 `QDBusObjectPath: No such file or directory`，现在编过了。
+
+##### 新的红：594/608，两处"Windows 才有的函数"
+
+```
+screenrecordingcontroller.cpp:1056: error: 'captureWindowId' is not a member of 'snow_shot::platform'
+screenrecordingcontroller.cpp:1820: error: 'setWindowExcludedFromCapture' is not a member of 'snow_shot::platform'
+```
+
+这两个函数声明在 `snow_shot/include/snow_shot/platform/windowcaptureexclusion.h`，
+实现全在 `src/platform/windows/windowchrome.cpp` 的 `#if defined(Q_OS_WIN)` 里。
+那个 TU 自己第 39–44 行是：
+
+```cpp
+#if defined(Q_OS_WIN) || defined(_WIN32) || defined(Q_OS_MACOS)
+#include "snow_shot/platform/windowcaptureexclusion.h"
+...
+#endif
+```
+
+也就是说**头在 Linux 上根本没被包含**，而调用点写在守卫外面 —— Windows 上能编译
+是因为守卫生效，Linux 上连符号都不存在。和 9.6.19、9.6.24 是同一个结构性盲区：
+**能编译它的平台不消费它**。
+
+##### 这里是"没有这个能力"，不是"失败"
+
+| 平台 | 机制 |
+|---|---|
+| Windows | `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` |
+| macOS | `SCContentFilter` |
+| X11 / Wayland | 无等价物 |
+
+所以 Linux 上正确的行为不是"报错并中止录制"，而是**照常录制、toolbar 出现在画面里**。
+`guardToolbarSurface()` 原来的失败分支会 `reportToolbarExclusionError()` 然后
+`return false`，在 Linux 上那个分支永远不该被走到 —— 因为没有东西"失败"。
+移植文档 §11 第 3 条已经写明这是要"在 UI 明确降级说明"的能力，而不是要伪装成错误。
+
+```cpp
+#if defined(Q_OS_WIN) || defined(_WIN32) || defined(Q_OS_MACOS)
+        if (!surface || !snow_shot::platform::setWindowExcludedFromCapture(surface, true)) {
+            reportToolbarExclusionError();
+            return false;
+        }
+        static_cast<void>(captureExclusion.exclude(surface));
+#else
+        Q_UNUSED(surface);
+#endif
+```
+
+`excludedWindowIds` 那一处（1056 行）同样包进守卫：Linux 上 `captureExclusion`
+是用空 setter 构造的，`exclude()` 从来不会登记任何窗口，这个列表按构造就是空的。
+
+##### 编译器还没走到的那一处
+
+`tests/screen_recording_controller_tests.cpp` 的 `prepareExpectedRecordingExclusions()`
+有同一个调用。它不在 Build 步骤里编（`Release` preset 是
+`SNOW_APPS_BUILD_TESTS=OFF`），要等到最后的 `Unit tests` 步骤才会红 —— 也就是
+"下一个红灯"，只是晚了半小时。
+
+##### 门禁：`scripts/check-linux-windows-only-platform-symbols.py`
+
+判据：**只在 Windows 守卫内定义的 `snow_shot::platform` 符号，任何引用都必须
+落在 Windows/macOS 守卫的生效分支里**。三项必要的减法，每一项都对应一类误报：
+
+| 减法 | 不加会怎样 |
+|---|---|
+| 减去 `src/platform/linux/*.cpp` 与 `src/platform/*.cpp` 里也有定义的符号 | `focusedFullscreenWindowExists` / `focusedFullscreenWindowOnScreen` 三平台各有一份，直接误报三处 |
+| 减去 CMake `if(WIN32)` 块里声明的 target 的源文件 | `recapture_cursor_native_e2e_test.cpp` 只在 Windows 构建，它调用那些函数是对的 |
+| 认出 `#else` 一侧 | `#if defined(Q_OS_WIN) … #else …` 的 else 分支是"非 Windows"，把它算成守卫会让门禁对一半代码失明 |
+
+`if(NOT WIN32)` 也算"非守卫"，否则 `NOT` 会被读成肯定。
+
+实测：`2 symbol(s)`、`12 guarded use(s)` —— 两个真符号（`captureWindowId`、
+`setWindowExcludedFromCapture`），十二处已经被正确守卫的引用。
+
+##### 反向验证
+
+`revval-windows-only-symbols.sh`：拆掉录制控制器里的两处守卫、拆掉测试 helper 里的
+守卫、加一行注释做对照。三红一绿，且每条红只指向被改的那一行。
+
+##### 顺带
+
+`check-linux-ci-workflow.py` 在这一轮暴露出自己的一个解析坑：`cmake --preset` 后面
+接续行反斜杠时，剥掉 `${{ }}` 之后正则把 `\` 读成 preset 名（9.6.25 的 AppImage
+步骤正好是多行 configure）。已把 preset 名的首字符类改成 `[^-\\\s]`。
+
+---
+
 ## 10. 工作量 / 优先级矩阵
 
 | 编号 | 工作项 | 规模 | 风险 | 优先级 |

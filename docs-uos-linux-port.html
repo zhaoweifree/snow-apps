@@ -6551,6 +6551,109 @@ aarch64 写成 arm64），<code>revval-appimage-bundle.sh</code> 五条（换掉
 弱化 FATAL 文案 / 用滚动 tag / 删一份 checksum / 停掉 emit）。全部按"只为那一件
 事变红"断言，恢复后必须重新绿。</p>
 <hr>
+<h4>9.6.26 run 24：QtDBus 修法成立，红推到 594/608 的一个"不存在的平台能力"（2026-10-22）</h4>
+<h5>9.6.24 的修法确认成立</h5>
+<p>run 24（<code>39808314409</code>，<code>e0174299</code>）失败那一行的编译命令里，Qt 相关标志多了两个：</p>
+<pre><code>-DQT_DBUS_LIB ... -isystem /usr/include/aarch64-linux-gnu/qt5/QtDBus
+</code></pre>
+<p><code>PRIVATE</code> → <code>PUBLIC</code> 之后，QtDBus 的 include 目录确实到了消费方。同一处代码此前
+报的是 <code>QDBusObjectPath: No such file or directory</code>，现在编过了。</p>
+<h5>新的红：594/608，两处"Windows 才有的函数"</h5>
+<pre><code>screenrecordingcontroller.cpp:1056: error: 'captureWindowId' is not a member of 'snow_shot::platform'
+screenrecordingcontroller.cpp:1820: error: 'setWindowExcludedFromCapture' is not a member of 'snow_shot::platform'
+</code></pre>
+<p>这两个函数声明在 <code>snow_shot/include/snow_shot/platform/windowcaptureexclusion.h</code>，
+实现全在 <code>src/platform/windows/windowchrome.cpp</code> 的 <code>#if defined(Q_OS_WIN)</code> 里。
+那个 TU 自己第 39–44 行是：</p>
+<pre><code class="language-cpp">#if defined(Q_OS_WIN) || defined(_WIN32) || defined(Q_OS_MACOS)
+#include &quot;snow_shot/platform/windowcaptureexclusion.h&quot;
+...
+#endif
+</code></pre>
+<p>也就是说<strong>头在 Linux 上根本没被包含</strong>，而调用点写在守卫外面 —— Windows 上能编译
+是因为守卫生效，Linux 上连符号都不存在。和 9.6.19、9.6.24 是同一个结构性盲区：
+<strong>能编译它的平台不消费它</strong>。</p>
+<h5>这里是"没有这个能力"，不是"失败"</h5>
+<table>
+<thead>
+<tr>
+<th>平台</th>
+<th>机制</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows</td>
+<td><code>SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)</code></td>
+</tr>
+<tr>
+<td>macOS</td>
+<td><code>SCContentFilter</code></td>
+</tr>
+<tr>
+<td>X11 / Wayland</td>
+<td>无等价物</td>
+</tr>
+</tbody>
+</table>
+<p>所以 Linux 上正确的行为不是"报错并中止录制"，而是<strong>照常录制、toolbar 出现在画面里</strong>。
+<code>guardToolbarSurface()</code> 原来的失败分支会 <code>reportToolbarExclusionError()</code> 然后
+<code>return false</code>，在 Linux 上那个分支永远不该被走到 —— 因为没有东西"失败"。
+移植文档 §11 第 3 条已经写明这是要"在 UI 明确降级说明"的能力，而不是要伪装成错误。</p>
+<pre><code class="language-cpp">#if defined(Q_OS_WIN) || defined(_WIN32) || defined(Q_OS_MACOS)
+        if (!surface || !snow_shot::platform::setWindowExcludedFromCapture(surface, true)) {
+            reportToolbarExclusionError();
+            return false;
+        }
+        static_cast&lt;void&gt;(captureExclusion.exclude(surface));
+#else
+        Q_UNUSED(surface);
+#endif
+</code></pre>
+<p><code>excludedWindowIds</code> 那一处（1056 行）同样包进守卫：Linux 上 <code>captureExclusion</code>
+是用空 setter 构造的，<code>exclude()</code> 从来不会登记任何窗口，这个列表按构造就是空的。</p>
+<h5>编译器还没走到的那一处</h5>
+<p><code>tests/screen_recording_controller_tests.cpp</code> 的 <code>prepareExpectedRecordingExclusions()</code>
+有同一个调用。它不在 Build 步骤里编（<code>Release</code> preset 是
+<code>SNOW_APPS_BUILD_TESTS=OFF</code>），要等到最后的 <code>Unit tests</code> 步骤才会红 —— 也就是
+"下一个红灯"，只是晚了半小时。</p>
+<h5>门禁：<code>scripts/check-linux-windows-only-platform-symbols.py</code></h5>
+<p>判据：<strong>只在 Windows 守卫内定义的 <code>snow_shot::platform</code> 符号，任何引用都必须
+落在 Windows/macOS 守卫的生效分支里</strong>。三项必要的减法，每一项都对应一类误报：</p>
+<table>
+<thead>
+<tr>
+<th>减法</th>
+<th>不加会怎样</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>减去 <code>src/platform/linux/*.cpp</code> 与 <code>src/platform/*.cpp</code> 里也有定义的符号</td>
+<td><code>focusedFullscreenWindowExists</code> / <code>focusedFullscreenWindowOnScreen</code> 三平台各有一份，直接误报三处</td>
+</tr>
+<tr>
+<td>减去 CMake <code>if(WIN32)</code> 块里声明的 target 的源文件</td>
+<td><code>recapture_cursor_native_e2e_test.cpp</code> 只在 Windows 构建，它调用那些函数是对的</td>
+</tr>
+<tr>
+<td>认出 <code>#else</code> 一侧</td>
+<td><code>#if defined(Q_OS_WIN) … #else …</code> 的 else 分支是"非 Windows"，把它算成守卫会让门禁对一半代码失明</td>
+</tr>
+</tbody>
+</table>
+<p><code>if(NOT WIN32)</code> 也算"非守卫"，否则 <code>NOT</code> 会被读成肯定。</p>
+<p>实测：<code>2 symbol(s)</code>、<code>12 guarded use(s)</code> —— 两个真符号（<code>captureWindowId</code>、
+<code>setWindowExcludedFromCapture</code>），十二处已经被正确守卫的引用。</p>
+<h5>反向验证</h5>
+<p><code>revval-windows-only-symbols.sh</code>：拆掉录制控制器里的两处守卫、拆掉测试 helper 里的
+守卫、加一行注释做对照。三红一绿，且每条红只指向被改的那一行。</p>
+<h5>顺带</h5>
+<p><code>check-linux-ci-workflow.py</code> 在这一轮暴露出自己的一个解析坑：<code>cmake --preset</code> 后面
+接续行反斜杠时，剥掉 <code>${{ }}</code> 之后正则把 <code>\</code> 读成 preset 名（9.6.25 的 AppImage
+步骤正好是多行 configure）。已把 preset 名的首字符类改成 <code>[^-\\\s]</code>。</p>
+<hr>
+
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>
