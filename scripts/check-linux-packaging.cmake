@@ -25,7 +25,22 @@ set(SNOW_SHOT_DESCRIPTION
 set(SNOW_SHOT_HOMEPAGE_URL "https://snowshot.top")
 set(SNOW_SHOT_SUPPORT_EMAIL "chao@mgchao.top")
 set(CMAKE_PROJECT_NAME "snow-apps")
-set(CMAKE_BINARY_DIR "/nonexistent/snow-build")
+# A writable stand-in for the build directory. Every path this script checks is
+# built from this variable, so the value only has to look like a build tree --
+# but it does have to *exist*: `snow_shot_configure_linux_package()` configures
+# the CPack bundle script into `${CMAKE_BINARY_DIR}`, and `configure_file` cannot
+# write into a directory that is not there. A literal `/nonexistent/snow-build`
+# looked harmless on the Windows workstation (the path resolved somewhere
+# writable) and failed the gate on Linux:
+#
+#     CMake Error: Could not open file for write in copy operation
+#     /nonexistent/snow-build/snow-shot-linux-runtime-bundle.cmake.tmp
+#
+# Cleared at the start so a run that failed halfway does not leave state behind
+# for the next one.
+set(CMAKE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/snow-packaging-build")
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_SYSTEM_PROCESSOR "x86_64")
 
 include("${_snow_repo}/cmake/SnowShotLinuxPackage.cmake")
@@ -330,6 +345,10 @@ if(_snow_position EQUAL -1)
     message(STATUS "FAIL CMakeLists.txt never calls snow_shot_add_appimage_target()")
     math(EXPR _snow_failures "${_snow_failures} + 1")
 endif()
+
+# The scratch tree is only an input to the checks above; leaving it behind turns
+# a green run into an untracked directory in the repository root.
+file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}")
 
 if(_snow_failures GREATER 0)
     message(FATAL_ERROR "Linux packaging check failed: ${_snow_failures} problem(s)")
