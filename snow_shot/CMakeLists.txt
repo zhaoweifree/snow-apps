@@ -884,7 +884,9 @@ add_library(snow_shot_translation STATIC
 )
 snow_enable_unity_build(snow_shot_translation)
 target_include_directories(snow_shot_translation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(snow_shot_translation PUBLIC snow_shot_storage Qt::Network
+# `Qt::Gui` is PUBLIC because snowshotapiclient.h is a public header of this
+# library and includes `<QImage>`: the preview payload it hands back is a QImage.
+target_link_libraries(snow_shot_translation PUBLIC snow_shot_storage Qt::Network Qt::Gui
     PRIVATE snow_selected_text_c)
 target_compile_definitions(snow_shot_translation PRIVATE
     SNOW_SHOT_API_BASE_URL=\"${SNOW_SHOT_API_BASE_URL}\"
@@ -1170,13 +1172,22 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/systemnotificationservice.cpp)
     target_include_directories(snow_shot_system_notifications PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    # `Qt::DBus` is PUBLIC, not PRIVATE: `systemnotificationservice.h` is a public
+    # header of this target and it includes `<QDBusConnection>`, so whoever compiles
+    # against this library must see the QtDBus include directory. A PRIVATE link
+    # still propagates at *link* time through a static library (`$<LINK_ONLY:...>`),
+    # which is why the omission only shows up as a missing header in a translation
+    # unit that thought it had every dependency it needed - run 23, `QDBusConnection:
+    # No such file or directory`, on the arm64 builder.
     target_link_libraries(snow_shot_system_notifications PUBLIC Qt::Core
         snow_shot_notification_payload
-        PRIVATE Qt::DBus)
+        Qt::DBus)
     # The StatusNotifierItem that stands in for QSystemTrayIcon wherever the
     # platform plugin's tray is not what the desktop sees. Built next to the
     # notification backend because it is the same kind of thing: a session-bus
-    # object that survives a display-protocol change.
+    # object that survives a display-protocol change. `Qt::DBus` is PUBLIC for
+    # the same reason as above - `statusnotifierservice.h` includes
+    # `<QDBusObjectPath>` and `systemtraycontroller.cpp` compiles against it.
     add_library(snow_shot_status_notifier STATIC
         include/snow_shot/platform/linux/statusnotifierservice.h
         src/platform/linux/statusnotifierservice.cpp)
@@ -1184,7 +1195,7 @@ if(UNIX AND NOT APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(snow_shot_status_notifier PUBLIC Qt::Core Qt::Gui
         snow_shot_status_notifier_payload
-        PRIVATE Qt::DBus)
+        Qt::DBus)
 endif()
 add_library(snow_shot_administrator STATIC
     include/snow_shot/platform/linux/autostartregistration.h

@@ -6311,6 +6311,138 @@ endif()
 往表里加一行即可，不用重新考古。反向验证三条（删掉定义 / 挪到消费目录之后 /
 去掉平台守卫），每条都必须只为那一件事变红。</p>
 <hr>
+<h4>9.6.24 run 23：deps 与 Configure 双双全绿，红落到一个 <code>PRIVATE</code> 的 Qt 模块上（2026-10-22）</h4>
+<h5>里程碑</h5>
+<p>run 23（<code>39801467842</code>，<code>b59adff4</code>）第一次让前两个步骤在两架构同时变绿：</p>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>x64</th>
+<th>arm64</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4. Build the pinned Linux dependencies</td>
+<td>success</td>
+<td>success</td>
+</tr>
+<tr>
+<td>9. Configure</td>
+<td>success</td>
+<td>success</td>
+</tr>
+<tr>
+<td>10. Build</td>
+<td><strong>failure</strong></td>
+<td><strong>failure</strong></td>
+</tr>
+</tbody>
+</table>
+<p><code>WITH_TESSERACT</code>（9.6.21 / 9.6.22）与 <code>Iconv::Iconv</code>（9.6.23）两处修法由此确认成立。
+Build 在 540/608 编译单元处停住，两架构错在同一行：</p>
+<pre><code>snow_shot/include/snow_shot/platform/linux/statusnotifierservice.h:6:10:
+fatal error: QDBusObjectPath: No such file or directory
+    6 | #include &lt;QDBusObjectPath&gt;
+</code></pre>
+<h5>定因：编译命令里少了三个字符</h5>
+<p>失败那行的完整编译命令是一份决定性的证据。它的 Qt 相关标志是：</p>
+<pre><code>-DQT_CONCURRENT_LIB -DQT_CORE_LIB -DQT_GUI_LIB -DQT_MESSAGE_LOGCONTEXT
+-DQT_NETWORK_LIB -DQT_NO_DEBUG -DQT_SVG_LIB -DQT_WIDGETS_LIB
+-isystem /usr/include/aarch64-linux-gnu/qt5/QtGui
+-isystem /usr/include/aarch64-linux-gnu/qt5/QtWidgets
+-isystem /usr/include/aarch64-linux-gnu/qt5/QtCore
+-isystem /usr/include/aarch64-linux-gnu/qt5/QtNetwork
+-isystem /usr/include/aarch64-linux-gnu/qt5/QtSvg
+</code></pre>
+<p><code>QT_DBUS_LIB</code> 没有，<code>.../qt5/QtDBus</code> 也没有 —— QtDBus 的<strong>使用需求</strong>（use requirements）
+一个都没到。而头文件 <code>&lt;QDBusObjectPath&gt;</code> 需要 <code>-isystem .../qt5/QtDBus</code>，因为
+<code>QDBusObjectPath</code> 是 QtDBus 模块独有的头，不在 qtbase 的 <code>include/</code> 根目录下。</p>
+<p>来源在 <code>snow_shot/CMakeLists.txt</code>：</p>
+<pre><code class="language-cmake">target_link_libraries(snow_shot_status_notifier PUBLIC Qt::Core Qt::Gui
+    snow_shot_status_notifier_payload
+    PRIVATE Qt::DBus)          # ← 错在 PRIVATE
+</code></pre>
+<p><code>statusnotifierservice.h</code> 是这个库的<strong>公共头</strong>，第 6 行 <code>#include &lt;QDBusObjectPath&gt;</code>；
+<code>systemnotificationservice.h</code> 同样如此（<code>#include &lt;QDBusConnection&gt;</code>）。公共头里的
+模块必须是公共依赖。</p>
+<h5>为什么这个错看起来不像错</h5>
+<p>静态库的 <code>PRIVATE</code> 依赖<strong>在链接期确实会传播</strong>：CMake 把静态库的 PRIVATE 依赖包成
+<code>$&lt;LINK_ONLY:...&gt;</code> 塞进消费方的 <code>INTERFACE_LINK_LIBRARIES</code>，链接命令里仍然会出现
+<code>libQt5DBus.so</code>。configure 一路绿灯，链接也不会报错 —— 丢掉的只有 <code>-isystem</code>、
+<code>-DQT_DBUS_LIB</code> 这类<strong>编译期</strong>使用需求。于是症状不是"找不到库"，而是"找不到头"。</p>
+<p>这一条正是它能在代码里躺这么久的原因：<code>snow_shot</code> 是 <code>PRIVATE</code> 链的
+<code>snow_shot_status_notifier</code>，链接期一切正常，编译期的缺口只落在"碰巧包含了这个公共头"
+的翻译单元上。</p>
+<h5>为什么 Windows / macOS 永远复现不了</h5>
+<p><code>snow_shot/include/snow_shot/platform/linux/</code> 下的两个头只被
+<code>systemtraycontroller.cpp</code> 与 <code>system_tray_controller_tests.cpp</code> 包含，而这两处都在
+Linux 守卫里；头本身也是 Linux 分支才编进库的。<strong>能编译它的平台不消费它，
+消费它的平台才第一次编译它</strong> —— 与 9.6.19（<code>QMimeData::retrieveData</code>）同一个结构性盲区，
+只是这次的对象是 <code>target_link_libraries</code> 的可见性关键字而不是虚函数签名。</p>
+<h5>修法</h5>
+<pre><code class="language-cmake"># 两个库同样处理：公共头里有 QtDBus 的类型，所以 Qt::DBus 是公共依赖
+target_link_libraries(snow_shot_status_notifier PUBLIC Qt::Core Qt::Gui
+    snow_shot_status_notifier_payload
+    Qt::DBus)
+</code></pre>
+<p><code>systemnotificationservice.h</code> 一并修 —— 它在同一个块的下一行，同一类错误，
+只是编译顺序让 <code>QDBusObjectPath</code> 先暴露出来。</p>
+<h5>新门禁抓到的第二处：<code>snow_shot_translation</code></h5>
+<p>新门禁第一次跑起来就在既有代码里抓到一个同类缺口：</p>
+<pre><code>FAIL: snow_shot_translation: public header
+      snow_shot/include/snow_shot/network/snowshotapiclient.h includes ['QImage'],
+      but Qt::Gui is not linked at all
+</code></pre>
+<p>这个库只链了 <code>Qt::Network</code>（它传递 <code>Core</code>，但不传递 <code>Gui</code>），而它的公共头里有
+<code>&lt;QImage&gt;</code>。当前没炸是因为所有消费方自己都链了 <code>Qt::Gui</code> —— 属于"运气成立"，
+不是"契约成立"。修法是往 PUBLIC 里补 <code>Qt::Gui</code>。</p>
+<h5>门禁：<code>scripts/check-linux-qt-module-visibility.py</code></h5>
+<p>判据一句话：<strong>静态库的公共头包含了某个 Qt 模块的头，那这个模块必须在它的
+PUBLIC/INTERFACE 里</strong>。三项实现决定：</p>
+<table>
+<thead>
+<tr>
+<th>决定</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>只查 <code>STATIC</code> / <code>OBJECT</code> 库</td>
+<td>可执行文件的 PUBLIC 无人消费，查它只会制造噪音；静态库的公共头才是被多个目标编译的东西</td>
+</tr>
+<tr>
+<td><code>Core</code> 算被覆盖</td>
+<td>Qt 自己的模块依赖图：<code>Gui</code>→<code>Core</code>，<code>Widgets</code>→<code>Gui</code>+<code>Core</code>；要求显式写 <code>Qt::Core</code> 是冗余。表在 <code>QT_MODULE_IMPLIES</code></td>
+</tr>
+<tr>
+<td>认不出的 Qt 头直接失败</td>
+<td>静默跳过就是 9.6.21 里那条"从未执行过的转储"的同款：盲区必须响</td>
+</tr>
+</tbody>
+</table>
+<p>裸形式 <code>target_link_libraries(t foo)</code> 按 CMake 语义当作 <code>PUBLIC</code>（非 imported 目标），
+解析器对此有显式分支 —— 否则每个用裸形式写 <code>Qt::Core</code> 的目标都会被误报。</p>
+<p>实测规模与输出：</p>
+<pre><code>Qt module visibility check passed (19 static libraries, 32 public headers, 103 Qt includes classified)
+</code></pre>
+<p>反向验证（<code>.workbuddy/uos-port/revval-qt-module-visibility.sh</code>）五条变异 + 一条对照：</p>
+<ol>
+<li><code>snow_shot_system_notifications</code> 的 <code>Qt::DBus</code> 退回 <code>PRIVATE</code> → 只为它变红；</li>
+<li><code>snow_shot_status_notifier</code> 同上 → 只为它变红；</li>
+<li><code>snow_shot_translation</code> 删掉 <code>Qt::Gui</code> → 只为它变红；</li>
+<li><code>snow_shot_main_window_skin</code> 的 <code>Qt::Widgets</code> 降为 <code>PRIVATE</code> → 它连带 <code>Gui</code>/<code>Core</code>
+   一起失去覆盖，门禁对它报 5 行，全部属于同一个目标（反向验证按目标前缀断言，
+   而不是"必须只有一行"，否则等于在断言错误的东西）；</li>
+<li>公共头里插入 <code>#include &lt;QGraphicsScene&gt;</code> → 命中"认不出"分支，只报这一条；</li>
+<li>对照：只加一行注释 → 必须仍然全绿。</li>
+</ol>
+<p><strong>教训</strong>：<code>PRIVATE</code> 在静态库上不是"私有"，是"链接期公开、编译期私有"。
+这个不对称不会被 configure 发现，也不会被链接发现，只会被"另一个目标恰好编译了
+这个公共头"发现 —— 而那个目标往往只在 CI 的另一条架构上存在。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

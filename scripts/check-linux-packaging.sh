@@ -97,6 +97,15 @@ echo "=== opencv consumer imports"
 "$python_command" scripts/check-linux-opencv-imports.py
 
 echo
+echo "=== qt module visibility"
+# A public header of a static library includes a Qt module's header, so that
+# module has to be PUBLIC on the library: a PRIVATE dependency still reaches
+# the linker through $<LINK_ONLY:...>, but the include directory does not, and
+# the consumer's compile fails with "QDBusObjectPath: No such file or directory"
+# (run 23, 9.6.24).
+"$python_command" scripts/check-linux-qt-module-visibility.py
+
+echo
 echo "=== ffmpeg wiring"
 # ffmpeg-sys-next resolves FFmpeg through FFMPEG_DIR *before* pkg-config and
 # then looks under <FFMPEG_DIR>/include only, so one stale prefix turns a
