@@ -90,6 +90,13 @@ echo "=== opencv configure options"
 "$python_command" scripts/check-linux-deps-opencv-options.py
 
 echo
+echo "=== opencv consumer imports"
+# OpenCVConfig.cmake has no find_dependency, so every imported target the
+# static Linux export names (Iconv::Iconv today) has to be defined by us,
+# before the subdirectories that look OpenCV up (run 22, 9.6.23).
+"$python_command" scripts/check-linux-opencv-imports.py
+
+echo
 echo "=== ffmpeg wiring"
 # ffmpeg-sys-next resolves FFmpeg through FFMPEG_DIR *before* pkg-config and
 # then looks under <FFMPEG_DIR>/include only, so one stale prefix turns a

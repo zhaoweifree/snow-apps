@@ -6269,6 +6269,48 @@ endif()
 </ul>
 <p>反向验证加到 7 条：删 <code>-DWITH_ADE=OFF</code> 必须只为"WITH_ADE 必须 OFF"变红。</p>
 <hr>
+<h4>9.6.23 run 22：<code>OpenCVConfig.cmake</code> 从不 <code>find_dependency</code>，消费方得自己补（2026-10-22）</h4>
+<p>run 22（<code>39798623715</code>）的日志里 <code>ade</code> 那条彻底消失，说明 9.6.22 的修法成立。
+新的第一条 cmake 错误换成了：</p>
+<pre><code>CMake Error at .../share/opencv4/OpenCVModules.cmake:112 (set_target_properties):
+  The link interface of target &quot;opencv_wechat_qrcode&quot; contains:
+
+    Iconv::Iconv
+
+  but the target was not found.
+Call Stack:
+  .../share/opencv4/OpenCVConfig.cmake:128 (include)
+  snow_shot/CMakeLists.txt:367 (find_package)
+</code></pre>
+<h5>为什么只有 Linux 会碰到</h5>
+<p><code>cmake/templates/OpenCVConfig.cmake.in</code> 里<strong>一个 <code>find_dependency</code> 都没有</strong>：
+它只负责 include 出 <code>OpenCVModules.cmake</code>，而那份文件里每个
+<code>INTERFACE_LINK_LIBRARIES</code> 引用的第三方导入目标，都要求消费方<strong>事先</strong>定义好。</p>
+<ul>
+<li>Windows / macOS 的 OpenCV 来自包管理器，它的 config 自己把这些目标建好了；</li>
+<li>Linux 这份是我们自己 <code>cmake --install</code> 出去的静态构建，<code>Imagecodecs</code> 相关模块
+  没进 <code>BUILD_LIST</code>，真正被带出去的外部导入目标只有 <code>Iconv::Iconv</code>
+  （由 <code>wechat_qrcode</code> 的链接接口带入）。</li>
+</ul>
+<p>于是同一行 <code>find_package(OpenCV CONFIG REQUIRED)</code> 在 Windows 上一直可用，
+在 Linux 上第一次真的把 OpenCV 装出来就炸 —— 又一个"Windows 永不复现"的盲区。</p>
+<h5>修法</h5>
+<p>在根 <code>CMakeLists.txt</code>、所有 <code>add_subdirectory</code> 之前：</p>
+<pre><code class="language-cmake">if(UNIX AND NOT APPLE)
+    find_package(Iconv)
+    ...
+endif()
+</code></pre>
+<p>glibc 的 iconv 在 libc 里，<code>FindIconv</code> 给的是一个不链任何东西的 INTERFACE 目标，
+所以"让目标存在"本身就是全部修法。位置也有讲究：导入目标只对<strong>之后</strong>加入的目录
+可见，放在 <code>add_subdirectory(snow_draw_engine_qt)</code> 之后就没有用了。</p>
+<h5>门禁：<code>scripts/check-linux-opencv-imports.py</code></h5>
+<p>判据是"消费者视角"的三条：<code>Iconv::Iconv</code> 必须在根 CMakeLists 里有定义、
+必须在两个消费目录之前、必须被 <code>if(UNIX ...)</code> 守着。
+<code>REQUIRED_TARGETS</code> 是登记表 —— 如果静态导出的接口里再冒出一个目标，
+往表里加一行即可，不用重新考古。反向验证三条（删掉定义 / 挪到消费目录之后 /
+去掉平台守卫），每条都必须只为那一件事变红。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

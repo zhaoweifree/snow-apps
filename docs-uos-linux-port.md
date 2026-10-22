@@ -4091,6 +4091,60 @@ endif()
 
 反向验证加到 7 条：删 `-DWITH_ADE=OFF` 必须只为"WITH_ADE 必须 OFF"变红。
 
+#### 9.6.23 run 22：`OpenCVConfig.cmake` 从不 `find_dependency`，消费方得自己补（2026-10-22）
+
+run 22（`39798623715`）的日志里 `ade` 那条彻底消失，说明 9.6.22 的修法成立。
+新的第一条 cmake 错误换成了：
+
+```
+CMake Error at .../share/opencv4/OpenCVModules.cmake:112 (set_target_properties):
+  The link interface of target "opencv_wechat_qrcode" contains:
+
+    Iconv::Iconv
+
+  but the target was not found.
+Call Stack:
+  .../share/opencv4/OpenCVConfig.cmake:128 (include)
+  snow_shot/CMakeLists.txt:367 (find_package)
+```
+
+##### 为什么只有 Linux 会碰到
+
+`cmake/templates/OpenCVConfig.cmake.in` 里**一个 `find_dependency` 都没有**：
+它只负责 include 出 `OpenCVModules.cmake`，而那份文件里每个
+`INTERFACE_LINK_LIBRARIES` 引用的第三方导入目标，都要求消费方**事先**定义好。
+
+- Windows / macOS 的 OpenCV 来自包管理器，它的 config 自己把这些目标建好了；
+- Linux 这份是我们自己 `cmake --install` 出去的静态构建，`Imagecodecs` 相关模块
+  没进 `BUILD_LIST`，真正被带出去的外部导入目标只有 `Iconv::Iconv`
+  （由 `wechat_qrcode` 的链接接口带入）。
+
+于是同一行 `find_package(OpenCV CONFIG REQUIRED)` 在 Windows 上一直可用，
+在 Linux 上第一次真的把 OpenCV 装出来就炸 —— 又一个"Windows 永不复现"的盲区。
+
+##### 修法
+
+在根 `CMakeLists.txt`、所有 `add_subdirectory` 之前：
+
+```cmake
+if(UNIX AND NOT APPLE)
+    find_package(Iconv)
+    ...
+endif()
+```
+
+glibc 的 iconv 在 libc 里，`FindIconv` 给的是一个不链任何东西的 INTERFACE 目标，
+所以"让目标存在"本身就是全部修法。位置也有讲究：导入目标只对**之后**加入的目录
+可见，放在 `add_subdirectory(snow_draw_engine_qt)` 之后就没有用了。
+
+##### 门禁：`scripts/check-linux-opencv-imports.py`
+
+判据是"消费者视角"的三条：`Iconv::Iconv` 必须在根 CMakeLists 里有定义、
+必须在两个消费目录之前、必须被 `if(UNIX ...)` 守着。
+`REQUIRED_TARGETS` 是登记表 —— 如果静态导出的接口里再冒出一个目标，
+往表里加一行即可，不用重新考古。反向验证三条（删掉定义 / 挪到消费目录之后 /
+去掉平台守卫），每条都必须只为那一件事变红。
+
 ---
 
 ## 10. 工作量 / 优先级矩阵

@@ -221,6 +221,29 @@ if(SNOW_APPS_BUILD_SNOW_SHOT AND
         "SNOW_APPS_BUILD_SNOW_SHOT requires Ant Design Qt, Snow Image, and the Draw Engine")
 endif()
 
+# The OpenCV 4.12 that `scripts/build-linux-deps.sh` installs is a *static*
+# build with the wechat_qrcode module, and that module's exported link
+# interface names `Iconv::Iconv`. OpenCV finds Iconv while configuring and
+# records the target in `OpenCVModules.cmake`, but `OpenCVConfig.cmake`
+# contains no `find_dependency` at all, so the consumer has to define it:
+#
+#   CMake Error at .../share/opencv4/OpenCVModules.cmake:112 (set_target_properties):
+#     The link interface of target "opencv_wechat_qrcode" contains: Iconv::Iconv
+#     but the target was not found.        (run 22)
+#
+# On glibc Iconv is part of libc, so `FindIconv` produces an INTERFACE target
+# that links nothing -- the whole fix is making the target exist before the
+# subdirectories that look OpenCV up. It is Linux-only because the Windows and
+# macOS builds get their OpenCV from a package manager whose config does this.
+if(UNIX AND NOT APPLE)
+    find_package(Iconv)
+    if(NOT TARGET Iconv::Iconv)
+        message(WARNING
+            "Iconv was not found; find_package(OpenCV) will fail if the installed "
+            "OpenCV exports an Iconv::Iconv link dependency")
+    endif()
+endif()
+
 if(SNOW_APPS_BUILD_SNOW_IMAGE)
     set(SNOW_IMAGE_BUILD_TESTS ${SNOW_APPS_BUILD_TESTS} CACHE BOOL
         "Build Snow Image tests." FORCE)
