@@ -4030,6 +4030,67 @@ run 20 的日志给出了答案，而且答案的形状值得记一笔：**11 �
 磁盘也不是瓶颈：run 20 的 `report_free_space` 报的是 **109 GB free**，
 `require_free_space` 的 1–4 GB 阈值只是防"树被撑爆"，不是常态。
 
+#### 9.6.22 run 21：deps 第一次全绿，红落到一个没有 `VERIFY` 的选项上（2026-10-22）
+
+run 21（`39793895672`）第一次让 **两个架构的 deps 步骤同时变绿** ——
+OpenCV 4.12 的 configure、编译、安装整条链路走通，整个 deps 步骤 3.5 分钟
+（`13:42:12` 起，`13:45:16` 进 opencv）。红灯往后挪到我们自己的 Configure：
+
+```
+CMake Error at .../share/opencv4/OpenCVModules.cmake:137 (message):
+  The imported target "ade" references the file
+     ".../lib/manual-link/opencv4_thirdparty/libade.a"
+  but this file does not exist.
+Call Stack:
+  .../share/opencv4/OpenCVConfig.cmake:128 (include)
+  snow_draw_engine_qt/CMakeLists.txt:33 (find_package)
+```
+
+##### 为什么 `ocv_verify_config()` 看不见它
+
+`modules/gapi/cmake/init.cmake`：
+
+```cmake
+OCV_OPTION(WITH_ADE "Enable ADE framework (required for Graph API module)" ON)
+...
+if(NOT WITH_ADE)
+  return()
+endif()
+if(NOT TARGET ade)
+  include("${CMAKE_CURRENT_LIST_DIR}/DownloadADE.cmake")
+endif()
+```
+
+三个条件叠加出这个坑：
+
+1. **没有 `VERIFY` 子句** ⇒ 不进 `OPENCV_VERIFICATIONS`，verification 一声不响；
+2. **默认 ON**，而它是模块级 `init.cmake`，`ocv_glob_modules()` 第一遍照样执行，
+   `BUILD_LIST=wechat_qrcode` 挡不住；
+3. `DownloadADE.cmake` 会真的把 ADE 下下来并建出 `ade` 目标，而 `install(EXPORT
+   OpenCVModules ...)` 把它写进导出表 —— 但**编译安装 `libade.a` 的是 gapi**，
+   gapi 不构建，于是归档根本不存在。
+
+结果是一个"构建全绿、包不可用"的失败：`cmake --install` 不报错，
+`find_package(OpenCV CONFIG)` 才炸，而且炸在我们自己的 `snow_draw_engine_qt` 里。
+
+##### 修法，与一次自己造成的回退
+
+`-DWITH_ADE=OFF`（overlay port 传的也是这一条，vcpkg 能过正是因为它）。
+
+这条在上一轮被我**删掉过**：新门禁的"死选项"检查拿根 `CMakeLists.txt` 的 90 个
+`WITH_*` 当全集，`WITH_ADE` 不在里面，于是被误判为"cmake 会静默忽略的名字"。
+真正的事实是它由 **gapi 的 `cmake/init.cmake`** 声明 —— 又是"模块级 init.cmake
+也参与"，和 `WITH_TESSERACT` 同一个盲区，只不过一个炸 verification、一个炸导出。
+
+所以门禁也补了两处：
+
+- 声明表 90 → **98**（根 90 + contrib 的 `julia`/`matlab`/`tesseract` +
+  gapi 的 `ADE`/`FREETYPE`/`GAPI_ONEVPL`/`OAK`/`PLAIDML`）；
+- 新增 `REQUIRED_OFF_UNVERIFIED`：**没有 `VERIFY`、但会让安装出来的包不可用**
+  的选项。这一类的判据不可能来自 `ocv_verify_config()`，只能来自"消费者视角"。
+
+反向验证加到 7 条：删 `-DWITH_ADE=OFF` 必须只为"WITH_ADE 必须 OFF"变红。
+
 ---
 
 ## 10. 工作量 / 优先级矩阵

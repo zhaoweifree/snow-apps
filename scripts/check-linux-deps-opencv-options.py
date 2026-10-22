@@ -30,6 +30,12 @@ verification (nothing is probed, the flag stays false), while an option that
 is ON with a missing dependency always does. Only the options that default
 to ON *and* cannot be satisfied by the CI image have to be stated as OFF.
 
+Not every trap goes through the verification, though. `WITH_ADE` carries no
+`VERIFY` clause and is caught one step later, by whoever calls
+`find_package(OpenCV CONFIG)`: it makes OpenCV export an `ade` target that it
+never installs. `REQUIRED_OFF_UNVERIFIED` covers that class -- options that
+break the installed package directly, without any cmake error at build time.
+
 `REQUIRED_OFF` is that set. It was not written by hand: it is the failure
 list of a replication of the upstream `OCV_OPTION` macro and
 `ocv_verify_config()` (extracted verbatim from OpenCV 4.12.0, evaluated with
@@ -92,12 +98,26 @@ REQUIRED_OFF = {
     "WITH_VTK": "cmake/OpenCVDetectVTK.cmake -> find_package(VTK) (no libvtk9-dev)",
 }
 
+# Options that `ocv_verify_config()` cannot see -- they carry no `VERIFY`
+# clause -- but that still break the installed package when they are on.
+# Value: what goes wrong.
+REQUIRED_OFF_UNVERIFIED = {
+    "WITH_ADE": "modules/gapi/cmake/init.cmake (default ON) downloads ADE and "
+                "exports an `ade` target from OpenCVModules.cmake; gapi is not in "
+                "BUILD_LIST, so nothing builds or installs libade.a and every "
+                "find_package(OpenCV CONFIG) aborts with 'The imported target "
+                "\"ade\" references the file ... but this file does not exist' "
+                "(run 21)",
+}
+
 # Every `OCV_OPTION(WITH_..., ...)` OpenCV 4.12.0 declares: the 90 in the root
-# CMakeLists.txt plus the three that opencv_contrib modules declare in their
-# `cmake/init.cmake`. Those files are *not* conditional on the module being
-# built -- `ocv_glob_modules()` includes every module's copy in its first pass
-# -- so a contrib option can end up in the verification list of a build that
-# only asks for `wechat_qrcode` (that is how WITH_TESSERACT got there).
+# CMakeLists.txt, the three that opencv_contrib modules declare in their
+# `cmake/init.cmake`, and the five that the gapi module declares in its own.
+# Those files are *not* conditional on the module being built --
+# `ocv_glob_modules()` includes every module's `cmake/init.cmake` in its first
+# pass -- so a module option can end up deciding the fate of a build that only
+# asks for `wechat_qrcode`. That is how both `WITH_TESSERACT` (verification
+# failure) and `WITH_ADE` (broken imported target) got here.
 # Used to reject options that do not exist, which cmake accepts silently.
 DECLARED_WITH_OPTIONS = frozenset(
     """
@@ -118,6 +138,7 @@ DECLARED_WITH_OPTIONS = frozenset(
     WITH_UEYE WITH_V4L WITH_VA WITH_VA_INTEL WITH_VTK WITH_VULKAN WITH_WAYLAND
     WITH_WEBNN WITH_WEBP WITH_WIN32UI WITH_XIMEA WITH_XINE WITH_ZLIB_NG
     WITH_JULIA WITH_MATLAB
+    WITH_ADE WITH_FREETYPE WITH_GAPI_ONEVPL WITH_OAK WITH_PLAIDML
     """.split()
 )
 
@@ -213,7 +234,15 @@ def main() -> int:
             else:
                 fail(f"{option}={value} but its dependency is not in the CI image ({probe})")
 
-    # 2. An option OpenCV does not declare is silently ignored, so the intended
+    # 2. Options that break the installed package without ever reaching the
+    #    verification, because they carry no `VERIFY` clause.
+    for option, consequence in sorted(REQUIRED_OFF_UNVERIFIED.items()):
+        if options.get(option) != "OFF":
+            fail(
+                f"{option} has to be OFF: {consequence}"
+            )
+
+    # 3. An option OpenCV does not declare is silently ignored, so the intended
     #    "off" falls back to the default and the verification fails elsewhere.
     for option in sorted(options):
         if option.startswith("WITH_") and option not in DECLARED_WITH_OPTIONS:
@@ -222,7 +251,7 @@ def main() -> int:
                 "remove it or fix the spelling"
             )
 
-    # 3. Hermeticity. Both of these pull an archive from the network in the
+    # 4. Hermeticity. Both of these pull an archive from the network in the
     #    middle of the configure step, which this build may not do.
     if options.get("WITH_IPP") != "OFF":
         fail("WITH_IPP has to be OFF: with it on, OpenCV downloads the IPPICV "
@@ -238,6 +267,7 @@ def main() -> int:
     print(
         "OpenCV option check passed "
         f"({len(REQUIRED_OFF)} options that cannot be satisfied, "
+        f"{len(REQUIRED_OFF_UNVERIFIED)} export traps, "
         f"{len(DECLARED_WITH_OPTIONS)} declared options, {len(packages)} apt packages)"
     )
     return 0

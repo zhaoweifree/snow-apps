@@ -6220,6 +6220,55 @@ Linux/x86_64 平台变量模型、按 workflow apt 清单推出的 <code>HAVE_*<
 <p>磁盘也不是瓶颈：run 20 的 <code>report_free_space</code> 报的是 <strong>109 GB free</strong>，
 <code>require_free_space</code> 的 1–4 GB 阈值只是防"树被撑爆"，不是常态。</p>
 <hr>
+<h4>9.6.22 run 21：deps 第一次全绿，红落到一个没有 <code>VERIFY</code> 的选项上（2026-10-22）</h4>
+<p>run 21（<code>39793895672</code>）第一次让 <strong>两个架构的 deps 步骤同时变绿</strong> ——
+OpenCV 4.12 的 configure、编译、安装整条链路走通，整个 deps 步骤 3.5 分钟
+（<code>13:42:12</code> 起，<code>13:45:16</code> 进 opencv）。红灯往后挪到我们自己的 Configure：</p>
+<pre><code>CMake Error at .../share/opencv4/OpenCVModules.cmake:137 (message):
+  The imported target &quot;ade&quot; references the file
+     &quot;.../lib/manual-link/opencv4_thirdparty/libade.a&quot;
+  but this file does not exist.
+Call Stack:
+  .../share/opencv4/OpenCVConfig.cmake:128 (include)
+  snow_draw_engine_qt/CMakeLists.txt:33 (find_package)
+</code></pre>
+<h5>为什么 <code>ocv_verify_config()</code> 看不见它</h5>
+<p><code>modules/gapi/cmake/init.cmake</code>：</p>
+<pre><code class="language-cmake">OCV_OPTION(WITH_ADE &quot;Enable ADE framework (required for Graph API module)&quot; ON)
+...
+if(NOT WITH_ADE)
+  return()
+endif()
+if(NOT TARGET ade)
+  include(&quot;${CMAKE_CURRENT_LIST_DIR}/DownloadADE.cmake&quot;)
+endif()
+</code></pre>
+<p>三个条件叠加出这个坑：</p>
+<ol>
+<li><strong>没有 <code>VERIFY</code> 子句</strong> ⇒ 不进 <code>OPENCV_VERIFICATIONS</code>，verification 一声不响；</li>
+<li><strong>默认 ON</strong>，而它是模块级 <code>init.cmake</code>，<code>ocv_glob_modules()</code> 第一遍照样执行，
+   <code>BUILD_LIST=wechat_qrcode</code> 挡不住；</li>
+<li><code>DownloadADE.cmake</code> 会真的把 ADE 下下来并建出 <code>ade</code> 目标，而 <code>install(EXPORT
+   OpenCVModules ...)</code> 把它写进导出表 —— 但<strong>编译安装 <code>libade.a</code> 的是 gapi</strong>，
+   gapi 不构建，于是归档根本不存在。</li>
+</ol>
+<p>结果是一个"构建全绿、包不可用"的失败：<code>cmake --install</code> 不报错，
+<code>find_package(OpenCV CONFIG)</code> 才炸，而且炸在我们自己的 <code>snow_draw_engine_qt</code> 里。</p>
+<h5>修法，与一次自己造成的回退</h5>
+<p><code>-DWITH_ADE=OFF</code>（overlay port 传的也是这一条，vcpkg 能过正是因为它）。</p>
+<p>这条在上一轮被我<strong>删掉过</strong>：新门禁的"死选项"检查拿根 <code>CMakeLists.txt</code> 的 90 个
+<code>WITH_*</code> 当全集，<code>WITH_ADE</code> 不在里面，于是被误判为"cmake 会静默忽略的名字"。
+真正的事实是它由 <strong>gapi 的 <code>cmake/init.cmake</code></strong> 声明 —— 又是"模块级 init.cmake
+也参与"，和 <code>WITH_TESSERACT</code> 同一个盲区，只不过一个炸 verification、一个炸导出。</p>
+<p>所以门禁也补了两处：</p>
+<ul>
+<li>声明表 90 → <strong>98</strong>（根 90 + contrib 的 <code>julia</code>/<code>matlab</code>/<code>tesseract</code> +
+  gapi 的 <code>ADE</code>/<code>FREETYPE</code>/<code>GAPI_ONEVPL</code>/<code>OAK</code>/<code>PLAIDML</code>）；</li>
+<li>新增 <code>REQUIRED_OFF_UNVERIFIED</code>：<strong>没有 <code>VERIFY</code>、但会让安装出来的包不可用</strong>
+  的选项。这一类的判据不可能来自 <code>ocv_verify_config()</code>，只能来自"消费者视角"。</li>
+</ul>
+<p>反向验证加到 7 条：删 <code>-DWITH_ADE=OFF</code> 必须只为"WITH_ADE 必须 OFF"变红。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

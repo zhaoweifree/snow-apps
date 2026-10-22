@@ -1019,6 +1019,19 @@ build_opencv() {
     # would succeed -- turning it off costs nothing here and keeps the option
     # set independent of the runner's kernel headers.
     #
+    # `WITH_ADE=OFF` is a different kind of trap, and the reason it is written
+    # here even though `ocv_verify_config()` never looks at it:
+    # `modules/gapi/cmake/init.cmake` declares
+    # `OCV_OPTION(WITH_ADE "..." ON)` -- no `VERIFY` clause, default ON, and
+    # the file runs in `ocv_glob_modules()`'s first pass, so it applies even
+    # though gapi is not in `BUILD_LIST`. With the option on, `DownloadADE.cmake`
+    # fetches the framework and creates an `ade` target that gets exported from
+    # `OpenCVModules.cmake`, while the archive itself is never installed --
+    # gapi is what would build it. Every `find_package(OpenCV CONFIG)` then
+    # aborts with "The imported target ade references the file
+    # .../libade.a but this file does not exist" (run 21). The vcpkg port
+    # passes the same `-DWITH_ADE=OFF` for the same reason.
+    #
     # `WITH_IPP=OFF` also keeps the build hermetic: with the option ON,
     # OpenCV downloads the IPPICV package during the configure step
     # (cmake/OpenCVFindIPP.cmake), which is a network access in the middle of
@@ -1062,6 +1075,7 @@ build_opencv() {
         -DOPENCV_3P_LIB_INSTALL_PATH=lib/manual-link/opencv4_thirdparty \
         -DENABLE_CONFIG_VERIFICATION=ON \
         -DOPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION=TRUE \
+        -DWITH_ADE=OFF \
         -DWITH_AVIF=OFF \
         -DWITH_CUDA=OFF \
         -DWITH_CUDNN=OFF \
