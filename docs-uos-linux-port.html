@@ -7419,6 +7419,45 @@ COMMAND &quot;${CMAKE_COMMAND}&quot; &quot;-DSTAGED_DIR=${SNOW_SHOT_APPIMAGE_USR
 <p>反向验证扩到 <strong>10 变异 + 1 对照</strong>，新增的三条分别对应"AppDir 没有库""路径没导出"
 "提了 STAGED_DIR 却仍用 CPack 目录"，全部红在预期文案上。</p>
 <hr>
+<h4>9.6.36 <code>install(PROGRAMS "$&lt;TARGET_FILE:…&gt;")</code> 不写 RPATH，而这两个 helper 正好是这么装的</h4>
+<p><code>INSTALL_RPATH</code> 是<strong>目标</strong>的属性，只有在 <code>install(TARGETS)</code> 里才会被 CMake 用来重写
+装出去那份文件的 RUNPATH。仓库里两个 Rust helper 走的是另一条路：</p>
+<pre><code class="language-cmake">install(PROGRAMS &quot;$&lt;TARGET_FILE:snow_ocr_process&gt;&quot; DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(PROGRAMS &quot;$&lt;TARGET_FILE:snow_shot_mcp&gt;&quot;    DESTINATION ${CMAKE_INSTALL_BINDIR})
+</code></pre>
+<p><code>install(PROGRAMS)</code> 是<strong>按文件拷贝</strong>，逐字节复制，不做 RUNPATH 调整。而 cargo 可执行
+目标本身是 <code>add_executable(... IMPORTED GLOBAL)</code> —— 文件由 cargo 产出，
+CMake 没有参与链接，也就没有"装的时候改一改"这一步。结果是
+<code>usr/bin/snow-ocr-process</code> 里<strong>根本没有 <code>DT_RUNPATH</code></strong>：</p>
+<ul>
+<li>运行时 loader 只查系统目录，包里 <code>usr/lib/snow-shot/</code> 的私有库对它不可见；</li>
+<li><code>dpkg-shlibdeps</code> 那边同样吃亏：<code>CPackDeb.cmake</code> 的 <code>-l&lt;dir&gt;</code> 是从 RUNPATH 里
+  带 <code>$ORIGIN</code> 的条目推出来的，没有 RUNPATH 就一条都推不出来，只能靠
+  <code>SHLIBDEPS_PRIVATE_DIRS</code> 兜住。</li>
+</ul>
+<p>包能装、主程序能起，OCR 子进程一 spawn 就找不到库 —— 属于"结构校验全绿、产物不能用"
+的那一类。</p>
+<p><strong>修法是链接期写一次，不是安装期改。</strong> 在 <code>snow_add_rust_executable()</code> 里补一个
+Unix 分支：</p>
+<pre><code class="language-cmake">set(_snow_rust_dollar &quot;$&quot;)
+set(_snow_rust_rpath &quot;${_snow_rust_dollar}ORIGIN/../${_snow_rust_libdir}/snow-shot&quot;)
+list(INSERT _cargo_environment 0
+    &quot;RUSTFLAGS=$ENV{RUSTFLAGS} -C link-arg=-Wl,-rpath,${_snow_rust_rpath}&quot;)
+</code></pre>
+<p>为什么不走 <code>file(RPATH_SET)</code>：它改的是<strong>已存在</strong>的 RPATH 字符串，需要新值不超出
+原字符串的位置；给一个"一条 RPATH 都没有"的二进制新增条目不是它擅长的场景
+（9.6.34 用它对私有库设 <code>$ORIGIN</code> 是另一回事 —— 那些库本来就有 RPATH 字段，
+且 <code>$ORIGIN</code> 只有 7 个字节）。<strong>同一个工具在不同输入上的可靠性不一样，
+"能用"要按输入分别验证。</strong></p>
+<p><code>$</code> 用 <code>set(_snow_rust_dollar "$")</code> 拼出来，是为了在源码里不出现 <code>$</code> 紧跟 <code>{</code>
+的序列 —— 那会被读成变量展开。</p>
+<p>门禁侧比对的是<strong>两个文件的常量</strong>，不是单看某个字符串：从
+<code>snow_shot_linux_private_lib_dir()</code> 取到这个名字（<code>snow-shot</code>），再要求在
+<code>cmake/RustStaticLibrary.cmake</code> 剥注释后的正文里出现 <code>-Wl,-rpath,</code> 与
+<code>/&lt;这个名字&gt;</code>。改名只改一处就会红。反向验证第 11 条（删掉那个 <code>list(INSERT …)</code>）
+红在 <code>never get -Wl,-rpath,</code>。</p>
+<hr>
+
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>

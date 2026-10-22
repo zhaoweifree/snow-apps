@@ -5307,6 +5307,54 @@ COMMAND "${CMAKE_COMMAND}" "-DSTAGED_DIR=${SNOW_SHOT_APPIMAGE_USR}"
 反向验证扩到 **10 变异 + 1 对照**，新增的三条分别对应"AppDir 没有库""路径没导出"
 "提了 STAGED_DIR 却仍用 CPack 目录"，全部红在预期文案上。
 
+#### 9.6.36 `install(PROGRAMS "$<TARGET_FILE:…>")` 不写 RPATH，而这两个 helper 正好是这么装的
+
+`INSTALL_RPATH` 是**目标**的属性，只有在 `install(TARGETS)` 里才会被 CMake 用来重写
+装出去那份文件的 RUNPATH。仓库里两个 Rust helper 走的是另一条路：
+
+```cmake
+install(PROGRAMS "$<TARGET_FILE:snow_ocr_process>" DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(PROGRAMS "$<TARGET_FILE:snow_shot_mcp>"    DESTINATION ${CMAKE_INSTALL_BINDIR})
+```
+
+`install(PROGRAMS)` 是**按文件拷贝**，逐字节复制，不做 RUNPATH 调整。而 cargo 可执行
+目标本身是 `add_executable(... IMPORTED GLOBAL)` —— 文件由 cargo 产出，
+CMake 没有参与链接，也就没有"装的时候改一改"这一步。结果是
+`usr/bin/snow-ocr-process` 里**根本没有 `DT_RUNPATH`**：
+
+* 运行时 loader 只查系统目录，包里 `usr/lib/snow-shot/` 的私有库对它不可见；
+* `dpkg-shlibdeps` 那边同样吃亏：`CPackDeb.cmake` 的 `-l<dir>` 是从 RUNPATH 里
+  带 `$ORIGIN` 的条目推出来的，没有 RUNPATH 就一条都推不出来，只能靠
+  `SHLIBDEPS_PRIVATE_DIRS` 兜住。
+
+包能装、主程序能起，OCR 子进程一 spawn 就找不到库 —— 属于"结构校验全绿、产物不能用"
+的那一类。
+
+**修法是链接期写一次，不是安装期改。** 在 `snow_add_rust_executable()` 里补一个
+Unix 分支：
+
+```cmake
+set(_snow_rust_dollar "$")
+set(_snow_rust_rpath "${_snow_rust_dollar}ORIGIN/../${_snow_rust_libdir}/snow-shot")
+list(INSERT _cargo_environment 0
+    "RUSTFLAGS=$ENV{RUSTFLAGS} -C link-arg=-Wl,-rpath,${_snow_rust_rpath}")
+```
+
+为什么不走 `file(RPATH_SET)`：它改的是**已存在**的 RPATH 字符串，需要新值不超出
+原字符串的位置；给一个"一条 RPATH 都没有"的二进制新增条目不是它擅长的场景
+（9.6.34 用它对私有库设 `$ORIGIN` 是另一回事 —— 那些库本来就有 RPATH 字段，
+且 `$ORIGIN` 只有 7 个字节）。**同一个工具在不同输入上的可靠性不一样，
+"能用"要按输入分别验证。**
+
+`$` 用 `set(_snow_rust_dollar "$")` 拼出来，是为了在源码里不出现 `$` 紧跟 `{`
+的序列 —— 那会被读成变量展开。
+
+门禁侧比对的是**两个文件的常量**，不是单看某个字符串：从
+`snow_shot_linux_private_lib_dir()` 取到这个名字（`snow-shot`），再要求在
+`cmake/RustStaticLibrary.cmake` 剥注释后的正文里出现 `-Wl,-rpath,` 与
+`/<这个名字>`。改名只改一处就会红。反向验证第 11 条（删掉那个 `list(INSERT …)`）
+红在 `never get -Wl,-rpath,`。
+
 ---
 
 ## 10. 工作量 / 优先级矩阵

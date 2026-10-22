@@ -308,6 +308,31 @@ foreach(_needle
     endif()
 endforeach()
 
+# The cargo-built helpers (`snow-ocr-process`, `snow-shot-mcp`) are installed
+# with `install(PROGRAMS "$<TARGET_FILE:...>")`. That copies the file verbatim,
+# so `INSTALL_RPATH` never applies -- a cargo target is `IMPORTED`, and only
+# `install(TARGETS)` runs CMake's RUNPATH rewrite. The runpath therefore has to
+# be written by the linker, in `snow_add_rust_executable()`.
+#
+# A helper without a RUNPATH loads nothing from the private directory, and
+# `dpkg-shlibdeps` sees no `$ORIGIN` to turn into `-l<dir>` either. Both halves
+# are silent: the package builds, installs, and the helper fails at spawn time.
+file(READ "${_snow_repo}/cmake/RustStaticLibrary.cmake" _rust_module)
+string(REGEX REPLACE "#[^\n]*" "" _rust_code "${_rust_module}")
+snow_shot_linux_private_lib_dir(_gate_private)
+get_filename_component(_gate_private_name "${_gate_private}" NAME)
+foreach(_needle
+        "-Wl,-rpath,"
+        "/${_gate_private_name}")
+    string(FIND "${_rust_code}" "${_needle}" _rust_position)
+    if(_rust_position EQUAL -1)
+        message(STATUS "FAIL the cargo executables never get ${_needle} in their RUNPATH")
+        math(EXPR _snow_failures "${_snow_failures} + 1")
+    else()
+        message(STATUS "ok   the cargo executables get ${_needle} in their RUNPATH")
+    endif()
+endforeach()
+
 # The same function on an arm64 host must select the arm64 package.
 set(CMAKE_SYSTEM_PROCESSOR "aarch64")
 snow_shot_configure_linux_package()

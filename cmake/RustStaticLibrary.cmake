@@ -549,6 +549,37 @@ function(snow_add_rust_executable target_name)
             list(INSERT _cargo_environment 0
                 "RUSTFLAGS=$ENV{RUSTFLAGS} -Dwarnings${_rust_link_flags}")
         endif()
+    elseif(UNIX AND NOT APPLE)
+        # The cargo-built executables are installed with
+        # `install(PROGRAMS "$<TARGET_FILE:...>")`, which copies the file
+        # verbatim. `INSTALL_RPATH` is a property of *targets* installed through
+        # `install(TARGETS)` -- CMake edits the RUNPATH of those on the way in --
+        # and a cargo executable is an `IMPORTED` target that never takes that
+        # path. So the runpath has to be written by the linker, once, here.
+        #
+        # Without it the staged helper carries no `DT_RUNPATH` at all: the loader
+        # searches only the system directories, the private libraries the package
+        # ships in `${CMAKE_INSTALL_LIBDIR}/snow-shot` are unreachable, and the
+        # package installs cleanly while its OCR helper cannot start. It is also
+        # invisible to `dpkg-shlibdeps`: `CPackDeb.cmake` derives its `-l<dir>`
+        # arguments from the RUNPATH, so a binary without one contributes
+        # nothing and the private copies have to be found through
+        # `SHLIBDEPS_PRIVATE_DIRS` alone.
+        #
+        # The directory name mirrors `snow_shot_linux_private_lib_dir()`. That
+        # function lives in a module included after the subdirectories, so it
+        # cannot be called from here; the packaging gate compares the two.
+        set(_snow_rust_libdir "${CMAKE_INSTALL_LIBDIR}")
+        if(NOT _snow_rust_libdir)
+            set(_snow_rust_libdir "lib")
+        endif()
+        # `$ORIGIN` is literal, not a CMake variable: the `$` is put together
+        # here so that no `$` + `{` sequence can be read as an expansion.
+        set(_snow_rust_dollar "$")
+        set(_snow_rust_rpath
+            "${_snow_rust_dollar}ORIGIN/../${_snow_rust_libdir}/snow-shot")
+        list(INSERT _cargo_environment 0
+            "RUSTFLAGS=$ENV{RUSTFLAGS} -C link-arg=-Wl,-rpath,${_snow_rust_rpath}")
     endif()
     set(_cargo_feature_args)
     if(SNOW_RUST_NO_DEFAULT_FEATURES)
