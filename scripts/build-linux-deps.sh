@@ -999,8 +999,17 @@ build_opencv() {
     # Only the second case has to be spelled out: options that default to ON
     # and whose dependency this image does not provide. Replaying the upstream
     # `OCV_OPTION` macro and `ocv_verify_config()` against the apt list of
-    # `.github/workflows/snow-shot-linux.yml` names exactly fifteen of them,
+    # `.github/workflows/snow-shot-linux.yml` names exactly sixteen of them,
     # and `scripts/check-linux-deps-opencv-options.py` keeps that set honest.
+    #
+    # `WITH_TESSERACT` is one of those, and it is not in OpenCV's own tree:
+    # `opencv_contrib/modules/text/cmake/init.cmake` declares it with
+    # `VERIFY HAVE_TESSERACT` and a default of `(NOT CMAKE_CROSSCOMPILING)` --
+    # ON for a native build. That file is included even though the text module
+    # is not built, because `ocv_glob_modules()` runs every module's
+    # `cmake/init.cmake` in its first pass. It was the last mismatch that run
+    # 20 reported, and the only one left in a log that finally showed the real
+    # cmake error.
     #
     # `WITH_FFMPEG` is deliberately *not* turned off: the CI installs
     # libavcodec/libavformat/libavutil/libswscale, `detect_ffmpeg.cmake` finds
@@ -1077,7 +1086,8 @@ build_opencv() {
         -DWITH_ITT=OFF \
         -DWITH_SPNG=OFF \
         -DWITH_ZLIB_NG=OFF \
-        -DWITH_CPUFEATURES=OFF
+        -DWITH_CPUFEATURES=OFF \
+        -DWITH_TESSERACT=OFF
 
     # The consumer's view, not the build's: `find_package(OpenCV CONFIG
     # REQUIRED)` reads the config package, and the two headers the barcode

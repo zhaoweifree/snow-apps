@@ -36,6 +36,10 @@ list of a replication of the upstream `OCV_OPTION` macro and
 cmake 4.2.3, a Linux/x86_64 platform variable model and dependency results
 driven from the workflow's apt list). Fed with no options at all it names 15
 options; fed with the option set of run 19 it names the 11 that were missing.
+The sixteenth, `WITH_TESSERACT`, came out of run 20 instead: it is declared by
+`opencv_contrib/modules/text/cmake/init.cmake`, whose default is
+`(NOT CMAKE_CROSSCOMPILING)`, so it is ON for a native build -- the replication
+missed it because it only read OpenCV's own root CMakeLists.txt.
 
 The vcpkg port reaches the same state through its feature map, which passes
 `-DWITH_<x>=OFF` for every feature that is not enabled. The difference is
@@ -80,14 +84,21 @@ REQUIRED_OFF = {
     "WITH_OPENCLAMDBLAS": "cmake/OpenCVDetectOpenCL.cmake -> clAmdBlas (not installed)",
     "WITH_OPENCLAMDFFT": "cmake/OpenCVDetectOpenCL.cmake -> clAmdFft (not installed)",
     "WITH_OPENJPEG": "cmake/OpenCVFindLibsGrfmt.cmake -> OpenJPEG (no libopenjp2-7-dev)",
+    "WITH_TESSERACT": "opencv_contrib/modules/text/cmake/init.cmake -> Tesseract "
+                      "(no libtesseract-dev); default is (NOT CMAKE_CROSSCOMPILING), "
+                      "so it is ON for a native build",
     "WITH_VA": "cmake/OpenCVFindVA.cmake -> va/va.h (no libva-dev)",
     "WITH_VA_INTEL": "cmake/OpenCVFindVA.cmake -> Intel VA-API/OpenCL (no libva-dev)",
     "WITH_VTK": "cmake/OpenCVDetectVTK.cmake -> find_package(VTK) (no libvtk9-dev)",
 }
 
-# Every `OCV_OPTION(WITH_..., ...)` OpenCV 4.12.0's root CMakeLists.txt
-# declares (90 of them). Used to reject options that do not exist, because
-# cmake accepts an unknown -D option silently.
+# Every `OCV_OPTION(WITH_..., ...)` OpenCV 4.12.0 declares: the 90 in the root
+# CMakeLists.txt plus the three that opencv_contrib modules declare in their
+# `cmake/init.cmake`. Those files are *not* conditional on the module being
+# built -- `ocv_glob_modules()` includes every module's copy in its first pass
+# -- so a contrib option can end up in the verification list of a build that
+# only asks for `wechat_qrcode` (that is how WITH_TESSERACT got there).
+# Used to reject options that do not exist, which cmake accepts silently.
 DECLARED_WITH_OPTIONS = frozenset(
     """
     WITH_1394 WITH_ANDROID_MEDIANDK WITH_ANDROID_NATIVE_CAMERA WITH_ARAVIS
@@ -103,9 +114,10 @@ DECLARED_WITH_OPTIONS = frozenset(
     WITH_OPENCLAMDBLAS WITH_OPENCLAMDFFT WITH_OPENCL_D3D11_NV WITH_OPENCL_SVM
     WITH_OPENEXR WITH_OPENGL WITH_OPENJPEG WITH_OPENMP WITH_OPENNI WITH_OPENNI2
     WITH_OPENVINO WITH_OPENVX WITH_PNG WITH_PROTOBUF WITH_PTHREADS_PF WITH_PVAPI
-    WITH_QT WITH_QUIRC WITH_SPNG WITH_TBB WITH_TIFF WITH_TIMVX WITH_UEYE WITH_V4L
-    WITH_VA WITH_VA_INTEL WITH_VTK WITH_VULKAN WITH_WAYLAND WITH_WEBNN WITH_WEBP
-    WITH_WIN32UI WITH_XIMEA WITH_XINE WITH_ZLIB_NG
+    WITH_QT WITH_QUIRC WITH_SPNG WITH_TBB WITH_TESSERACT WITH_TIFF WITH_TIMVX
+    WITH_UEYE WITH_V4L WITH_VA WITH_VA_INTEL WITH_VTK WITH_VULKAN WITH_WAYLAND
+    WITH_WEBNN WITH_WEBP WITH_WIN32UI WITH_XIMEA WITH_XINE WITH_ZLIB_NG
+    WITH_JULIA WITH_MATLAB
     """.split()
 )
 

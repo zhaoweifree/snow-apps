@@ -6074,12 +6074,12 @@ class MimeDataRetrieveDataProbe final : public QMimeData {
   <code>build_opencv()</code> 的 configure/build 一次都没在本机跑过。</li>
 </ul>
 <hr>
-<h4>9.6.21 run 19：<code>ENABLE_CONFIG_VERIFICATION</code> 的 11 项错配，与一条从未执行过的转储（2026-10-22）</h4>
+<h4>9.6.21 run 19 / 20：<code>ENABLE_CONFIG_VERIFICATION</code> 的 16 项错配，与一条从未执行过的转储（2026-10-22）</h4>
 <p>run 19（<code>39764499751</code>）和 run 18 不是同一个病：x64 与 arm64 都停在<strong>依赖脚本</strong>里，
 整段日志只有一行：</p>
 <pre><code>error: opencv installed no OpenCVConfig.cmake
 </code></pre>
-<h5>25 秒的时间线先排除掉"编译失败"</h5>
+<h5>25 秒到底是不是"来不及编译"</h5>
 <table>
 <thead>
 <tr>
@@ -6098,10 +6098,14 @@ class MimeDataRetrieveDataProbe final : public QMimeData {
 </tr>
 </tbody>
 </table>
-<p>中间 <strong>25 秒、零输出</strong>。OpenCV 那一步要下 90 MB 主仓 + contrib + 4 个模型，再解包、
-打补丁、configure、编译、安装 —— 25 秒连其中一半都装不下。所以
-<code>no OpenCVConfig.cmake</code> 不是病因：它是 <code>build_opencv()</code> 末尾的断言
-（<code>scripts/build-linux-deps.sh:961</code>），在 configure 早已死掉之后才轮到它说话。</p>
+<p>中间 <strong>25 秒、零输出</strong>。我最初据此判断"下载+解包+configure+编译装不下 25 秒，
+所以失败在下载阶段"——<strong>这个判断是错的</strong>，run 20 的日志把它推翻了：那一轮
+<code>disk before opencv</code> 到 configure 报错是 <code>13:45:16.149 → 13:45:39.035</code>，
+<strong>22.9 秒</strong>，而这 22.9 秒里包括了下载 90 MB 主仓、解包、打补丁和完整的 configure。
+所以 25 秒恰恰是"configure 一路跑到 <code>ocv_verify_config()</code> 然后失败"的正常耗时，
+不是"根本来不及"。同一段里真正成立的部分只有一句：<code>no OpenCVConfig.cmake</code> 不是
+病因，它是 <code>build_opencv()</code> 末尾的断言（<code>scripts/build-linux-deps.sh:961</code>），
+在 configure 早已死掉之后才轮到它说话。</p>
 <h5>真因：<code>-DENABLE_CONFIG_VERIFICATION=ON</code> + 11 项选项错配</h5>
 <p>这个开关是从 overlay port 抄来的（同一份源码、同一组选项）。打开后，configure
 结束前 OpenCV 会跑 <code>ocv_verify_config()</code>（<code>cmake/OpenCVUtils.cmake</code>）：</p>
@@ -6121,6 +6125,26 @@ endforeach()
 <pre><code>WITH_AVIF  WITH_VTK  WITH_EIGEN  WITH_GSTREAMER  WITH_IPP  WITH_JASPER
 WITH_OPENJPEG  WITH_OPENCLAMDFFT  WITH_OPENCLAMDBLAS  WITH_VA  WITH_VA_INTEL
 </code></pre>
+<p>run 20（<code>39788745221</code>，本轮的修法）终于把这段 cmake 错误转储出来了，只剩一项：</p>
+<pre><code>CMake Error at cmake/OpenCVUtils.cmake:801 (message):
+  Some dependencies have not been found or have been forced, unset
+  ENABLE_CONFIG_VERIFICATION option to ignore these failures or change
+  following options:
+
+  WITH_TESSERACT
+error: opencv build failed (log: .../logs/opencv.log)
+</code></pre>
+<p><code>WITH_TESSERACT</code> <strong>不在 OpenCV 自己的树里</strong>，它由
+<code>opencv_contrib/modules/text/cmake/init.cmake</code> 声明：</p>
+<pre><code class="language-cmake">OCV_OPTION(WITH_TESSERACT &quot;Include Tesseract OCR library support&quot; (NOT CMAKE_CROSSCOMPILING)
+  VERIFY HAVE_TESSERACT)
+</code></pre>
+<p>默认值 <code>(NOT CMAKE_CROSSCOMPILING)</code> 在原生构建下就是 <strong>ON</strong>，而镜像里没有
+<code>libtesseract-dev</code>。复刻实验漏掉它，是因为实验只喂了<strong>根</strong> <code>CMakeLists.txt</code> 的
+<code>OCV_OPTION</code> 块 —— 而 <code>ocv_glob_modules()</code> 的第一遍对<strong>每个</strong>模块 include
+<code>cmake/init.cmake</code>，contrib 的 <code>text</code> 虽然没被构建，它的 init 照样执行。
+contrib 里只有三个这样的文件（<code>julia</code> / <code>matlab</code> / <code>text</code>），前两个的选项默认 OFF
+且<strong>没有</strong> <code>VERIFY</code>，所以真正会咬人的只有这一个。</p>
 <h5>为什么真正的报错没进日志</h5>
 <p><code>configure_build_install</code> 在 HEAD 里<strong>没有 <code>|| die</code></strong>，而调用点写的是
 <code>cmd || { cat "$log"; die ...; }</code> —— <code>||</code> 的左侧在 <code>errexit</code> 下被放行，
@@ -6157,6 +6181,10 @@ Linux/x86_64 平台变量模型、按 workflow apt 清单推出的 <code>HAVE_*<
 </tr>
 </tbody>
 </table>
+<p>实验还有一个<strong>结构性盲区</strong>，由 run 20 补上：它只喂了根 <code>CMakeLists.txt</code> 的
+<code>OCV_OPTION</code> 块，因此看不见 contrib 的 <code>cmake/init.cmake</code> 声明的那一项。
+把 <code>WITH_TESSERACT</code> 补进去之后，真正"必须显式 OFF"的集合是 <strong>16 项</strong>，
+门禁和脚本都按 16 项收敛。</p>
 <p>实验过程本身纠正了两个结论，值得记下来：</p>
 <ul>
 <li><strong><code>VERIFY</code> 选项是 84 项，不是 70 项。</strong> 根 <code>CMakeLists.txt</code> 里有 7 项（<code>WITH_EIGEN</code>
@@ -6184,12 +6212,13 @@ Linux/x86_64 平台变量模型、按 workflow apt 清单推出的 <code>HAVE_*<
 <p>反向验证 <code>.workbuddy/uos-port/revval-opencv-options.sh</code> 五条：删 <code>-DWITH_VTK=OFF</code>、
 改 <code>=ON</code>、插回 <code>-DWITH_ADE=OFF</code>、<code>-DWITH_IPP</code> 翻 ON、去掉
 <code>-DENABLE_CONFIG_VERIFICATION</code> —— 每条都必须<strong>只</strong>为那一件事变红，恢复后必须回绿。</p>
-<h5>仍未闭环的一点</h5>
-<p>25 秒窗口说明失败发生在 <strong>下载/校验/configure 的极早期</strong>，而"A 项选项错配导致
-configure 失败"通常也要几十秒（<code>OBSENSOR_USE_ORBBEC_SDK</code> 之外的检测 + 试编译）。
-本轮已让 <code>opencv.log</code> 在失败时被转储，下一次 CI 的日志尾部会直接给出答案：
-若是 curl 返回码，说明是下载；若是 <code>ocv_verify_config</code> 的 <code>FATAL_ERROR</code>，
-说明就是选项集；两者都可能，但<strong>只有日志能定</strong>。</p>
+<h5>闭环与代价</h5>
+<p>run 20 的日志给出了答案，而且答案的形状值得记一笔：<strong>11 项错配修完后只剩 1 项</strong>，
+而这一项来自模型完全没看的地方（contrib）。这正是"进门禁"而不是"改到绿"的理由 ——
+<code>WITH_TESSERACT</code> 现在是 <code>scripts/check-linux-deps-opencv-options.py</code> 的 16 项之一，
+下次谁把 <code>-DWITH_TESSERACT=OFF</code> 删掉，本地门禁就会先红。</p>
+<p>磁盘也不是瓶颈：run 20 的 <code>report_free_space</code> 报的是 <strong>109 GB free</strong>，
+<code>require_free_space</code> 的 1–4 GB 阈值只是防"树被撑爆"，不是常态。</p>
 <hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>

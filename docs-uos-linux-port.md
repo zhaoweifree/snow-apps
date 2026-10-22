@@ -3880,7 +3880,7 @@ screenshotqrrecognitionservice.cpp:60:17: error: 'barcode' is not a member of 'c
 - 真正的验证仍然只能来自下一次 CI：**本机没有 Linux 编译器**，
   `build_opencv()` 的 configure/build 一次都没在本机跑过。
 
-#### 9.6.21 run 19：`ENABLE_CONFIG_VERIFICATION` 的 11 项错配，与一条从未执行过的转储（2026-10-22）
+#### 9.6.21 run 19 / 20：`ENABLE_CONFIG_VERIFICATION` 的 16 项错配，与一条从未执行过的转储（2026-10-22）
 
 run 19（`39764499751`）和 run 18 不是同一个病：x64 与 arm64 都停在**依赖脚本**里，
 整段日志只有一行：
@@ -3889,17 +3889,21 @@ run 19（`39764499751`）和 run 18 不是同一个病：x64 与 arm64 都停在
 error: opencv installed no OpenCVConfig.cmake
 ```
 
-##### 25 秒的时间线先排除掉"编译失败"
+##### 25 秒到底是不是"来不及编译"
 
 | 时刻 | 事件 |
 |---|---|
 | `10:46:28.924` | libheif 安装完成（`libheif-config-version.cmake`） |
 | `10:46:53.926` | `error: opencv installed no OpenCVConfig.cmake` |
 
-中间 **25 秒、零输出**。OpenCV 那一步要下 90 MB 主仓 + contrib + 4 个模型，再解包、
-打补丁、configure、编译、安装 —— 25 秒连其中一半都装不下。所以
-`no OpenCVConfig.cmake` 不是病因：它是 `build_opencv()` 末尾的断言
-（`scripts/build-linux-deps.sh:961`），在 configure 早已死掉之后才轮到它说话。
+中间 **25 秒、零输出**。我最初据此判断"下载+解包+configure+编译装不下 25 秒，
+所以失败在下载阶段"——**这个判断是错的**，run 20 的日志把它推翻了：那一轮
+`disk before opencv` 到 configure 报错是 `13:45:16.149 → 13:45:39.035`，
+**22.9 秒**，而这 22.9 秒里包括了下载 90 MB 主仓、解包、打补丁和完整的 configure。
+所以 25 秒恰恰是"configure 一路跑到 `ocv_verify_config()` 然后失败"的正常耗时，
+不是"根本来不及"。同一段里真正成立的部分只有一句：`no OpenCVConfig.cmake` 不是
+病因，它是 `build_opencv()` 末尾的断言（`scripts/build-linux-deps.sh:961`），
+在 configure 早已死掉之后才轮到它说话。
 
 ##### 真因：`-DENABLE_CONFIG_VERIFICATION=ON` + 11 项选项错配
 
@@ -3927,6 +3931,33 @@ WITH_AVIF  WITH_VTK  WITH_EIGEN  WITH_GSTREAMER  WITH_IPP  WITH_JASPER
 WITH_OPENJPEG  WITH_OPENCLAMDFFT  WITH_OPENCLAMDBLAS  WITH_VA  WITH_VA_INTEL
 ```
 
+run 20（`39788745221`，本轮的修法）终于把这段 cmake 错误转储出来了，只剩一项：
+
+```
+CMake Error at cmake/OpenCVUtils.cmake:801 (message):
+  Some dependencies have not been found or have been forced, unset
+  ENABLE_CONFIG_VERIFICATION option to ignore these failures or change
+  following options:
+
+  WITH_TESSERACT
+error: opencv build failed (log: .../logs/opencv.log)
+```
+
+`WITH_TESSERACT` **不在 OpenCV 自己的树里**，它由
+`opencv_contrib/modules/text/cmake/init.cmake` 声明：
+
+```cmake
+OCV_OPTION(WITH_TESSERACT "Include Tesseract OCR library support" (NOT CMAKE_CROSSCOMPILING)
+  VERIFY HAVE_TESSERACT)
+```
+
+默认值 `(NOT CMAKE_CROSSCOMPILING)` 在原生构建下就是 **ON**，而镜像里没有
+`libtesseract-dev`。复刻实验漏掉它，是因为实验只喂了**根** `CMakeLists.txt` 的
+`OCV_OPTION` 块 —— 而 `ocv_glob_modules()` 的第一遍对**每个**模块 include
+`cmake/init.cmake`，contrib 的 `text` 虽然没被构建，它的 init 照样执行。
+contrib 里只有三个这样的文件（`julia` / `matlab` / `text`），前两个的选项默认 OFF
+且**没有** `VERIFY`，所以真正会咬人的只有这一个。
+
 ##### 为什么真正的报错没进日志
 
 `configure_build_install` 在 HEAD 里**没有 `|| die`**，而调用点写的是
@@ -3951,6 +3982,11 @@ Linux/x86_64 平台变量模型、按 workflow apt 清单推出的 `HAVE_*` 结�
 | 不给任何 `-D`（纯默认） | **15 项**：`AVIF EIGEN GSTREAMER GTK IPP ITT JASPER LAPACK OPENCL OPENCLAMDBLAS OPENCLAMDFFT OPENJPEG VA VA_INTEL VTK` |
 | run 19 的选项集 | **11 项**（上表） |
 | 本轮修后 | `VERIFY_RESULT: OK` |
+
+实验还有一个**结构性盲区**，由 run 20 补上：它只喂了根 `CMakeLists.txt` 的
+`OCV_OPTION` 块，因此看不见 contrib 的 `cmake/init.cmake` 声明的那一项。
+把 `WITH_TESSERACT` 补进去之后，真正"必须显式 OFF"的集合是 **16 项**，
+门禁和脚本都按 16 项收敛。
 
 实验过程本身纠正了两个结论，值得记下来：
 
@@ -3984,13 +4020,15 @@ Linux/x86_64 平台变量模型、按 workflow apt 清单推出的 `HAVE_*` 结�
 改 `=ON`、插回 `-DWITH_ADE=OFF`、`-DWITH_IPP` 翻 ON、去掉
 `-DENABLE_CONFIG_VERIFICATION` —— 每条都必须**只**为那一件事变红，恢复后必须回绿。
 
-##### 仍未闭环的一点
+##### 闭环与代价
 
-25 秒窗口说明失败发生在 **下载/校验/configure 的极早期**，而"A 项选项错配导致
-configure 失败"通常也要几十秒（`OBSENSOR_USE_ORBBEC_SDK` 之外的检测 + 试编译）。
-本轮已让 `opencv.log` 在失败时被转储，下一次 CI 的日志尾部会直接给出答案：
-若是 curl 返回码，说明是下载；若是 `ocv_verify_config` 的 `FATAL_ERROR`，
-说明就是选项集；两者都可能，但**只有日志能定**。
+run 20 的日志给出了答案，而且答案的形状值得记一笔：**11 项错配修完后只剩 1 项**，
+而这一项来自模型完全没看的地方（contrib）。这正是"进门禁"而不是"改到绿"的理由 ——
+`WITH_TESSERACT` 现在是 `scripts/check-linux-deps-opencv-options.py` 的 16 项之一，
+下次谁把 `-DWITH_TESSERACT=OFF` 删掉，本地门禁就会先红。
+
+磁盘也不是瓶颈：run 20 的 `report_free_space` 报的是 **109 GB free**，
+`require_free_space` 的 1–4 GB 阈值只是防"树被撑爆"，不是常态。
 
 ---
 
