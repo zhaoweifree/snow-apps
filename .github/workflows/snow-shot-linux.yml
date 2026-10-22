@@ -169,13 +169,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `architecture` is this workflow's own short spelling (it names the
+          # artefacts); `appimage-arch` is the ELF machine name appimagetool and
+          # the runtime releases use. They are different vocabularies and the
+          # mapping has to exist somewhere -- here, once, instead of in an
+          # inline ternary per step.
           - architecture: x64
+            appimage-arch: x86_64
             runner: ubuntu-24.04
             preset: snow-shot-linux-x64-release
             build-preset: build-snow-shot-linux-x64-release
           # GitHub's hosted arm64 runner. A private fork without arm64 minutes
           # can drop this entry; the x64 entry still proves the packaging path.
           - architecture: arm64
+            appimage-arch: aarch64
             runner: ubuntu-24.04-arm
             preset: snow-shot-linux-arm64-release
             build-preset: build-snow-shot-linux-arm64-release
@@ -360,8 +367,21 @@ jobs:
       # silently package whatever upstream happened to serve that minute. The
       # script writes `KEY=VALUE` lines to stdout for exactly this use, and
       # nothing else.
+      # The script needs both the architecture and a destination: it verifies
+      # two pushed-to-`continuous` assets by checksum, and the paths it prints
+      # are what the configure below hands to `snow_shot_add_appimage_target()`.
+      # A call without arguments is not "use the defaults" -- there are none,
+      # and the run that first executed this step proved it:
+      #
+      #     error: --arch is required
+      #
+      # `$RUNNER_TEMP` rather than the workspace: the two files are build
+      # inputs, not artefacts, and must not end up in the upload glob.
       - name: Fetch appimagetool
-        run: bash scripts/fetch-appimagetool.sh >> "$GITHUB_ENV"
+        run: |
+          bash scripts/fetch-appimagetool.sh \
+            --arch "${{ matrix.appimage-arch }}" \
+            --dest "$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
 
       # This is the one packaging path that had never executed anywhere: the
       # Windows workstation has no appimagetool, so every command in
@@ -387,7 +407,7 @@ jobs:
           echo "== $appimage"
           ls -l "$appimage"
           python3 scripts/check-linux-appimage-build.py --appimage "$appimage" \
-            --expect-arch ${{ matrix.architecture == 'x64' && 'x86_64' || 'aarch64' }}
+            --expect-arch "${{ matrix.appimage-arch }}"
 
       - name: Upload the AppImage
         uses: actions/upload-artifact@v4

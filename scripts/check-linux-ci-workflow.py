@@ -85,6 +85,20 @@ def steps_of(job: dict) -> list[dict]:
     return [step for step in job.get("steps", []) if isinstance(step, dict)]
 
 
+def matrix_entries(job: dict) -> list[dict]:
+    """The expanded matrix rows, i.e. what each job instance is parameterised by.
+
+    Only `include:` is used here; a plain `axis: [...]` matrix has no
+    architecture field to read, and the AppImage checks would then have nothing
+    to compare against.
+    """
+    matrix = (job.get("strategy") or {}).get("matrix") or {}
+    include = matrix.get("include")
+    if not isinstance(include, list):
+        return []
+    return [entry for entry in include if isinstance(entry, dict)]
+
+
 def run_commands(job: dict) -> list[str]:
     return [step.get("run", "") for step in steps_of(job) if step.get("run")]
 
@@ -188,6 +202,14 @@ def appimage_checks(jobs: dict) -> None:
           "fetch-appimagetool.sh" in fetch and "GITHUB_ENV" in fetch,
           "the next step reads SNOW_APPS_APPIMAGETOOL* from the environment")
 
+    # Both options are mandatory and the script has no defaults for either: a
+    # bare call dies with `error: --arch is required`, which is exactly what the
+    # first run that reached this step reported (the checks here only asserted
+    # the script name and `$GITHUB_ENV`, so a call with no arguments passed).
+    for option in ("--arch", "--dest"):
+        check(f"Fetch appimagetool passes {option}", option in fetch,
+              "the script refuses to guess either value")
+
     pack = by_name["Build the AppImage"].get("run", "")
     for token in (
         "-DSNOW_APPS_PACKAGE_APPIMAGE=ON",
@@ -209,10 +231,21 @@ def appimage_checks(jobs: dict) -> None:
     check("Validate the AppImage runs the product check",
           "scripts/check-linux-appimage-build.py" in validate,
           "an AppImage that is never unpacked is only a file that exists")
-    for architecture, machine in APPIMAGE_ARCHITECTURES.items():
-        check(f"Validate the AppImage names the {architecture} ELF machine",
-              f"'{machine}'" in validate,
-              f"{architecture} has to be checked as {machine}")
+
+    # The workflow names its artefacts `x64`/`arm64`; appimagetool and the
+    # runtime releases say `x86_64`/`aarch64`. The mapping lives in the matrix
+    # now, so both steps have to read it from there -- and the matrix has to
+    # actually carry it, or `--arch ""` reaches the script.
+    declared = {entry.get("architecture"): entry.get("appimage-arch")
+                for entry in matrix_entries(job)}
+    check("the build matrix declares appimage-arch for every architecture",
+          declared == APPIMAGE_ARCHITECTURES,
+          f"declared {declared}, expected {APPIMAGE_ARCHITECTURES}")
+    for label, text in (("Fetch appimagetool", fetch),
+                        ("Validate the AppImage", validate)):
+        check(f"{label} takes the ELF machine name from the matrix",
+              "matrix.appimage-arch" in text,
+              "x64/arm64 is the workflow's spelling, not the ELF machine name")
 
     root_cmake = REPO / "CMakeLists.txt"
     check("the root CMakeLists offers SNOW_APPS_PACKAGE_APPIMAGE",
