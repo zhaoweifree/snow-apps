@@ -7088,6 +7088,45 @@ endif()
 在此之前 <code>Validate the AppImage</code> 只验结构（ELF、magic、AppRun 字节一致），
 <strong>不声称"能启动"</strong> —— 这一点必须写在文档里，而不是留在"应该没问题"里。</p>
 <hr>
+<h4>9.6.32 同一个错锚点还在产物校验器里：<code>is_file()</code> 返回 False 时，检查整段被跳过</h4>
+<p>改完 9.6.31 顺手看 <code>Validate the AppImage</code> 调的那个脚本，同一个仓库根锚点又出现一次：</p>
+<pre><code class="language-python">reviewed = REPO / &quot;packaging&quot; / &quot;linux&quot; / &quot;appimage&quot; / &quot;AppRun&quot;
+</code></pre>
+<p>仓库根从来没有 <code>packaging/</code>。差别在于后果更隐蔽：</p>
+<pre><code class="language-python">check(&quot;the reviewed AppRun exists in the repository&quot;, reviewed.is_file(), str(reviewed))
+if app_run.is_file() and reviewed.is_file():
+    check(&quot;the packaged AppRun is the reviewed one&quot;, ...)
+</code></pre>
+<p><code>is_file()</code> 为 False ⇒ 第二条 <code>check</code> <strong>整段不执行</strong>。第一条会报 FAIL，但它是
+"文件不存在"，读起来像环境问题；真正想说的"包里那份和审过的那份不一致"从未被问过。
+而在 CI 上，第一条之前的 <code>usr/bin/snow_shot</code> 之类若先红，这一条连 FAIL 都不会被看到。</p>
+<p>文件里原来的注释还把这个猜测写成了事实：</p>
+<blockquote>
+<p>the file lives at the repository root (<code>packaging/linux/appimage/AppRun</code>, the path
+<code>cmake/SnowShotAppImage.cmake</code> copies from</p>
+</blockquote>
+<p><code>cmake/SnowShotAppImage.cmake</code> 从来没有从仓库根拷过东西 —— 9.6.31 之前它用的是
+<code>${CMAKE_CURRENT_SOURCE_DIR}</code>，那也不是仓库根。<strong>注释和代码各自猜了一件事，
+两件事都错，而且它们互相印证。</strong></p>
+<h5>修法，以及一条通用的门禁</h5>
+<p>锚点改成 <code>REPO / "snow_shot" / "packaging" / ...</code>。但只修这一处不够：这个脚本
+在 CI 的 runner 上、手里有真 AppImage 时才运行，工作站上没人解析它。</p>
+<p>所以 <code>scripts/check-linux-appimage.py</code> 加了一条通用检查：用 <code>ast</code> 找出
+<code>check-linux-appimage-build.py</code> 里所有 <code>REPO / "a" / "b" / ...</code> 字面量链，
+逐条解析到工作树里，必须存在。</p>
+<p>用 <code>ast</code> 而不是正则是有原因的，第一版就踩了：正则把<strong>注释里</strong>的
+<code>REPO / "..."</code> 也当成表达式，而 <code>Path("...")</code> 在 Windows 上因为尾部点被规范化，
+解析成了仓库目录本身，于是"存在"。用 <code>ast</code> 只看真实的表达式树。</p>
+<h5>反向验证</h5>
+<p>2 变异 + 1 对照：锚点退回仓库根（红在该链上）、链指向不存在的目录（红）、未改动时绿。
+第 2 条是"看起来完全正确、只是指错了地方"的形态 —— 任何检查"表达式写对没有"的门禁
+都会放过它。</p>
+<h5>教训</h5>
+<p><code>is_file()</code> 当守卫是必要的，但<strong>守卫失败时不能静默跳过断言</strong>：要么让它先红并把
+"因为前面没找到"写清楚，要么把它变成断言本身的一部分。这次两者都缺 ——
+于是"暂存路径错"和"内容不一致"两个不同的问题，在日志里长得一样。</p>
+<hr>
+
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>

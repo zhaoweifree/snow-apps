@@ -4950,6 +4950,62 @@ if(WIN32 AND NOT SNOW_SHOT_QT_STATIC)
 
 ---
 
+#### 9.6.32 同一个错锚点还在产物校验器里：`is_file()` 返回 False 时，检查整段被跳过
+
+改完 9.6.31 顺手看 `Validate the AppImage` 调的那个脚本，同一个仓库根锚点又出现一次：
+
+```python
+reviewed = REPO / "packaging" / "linux" / "appimage" / "AppRun"
+```
+
+仓库根从来没有 `packaging/`。差别在于后果更隐蔽：
+
+```python
+check("the reviewed AppRun exists in the repository", reviewed.is_file(), str(reviewed))
+if app_run.is_file() and reviewed.is_file():
+    check("the packaged AppRun is the reviewed one", ...)
+```
+
+`is_file()` 为 False ⇒ 第二条 `check` **整段不执行**。第一条会报 FAIL，但它是
+"文件不存在"，读起来像环境问题；真正想说的"包里那份和审过的那份不一致"从未被问过。
+而在 CI 上，第一条之前的 `usr/bin/snow_shot` 之类若先红，这一条连 FAIL 都不会被看到。
+
+文件里原来的注释还把这个猜测写成了事实：
+
+> the file lives at the repository root (`packaging/linux/appimage/AppRun`, the path
+> `cmake/SnowShotAppImage.cmake` copies from
+
+`cmake/SnowShotAppImage.cmake` 从来没有从仓库根拷过东西 —— 9.6.31 之前它用的是
+`${CMAKE_CURRENT_SOURCE_DIR}`，那也不是仓库根。**注释和代码各自猜了一件事，
+两件事都错，而且它们互相印证。**
+
+##### 修法，以及一条通用的门禁
+
+锚点改成 `REPO / "snow_shot" / "packaging" / ...`。但只修这一处不够：这个脚本
+在 CI 的 runner 上、手里有真 AppImage 时才运行，工作站上没人解析它。
+
+所以 `scripts/check-linux-appimage.py` 加了一条通用检查：用 `ast` 找出
+`check-linux-appimage-build.py` 里所有 `REPO / "a" / "b" / ...` 字面量链，
+逐条解析到工作树里，必须存在。
+
+用 `ast` 而不是正则是有原因的，第一版就踩了：正则把**注释里**的
+`REPO / "..."` 也当成表达式，而 `Path("...")` 在 Windows 上因为尾部点被规范化，
+解析成了仓库目录本身，于是"存在"。用 `ast` 只看真实的表达式树。
+
+##### 反向验证
+
+2 变异 + 1 对照：锚点退回仓库根（红在该链上）、链指向不存在的目录（红）、未改动时绿。
+第 2 条是"看起来完全正确、只是指错了地方"的形态 —— 任何检查"表达式写对没有"的门禁
+都会放过它。
+
+##### 教训
+
+`is_file()` 当守卫是必要的，但**守卫失败时不能静默跳过断言**：要么让它先红并把
+"因为前面没找到"写清楚，要么把它变成断言本身的一部分。这次两者都缺 ——
+于是"暂存路径错"和"内容不一致"两个不同的问题，在日志里长得一样。
+
+---
+
 ## 10. 工作量 / 优先级矩阵
 
 | 编号 | 工作项 | 规模 | 风险 | 优先级 |
