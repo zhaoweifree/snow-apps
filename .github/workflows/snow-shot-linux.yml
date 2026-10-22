@@ -31,14 +31,22 @@ on:
     branches: [main]
     # Packaging and desktop files are the point of the `gates` job, but a
     # documentation edit is not worth a full Qt build.
+    #
+    # `*.html` is part of that and was missing: the port document is also
+    # rendered to `docs-uos-linux-port.html` at the repository root, so a
+    # docs-only push that regenerated the HTML started a run, and
+    # `cancel-in-progress` then killed the build that was actually being
+    # watched (run 25, cancelled by run 26).
     paths-ignore:
       - "docs*/**"
       - "*.md"
+      - "*.html"
       - ".workbuddy/**"
   pull_request:
     paths-ignore:
       - "docs*/**"
       - "*.md"
+      - "*.html"
       - ".workbuddy/**"
   workflow_dispatch:
 

@@ -124,6 +124,30 @@ def apt_packages(text: str) -> list[str]:
 # "architecture mismatch" report from a machine nobody is watching.
 APPIMAGE_ARCHITECTURES = {"x64": "x86_64", "arm64": "aarch64"}
 
+# Documentation artefacts that must not start a run. The port document is
+# rendered to a root-level `.html`, and only `*.md` was ignored: a docs-only push
+# started a run and `cancel-in-progress` killed the build being watched (run 25,
+# cancelled by run 26).
+IGNORED_DOCUMENTATION_PATTERNS = ("*.md", "*.html")
+
+
+def paths_ignore_checks(workflow: dict) -> None:
+    triggers = workflow.get("on") or workflow.get(True) or {}
+    if not isinstance(triggers, dict):
+        check("the workflow declares its triggers", False, f"found {type(triggers).__name__}")
+        return
+    for event in ("push", "pull_request"):
+        config = triggers.get(event)
+        if not isinstance(config, dict):
+            check(f"{event}: declares paths-ignore", False, "no configuration")
+            continue
+        patterns = config.get("paths-ignore") or []
+        missing = [pattern for pattern in IGNORED_DOCUMENTATION_PATTERNS
+                   if pattern not in patterns]
+        check(f"{event}: ignores the documentation artefacts", not missing,
+              "missing " + ", ".join(missing) + " -- a docs-only push would start a "
+              "full build and, with cancel-in-progress, kill the run being watched")
+
 
 def appimage_checks(jobs: dict) -> None:
     """The AppImage packaging path has to stay wired, in this order.
@@ -415,6 +439,7 @@ def main() -> int:
                       "appimagetool cannot build the squashfs without mksquashfs")
 
         appimage_checks(jobs)
+        paths_ignore_checks(workflow)
 
     if failures:
         print(f"\n{len(failures)} problem(s)")
