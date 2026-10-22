@@ -438,7 +438,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**剩余**：PipeWire 帧消费 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**AppImage 路径的前两处"从未执行过的代码"已修**：`Fetch appimagetool` 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 指向仓库根（9.6.31）。**剩余**：Qt 进 Linux 安装树（AppRun 已假定 `usr/plugins` 存在，而部署块仍是 `if(WIN32 …)`，见 9.6.31）；PipeWire 帧消费 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -4830,6 +4830,123 @@ workflow 用 `x64` / `arm64` 命名产物（artifact 名、preset 名），appim
 "这一步写对了"和"这一步跑起来会成功"是两件事。前者可以用 `in` 断言，后者需要
 断言**参数、取值、来源**三者同时成立。凡是"调用一个自己写的脚本"，脚本的必填项
 就必须出现在门禁里 —— 因为必填项存在的理由，正是作者当时认为它不能猜。
+
+---
+
+#### 9.6.31 AppImage 暂存的两个源文件指向 `<repo>/packaging`：函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 是"谁在调用"
+
+这一轮不是 CI 报的，是等 run 32 的时候把 AppImage 那段从未执行过的 configure
+面读了一遍发现的。它会在 `Build the AppImage` 的 configure 阶段直接
+`FATAL_ERROR`，所以无论前面几关多绿，AppImage 都出不来。
+
+##### 机制
+
+`snow_shot_add_appimage_target()` 里这样取两个要拷进 AppDir 的文件：
+
+```cmake
+set(_snow_apprun "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/appimage/AppRun")
+set(_snow_icon_source "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/hicolor/256x256/apps/snow-shot.png")
+```
+
+而它唯一的调用点在**根** `CMakeLists.txt`：
+
+```cmake
+if(SNOW_APPS_PACKAGE_APPIMAGE)
+    include(cmake/SnowShotAppImage.cmake)
+    snow_shot_add_appimage_target()   # ← 这里
+endif()
+```
+
+`CMAKE_CURRENT_SOURCE_DIR` 是"当前正在处理的 `CMakeLists.txt` 所在目录"，不是
+"这个 `.cmake` 文件所在目录"，也不是"函数定义所在的目录"。于是两处都解析成
+`<repo>/packaging/...` 与 `<repo>/resources/...`：
+
+| 路径 | 实际位置 | 解析结果 |
+|---|---|---|
+| `packaging/linux/appimage/AppRun` | `snow_shot/packaging/...` | 不存在 |
+| `resources/icons/hicolor/256x256/apps/snow-shot.png` | `snow_shot/resources/...` | 不存在 |
+
+图标那条有 `EXISTS` 检查，所以 configure 会在这里停：
+
+```
+Missing <repo>/resources/icons/hicolor/256x256/apps/snow-shot.png.
+Run: python3 scripts/gen-linux-icons.py
+```
+
+**报错信息本身是误导的**：图标一直在 `snow_shot/resources/` 下，`gen-linux-icons.py`
+再跑一遍也不会有任何变化。一个错误的路径配一句"去生成图标"的建议，比不报错更费时间。
+
+##### 为什么门禁没抓到
+
+`scripts/check-linux-packaging.cmake` 第 5 节确实测了这个模块，但测的是三个**纯函数**
+（架构映射、布局字符串）。会碰目标、会碰真实文件的是
+`snow_shot_add_appimage_target()`，而它需要 `TARGET snow_shot`，在工作站上永远不执行 ——
+门禁对它的断言只有一条：`CMakeLists.txt` 里出现过 `snow_shot_add_appimage_target()`。
+**"调用点存在"与"调用点能成立"之间的那段，就是这次的 bug 所在。**
+
+这与 9.6.28 / 9.6.30 同一族：断言落在"写下来了"，而失败的机制在"写下来的东西
+指向哪里"。
+
+##### 修法
+
+布局函数改成接受 `APP_SOURCE_DIR`，省略时向目标要：
+
+```cmake
+if(_snow_APP_SOURCE_DIR)
+    set(_snow_app_dir "${_snow_APP_SOURCE_DIR}")
+elseif(TARGET snow_shot)
+    get_target_property(_snow_app_dir snow_shot SOURCE_DIR)
+endif()
+```
+
+并新增两个输出 `SNOW_SHOT_APPIMAGE_APPRUN_SOURCE` / `SNOW_SHOT_APPIMAGE_ICON_SOURCE`，
+`AppRun` 也补上 `EXISTS` 检查（原来只有图标有，缺 `AppRun` 会一路走到
+`cmake -E copy` 才炸，报的是 copy 失败）。
+
+`get_target_property(... SOURCE_DIR)` 而不是写死 `snow_shot/`：目标自己知道自己在
+哪个目录，调用方不必知道。**凡是"这文件在哪"，问持有它的那个东西，不要问"我在哪"** ——
+`CMAKE_CURRENT_LIST_DIR`（9.6.x 早先那条）与 `CMAKE_CURRENT_SOURCE_DIR` 是同一个坑的
+两个变量名。
+
+##### 门禁
+
+`check-linux-packaging.cmake` 用 `APP_SOURCE_DIR "${_snow_repo}/snow_shot"` 显式调用
+布局函数，然后**逐个项目检查那两个文件真的存在**。这条检查是功能性的：它不等价于
+"文本里有几个变量名"，而是"算出来的路径落在有文件的地方"。
+
+##### 反向验证
+
+3 条 + 1 对照全过：把锚点换回 `CMAKE_CURRENT_SOURCE_DIR`（两条路径同时红）、只把
+图标名写错（只有 `ICON_SOURCE` 红，证明两条检查互相独立）、未改动时绿。
+
+脚本另外加了一条**基线守卫**：快照之前先跑一遍门禁，不绿就拒绝快照。这一条是踩
+出来的 —— 上一次脚本在"变异后、还原前"被打断，把带 `.png.bak` 的文本留在树里，
+下一次运行就把这份污染当成了基线，于是所有用例"通过"，还原时忠实地把坏文本恢复
+回去。
+
+##### 同一轮读代码时确认的另一件事：Linux 安装树里没有 Qt
+
+`snow_shot/CMakeLists.txt` 里唯一的 Qt 部署块是：
+
+```cmake
+if(WIN32 AND NOT SNOW_SHOT_QT_STATIC)
+    qt_generate_deploy_app_script(...)
+    install(SCRIPT "${SNOW_SHOT_QT_DEPLOY_SCRIPT}")
+```
+
+即：**Linux 上不部署 Qt**。这解释了 .deb 为什么必须靠
+`CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON`（依赖发行版的 Qt 包），但也意味着
+`cmake --install` 出来的 AppDir 里没有 `usr/lib/libQt6*.so*`、也没有
+`usr/plugins/platforms/libqxcb.so` —— 而 `packaging/linux/appimage/AppRun` 的第一段
+注释写的正是"没有 `QT_PLUGIN_PATH` 的包会在第一个窗口上报
+`no Qt platform plugin could be initialized`"。
+
+也就是说：AppRun 假定 Qt 是被打包进去的，安装规则并没有这么做。这份 AppImage
+只在与构建机同源的 Qt 上能跑，跨发行版（UOS 20 的 Qt 版本不同）不行。
+
+这是 P7 的独立一项，不在本节修：它会改变安装树的内容，需要自己的一轮验证。
+在此之前 `Validate the AppImage` 只验结构（ELF、magic、AppRun 字节一致），
+**不声称"能启动"** —— 这一点必须写在文档里，而不是留在"应该没问题"里。
 
 ---
 

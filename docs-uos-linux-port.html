@@ -1315,7 +1315,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <td><strong>P7 硬化与 CI</strong> <em>(进行中)</em></td>
 <td>稳定与回归</td>
 <td>Wayland 会话适配；CI 增 Linux job</td>
-<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。<strong>剩余</strong>：PipeWire 帧消费</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。<strong>AppImage 路径的前两处"从未执行过的代码"已修</strong>：<code>Fetch appimagetool</code> 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 <code>CMAKE_CURRENT_SOURCE_DIR</code> 指向仓库根（9.6.31）。<strong>剩余</strong>：Qt 进 Linux 安装树（AppRun 已假定 <code>usr/plugins</code> 存在，而部署块仍是 <code>if(WIN32 …)</code>，见 9.6.31）；PipeWire 帧消费</td>
 </tr>
 </tbody>
 </table>
@@ -6991,7 +6991,103 @@ crate 还在" —— 免得门禁守着一个已经消失的前提。</p>
 断言<strong>参数、取值、来源</strong>三者同时成立。凡是"调用一个自己写的脚本"，脚本的必填项
 就必须出现在门禁里 —— 因为必填项存在的理由，正是作者当时认为它不能猜。</p>
 <hr>
-
+<h4>9.6.31 AppImage 暂存的两个源文件指向 <code>&lt;repo&gt;/packaging</code>：函数体里的 <code>CMAKE_CURRENT_SOURCE_DIR</code> 是"谁在调用"</h4>
+<p>这一轮不是 CI 报的，是等 run 32 的时候把 AppImage 那段从未执行过的 configure
+面读了一遍发现的。它会在 <code>Build the AppImage</code> 的 configure 阶段直接
+<code>FATAL_ERROR</code>，所以无论前面几关多绿，AppImage 都出不来。</p>
+<h5>机制</h5>
+<p><code>snow_shot_add_appimage_target()</code> 里这样取两个要拷进 AppDir 的文件：</p>
+<pre><code class="language-cmake">set(_snow_apprun &quot;${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/appimage/AppRun&quot;)
+set(_snow_icon_source &quot;${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/hicolor/256x256/apps/snow-shot.png&quot;)
+</code></pre>
+<p>而它唯一的调用点在<strong>根</strong> <code>CMakeLists.txt</code>：</p>
+<pre><code class="language-cmake">if(SNOW_APPS_PACKAGE_APPIMAGE)
+    include(cmake/SnowShotAppImage.cmake)
+    snow_shot_add_appimage_target()   # ← 这里
+endif()
+</code></pre>
+<p><code>CMAKE_CURRENT_SOURCE_DIR</code> 是"当前正在处理的 <code>CMakeLists.txt</code> 所在目录"，不是
+"这个 <code>.cmake</code> 文件所在目录"，也不是"函数定义所在的目录"。于是两处都解析成
+<code>&lt;repo&gt;/packaging/...</code> 与 <code>&lt;repo&gt;/resources/...</code>：</p>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>实际位置</th>
+<th>解析结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>packaging/linux/appimage/AppRun</code></td>
+<td><code>snow_shot/packaging/...</code></td>
+<td>不存在</td>
+</tr>
+<tr>
+<td><code>resources/icons/hicolor/256x256/apps/snow-shot.png</code></td>
+<td><code>snow_shot/resources/...</code></td>
+<td>不存在</td>
+</tr>
+</tbody>
+</table>
+<p>图标那条有 <code>EXISTS</code> 检查，所以 configure 会在这里停：</p>
+<pre><code>Missing &lt;repo&gt;/resources/icons/hicolor/256x256/apps/snow-shot.png.
+Run: python3 scripts/gen-linux-icons.py
+</code></pre>
+<p><strong>报错信息本身是误导的</strong>：图标一直在 <code>snow_shot/resources/</code> 下，<code>gen-linux-icons.py</code>
+再跑一遍也不会有任何变化。一个错误的路径配一句"去生成图标"的建议，比不报错更费时间。</p>
+<h5>为什么门禁没抓到</h5>
+<p><code>scripts/check-linux-packaging.cmake</code> 第 5 节确实测了这个模块，但测的是三个<strong>纯函数</strong>
+（架构映射、布局字符串）。会碰目标、会碰真实文件的是
+<code>snow_shot_add_appimage_target()</code>，而它需要 <code>TARGET snow_shot</code>，在工作站上永远不执行 ——
+门禁对它的断言只有一条：<code>CMakeLists.txt</code> 里出现过 <code>snow_shot_add_appimage_target()</code>。
+<strong>"调用点存在"与"调用点能成立"之间的那段，就是这次的 bug 所在。</strong></p>
+<p>这与 9.6.28 / 9.6.30 同一族：断言落在"写下来了"，而失败的机制在"写下来的东西
+指向哪里"。</p>
+<h5>修法</h5>
+<p>布局函数改成接受 <code>APP_SOURCE_DIR</code>，省略时向目标要：</p>
+<pre><code class="language-cmake">if(_snow_APP_SOURCE_DIR)
+    set(_snow_app_dir &quot;${_snow_APP_SOURCE_DIR}&quot;)
+elseif(TARGET snow_shot)
+    get_target_property(_snow_app_dir snow_shot SOURCE_DIR)
+endif()
+</code></pre>
+<p>并新增两个输出 <code>SNOW_SHOT_APPIMAGE_APPRUN_SOURCE</code> / <code>SNOW_SHOT_APPIMAGE_ICON_SOURCE</code>，
+<code>AppRun</code> 也补上 <code>EXISTS</code> 检查（原来只有图标有，缺 <code>AppRun</code> 会一路走到
+<code>cmake -E copy</code> 才炸，报的是 copy 失败）。</p>
+<p><code>get_target_property(... SOURCE_DIR)</code> 而不是写死 <code>snow_shot/</code>：目标自己知道自己在
+哪个目录，调用方不必知道。<strong>凡是"这文件在哪"，问持有它的那个东西，不要问"我在哪"</strong> ——
+<code>CMAKE_CURRENT_LIST_DIR</code>（9.6.x 早先那条）与 <code>CMAKE_CURRENT_SOURCE_DIR</code> 是同一个坑的
+两个变量名。</p>
+<h5>门禁</h5>
+<p><code>check-linux-packaging.cmake</code> 用 <code>APP_SOURCE_DIR "${_snow_repo}/snow_shot"</code> 显式调用
+布局函数，然后<strong>逐个项目检查那两个文件真的存在</strong>。这条检查是功能性的：它不等价于
+"文本里有几个变量名"，而是"算出来的路径落在有文件的地方"。</p>
+<h5>反向验证</h5>
+<p>3 条 + 1 对照全过：把锚点换回 <code>CMAKE_CURRENT_SOURCE_DIR</code>（两条路径同时红）、只把
+图标名写错（只有 <code>ICON_SOURCE</code> 红，证明两条检查互相独立）、未改动时绿。</p>
+<p>脚本另外加了一条<strong>基线守卫</strong>：快照之前先跑一遍门禁，不绿就拒绝快照。这一条是踩
+出来的 —— 上一次脚本在"变异后、还原前"被打断，把带 <code>.png.bak</code> 的文本留在树里，
+下一次运行就把这份污染当成了基线，于是所有用例"通过"，还原时忠实地把坏文本恢复
+回去。</p>
+<h5>同一轮读代码时确认的另一件事：Linux 安装树里没有 Qt</h5>
+<p><code>snow_shot/CMakeLists.txt</code> 里唯一的 Qt 部署块是：</p>
+<pre><code class="language-cmake">if(WIN32 AND NOT SNOW_SHOT_QT_STATIC)
+    qt_generate_deploy_app_script(...)
+    install(SCRIPT &quot;${SNOW_SHOT_QT_DEPLOY_SCRIPT}&quot;)
+</code></pre>
+<p>即：<strong>Linux 上不部署 Qt</strong>。这解释了 .deb 为什么必须靠
+<code>CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON</code>（依赖发行版的 Qt 包），但也意味着
+<code>cmake --install</code> 出来的 AppDir 里没有 <code>usr/lib/libQt6*.so*</code>、也没有
+<code>usr/plugins/platforms/libqxcb.so</code> —— 而 <code>packaging/linux/appimage/AppRun</code> 的第一段
+注释写的正是"没有 <code>QT_PLUGIN_PATH</code> 的包会在第一个窗口上报
+<code>no Qt platform plugin could be initialized</code>"。</p>
+<p>也就是说：AppRun 假定 Qt 是被打包进去的，安装规则并没有这么做。这份 AppImage
+只在与构建机同源的 Qt 上能跑，跨发行版（UOS 20 的 Qt 版本不同）不行。</p>
+<p>这是 P7 的独立一项，不在本节修：它会改变安装树的内容，需要自己的一轮验证。
+在此之前 <code>Validate the AppImage</code> 只验结构（ELF、magic、AppRun 字节一致），
+<strong>不声称"能启动"</strong> —— 这一点必须写在文档里，而不是留在"应该没问题"里。</p>
+<hr>
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>
