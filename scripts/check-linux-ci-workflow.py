@@ -229,6 +229,47 @@ def main() -> int:
               "scripts/build-linux-deps.sh" in build_text,
               "configure would run against whatever the distribution happens to have")
 
+        # The Rust toolchain must be installed by hand and pinned with
+        # RUSTUP_TOOLCHAIN.
+        #
+        # `rust-toolchain.toml` pins 1.97.1 *and* asks for the clippy and
+        # rustfmt components. Inside the checkout, rustup honours that file
+        # over the default toolchain, so the first `rustc`/`cargo` call makes
+        # rustup install 1.97.1 with those components. On the arm64 runner the
+        # pinned toolchain was half-installed, and rustup's recovery path rolled
+        # the whole thing back after a component conflict (CI run
+        # 39715098658): the rollback took rust-std with it, so the failure
+        # surfaced much later as "Rust target 'aarch64-unknown-linux-gnu' is
+        # not installed or usable" -- the target was never the problem.
+        #
+        # CI runs neither clippy nor rustfmt, so the fix is to install only
+        # rustc/cargo/rust-std and pin the version with RUSTUP_TOOLCHAIN, which
+        # outranks the toolchain file (verified with `rustup show`: "overridden
+        # by environment variable RUSTUP_TOOLCHAIN") and so leaves rustup no
+        # reason to install anything.
+        for job_name in ("gates", "build"):
+            job_text = "\n".join(run_commands(jobs.get(job_name, {})))
+            check(f"{job_name} job installs the Rust toolchain by hand",
+                  re.search(r"rustup toolchain install[ \t]+1\.97\.1", job_text) is not None,
+                  "dtolnay/rust-toolchain leaves rust-toolchain.toml in charge of the components")
+            check(f"{job_name} job pins RUSTUP_TOOLCHAIN",
+                  "RUSTUP_TOOLCHAIN=1.97.1" in job_text,
+                  "without it rustup honours rust-toolchain.toml and installs the components")
+            check(f"{job_name} job does not install the clippy component",
+                  "--component clippy" not in job_text and "--component clippy-preview" not in job_text,
+                  "CI never runs clippy; installing it is what hit the conflict")
+            check(f"{job_name} job does not use dtolnay/rust-toolchain",
+                  "dtolnay/rust-toolchain" not in json.dumps(jobs.get(job_name, {})),
+                  "that action leaves the toolchain file's components in charge")
+
+        # The cross-target check adds two targets to the pinned toolchain; it
+        # has to name that toolchain explicitly, because RUSTUP_TOOLCHAIN pins
+        # which toolchain *cargo* uses but not which one `rustup target add`
+        # writes to.
+        check("gates job adds the cross targets to the pinned toolchain",
+              re.search(r"rustup target add[ \t]+--toolchain[ \t]+1\.97\.1", gates_text) is not None,
+              "the targets could land on a different toolchain than the checks use")
+
         # The apt list: duplicated names are harmless but usually mean a
         # copy-paste that dropped the package somebody meant to add.
         for job_name, job in jobs.items():

@@ -94,7 +94,11 @@ class PngClipboardMimeData final : public QMimeData {
     }
 
   protected:
-    QVariant retrieveData(const QString& mime, QMetaType type) const override {
+    // The second parameter is QVariant::Type in Qt 5 and QMetaType in Qt 6, so
+    // it has to be spelled through the shim alias - see SnowMimeDataType in
+    // snow_shot/compat/qt_compat.h. Writing QMetaType here compiles on Qt 6
+    // (the Windows build) and breaks on Qt 5 (the Linux build).
+    QVariant retrieveData(const QString& mime, SnowMimeDataType type) const override {
         const auto activity = snow_shot::runtime::RuntimeActivityTracker::shared().acquire();
         if (mime == QStringLiteral("application/x-qt-image")) {
             return snow_shot::image_codec::decode(data(QStringLiteral("image/png")),

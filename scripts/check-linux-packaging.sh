@@ -96,3 +96,19 @@ echo "=== qt compat macro order"
 # the Qt5 branch was dead code on every platform and -Wundef turned it into
 # a hard error on GCC (run 15, 9.6.17).
 "$python_command" scripts/check-qt-compat-macro-order.py
+
+echo
+echo "=== qt5/qt6 virtual signatures"
+# A Qt virtual whose signature differs between Qt 5.15 and Qt 6.12 can only
+# be overridden with the spelling of the Qt in use. The QMimeData::retrieveData
+# override is behind `#if !defined(Q_OS_WIN)`, so the Windows build (Qt 6)
+# never compiled it and the Linux build (Qt 5) found it first (run 17,
+# 9.6.19). This gate keeps every such override version-neutral.
+"$python_command" scripts/check-qt5-qt6-virtual-signatures.py
+
+echo
+echo "=== rust target error message"
+# The Rust toolchain probe blamed the target and pointed at a Windows script
+# on the Linux runners, and threw cargo's own output away. The remedy has to
+# name the right platform and carry cargo's words (run 15, 9.6.17).
+"$python_command" scripts/check-rust-target-error.py

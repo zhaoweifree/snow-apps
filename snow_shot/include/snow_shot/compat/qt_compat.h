@@ -64,6 +64,7 @@
 #if !defined(SNOW_COMPAT_INERT)
 
 #include <QtGlobal>
+#include <QAbstractNativeEventFilter>
 #include <QEvent>
 #include <QFuture>
 #include <QHash>
@@ -71,6 +72,7 @@
 #include <QLibraryInfo>
 #include <QList>
 #include <QMargins>
+#include <QMimeData>
 #include <QMetaObject>
 #include <QMetaType>
 #include <QObject>
@@ -847,6 +849,22 @@ using snowNativeEventResult = long;
 using SnowRoleList = QList<int>;
 #else
 using SnowRoleList = QVector<int>;
+#endif
+
+// QMimeData::retrieveData() takes its second parameter as QVariant::Type in
+// Qt 5.15.2 (QtCore/qmimedata.h:88) and as QMetaType in Qt 6.12
+// (QtCore/qmimedata.h:53). The two are not the same type and Qt 6 has no
+// QVariant::Type at all (the enum was dropped from QtCore/qvariant.h), so a
+// subclass cannot spell one signature for both. Overriding it with the Qt 6
+// spelling on Qt 5 fails with
+//   error: 'QVariant ...::retrieveData(const QString&, QMetaType) const'
+//          marked 'override', but does not override
+// (CI run 39736061339, Linux/Qt 5.15.13). Mechanical rewrite rule R13:
+//   retrieveData(const QString&, QMetaType)  ->  retrieveData(const QString&, SnowMimeDataType)
+#if SNOW_QT6
+using SnowMimeDataType = QMetaType;
+#else
+using SnowMimeDataType = QVariant::Type;
 #endif
 
 #if SNOW_COMPAT_HAS_GUI
@@ -2102,5 +2120,49 @@ private:
           return __VA_ARGS__;                                                                       \
       } while (false)
 #endif
+
+// ---------------------------------------------------------------------------
+// 17. Qt5/Qt6 virtual function signature probes.
+//
+//     A Qt class whose virtual function changed signature between Qt 5.15 and
+//     Qt 6.12 can only be overridden with the spelling of the Qt in use. The
+//     override lives in business code, and business code can sit behind a
+//     platform guard -- QMimeData::retrieveData() is overridden inside
+//     `#if !defined(Q_OS_WIN)`, so the Windows build (Qt 6) never compiled it
+//     and the defect survived until the Linux Qt 5 build reached it.
+//
+//     The probes below are classes, not functions, so they are compiled
+//     wherever this header is injected - i.e. in every C++ translation unit
+//     of both routes. That turns "the override matches the base class" into
+//     something the compiler checks on every platform, not only on the one
+//     that happens to compile the overriding code.
+//
+//     Every probe is a final class with a single override whose signature is
+//     spelled through the shim aliases above. If a shim alias stops matching
+//     the Qt in use, the probe stops compiling and the error names the file.
+// ---------------------------------------------------------------------------
+namespace snow_compat_probe {
+
+// QMimeData::retrieveData() - QVariant::Type in Qt 5, QMetaType in Qt 6.
+class MimeDataRetrieveDataProbe final : public QMimeData {
+  protected:
+    QVariant retrieveData(const QString& mimetype, SnowMimeDataType type) const override
+    {
+        return QMimeData::retrieveData(mimetype, type);
+    }
+};
+
+// QAbstractNativeEventFilter::nativeEventFilter() - long* in Qt 5, qintptr* in
+// Qt 6. The alias is snowNativeEventResult (see above).
+class NativeEventFilterProbe final : public QAbstractNativeEventFilter {
+  public:
+    bool nativeEventFilter(const QByteArray& eventType, void* message,
+                           snowNativeEventResult* result) override
+    {
+        return QAbstractNativeEventFilter::nativeEventFilter(eventType, message, result);
+    }
+};
+
+} // namespace snow_compat_probe
 
 #endif // !SNOW_COMPAT_INERT

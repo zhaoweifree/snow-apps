@@ -78,8 +78,41 @@ jobs:
       # `snow-linux` and the platform-independent half of `snow-capture` are
       # pure logic on purpose (docs-uos-linux-port.md P3), so their tests run on
       # the Linux host rather than only on the Windows workstation.
+      # The Rust toolchain is installed by hand instead of through
+      # `dtolnay/rust-toolchain@stable`, and the difference matters:
+      #
+      # `rust-toolchain.toml` pins 1.97.1 *and* asks for the clippy and
+      # rustfmt components. Inside the checkout directory, rustup honours that
+      # file over the default toolchain, so the first `rustc`/`cargo` call
+      # makes rustup install 1.97.1 together with those components. On the
+      # arm64 runner image the pinned toolchain was in a half-installed state,
+      # and rustup's recovery path rolled the whole thing back after a
+      # component-file conflict (CI run 39715098658):
+      #
+      #     info: recovering from a partially installed toolchain
+      #     info: rolling back changes
+      #     error: failed to install component: 'clippy-preview-aarch64-unknown-linux-gnu',
+      #            detected conflict: 'bin/cargo-clippy'
+      #
+      # The rollback took rust-std with it, so the failure surfaced much
+      # later as "Rust target 'aarch64-unknown-linux-gnu' is not installed or
+      # usable" -- the target was never the problem.
+      #
+      # CI does not run clippy or rustfmt (only scripts/check-rust.sh does,
+      # on the workstation), so the fix is to install exactly what the build
+      # needs -- rustc, cargo and the host's rust-std -- and pin it with
+      # RUSTUP_TOOLCHAIN. That environment variable outranks the toolchain
+      # file (verified with `rustup show`: "overridden by environment
+      # variable RUSTUP_TOOLCHAIN"), so rustup no longer tries to add the
+      # missing components and the conflict window disappears.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal --no-self-update --force-non-host
+          rustup default 1.97.1 --force-non-host
+          echo "RUSTUP_TOOLCHAIN=1.97.1" >> "$GITHUB_ENV"
+          rustup show active-toolchain
+          rustc -vV
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -107,10 +140,15 @@ jobs:
 
       # `--all-features` on a non-Windows host was broken until P5 slice 1 fixed
       # the stage-timing re-exports; this step is what keeps it fixed.
+      #
+      # `--toolchain 1.97.1` is explicit because RUSTUP_TOOLCHAIN pins that
+      # toolchain but does not change which one `rustup target add` writes to;
+      # without it the two cross targets could land on a different toolchain
+      # than the one the checks below actually use.
       - name: Rust cross-target type check
         working-directory: snow-crates
         run: |
-          rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+          rustup target add --toolchain 1.97.1 x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
           cargo check -p snow-linux -p snow-linux-c --target x86_64-unknown-linux-gnu --all-features
           cargo check -p snow-linux -p snow-linux-c --target aarch64-unknown-linux-gnu --all-features
 
@@ -187,8 +225,21 @@ jobs:
           bash scripts/build-linux-deps.sh --prefix "$RUNNER_TEMP/snow-linux-deps"
           echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/snow-linux-deps" >> "$GITHUB_ENV"
 
+      # Same reasoning as the gates job: `rust-toolchain.toml` asks for the
+      # clippy and rustfmt components, and letting rustup honour that file
+      # inside the checkout made the arm64 runner install a half-present
+      # toolchain and then roll it back after a component conflict (CI run
+      # 39715098658). CI runs neither component, so only rustc, cargo and the
+      # host's rust-std are installed here, and RUSTUP_TOOLCHAIN pins the
+      # version so the toolchain file can no longer trigger an install.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal --no-self-update --force-non-host
+          rustup default 1.97.1 --force-non-host
+          echo "RUSTUP_TOOLCHAIN=1.97.1" >> "$GITHUB_ENV"
+          rustup show active-toolchain
+          rustc -vV
 
       # The root `CMakeLists.txt` says `cmake_minimum_required(VERSION 4.2)`, and
       # Ubuntu 24.04 ships 3.28 -- whose preset reader rejects the file outright

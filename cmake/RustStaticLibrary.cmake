@@ -179,18 +179,41 @@ function(snow_add_rust_static_libraries batch_name)
     endif()
     snow_detect_rust_target(SNOW_RUST_TARGET)
 
+    # The cargo output is captured instead of discarded. `cargo metadata` is
+    # the probe for "is this Rust target usable", and the reason it fails is
+    # never the target itself: in CI run 39715098658 the target was fine and
+    # the toolchain install had been rolled back, so the only useful line was
+    # the one cargo printed and ERROR_QUIET threw away. The old message then
+    # blamed the target and pointed at scripts/bootstrap.ps1 -- a Windows
+    # script that does not exist on the Linux runners.
     execute_process(
         COMMAND "${CARGO_EXECUTABLE}" metadata --format-version 1
             --filter-platform "${SNOW_RUST_TARGET}" --no-deps
         WORKING_DIRECTORY "${SNOW_RUST_MANIFEST_DIR}"
         RESULT_VARIABLE _metadata_result
         OUTPUT_QUIET
-        ERROR_QUIET
+        ERROR_VARIABLE _metadata_stderr
     )
     if(NOT _metadata_result EQUAL 0)
+        string(STRIP "${_metadata_stderr}" _metadata_stderr)
+        if(WIN32)
+            set(_rust_remedy "Run scripts/bootstrap.ps1.")
+        else()
+            # string(CONCAT), not set() with two arguments: set() takes a
+            # *list*, so the two values would be joined with a ';' and the
+            # message would read "1.97.1 --profile minimal ;--target <triple>".
+            # The remedy is one sentence and has to be copy-pasteable, so the
+            # separator would be a defect, not cosmetics.
+            string(CONCAT _rust_remedy
+                "Install it with: rustup toolchain install 1.97.1 --profile minimal "
+                "--target ${SNOW_RUST_TARGET}")
+        endif()
         message(FATAL_ERROR
-            "Rust target '${SNOW_RUST_TARGET}' is not installed or usable. "
-            "Run scripts/bootstrap.ps1.")
+            "Rust target '${SNOW_RUST_TARGET}' is not installed or usable.\n"
+            "cargo metadata --filter-platform ${SNOW_RUST_TARGET} exited with "
+            "${_metadata_result}.\n"
+            "${_rust_remedy}\n"
+            "cargo said:\n${_metadata_stderr}")
     endif()
 
     if(CMAKE_CONFIGURATION_TYPES)

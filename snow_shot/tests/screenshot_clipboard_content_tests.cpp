@@ -823,7 +823,10 @@ class CountingEncodedMimeData final : public QMimeData {
     mutable int pngRequests = 0;
 
   protected:
-    QVariant retrieveData(const QString& mimeType, QMetaType type) const override {
+    // The second parameter is QVariant::Type in Qt 5 and QMetaType in Qt 6, so
+    // it has to be spelled through the shim alias - see SnowMimeDataType in
+    // snow_shot/compat/qt_compat.h.
+    QVariant retrieveData(const QString& mimeType, SnowMimeDataType type) const override {
         if (mimeType == QStringLiteral("image/png"))
             ++pngRequests;
         return QMimeData::retrieveData(mimeType, type);
