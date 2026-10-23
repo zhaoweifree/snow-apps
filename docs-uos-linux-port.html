@@ -7655,6 +7655,108 @@ else()                                          # 别的错才致命
 <p><strong>这一节的结论可以压成一句</strong>：<code>file(RPATH_SET)</code> 和 <code>$ORIGIN</code> 是两件事——前者修的是
 "已经指向错地方的路径"，后者要求"路径能被写进去"，而后者只有在编译期才可能。</p>
 <hr>
+<h4>9.6.40 run 41：<code>.deb</code> 首次成型，红移到 AppStream 的 schema 规则</h4>
+<p>run 41（<code>faf62a24</code>）出现了这个项目在 Linux 上的第一个<strong>真包</strong>：</p>
+<pre><code class="language-text">Run Build Utility from CPack
+CPack: - package: /home/runner/work/snow-apps/.../snow-shot_1.2.8_arm64.deb generated.
+package-file &quot;snow-shot_1.2.8_arm64.deb&quot; generated
+</code></pre>
+<p><code>Build</code> 两架构第五次连绿，<code>Build the Debian package</code> 一次通过。这同时确认了前三层：</p>
+<ul>
+<li><code>CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON</code> 下 <code>Depends</code> 是 <code>dpkg-shlibdeps</code> 从 ELF 的
+  <code>NEEDED</code> 推出来的，内容形如 <code>libqt5core5t64 …, libqt5gui5t64 …, libqt5widgets5t64 …</code>
+  ——<strong>没有</strong>任何一条是手写的（§9.6.31 那条铁律成立）；</li>
+<li>私有库按 soname 落进 <code>usr/lib/snow-shot/</code>：<code>libIex-3_4.so.33</code>、<code>libImath-3_2.so.30</code>、
+  <code>libhwy.so.1</code>、<code>libjpeg.so.62</code>、<code>libjxl.so.0.11</code>……<strong>后缀与 DT_SONAME 一致</strong>，
+  这是 §9.6.37 的 soname 解析在真机器上的验证；</li>
+<li><code>Architecture:</code> 由矩阵推出 <code>arm64</code>/<code>amd64</code>，与 runner 一致（§9.6.25）。</li>
+</ul>
+<p>红在一个从未被任何本地门禁覆盖的地方：</p>
+<pre><code class="language-text">E: snow-shot.desktop:37: release-time-missing date
+Validation failed: errors: 1, warnings: 1, infos: 2
+</code></pre>
+<p><strong><code>release-time-missing</code> 不是 XML 良构性问题，也不是 <code>desktop-file-validate</code> 的规则。</strong>
+它是 AppStream schema 的一条约束：每个 <code>&lt;release&gt;</code> 元素必须带 <code>date</code>，格式 <code>YYYY-MM-DD</code>。
+仓库自己的 <code>check-linux-freedesktop.py</code> 只检查结构（良构、id 一致、图标命名），
+<code>desktop-file-validate</code> 只看 <code>.desktop</code>，所以这个错<strong>只能在 <code>appstreamcli</code> 里出现</strong>——
+而 <code>appstreamcli</code> 原本只装在 build job 里，代价是"整套构建跑完、打完包之后"才发现。</p>
+<p>日期不能编。取法是把版本号的引入点找出来：</p>
+<pre><code class="language-bash">git log -S &quot;1.2.8&quot; --oneline
+# 7e4347d7 build(release): bump snow shot to 1.2.8
+</code></pre>
+<p>于是 <code>&lt;release version="1.2.8" date="2026-10-13"/&gt;</code>。防线加两层：</p>
+<ol>
+<li><code>check-linux-freedesktop.py</code> 增加"每个 <code>&lt;release&gt;</code> 必须有 <code>YYYY-MM-DD</code> 的 <code>date</code>"，
+   注释里写下 <code>release-time-missing</code> 的原文，免得后来的人以为这条规则是自造的；</li>
+<li><code>gates</code> job 新增 <code>Freedesktop metadata with the real validators</code>：装
+   <code>appstream desktop-file-utils</code>，用与 build job 的 <code>Validate the packaged metadata</code>
+   <strong>完全相同的参数</strong>跑两个校验器。不涉及编译器，几秒钟，红在允许红的 job 里。</li>
+</ol>
+<h5>新步骤让门禁自己红了三条，而那是门禁的错</h5>
+<p>加完上面这两层，<code>check-linux-ci-workflow.py</code> 立刻报：</p>
+<pre><code class="language-text">FAIL gates: installs dpkg-dev: missing from apt list
+FAIL gates: installs qtbase5-private-dev: Qt5::GuiPrivate would be missing and 19 link lines would fail
+FAIL gates: installs patch: the OpenCV in-memory-model patch could not be applied
+</code></pre>
+<p>不是 workflow 缺包。<code>gates</code> 的定义写在它的 <code>name</code> 里：<strong><code>Linux gates (no toolchain)</code></strong>
+——它只跑 <code>cmake -P</code> 脚本模式、cargo 和两个元数据校验器，连编译器都没有。
+原来的断言之所以一直绿，是因为它长这样：</p>
+<pre><code class="language-python">packages = apt_packages(text)
+if not packages:
+    continue                       # ← gates 没有 apt-get install，整个循环跳过
+for tool in (&quot;desktop-file-utils&quot;, &quot;appstream&quot;, &quot;dpkg-dev&quot;):
+    check(...)
+check(... &quot;qtbase5-private-dev&quot; ...)
+check(... &quot;patch&quot; ...)
+</code></pre>
+<p><strong>"没有 apt 列表就跳过"</strong>掩盖了"这套要求本来只对构建 job 成立"。给 <code>gates</code> 加第一个
+<code>apt-get install</code> 的那一刻，它就开始要求一个不编译任何东西的 job 去装 Qt 私有头。</p>
+<p>修法不是把三个包塞进 <code>gates</code>（那是把门禁的错当成流程的错），而是<strong>让要求从 job 自己做什么
+推出来</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>要求</th>
+<th>依据（读 job 的 <code>run</code> 文本）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>desktop-file-utils</code> / <code>appstream</code></td>
+<td>该 job 调用 <code>desktop-file-validate</code> 或 <code>appstreamcli</code></td>
+</tr>
+<tr>
+<td><code>dpkg-dev</code></td>
+<td>该 job 调用 <code>cpack --config</code> 或 <code>dpkg-deb</code></td>
+</tr>
+<tr>
+<td><code>qtbase5-private-dev</code> / <code>patch</code> / <code>squashfs-tools</code></td>
+<td>该 job 调用 <code>cmake --build --preset</code> 或 <code>build-linux-deps.sh</code></td>
+</tr>
+<tr>
+<td><code>libopencv-dev</code> 必须缺席</td>
+<td>所有 job（任何 job 装它都是两个来源）</td>
+</tr>
+</tbody>
+</table>
+<p><code>gates</code> 现在只被要求前两组里的第一组，<code>build</code> 全中——两边的错都会红。</p>
+<h5>同一个循环里另外两个洞</h5>
+<ol>
+<li><strong><code>apt_packages</code> 只读第一个 <code>apt-get install</code> 块。</strong><code>break</code> 出去的写法让 job 里的第二个
+   安装块<strong>完全隐形</strong>：把一个包从第一块挪到第二块，"缺包"就变成"装好了"。改成逐行扫完
+   整个 job 的 <code>run</code> 文本，遇非续行只结束当前块。差分实测：把 <code>build</code> 的两个校验器拆到
+   独立安装块，新读法 <code>sees=True</code>、旧读法 <code>sees=False</code>，而门禁仍绿——差别是真的。</li>
+<li><strong>"校验器步骤不见了，包检查就变空转。"</strong>上面的包断言是条件式的（job 调了才要求），
+   于是删掉那个 step，断言连同它守的东西一起消失、还报 ok。所以另加
+   <code>metadata_validator_checks()</code>，直接按名字锚定两个 step 并断言它们各自调用两个校验器，
+   参数里都带 <code>--no-net</code>——两处不许各说各话。</li>
+</ol>
+<p>反向验证四条变异全部变红、恢复全部变绿：<code>gates</code> 少 <code>appstream</code>、<code>gates</code> 不再调
+<code>appstreamcli</code>、<code>build</code> 少 <code>qtbase5-private-dev</code>、<code>build</code> 的 step 改名。</p>
+<p><strong>这一节的结论</strong>：<code>Build</code> 和打包容器的绿灯是靠"每一步只信机器给的证据"攒出来的；
+而门禁一旦把 A job 的要求套到 B job 上，它红得比 CI 还早——那时该改的是门禁的<strong>依据</strong>，
+不是被它指着的那个文件。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

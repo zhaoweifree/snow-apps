@@ -5552,6 +5552,113 @@ else()                                          # 别的错才致命
 
 ---
 
+#### 9.6.40 run 41：`.deb` 首次成型，红移到 AppStream 的 schema 规则
+
+run 41（`faf62a24`）出现了这个项目在 Linux 上的第一个**真包**：
+
+```text
+Run Build Utility from CPack
+CPack: - package: /home/runner/work/snow-apps/.../snow-shot_1.2.8_arm64.deb generated.
+package-file "snow-shot_1.2.8_arm64.deb" generated
+```
+
+`Build` 两架构第五次连绿，`Build the Debian package` 一次通过。这同时确认了前三层：
+
+* `CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON` 下 `Depends` 是 `dpkg-shlibdeps` 从 ELF 的
+  `NEEDED` 推出来的，内容形如 `libqt5core5t64 …, libqt5gui5t64 …, libqt5widgets5t64 …`
+  ——**没有**任何一条是手写的（§9.6.31 那条铁律成立）；
+* 私有库按 soname 落进 `usr/lib/snow-shot/`：`libIex-3_4.so.33`、`libImath-3_2.so.30`、
+  `libhwy.so.1`、`libjpeg.so.62`、`libjxl.so.0.11`……**后缀与 DT_SONAME 一致**，
+  这是 §9.6.37 的 soname 解析在真机器上的验证；
+* `Architecture:` 由矩阵推出 `arm64`/`amd64`，与 runner 一致（§9.6.25）。
+
+红在一个从未被任何本地门禁覆盖的地方：
+
+```text
+E: snow-shot.desktop:37: release-time-missing date
+Validation failed: errors: 1, warnings: 1, infos: 2
+```
+
+**`release-time-missing` 不是 XML 良构性问题，也不是 `desktop-file-validate` 的规则。**
+它是 AppStream schema 的一条约束：每个 `<release>` 元素必须带 `date`，格式 `YYYY-MM-DD`。
+仓库自己的 `check-linux-freedesktop.py` 只检查结构（良构、id 一致、图标命名），
+`desktop-file-validate` 只看 `.desktop`，所以这个错**只能在 `appstreamcli` 里出现**——
+而 `appstreamcli` 原本只装在 build job 里，代价是"整套构建跑完、打完包之后"才发现。
+
+日期不能编。取法是把版本号的引入点找出来：
+
+```bash
+git log -S "1.2.8" --oneline
+# 7e4347d7 build(release): bump snow shot to 1.2.8
+```
+
+于是 `<release version="1.2.8" date="2026-10-13"/>`。防线加两层：
+
+1. `check-linux-freedesktop.py` 增加"每个 `<release>` 必须有 `YYYY-MM-DD` 的 `date`"，
+   注释里写下 `release-time-missing` 的原文，免得后来的人以为这条规则是自造的；
+2. `gates` job 新增 `Freedesktop metadata with the real validators`：装
+   `appstream desktop-file-utils`，用与 build job 的 `Validate the packaged metadata`
+   **完全相同的参数**跑两个校验器。不涉及编译器，几秒钟，红在允许红的 job 里。
+
+##### 新步骤让门禁自己红了三条，而那是门禁的错
+
+加完上面这两层，`check-linux-ci-workflow.py` 立刻报：
+
+```text
+FAIL gates: installs dpkg-dev: missing from apt list
+FAIL gates: installs qtbase5-private-dev: Qt5::GuiPrivate would be missing and 19 link lines would fail
+FAIL gates: installs patch: the OpenCV in-memory-model patch could not be applied
+```
+
+不是 workflow 缺包。`gates` 的定义写在它的 `name` 里：**`Linux gates (no toolchain)`**
+——它只跑 `cmake -P` 脚本模式、cargo 和两个元数据校验器，连编译器都没有。
+原来的断言之所以一直绿，是因为它长这样：
+
+```python
+packages = apt_packages(text)
+if not packages:
+    continue                       # ← gates 没有 apt-get install，整个循环跳过
+for tool in ("desktop-file-utils", "appstream", "dpkg-dev"):
+    check(...)
+check(... "qtbase5-private-dev" ...)
+check(... "patch" ...)
+```
+
+**"没有 apt 列表就跳过"**掩盖了"这套要求本来只对构建 job 成立"。给 `gates` 加第一个
+`apt-get install` 的那一刻，它就开始要求一个不编译任何东西的 job 去装 Qt 私有头。
+
+修法不是把三个包塞进 `gates`（那是把门禁的错当成流程的错），而是**让要求从 job 自己做什么
+推出来**：
+
+| 要求 | 依据（读 job 的 `run` 文本） |
+|---|---|
+| `desktop-file-utils` / `appstream` | 该 job 调用 `desktop-file-validate` 或 `appstreamcli` |
+| `dpkg-dev` | 该 job 调用 `cpack --config` 或 `dpkg-deb` |
+| `qtbase5-private-dev` / `patch` / `squashfs-tools` | 该 job 调用 `cmake --build --preset` 或 `build-linux-deps.sh` |
+| `libopencv-dev` 必须缺席 | 所有 job（任何 job 装它都是两个来源） |
+
+`gates` 现在只被要求前两组里的第一组，`build` 全中——两边的错都会红。
+
+##### 同一个循环里另外两个洞
+
+1. **`apt_packages` 只读第一个 `apt-get install` 块。**`break` 出去的写法让 job 里的第二个
+   安装块**完全隐形**：把一个包从第一块挪到第二块，"缺包"就变成"装好了"。改成逐行扫完
+   整个 job 的 `run` 文本，遇非续行只结束当前块。差分实测：把 `build` 的两个校验器拆到
+   独立安装块，新读法 `sees=True`、旧读法 `sees=False`，而门禁仍绿——差别是真的。
+2. **"校验器步骤不见了，包检查就变空转。"**上面的包断言是条件式的（job 调了才要求），
+   于是删掉那个 step，断言连同它守的东西一起消失、还报 ok。所以另加
+   `metadata_validator_checks()`，直接按名字锚定两个 step 并断言它们各自调用两个校验器，
+   参数里都带 `--no-net`——两处不许各说各话。
+
+反向验证四条变异全部变红、恢复全部变绿：`gates` 少 `appstream`、`gates` 不再调
+`appstreamcli`、`build` 少 `qtbase5-private-dev`、`build` 的 step 改名。
+
+**这一节的结论**：`Build` 和打包容器的绿灯是靠"每一步只信机器给的证据"攒出来的；
+而门禁一旦把 A job 的要求套到 B job 上，它红得比 CI 还早——那时该改的是门禁的**依据**，
+不是被它指着的那个文件。
+
+---
+
 ## 10. 工作量 / 优先级矩阵
 
 | 编号 | 工作项 | 规模 | 风险 | 优先级 |

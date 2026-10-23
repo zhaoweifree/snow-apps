@@ -210,6 +210,22 @@ def main() -> int:
         ]
         check("metainfo lists the current version",
               version.group(1) in released, f"{version.group(1)} not in {released}")
+        # `appstreamcli validate` fails on a release without a date:
+        #
+        #     E: snow-shot.desktop:37: release-time-missing date
+        #     Validation failed: errors: 1, ...
+        #
+        # and that error used to surface in `Validate the packaged metadata`,
+        # half an hour into a build. Neither `desktop-file-validate` nor any XML
+        # well-formedness check can see it, because it is a rule about the
+        # AppStream schema rather than about the document -- so it is spelled out
+        # here, where it costs a second.
+        releases = component.findall("releases/release")
+        for release in releases:
+            version_attr = release.get("version", "?")
+            date = (release.get("date") or "").strip()
+            check(f"metainfo release {version_attr} has a date",
+                  bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", date)), date or "missing")
 
     # --- The icon -------------------------------------------------------------
     try:

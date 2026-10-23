@@ -19,7 +19,10 @@ Checked:
     runner's full six-hour budget;
   * the matrix architectures map to the architectures the packaging gate
     asserts, so ``Architecture:`` in the .deb cannot disagree with the runner;
-  * the apt package list is non-empty and names no package twice;
+  * the apt package lists are non-empty, name no package twice, and install the
+    tools each job actually invokes -- the compiler headers where a job
+    compiles, the two metadata validators where a job validates; a job is
+    never asked to install a toolchain it does not use;
   * ``gates`` installs PyYAML, without which three checks in this file degrade
     to no-ops (see ``load_yaml``);
   * ``gates`` verifies that both cargo lockfiles are current -- ``snow_rust_ffi``
@@ -111,7 +114,14 @@ EXPRESSION = re.compile(r"\$\{\{[^}]*\}\}")
 
 
 def apt_packages(text: str) -> list[str]:
-    """Return the package names of the first ``apt-get install`` in a ``run`` block."""
+    """Every package named by any ``apt-get install`` in a job's ``run`` blocks.
+
+    *Any*, not the first: this used to stop at the first block, so a job that
+    installed its compiler in one step and a validator in a later step only ever
+    had the first list checked -- and a package silently dropped from the second
+    block read as "installed". A job is free to spread its packages over several
+    steps; the assertion is about what the job ends up with.
+    """
     packages: list[str] = []
     collecting = False
     for line in text.splitlines():
@@ -127,8 +137,10 @@ def apt_packages(text: str) -> list[str]:
                 continue
             if re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", word):
                 packages.append(word)
+        # A line that does not end in `\` closes the block; keep scanning from
+        # the next line instead of giving up on the rest of the job.
         if not continued:
-            break
+            collecting = False
     return packages
 
 
@@ -251,6 +263,46 @@ def appimage_checks(jobs: dict) -> None:
     check("the root CMakeLists offers SNOW_APPS_PACKAGE_APPIMAGE",
           "SNOW_APPS_PACKAGE_APPIMAGE" in root_cmake.read_text(encoding="utf-8"),
           "the option the workflow turns on does not exist")
+
+
+def metadata_validator_checks(jobs: dict) -> None:
+    """Both metadata validators run in both jobs that can afford them.
+
+    The apt check above only asks "the validator's package is installed *if*
+    the job runs the validator". That is a check that disappears together with
+    the thing it guards: delete the step and it goes vacuously green. Run 41
+    is the reason both steps exist -- `appstreamcli` rejected the metainfo for
+    a missing release date that neither `desktop-file-validate` nor the
+    repository's own structural gate can see, and it did so after the whole
+    build had finished:
+
+        E: snow-shot.desktop:37: release-time-missing date
+
+    `gates` can run them in seconds (no compiler involved), and the build job
+    has to run them again because that is where the *packaged* copies live.
+    """
+    expected = {
+        "gates": "Freedesktop metadata with the real validators",
+        "build": "Validate the packaged metadata",
+    }
+    for job_name, step_name in expected.items():
+        job = jobs.get(job_name)
+        if job is None:
+            check(f"{job_name}: exists for the metadata validators", False, "no such job")
+            continue
+        steps = {step.get("name", ""): step for step in steps_of(job)}
+        step = steps.get(step_name)
+        check(f"{job_name}: has the step '{step_name}'", step is not None,
+              "found: " + ", ".join(name for name in steps if name))
+        if step is None:
+            continue
+        text = step.get("run", "")
+        # Same flags in both places on purpose: `--no-net` keeps a runner
+        # without network from validating a cached copy of the AppStream data,
+        # and the two steps must not be able to disagree about it.
+        for token in ("desktop-file-validate", "appstreamcli validate --no-net"):
+            check(f"{job_name}: '{step_name}' runs {token}", token in text,
+                  "the schema rules are only enforced by these two tools")
 
 
 def main() -> int:
@@ -429,8 +481,14 @@ def main() -> int:
               re.search(r"rustup target add[ \t]+--toolchain[ \t]+1\.97\.1", gates_text) is not None,
               "the targets could land on a different toolchain than the checks use")
 
-        # The apt list: duplicated names are harmless but usually mean a
-        # copy-paste that dropped the package somebody meant to add.
+        # The apt lists, split by what each job is actually asked to do. The
+        # requirements are not one list applied to every job: `gates` is defined
+        # as "no toolchain" (it runs `cmake -P` script-mode checks, cargo and two
+        # metadata validators), so demanding `qtbase5-private-dev` of it is a
+        # demand to install a compiler header tree it never compiles against.
+        # The distinction is read out of the job, not out of its name: a job
+        # builds if it invokes the project build, and it validates if it runs a
+        # validator. That keeps a renamed or added job honest in both directions.
         for job_name, job in jobs.items():
             text = "\n".join(run_commands(job))
             packages = apt_packages(text)
@@ -439,11 +497,33 @@ def main() -> int:
             duplicates = {p for p in packages if packages.count(p) > 1}
             check(f"{job_name}: apt package list has no duplicates", not duplicates,
                   ", ".join(sorted(duplicates)))
+
             # The validators the port document defers to "the first command on
-            # the real machine" have to be installed here or that step is a
-            # no-op that still exits zero on an empty grep.
-            for tool in ("desktop-file-utils", "appstream", "dpkg-dev"):
-                check(f"{job_name}: installs {tool}", tool in packages, "missing from apt list")
+            # the real machine" have to be installed by whichever job runs them
+            # or that step is a no-op that still exits zero on an empty grep.
+            # Neither needs a compiler, so both jobs can carry this.
+            if "desktop-file-validate" in text or "appstreamcli" in text:
+                for tool in ("desktop-file-utils", "appstream"):
+                    check(f"{job_name}: installs {tool}", tool in packages,
+                          "missing from apt list")
+            # `dpkg-dev` earns its place in two jobs for two reasons: `gates`
+            # never builds a package (so it is not required there), and the
+            # build job needs `dpkg-shlibdeps` for cpack's Depends and
+            # `dpkg-deb` for the metadata step.
+            if "cpack --config" in text or "dpkg-deb" in text:
+                check(f"{job_name}: installs dpkg-dev", "dpkg-dev" in packages,
+                      "missing from apt list")
+
+            # Below this line the requirements are about compiling the project.
+            # Two sources for the same library means a failed build silently
+            # falls back to the old one, so `libopencv-dev` has to be absent
+            # everywhere -- but the rest only makes sense where there is a
+            # compiler.
+            check(f"{job_name}: does not install libopencv-dev",
+                  "libopencv-dev" not in packages,
+                  "the distribution's OpenCV 4.6 would shadow the pinned 4.12")
+            if "cmake --build --preset" not in text and "scripts/build-linux-deps.sh" not in text:
+                continue
             # qtbase5-dev is public headers only: without qtbase5-private-dev
             # `Qt5::GuiPrivate` never exists, and the sources do include
             # `<qpa/...>` / `<private/...>` (CI run 39600792545).
@@ -455,23 +535,16 @@ def main() -> int:
             # list for the checkout, so `patch` is the explicit dependency.
             check(f"{job_name}: installs patch", "patch" in packages,
                   "the OpenCV in-memory-model patch could not be applied")
-            # Two sources for the same library means a failed build silently
-            # falls back to the old one. The distribution's OpenCV is 4.6,
-            # which has neither the `cv::barcode` API nor the in-memory
-            # `WeChatQRCode` constructor the barcode service is written
-            # against (§9.6.20) -- it has to be absent.
-            check(f"{job_name}: does not install libopencv-dev",
-                  "libopencv-dev" not in packages,
-                  "the distribution's OpenCV 4.6 would shadow the pinned 4.12")
             # appimagetool shells out to mksquashfs. It is a separate package
             # from appimagetool, and on a runner it is the only thing standing
             # between a green build and "mksquashfs: command not found".
-            if job_name == "build":
+            if "Build the AppImage" in [step.get("name", "") for step in steps_of(job)]:
                 check(f"{job_name}: installs squashfs-tools",
                       "squashfs-tools" in packages,
                       "appimagetool cannot build the squashfs without mksquashfs")
 
         appimage_checks(jobs)
+        metadata_validator_checks(jobs)
         paths_ignore_checks(workflow)
 
     if failures:
