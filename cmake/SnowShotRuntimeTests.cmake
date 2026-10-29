@@ -84,17 +84,17 @@ function(snow_shot_add_ocr_runtime_tests)
     set_tests_properties(snow-shot-ocr-cpu-recognition-service-tests PROPERTIES
         TIMEOUT 120
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-ocr-directml-recognition-service-tests PROPERTIES
         TIMEOUT 120
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(NAME snow-shot-ocr-storage-relocation-tests
         COMMAND snow-shot-ocr-recognition-service-tests --storage-relocation-only)
     set_tests_properties(snow-shot-ocr-storage-relocation-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-ocr-process-lifecycle-tests
         COMMAND snow-shot-ocr-recognition-service-tests --process-lifecycle)
     add_executable(snow-shot-ocr-assets-tests
@@ -108,7 +108,7 @@ function(snow_shot_add_ocr_runtime_tests)
     endif()
     add_test(NAME snow-shot-ocr-assets-tests COMMAND snow-shot-ocr-assets-tests)
     set_tests_properties(snow-shot-ocr-assets-tests PROPERTIES TIMEOUT 60 LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(WIN32 AND SNOW_WINDOWS_ARCHITECTURE STREQUAL "x64")
         add_executable(snow-shot-ocr-assets-arm64-contract-tests
             tests/screenshot_ocr_assets_arm64_tests.cpp
@@ -122,7 +122,7 @@ function(snow_shot_add_ocr_runtime_tests)
             COMMAND snow-shot-ocr-assets-arm64-contract-tests)
         set_tests_properties(snow-shot-ocr-assets-arm64-contract-tests PROPERTIES
             TIMEOUT 60 LABELS "unit;windows"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     add_test(NAME snow-shot-ocr-managed-runtime-tests
         COMMAND snow-shot-ocr-recognition-service-tests --managed-runtime-only)
@@ -131,13 +131,13 @@ function(snow_shot_add_ocr_runtime_tests)
     set_tests_properties(snow-shot-ocr-managed-runtime-tests
         snow-shot-ocr-managed-directml-runtime-tests PROPERTIES
         TIMEOUT 60 LABELS "unit;windows"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(APPLE)
         set_tests_properties(snow-shot-ocr-managed-runtime-tests PROPERTIES LABELS "unit")
         set_tests_properties(snow-shot-ocr-directml-recognition-service-tests PROPERTIES LABELS "unit;windows")
     endif()
     set_tests_properties(snow-shot-ocr-process-lifecycle-tests PROPERTIES TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_dependencies(snow-shot-ocr-recognition-service-tests snow_ocr_process)
     if(NOT SNOW_SHOT_BUILD_TESTS)
         snow_add_qt_test_cli_guard()

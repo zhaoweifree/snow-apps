@@ -333,7 +333,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-mini-local-shortcut-reset-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     get_target_property(_cloud_test_sources snow-shot-cloud-upload-tests SOURCES)
     list(FILTER _cloud_test_sources EXCLUDE REGEX "/qrc_[^/]+\\.cpp$")
@@ -345,7 +345,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-mini-cloud-upload-tests COMMAND snow-shot-mini-cloud-upload-tests -platform offscreen)
     set_tests_properties(snow-shot-mini-cloud-upload-tests PROPERTIES LABELS "unit" TIMEOUT 90
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     # The Mini regression also restores legacy pins and exercises palette
     # controls, so use the complete pinned-window fixture rather than only the
@@ -405,7 +405,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             snow-shot-full-branding-tests snow-shot-mini-branding-tests)
         add_test(NAME ${_test} COMMAND ${_test})
         set_tests_properties(${_test} PROPERTIES LABELS unit TIMEOUT 60
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endforeach()
     snow_shot_offscreen_qpa_environment(_mini_qpa_environment)
     set_tests_properties(snow-shot-mini-recognition-tests

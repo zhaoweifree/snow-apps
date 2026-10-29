@@ -1145,7 +1145,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-system-notification-controller-tests -platform offscreen)
     set_tests_properties(snow-shot-system-notification-controller-tests PROPERTIES
         LABELS "unit" TIMEOUT 30 ENVIRONMENT "${_SNOW_NOTIFICATION_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 # The payload half of the Linux notification backend is text handling: which
 # characters need escaping, which hint carries which type, and the argument order
@@ -1246,7 +1246,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     target_link_libraries(snow-shot-linux-autostart-tests PRIVATE snow_shot_administrator)
     add_test(NAME snow-shot-linux-autostart-tests COMMAND snow-shot-linux-autostart-tests)
     set_tests_properties(snow-shot-linux-autostart-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     # Same reasoning as the autostart test above: the D-Bus payload is text
     # handling, so the argument order, the hint types and the escaping rules are
     # asserted on every host. Delivering it needs a session bus and stays on Linux.
@@ -1255,20 +1255,20 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow_shot_notification_payload)
     add_test(NAME snow-shot-linux-notification-tests COMMAND snow-shot-linux-notification-tests)
     set_tests_properties(snow-shot-linux-notification-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     # The tray payload again needs no bus: it is byte order, entity decoding and
     # the two predicates that decide when our own item is exported at all.
     add_executable(snow-shot-linux-tray-tests tests/linux_tray_tests.cpp)
     target_link_libraries(snow-shot-linux-tray-tests PRIVATE snow_shot_status_notifier_payload)
     add_test(NAME snow-shot-linux-tray-tests COMMAND snow-shot-linux-tray-tests)
     set_tests_properties(snow-shot-linux-tray-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_executable(snow-shot-shell-image-launch-tests tests/shell_image_launch_tests.cpp)
     target_include_directories(snow-shot-shell-image-launch-tests PRIVATE include)
     target_link_libraries(snow-shot-shell-image-launch-tests PRIVATE Qt::Core)
     add_test(NAME snow-shot-shell-image-launch-tests COMMAND snow-shot-shell-image-launch-tests)
     set_tests_properties(snow-shot-shell-image-launch-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-administrator-launch-tests tests/administrator_launch_tests.cpp)
     target_link_libraries(snow-shot-administrator-launch-tests PRIVATE snow_shot_administrator)
@@ -1293,7 +1293,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     target_link_libraries(snow-shot-application-restart-tests PRIVATE Qt::Core Qt::Network)
     add_test(NAME snow-shot-application-restart-tests COMMAND snow-shot-application-restart-tests)
     set_tests_properties(snow-shot-application-restart-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 add_library(snow_shot_permissions STATIC
     include/snow_shot/presentation/apppermissionservice.h
@@ -2067,7 +2067,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-diagnostics-tests PROPERTIES LABELS "unit" TIMEOUT 60)
     if(WIN32)
         set_tests_properties(snow-shot-diagnostics-tests PROPERTIES
-            ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt::Core>\;$ENV{PATH}")
+            ENVIRONMENT "PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>\;$ENV{PATH}")
     endif()
     snow_shot_add_diagnostics_crash_tests()
 
@@ -2101,7 +2101,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         add_test(NAME snow-shot-arm64-stack-cookie-tests COMMAND snow-shot-arm64-stack-cookie-tests)
         set_tests_properties(snow-shot-arm64-stack-cookie-tests PROPERTIES
             LABELS "unit;windows" TIMEOUT 30
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
 
     if(WIN32)
@@ -2109,7 +2109,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         target_link_libraries(snow-shot-storage-directory-change-tests PRIVATE snow_shot_storage Qt::Core)
         add_test(NAME snow-shot-storage-directory-change-tests COMMAND snow-shot-storage-directory-change-tests)
         set_tests_properties(snow-shot-storage-directory-change-tests PROPERTIES LABELS "unit;windows" TIMEOUT 90
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
         add_executable(snow-shot-storage-directory-crash-capture-tests
             tests/storage_directory_crash_capture_tests.cpp)
@@ -2129,11 +2129,11 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-local-shortcut-migration-tests
         COMMAND snow-shot-application-storage-tests --local-shortcut-migration-only)
     set_tests_properties(snow-shot-local-shortcut-migration-tests PROPERTIES LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-update-settings-tests
         COMMAND snow-shot-application-storage-tests --update-settings-only)
     set_tests_properties(snow-shot-update-settings-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(APPLE)
         add_test(NAME snow-shot-storage-startup-directory-tests
             COMMAND snow-shot-application-storage-tests --directory-resolution-only)
@@ -2143,17 +2143,17 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-selection-aspect-ratio-settings-tests
         COMMAND snow-shot-application-storage-tests --selection-aspect-ratio-only)
     set_tests_properties(snow-shot-selection-aspect-ratio-settings-tests PROPERTIES LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-recording-post-processing-settings-tests
         COMMAND snow-shot-application-storage-tests --recording-post-processing-only)
     set_tests_properties(snow-shot-recording-post-processing-settings-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-scrolling-interval-settings-tests
         COMMAND snow-shot-application-storage-tests --scrolling-interval-only)
     set_tests_properties(snow-shot-scrolling-interval-settings-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     # Flaky by design: the async policy mutation settles on timers, and
     add_test(NAME snow-shot-pin-to-screen-storage-tests
         COMMAND snow-shot-application-storage-tests --pin-shortcuts-only)
@@ -2170,7 +2170,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-application-storage-tests --auto-save-after-execution-only)
     set_tests_properties(snow-shot-auto-save-execution-storage-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-storage-quit-lifetime-tests
         COMMAND snow-shot-application-storage-tests --quit-lifetime-only)
     add_test(NAME snow-shot-draw-template-storage-tests
@@ -2183,7 +2183,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-watermark-content-storage-tests PROPERTIES
         RUN_SERIAL TRUE
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-capture-history-repository-tests
@@ -2202,7 +2202,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-capture-history-repository-tests
         snow-shot-capture-history-revision-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-pinned-window-repository-tests
@@ -2221,7 +2221,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         LABELS "unit" TIMEOUT 60)
     set_tests_properties(snow-shot-pinned-window-repository-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-storage-usage-tracker-tests
@@ -2235,7 +2235,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-storage-usage-tracker-tests)
     set_tests_properties(snow-shot-storage-usage-tracker-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-form-fields-tests tests/form_fields_tests.cpp
@@ -2246,7 +2246,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-form-fields-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-text-translation-settings-tests tests/text_translation_settings_tests.cpp
         src/presentation/services/screenshotclipboardservice.cpp)
@@ -2278,7 +2278,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-mcp-settings-widget-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-mcp-settings-widget-tests)
 
@@ -2303,14 +2303,14 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-storage-status-widget-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -2320,13 +2320,13 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-annotation-toolbar-editor-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-storage-directory-widget-tests
         COMMAND snow-shot-storage-status-widget-tests --storage-directory-only -platform offscreen)
     set_tests_properties(snow-shot-storage-directory-widget-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-configuration-transfer-widget-tests
@@ -2353,14 +2353,14 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-configuration-transfer-widget-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -2371,7 +2371,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-pinned-window-management-page-tests COMMAND snow-shot-pinned-window-management-page-tests)
     set_tests_properties(snow-shot-pinned-window-management-page-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-screenshot-history-page-tests
         tests/screenshot_history_page_tests.cpp
@@ -2396,14 +2396,14 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(NAME snow-shot-screenshot-history-context-menu-tests
         COMMAND snow-shot-screenshot-history-page-tests --context-menu-only -platform offscreen)
     set_tests_properties(snow-shot-screenshot-history-context-menu-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     snow_shot_add_translations(snow-shot-screenshot-history-page-tests)
     snow_shot_import_offscreen_platform(snow-shot-screenshot-history-page-tests)
 
@@ -2424,7 +2424,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-single-instance-coordinator-tests)
     set_tests_properties(snow-shot-single-instance-coordinator-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     # Where the socket and the lock land on Linux: no bus, no filesystem, only the
     # path arithmetic and the ownership rule, so it runs on every host.
@@ -2438,7 +2438,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-linux-single-instance-endpoint-tests)
     set_tests_properties(snow-shot-linux-single-instance-endpoint-tests PROPERTIES LABELS "unit"
         TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_test(NAME snow-shot-storage-boundary-check
         COMMAND ${CMAKE_COMMAND}
@@ -2465,7 +2465,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-screenshot-result-compositor-tests -platform offscreen)
     set_tests_properties(snow-shot-screenshot-result-compositor-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-screenshot-export-service-tests
@@ -2506,7 +2506,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-fractional-dpi-export-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-screenshot-export-service-tests)
 
@@ -2563,7 +2563,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
 
         add_executable(snow-shot-window-cursor-refresh-tests
@@ -2584,7 +2584,7 @@ if(SNOW_SHOT_BUILD_TESTS)
                  COMMAND snow-shot-window-cursor-refresh-tests)
         set_tests_properties(snow-shot-window-cursor-refresh-tests PROPERTIES
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
             TIMEOUT 20
             LABELS "unit;windows"
         )
@@ -2623,7 +2623,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-about-page-tests
@@ -2663,7 +2663,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     target_link_libraries(snow-shot-about-page-tests PRIVATE snow_shot_updates)
     set_tests_properties(snow-shot-about-page-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     get_target_property(_main_window_font_sources snow-shot-about-page-tests SOURCES)
@@ -2716,7 +2716,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-storage-directory-catalog-tests
         COMMAND snow-shot-settings-catalog-tests --storage-directory-only)
     set_tests_properties(snow-shot-storage-directory-catalog-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-settings-catalog-tests
              COMMAND snow-shot-settings-catalog-tests)
     add_test(NAME snow-shot-ocr-text-options-catalog-tests
@@ -2725,12 +2725,12 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-settings-catalog-tests --ocr-highlighting-only)
     set_tests_properties(snow-shot-ocr-highlighting-settings-catalog-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-ocr-text-options-catalog-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-settings-catalog-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-main-window-skin-codec-tests tests/main_window_skin_codec_tests.cpp)
@@ -2772,7 +2772,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-app-font-tests)
     snow_shot_add_translations(snow-shot-app-font-tests)
@@ -2791,7 +2791,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-theme-primary-color-tests)
     snow_shot_add_translations(snow-shot-theme-primary-color-tests)
@@ -2812,13 +2812,13 @@ if(SNOW_SHOT_BUILD_TESTS)
         TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-custom-color-presets-settings-tests PROPERTIES
         LABELS "unit"
         TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-settings-color-commit-tests)
 
@@ -2833,7 +2833,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-settings-slider-commit-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-settings-page-loading-tests
         tests/settings_page_loading_tests.cpp
@@ -2847,14 +2847,14 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-settings-select-tests PROPERTIES
         TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(NAME snow-shot-settings-page-loading-tests
         COMMAND snow-shot-settings-page-loading-tests)
     set_tests_properties(snow-shot-settings-page-loading-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-settings-navigation-tests
         COMMAND snow-shot-settings-page-loading-tests --navigation-only)
     add_test(NAME snow-shot-action-toolbar-settings-tests
@@ -2867,7 +2867,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-settings-layout-stability-tests snow-shot-tray-selection-settings-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-annotation-shortcut-settings-tests
         tests/annotation_shortcut_settings_tests.cpp
@@ -2880,7 +2880,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-annotation-shortcut-settings-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-screen-recording-shortcut-settings-tests
         tests/screen_recording_shortcut_settings_tests.cpp
@@ -2896,7 +2896,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-screen-recording-shortcut-settings-tests)
 
@@ -2910,7 +2910,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-local-shortcut-reset-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     snow_shot_import_offscreen_platform(snow-shot-local-shortcut-reset-tests)
 
     add_executable(snow-shot-pin-to-screen-shortcut-settings-tests
@@ -2927,7 +2927,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-pin-to-screen-shortcut-settings-tests)
 
@@ -2946,18 +2946,18 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-application-storage-tests --ocr-highlighting-only)
     set_tests_properties(snow-shot-ocr-highlighting-settings-tests
         snow-shot-ocr-highlighting-storage-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-text-detection-processing-settings-tests
         COMMAND snow-shot-translation-settings-tests --text-detection-processing-only -platform offscreen)
     set_tests_properties(snow-shot-text-detection-processing-settings-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-translation-settings-tests PROPERTIES
         TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-translation-settings-tests)
 
@@ -2981,7 +2981,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-settings-runtime-session-tests)
     set_tests_properties(snow-shot-settings-runtime-session-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-configuration-archive-tests
@@ -3001,15 +3001,15 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-configuration-archive-tests --auto-save-after-execution-only)
     set_tests_properties(snow-shot-auto-save-execution-archive-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-selection-aspect-ratio-archive-tests
         COMMAND snow-shot-configuration-archive-tests --selection-aspect-ratio-only)
     set_tests_properties(snow-shot-selection-aspect-ratio-archive-tests PROPERTIES LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-configuration-archive-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-button-border-tests
@@ -3023,7 +3023,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-button-border-tests COMMAND snow-shot-button-border-tests)
     set_tests_properties(snow-shot-button-border-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-global-mouse-page-tests
@@ -3039,7 +3039,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-global-mouse-page-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     snow_shot_import_offscreen_platform(snow-shot-global-mouse-page-tests)
 
@@ -3108,7 +3108,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-selector-policy-tests)
     set_tests_properties(snow-shot-selector-policy-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-window-element-api-tests
@@ -3161,7 +3161,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-system-tray-controller-tests
@@ -3212,7 +3212,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-system-tray-controller-tests --recording-export-only -platform offscreen)
     set_tests_properties(snow-shot-recording-export-tray-tests PROPERTIES LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-tray-group-refresh-tests
         COMMAND snow-shot-system-tray-controller-tests --group-refresh-only -platform offscreen)
     add_test(NAME snow-shot-tray-menu-position-tests
@@ -3224,35 +3224,35 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-tray-fullscreen-suppression-tests PROPERTIES
         LABELS "unit" TIMEOUT 30 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-tray-menu-selection-tests PROPERTIES
         LABELS "unit" TIMEOUT 30 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     snow_shot_import_offscreen_platform(snow-shot-system-tray-controller-tests)
     set_tests_properties(snow-shot-tray-skin-tests PROPERTIES LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-tray-group-refresh-tests PROPERTIES LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-tray-menu-position-tests PROPERTIES
         LABELS "unit" TIMEOUT 30 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(WIN32)
         set_tests_properties(snow-shot-system-tray-controller-tests PROPERTIES
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-system-tray-controller-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -3313,7 +3313,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-window-group-switcher-tests COMMAND snow-shot-window-group-switcher-tests)
     set_tests_properties(snow-shot-window-group-switcher-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS unit)
 
     add_executable(snow-shot-pinned-window-group-tests
@@ -3345,7 +3345,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-action-popup-menu-tests tests/action_popup_menu_tests.cpp)
@@ -3359,7 +3359,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-action-popup-menu-tests PROPERTIES
         LABELS "unit" TIMEOUT 20
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     if(APPLE)
         snow_find_qt(COMPONENTS Test)
@@ -3392,14 +3392,14 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-context-menu-rendering-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -3424,7 +3424,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "QT_QPA_PLATFORM=$<IF:$<BOOL:${WIN32}>,windows,offscreen>"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-shortcut-key-row-tests
@@ -3447,7 +3447,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     if(WIN32)
         add_executable(snow-shot-print-screen-shortcut-recorder-tests
@@ -3469,7 +3469,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             RUN_SERIAL TRUE
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -3493,7 +3493,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "QT_QPA_PLATFORM=$<IF:$<BOOL:${WIN32}>,windows,offscreen>"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-form-layout-tests
@@ -3518,7 +3518,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-selection-resize-workflow-tests
@@ -3551,7 +3551,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-selection-effects-tests
@@ -3794,7 +3794,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-capture-modal-closer-tests)
     set_tests_properties(snow-shot-capture-modal-closer-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-tool-command-workflow-tests
         tests/screenshot_tool_command_workflow_tests.cpp
@@ -3923,7 +3923,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-selection-geometry-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     if(WIN32)
         # Re-runs the binary on the real Windows platform, where the native monitor query
@@ -3937,7 +3937,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
             LABELS "unit;windows"
         )
         add_test(NAME snow-shot-selection-geometry-windows-fractional-tests
@@ -3946,7 +3946,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_SCALE_FACTOR=1.5;QT_ENABLE_HIGHDPI_SCALING=1;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
             LABELS "unit;windows"
         )
     endif()
@@ -3979,7 +3979,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-selection-export-workflow-tests)
     set_tests_properties(snow-shot-selection-export-workflow-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-screenshot-color-picker-tests
@@ -4012,7 +4012,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-screenshot-color-picker-tests)
     set_tests_properties(snow-shot-screenshot-color-picker-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-screenshot-history-tests
@@ -4077,18 +4077,18 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-screenshot-eraser-wheel-tests
         COMMAND snow-shot-screenshot-history-tests --eraser-wheel-only -platform offscreen)
     set_tests_properties(snow-shot-screenshot-eraser-wheel-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-smart-selection-wheel-tests
         COMMAND snow-shot-screenshot-history-tests --smart-selection-wheel-only -platform offscreen)
     set_tests_properties(snow-shot-smart-selection-wheel-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     snow_shot_import_offscreen_platform(snow-shot-screenshot-history-tests)
     add_test(NAME snow-shot-previous-selection-shortcut-tests
         COMMAND snow-shot-screenshot-history-tests --previous-selection-only -platform offscreen)
     set_tests_properties(snow-shot-previous-selection-shortcut-tests PROPERTIES
         LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(
         NAME snow-shot-screenshot-completion-gesture-tests
         COMMAND snow-shot-screenshot-history-tests --completion-gestures-only
@@ -4101,7 +4101,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-screenshot-completion-gesture-tests
         PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(
         NAME snow-shot-screenshot-shortcut-priority-tests
@@ -4112,12 +4112,12 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-global-screenshot-shortcut-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-screenshot-exit-confirmation-tests
         COMMAND snow-shot-screenshot-history-tests --shortcut-exit-confirmation-only -platform offscreen)
     set_tests_properties(snow-shot-screenshot-exit-confirmation-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(
         NAME snow-shot-intelligent-selection-cursor-shortcut-tests
         COMMAND snow-shot-screenshot-history-tests
@@ -4127,7 +4127,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-screenshot-history-tests --cursor-shortcuts-only -platform offscreen)
     set_tests_properties(snow-shot-screenshot-cursor-shortcut-tests PROPERTIES
         LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(
         NAME snow-shot-canvas-color-sampling-tests
@@ -4142,7 +4142,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "QT_QPA_PLATFORM=$<IF:$<BOOL:${WIN32}>,windows,offscreen>"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-scrolling-preview-benchmark
@@ -4290,7 +4290,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             COMMAND snow-shot-screenshot-canvas-renderer-tests --ocr-highlighting-benchmark -platform offscreen)
         set_tests_properties(snow-shot-ocr-highlighting-performance-benchmark PROPERTIES
             LABELS "benchmark" TIMEOUT 120
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         if(WIN32)
             target_link_libraries(snow-shot-screenshot-canvas-renderer-tests PRIVATE Psapi)
         endif()
@@ -4352,11 +4352,11 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-pinned-result-scaling-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-fractional-dpi-rendering-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(NAME snow-shot-scrolling-overlay-tests
         COMMAND snow-shot-screenshot-canvas-renderer-tests --scrolling-overlay -platform offscreen)
@@ -4366,7 +4366,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         set_tests_properties(snow-shot-scrolling-overlay-native-tests PROPERTIES
             LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 60
             ENVIRONMENT "QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     add_test(NAME snow-shot-overlay-safe-area-tests
         COMMAND snow-shot-screenshot-canvas-renderer-tests --overlay-safe-area -platform offscreen)
@@ -4403,7 +4403,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-screenshot-canvas-renderer-tests --close-release-only -platform offscreen)
     set_tests_properties(snow-shot-direct-capture-history-rendering-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(
         NAME snow-shot-ocr-canvas-renderer-tests
@@ -4414,7 +4414,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             -platform offscreen)
     set_tests_properties(snow-shot-ocr-line-box-rendering-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(
         NAME snow-shot-overlay-pool-prewarm-tests
         COMMAND snow-shot-screenshot-canvas-renderer-tests --overlay-pool-prewarm
@@ -4429,13 +4429,13 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "QT_QPA_PLATFORM=offscreen"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-ocr-canvas-renderer-tests PROPERTIES
         ENVIRONMENT
             "QT_QPA_PLATFORM=offscreen"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     if(WIN32)
         add_test(
@@ -4449,7 +4449,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -4475,7 +4475,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-overlay-frame-presenter-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     if(WIN32)
         target_link_libraries(snow-shot-overlay-frame-presenter-tests PRIVATE dwmapi)
@@ -4489,7 +4489,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -4707,24 +4707,24 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-window-tests --window-confirmation-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-window-confirmation-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-drawing-close-tests
         COMMAND snow-shot-pinned-window-tests --drawing-close-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-drawing-close-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 30)
     set_tests_properties(snow-shot-pinned-close-persistence-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-transaction-lifetime-tests
         COMMAND snow-shot-pinned-window-tests --pin-lifetime-only -platform offscreen)
     add_test(NAME snow-shot-pinned-pixel-lifetime-tests
         COMMAND snow-shot-pinned-window-tests --pixel-lifetime-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-pixel-lifetime-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-pinned-transaction-lifetime-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-duplicate-pin-tests
         COMMAND snow-shot-pinned-window-tests --duplicate-pin-only -platform offscreen)
     set_tests_properties(snow-shot-duplicate-pin-tests PROPERTIES LABELS "unit"
@@ -4775,7 +4775,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-pinned-eraser-tests
         COMMAND snow-shot-pinned-window-tests --eraser-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-eraser-tests PROPERTIES LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-remembered-drawing-tool-tests
         COMMAND snow-shot-pinned-window-tests --remembered-drawing-tool-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-remembered-drawing-tool-tests PROPERTIES LABELS "unit"
@@ -4795,7 +4795,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-pinned-menu-language-tests PROPERTIES
         LABELS "unit" TIMEOUT 30 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-destroy-shortcut-tests
         COMMAND snow-shot-pinned-window-tests --pinned-destroy-shortcut-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-destroy-shortcut-tests PROPERTIES LABELS "unit")
@@ -4814,7 +4814,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             COMMAND snow-shot-pinned-window-tests --thumbnail-${_thumbnail_scenario}-only -platform offscreen)
         set_tests_properties(snow-shot-pinned-thumbnail-${_thumbnail_scenario}-tests PROPERTIES
             TIMEOUT 30 RUN_SERIAL TRUE
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endforeach()
     set_tests_properties(snow-shot-pinned-thumbnail-copy-tests PROPERTIES
         ENVIRONMENT "QT_SCALE_FACTOR=2")
@@ -4822,7 +4822,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-window-tests --thumbnail-copy-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-thumbnail-copy-fractional-tests PROPERTIES
         TIMEOUT 30 RUN_SERIAL TRUE ENVIRONMENT "QT_SCALE_FACTOR=1.25"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-thumbnail-background-tests
         COMMAND snow-shot-pinned-window-tests --thumbnail-background-only)
     add_test(NAME snow-shot-pinned-thumbnail-recreation-tests
@@ -4845,14 +4845,14 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-window-tests --text-double-click-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-text-double-click-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-text-wrap-tests
         COMMAND snow-shot-pinned-window-tests --text-wrap-only -platform offscreen)
     add_test(NAME snow-shot-pinned-text-wrap-fractional-tests
         COMMAND snow-shot-pinned-window-tests --text-wrap-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-text-wrap-tests snow-shot-pinned-text-wrap-fractional-tests
         PROPERTIES LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-pinned-text-wrap-fractional-tests PROPERTIES
         ENVIRONMENT "QT_SCALE_FACTOR=1.5;SNOW_PIN_TEST_DPR=1.5")
     add_test(NAME snow-shot-pinned-save-dialog-tests
@@ -4905,7 +4905,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     target_link_libraries(snow-shot-pdf-export-tests PRIVATE snow_shot_storage snow_shot_image_codec Qt::Gui)
     add_test(NAME snow-shot-pdf-export-tests COMMAND snow-shot-pdf-export-tests)
     set_tests_properties(snow-shot-pdf-export-tests PROPERTIES
-        LABELS "unit" ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        LABELS "unit" ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-screenshot-image-file-service-tests
         tests/screenshot_image_file_service_tests.cpp
@@ -4928,7 +4928,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-screenshot-image-file-service-tests PROPERTIES
         RUN_SERIAL TRUE
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-recognition-file-export-tests
@@ -4944,7 +4944,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-recognition-file-export-tests)
     set_tests_properties(snow-shot-recognition-file-export-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-update-confirmation-tests
         tests/update_confirmation_dialog_tests.cpp
@@ -4959,7 +4959,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-update-confirmation-tests)
     set_tests_properties(snow-shot-update-confirmation-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-file-pin-settings-tests tests/file_pin_settings_tests.cpp
         src/presentation/services/screenshotclipboardservice.cpp)
@@ -4968,7 +4968,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-file-pin-settings-tests COMMAND snow-shot-file-pin-settings-tests)
     set_tests_properties(snow-shot-file-pin-settings-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-custom-server-settings-tests
         tests/custom_server_settings_tests.cpp
@@ -4979,7 +4979,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-custom-server-settings-tests COMMAND snow-shot-custom-server-settings-tests)
     set_tests_properties(snow-shot-custom-server-settings-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-selection-snap-shortcut-settings-tests
         tests/selection_snap_shortcut_settings_tests.cpp
@@ -4991,7 +4991,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-selection-snap-shortcut-settings-tests)
     set_tests_properties(snow-shot-selection-snap-shortcut-settings-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-selection-resize-mode-settings-tests
         tests/selection_resize_mode_settings_tests.cpp
@@ -5003,7 +5003,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-selection-resize-mode-settings-tests)
     set_tests_properties(snow-shot-selection-resize-mode-settings-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-remember-last-used-tool-settings-tests
         tests/remember_last_used_tool_settings_tests.cpp
@@ -5015,7 +5015,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-remember-last-used-tool-settings-tests)
     set_tests_properties(snow-shot-remember-last-used-tool-settings-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-screen-recording-interaction-settings-tests
         tests/screen_recording_interaction_settings_tests.cpp
@@ -5028,7 +5028,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-screen-recording-interaction-settings-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-edit-selection-toolbar-settings-tests
         tests/edit_selection_toolbar_settings_tests.cpp
@@ -5041,7 +5041,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-edit-selection-toolbar-settings-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-file-pin-batch-tests
         tests/screenshot_file_pin_batch_tests.cpp
@@ -5097,7 +5097,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-file-pin-batch-tests COMMAND snow-shot-file-pin-batch-tests)
     set_tests_properties(snow-shot-file-pin-batch-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-clipboard-content-tests
         tests/screenshot_clipboard_content_tests.cpp
@@ -5124,11 +5124,11 @@ if(SNOW_SHOT_BUILD_TESTS)
         LABELS unit
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-clipboard-mime-data-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-clipboard-content-tests PROPERTIES
         RUN_SERIAL TRUE
         # The live snapshot exercises an in-process mime provider that hides
@@ -5136,7 +5136,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         # in-process semantics, the native OS clipboard drops the payload.
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     if(WIN32)
         add_executable(snow-shot-clipboard-roundtrip-tests
@@ -5161,7 +5161,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             TIMEOUT 30
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
     add_test(
@@ -5174,11 +5174,11 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-window-tests --file-drop-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-file-drop-tests PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" TIMEOUT 90)
     set_tests_properties(snow-shot-pinned-content-replacement-tests PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" TIMEOUT 90 RUN_SERIAL TRUE)
     add_test(
         NAME snow-shot-pinned-window-pool-tests
@@ -5207,7 +5207,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-pinned-cloud-upload-tests COMMAND snow-shot-pinned-window-tests --cloud-upload-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-cloud-upload-tests PROPERTIES LABELS "unit" TIMEOUT 45
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-toolbar-layout-tests
         COMMAND snow-shot-pinned-window-tests --pinned-toolbar-layout-only)
     set_tests_properties(snow-shot-pinned-toolbar-layout-tests PROPERTIES
@@ -5222,14 +5222,14 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-window-tests --ocr-box-selection-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-ocr-box-selection-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(WIN32)
         add_test(NAME snow-shot-pinned-ocr-box-selection-native-routing-tests
             COMMAND snow-shot-pinned-window-tests --ocr-box-selection-native-only -platform windows)
         set_tests_properties(snow-shot-pinned-ocr-box-selection-native-routing-tests PROPERTIES
             LABELS "unit;windows" RUN_SERIAL TRUE TIMEOUT 90
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     set_tests_properties(snow-shot-pinned-recognition-context-menu-tests PROPERTIES
         LABELS "unit" TIMEOUT 60)
@@ -5264,7 +5264,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             TIMEOUT 90
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     add_test(NAME snow-shot-pinned-escape-burst-tests
         COMMAND snow-shot-pinned-window-tests --escape-burst-only)
@@ -5275,7 +5275,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-pinned-scale-readout-tests PROPERTIES
         LABELS "unit" TIMEOUT 90
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-passive-geometry-tests
         COMMAND snow-shot-pinned-window-tests --passive-geometry-only)
     add_test(NAME snow-shot-pinned-pointer-presence-offscreen-tests
@@ -5283,14 +5283,14 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-pinned-pointer-presence-offscreen-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-pinned-passive-geometry-tests PROPERTIES
         LABELS "unit"
         RUN_SERIAL TRUE
         TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(WIN32)
         add_test(NAME snow-shot-pinned-passive-native-geometry-tests
             COMMAND snow-shot-pinned-window-tests --passive-geometry-only)
@@ -5300,7 +5300,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             TIMEOUT 30
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         add_test(NAME snow-shot-pinned-pointer-presence-tests
             COMMAND snow-shot-pinned-window-tests --pointer-presence-only)
         set_tests_properties(snow-shot-pinned-pointer-presence-tests PROPERTIES
@@ -5309,7 +5309,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             TIMEOUT 30
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     set(_snow_shot_pinned_window_test_names
         snow-shot-pinned-escape-burst-tests
@@ -5355,7 +5355,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         RUN_SERIAL TRUE
         TIMEOUT 90
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-export-coordinator-tests
@@ -5376,7 +5376,7 @@ if(SNOW_SHOT_BUILD_TESTS)
              COMMAND snow-shot-export-coordinator-tests)
     set_tests_properties(snow-shot-export-coordinator-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-export-dialog-workflow-tests
@@ -5414,7 +5414,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-pdf-dialog-tests COMMAND snow-shot-export-dialog-workflow-tests --pdf)
     set_tests_properties(snow-shot-pdf-dialog-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-export-dialog-workflow-tests
         COMMAND snow-shot-export-dialog-workflow-tests)
     add_test(NAME snow-shot-export-dialog-shortcut-tests
@@ -5425,10 +5425,10 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-export-dialog-workflow-tests --zoom-hint -platform offscreen)
     set_tests_properties(snow-shot-export-preview-hint-tests PROPERTIES
         TIMEOUT 30 LABELS unit
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-export-preview-wheel-tests PROPERTIES
         TIMEOUT 30 LABELS unit SNOW_TEST_CROSS_PLATFORM TRUE
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     # These tests drive QWidget events synchronously. Cocoa menu tracking has its
     # own event loop and is exercised by snow-shot-action-popup-native-tests.
     set_tests_properties(
@@ -5436,12 +5436,12 @@ if(SNOW_SHOT_BUILD_TESTS)
         PROPERTIES ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
     set_tests_properties(snow-shot-export-dialog-shortcut-tests PROPERTIES
         TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-save-format-tests
         COMMAND snow-shot-export-dialog-workflow-tests --remember-format)
     set_tests_properties(snow-shot-save-format-tests PROPERTIES
         TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         LABELS "unit")
     add_test(NAME snow-shot-export-dialog-pipeline-tests
@@ -5450,15 +5450,15 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-export-dialog-workflow-tests --placement)
     set_tests_properties(snow-shot-export-dialog-placement-tests PROPERTIES
         TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-export-dialog-workflow-tests PROPERTIES
         TIMEOUT 180 RUN_SERIAL TRUE
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-export-dialog-pipeline-tests PROPERTIES
         TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-export-artifact-tests
@@ -5499,12 +5499,12 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-export-artifact-tests --configured-directory-only)
     set_tests_properties(snow-shot-configured-save-directory-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-export-lifetime-tests
         COMMAND snow-shot-export-artifact-tests --pinned-lifetime-only)
     set_tests_properties(snow-shot-pinned-export-lifetime-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     get_target_property(_snow_mcp_test_sources snow-shot-export-artifact-tests SOURCES)
     list(REMOVE_ITEM _snow_mcp_test_sources tests/screenshot_export_artifact_tests.cpp
         tests/screenshot_export_row_performance_benchmark.cpp)
@@ -5523,7 +5523,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-cloud-upload-tests snow-shot-cloud-upload-settings-tests
         PROPERTIES LABELS "unit" TIMEOUT 90
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_executable(snow-shot-mcp-tests ${_snow_mcp_test_sources}
         tests/screenshot_mcp_tests.cpp
         include/snow_shot/app/mcp/screenshotmcpserver.h
@@ -5571,7 +5571,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     endif()
 
     set_tests_properties(snow-shot-mcp-tests PROPERTIES TIMEOUT 90 LABELS unit
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_test(NAME snow-shot-quick-save-command-tests
         COMMAND snow-shot-floating-toolbar-drag-tests --quick-save-only -platform offscreen)
@@ -5588,7 +5588,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-pinned-ocr-highlighting-tests
         COMMAND snow-shot-pinned-window-tests --ocr-highlighting-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-ocr-highlighting-tests PROPERTIES LABELS "unit" TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-pinned-recognition-save-tests PROPERTIES LABELS "unit" TIMEOUT 90)
     add_test(NAME snow-shot-pinned-shared-image-export-tests
         COMMAND snow-shot-pinned-window-tests --shared-image-export-only -platform offscreen)
@@ -5596,10 +5596,10 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-window-tests --pin-execution-autosave-only -platform offscreen)
     set_tests_properties(snow-shot-pin-execution-autosave-tests PROPERTIES
         LABELS "unit" TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-pinned-shared-image-export-tests PROPERTIES
         LABELS "unit" TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-opacity-export-tests
         COMMAND snow-shot-pinned-window-tests --opacity-export-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-opacity-export-tests PROPERTIES
@@ -5612,11 +5612,11 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-quick-save-export-tests snow-shot-pinned-quick-save-tests
         snow-shot-quick-save-toolbar-tests snow-shot-quick-save-command-tests
         snow-shot-quick-save-layout-storage-tests PROPERTIES TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     set_tests_properties(snow-shot-export-artifact-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-angle-annotation-integration-tests
@@ -5632,7 +5632,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-angle-annotation-integration-tests PROPERTIES
         LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-distance-annotation-integration-tests
         tests/distance_annotation_integration_tests.cpp
@@ -5647,7 +5647,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-distance-annotation-integration-tests PROPERTIES
         LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-speech-bubble-integration-tests
         tests/speech_bubble_integration_tests.cpp
@@ -5662,7 +5662,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-speech-bubble-integration-tests PROPERTIES
         LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-screenshot-tool-palette-tests
         tests/screenshot_tool_palette_tests.cpp
@@ -5705,11 +5705,11 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-screenshot-tool-palette-tests --custom-color-presets-only -platform offscreen)
     set_tests_properties(snow-shot-custom-color-presets-toolbar-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-ocr-text-options-toolbar-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --ocr-translation-only -platform offscreen)
     set_tests_properties(snow-shot-ocr-text-options-toolbar-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-selection-display-unit-toolbar-tests
         COMMAND snow-shot-floating-toolbar-drag-tests --selection-unit-only -platform offscreen)
     set_tests_properties(snow-shot-selection-display-unit-toolbar-tests PROPERTIES LABELS "unit" TIMEOUT 60)
@@ -5748,7 +5748,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-text-alignment-editing-tests PROPERTIES
         LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE)
     set_tests_properties(snow-shot-scrolling-toolbar-tests PROPERTIES LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-screenshot-tool-palette-remembered-drawing-tool-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --remembered-drawing-tool-only
             -platform offscreen)
@@ -5787,29 +5787,29 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-toolbar-popup-recovery-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --popup-recovery-only -platform offscreen)
     set_tests_properties(snow-shot-toolbar-popup-recovery-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-toolbar-popover-lifecycle-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --popover-lifecycle-only
             -platform offscreen)
     set_tests_properties(snow-shot-toolbar-popover-lifecycle-tests PROPERTIES LABELS "unit"
         TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-retired-style-editor-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --retired-style-editors-only -platform offscreen)
     set_tests_properties(snow-shot-retired-style-editor-tests PROPERTIES LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-toolbar-popover-hover-switching-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --popover-hover-switching-only
             -platform offscreen)
     set_tests_properties(snow-shot-toolbar-popover-hover-switching-tests PROPERTIES LABELS "unit"
         TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-cloud-upload-toolbar-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --cloud-upload-only -platform offscreen)
     set_tests_properties(snow-shot-cloud-upload-toolbar-tests PROPERTIES LABELS "unit" TIMEOUT 45
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(
         NAME snow-shot-screenshot-action-toolbar-layout-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --action-toolbar-layout-only
@@ -5820,7 +5820,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-screenshot-result-toolbar-layout-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(
         NAME snow-shot-toolbar-color-input-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --color-input-only -platform offscreen
@@ -5838,11 +5838,11 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-toolbar-group-button-settings-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-annotation-toolbar-layout-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-hidden-toolbar-shortcut-tests PROPERTIES LABELS "unit" TIMEOUT 60)
     add_test(NAME snow-shot-screenshot-action-shortcut-display-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --screenshot-actions-tooltips-only
@@ -5884,7 +5884,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-screenshot-selection-toolbar-hover-tests
@@ -5927,24 +5927,24 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-screenshot-selection-toolbar-popup-regression-tests PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit"
     )
     set_tests_properties(snow-shot-screenshot-selection-toolbar-icon-centering-tests PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit"
     )
     set_tests_properties(snow-shot-screenshot-selection-toolbar-compact-ratio-tests PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit"
     )
     set_tests_properties(snow-shot-screenshot-selection-toolbar-hover-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     if(WIN32)
         set_tests_properties(snow-shot-screenshot-selection-toolbar-hover-tests PROPERTIES
@@ -6016,7 +6016,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-speech-bubble-command-tests PROPERTIES
         LABELS "unit" SNOW_TEST_CROSS_PLATFORM TRUE TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-scrolling-interval-command-tests
         COMMAND snow-shot-screenshot-toolbar-remembered-tool-tests --scrolling-interval-only -platform offscreen)
     add_test(NAME snow-shot-edit-selection-toolbar-visibility-tests
@@ -6026,11 +6026,11 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-edit-selection-toolbar-visibility-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-selection-toolbar-lifecycle-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-eraser-commands-tests
         COMMAND snow-shot-screenshot-toolbar-remembered-tool-tests --eraser-only -platform offscreen)
     set_tests_properties(snow-shot-eraser-commands-tests PROPERTIES LABELS "unit" TIMEOUT 60)
@@ -6041,7 +6041,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-scrolling-interval-command-tests PROPERTIES
         RUN_SERIAL TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-global-canvas-tests
@@ -6090,12 +6090,12 @@ if(SNOW_SHOT_BUILD_TESTS)
             COMMAND snow-shot-global-canvas-tests --native-only -platform windows)
         set_tests_properties(snow-shot-global-canvas-native-tests PROPERTIES
             LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 90
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         add_test(NAME snow-shot-global-canvas-color-sampling-native-tests
             COMMAND snow-shot-global-canvas-tests --color-sampling-native-only -platform windows)
         set_tests_properties(snow-shot-global-canvas-color-sampling-native-tests PROPERTIES
             LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 30
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     if(APPLE)
         add_test(NAME snow-shot-global-canvas-platform-tests
@@ -6117,12 +6117,12 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-global-canvas-magnifier-availability-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-global-canvas-click-through-style-tests
         COMMAND snow-shot-global-canvas-tests --click-through-style-only -platform offscreen)
     set_tests_properties(snow-shot-global-canvas-click-through-style-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-global-canvas-angle-wheel-tests
         COMMAND snow-shot-global-canvas-tests --angle-wheel-only -platform offscreen)
     set_tests_properties(snow-shot-global-canvas-angle-wheel-tests PROPERTIES
@@ -6138,23 +6138,23 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-global-canvas-saved-style-tests
         COMMAND snow-shot-global-canvas-tests --saved-styles-only -platform offscreen)
     set_tests_properties(snow-shot-global-canvas-saved-style-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-global-canvas-quick-selection-settings-tests
         COMMAND snow-shot-global-canvas-tests --quick-selection-settings-only -platform offscreen)
     set_tests_properties(snow-shot-global-canvas-quick-selection-settings-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-global-canvas-tests COMMAND snow-shot-global-canvas-tests -platform offscreen)
     set_tests_properties(snow-shot-global-canvas-tests PROPERTIES LABELS "unit" TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-global-canvas-eraser-tests
         COMMAND snow-shot-global-canvas-tests --eraser-only -platform offscreen)
     set_tests_properties(snow-shot-global-canvas-eraser-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-global-canvas-color-sampling-tests
         COMMAND snow-shot-global-canvas-tests --color-sampling-only -platform offscreen)
     set_tests_properties(snow-shot-global-canvas-color-sampling-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     if(WIN32)
         add_executable(snow-shot-screenshot-toolbar-fill-color-hover-tests
@@ -6218,7 +6218,7 @@ if(SNOW_SHOT_BUILD_TESTS)
                 ENVIRONMENT
                     "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
                 ENVIRONMENT_MODIFICATION
-                    "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                    "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
 
         # This is intentionally not registered with CTest. It creates native
@@ -6364,7 +6364,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         # non-activating floating toolbar only supports on a native platform.
         LABELS "interactive;e2e;${_snow_recording_shortcut_os}" RUN_SERIAL TRUE TIMEOUT 60
         ENVIRONMENT "QT_QPA_PLATFORM=${_snow_recording_shortcut_platform}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-floating-toolbar-drag-tests
@@ -6487,7 +6487,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-scrolling-capture-settings-tests PROPERTIES
         LABELS "unit" SNOW_TEST_CROSS_PLATFORM TRUE TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_executable(snow-shot-color-picker-lifecycle-tests
         tests/screenshot_color_picker_lifecycle_tests.cpp
         src/presentation/services/screenshotcanvascolorsamplerwindow.cpp
@@ -6537,7 +6537,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-overlay-reveal-tests PROPERTIES
         LABELS "unit" SNOW_TEST_CROSS_PLATFORM TRUE TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-color-picker-lifecycle-tests
         COMMAND snow-shot-color-picker-lifecycle-tests)
     add_test(NAME snow-shot-toolbar-picker-hover-tests
@@ -6547,12 +6547,12 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-toolbar-guide-hover-tests PROPERTIES
         LABELS "unit" SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         TIMEOUT 60)
     set_tests_properties(snow-shot-toolbar-picker-hover-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         TIMEOUT 60)
     if(WIN32)
         add_test(NAME snow-shot-tool-stacking-native-tests
@@ -6562,7 +6562,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     endif()
     set_tests_properties(snow-shot-color-picker-lifecycle-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         TIMEOUT 60)
     # Share the real screenshot UI implementation between deterministic frame tests
     # and the preparation benchmark; the fixture never substitutes the presenter.
@@ -6614,7 +6614,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-presentation-frame-scheduler-tests)
     set_tests_properties(snow-shot-presentation-frame-scheduler-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_executable(snow-shot-animation-codec-tests tests/animation_codec_tests.cpp)
     target_include_directories(snow-shot-animation-codec-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(snow-shot-animation-codec-tests PRIVATE snow_shot_image_codec)
@@ -6698,7 +6698,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-selection-wheel-tests PROPERTIES
         LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_executable(snow-shot-selection-quick-set-tests
         tests/screenshot_selection_quick_sets_tests.cpp)
     target_link_libraries(snow-shot-selection-quick-set-tests PRIVATE
@@ -6712,7 +6712,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-selection-quick-set-restore-tests PROPERTIES
         LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-overlay-preparation-tests
         COMMAND snow-shot-color-picker-lifecycle-tests --overlay-preparation-only -platform offscreen)
     add_test(NAME snow-shot-pointer-presentation-tests
@@ -6727,7 +6727,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-rectangular-selection-rendering-tests
         PROPERTIES LABELS "unit" TIMEOUT 60
         SNOW_TEST_CROSS_PLATFORM TRUE ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(SNOW_SHOT_BUILD_BENCHMARKS)
         if(APPLE)
             # Opt-in native startup timing; intentionally not registered with CTest.
@@ -6966,7 +6966,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         set_tests_properties(snow-shot-floating-toolbar-dpi-frame-reconcile-tests PROPERTIES
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     if(APPLE)
         foreach(_toolbar_dpr IN ITEMS 1 2)
@@ -6993,21 +6993,21 @@ if(SNOW_SHOT_BUILD_TESTS)
             LABELS "interactive;windows"
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     add_test(NAME snow-shot-floating-toolbar-keyboard-focus-tests
         COMMAND snow-shot-floating-toolbar-drag-tests --keyboard-focus-only)
     set_tests_properties(snow-shot-floating-toolbar-keyboard-focus-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(WIN32)
         add_test(NAME snow-shot-floating-toolbar-keyboard-focus-windows-tests
             COMMAND snow-shot-floating-toolbar-drag-tests --keyboard-focus-only)
         set_tests_properties(snow-shot-floating-toolbar-keyboard-focus-windows-tests PROPERTIES
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     # The forward and reverse drag tests drive a native toolbar through real
     # hardware-style drag sequences and assert final HWND positions within a
@@ -7046,7 +7046,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-screenshot-selection-reset-command-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(
         NAME snow-shot-screenshot-cancel-ordering-tests
@@ -7055,7 +7055,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-screenshot-cancel-ordering-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(
         NAME snow-shot-jump-to-translation-page-toolbar-tests
@@ -7065,29 +7065,29 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-jump-to-translation-page-toolbar-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-floating-toolbar-drag-tests PROPERTIES
         RUN_SERIAL TRUE
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-floating-toolbar-reverse-drag-tests PROPERTIES
         RUN_SERIAL TRUE
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-floating-toolbar-seam-straddle-drag-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-floating-toolbar-action-layout-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     set_tests_properties(snow-shot-floating-toolbar-recording-hit-test-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     if(NOT WIN32)
         set_tests_properties(snow-shot-floating-toolbar-drag-tests PROPERTIES
@@ -7134,30 +7134,30 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-screenshot-tool-palette-tests --dpi-scaling-only -platform offscreen)
     set_tests_properties(snow-shot-toolbar-control-scaling-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-adqt-dpi-stable-offscreen-tests
         COMMAND snow-shot-adqt-dpi-stable-tests -platform offscreen)
     set_tests_properties(snow-shot-adqt-dpi-stable-offscreen-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-floating-toolbar-dpi-transaction-offscreen-tests
         COMMAND snow-shot-floating-toolbar-drag-tests --dpi-frame-reconcile-only -platform offscreen)
     set_tests_properties(snow-shot-floating-toolbar-dpi-transaction-offscreen-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(WIN32)
         set_tests_properties(snow-shot-adqt-dpi-stable-tests PROPERTIES
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-adqt-dpi-stable-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -7188,14 +7188,14 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-generated-icon-pack-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -7229,7 +7229,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-sidebar-widget-tests
@@ -7258,14 +7258,14 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-sidebar-widget-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -7286,7 +7286,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     )
     set_tests_properties(snow-shot-application-search-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit"
     )
 
@@ -7321,14 +7321,14 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-main-content-header-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -7367,20 +7367,20 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(NAME snow-shot-speech-bubble-toolbar-tests
         COMMAND snow-shot-toolbar-main-panel-tests --speech-bubble-only -platform offscreen)
     set_tests_properties(snow-shot-speech-bubble-toolbar-tests PROPERTIES
         LABELS "unit" SNOW_TEST_CROSS_PLATFORM TRUE TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-toolbar-skin-tests
         COMMAND snow-shot-toolbar-main-panel-tests --skin-only -platform offscreen)
     set_tests_properties(snow-shot-toolbar-skin-tests PROPERTIES
         LABELS "unit" SNOW_TEST_CROSS_PLATFORM TRUE TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(
         NAME snow-shot-toolbar-icon-centering-hidpi-tests
         COMMAND snow-shot-toolbar-main-panel-tests --icon-centering-only
@@ -7388,7 +7388,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-toolbar-icon-centering-hidpi-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT};QT_SCALE_FACTOR=2"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit;windows"
     )
 
@@ -7425,7 +7425,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-window-capture-exclusion-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-scrolling-capture-exclusion-tests
@@ -7449,7 +7449,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-scrolling-capture-exclusion-tests -platform offscreen)
     set_tests_properties(snow-shot-scrolling-capture-exclusion-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     get_target_property(_recording_test_sources snow-shot-screenshot-tool-palette-tests SOURCES)
     list(FILTER _recording_test_sources EXCLUDE REGEX "tests/screenshot_tool_palette_tests.cpp$")
@@ -7569,7 +7569,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             snow-shot-screen-recording-toolbar-ready-display-tests PROPERTIES
             LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 30 SKIP_RETURN_CODE 77
             ENVIRONMENT "QT_QPA_PLATFORM=windows"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     add_test(NAME snow-shot-recording-color-sampler-tests
         COMMAND snow-shot-screen-recording-controller-tests --color-sampling-only -platform offscreen)
@@ -7605,17 +7605,17 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-screen-recording-controller-tests --settings-dialog-only -platform offscreen)
     set_tests_properties(snow-shot-recording-settings-dialog-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-recording-api-mode-tests
         COMMAND snow-shot-screen-recording-controller-tests --api-mode-only -platform offscreen)
     set_tests_properties(snow-shot-recording-api-mode-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-recording-startup-retry-tests
         COMMAND snow-shot-screen-recording-controller-tests --startup-retry-only -platform offscreen)
     set_tests_properties(snow-shot-recording-startup-retry-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-recording-modal-stacking-tests
         COMMAND snow-shot-screen-recording-controller-tests --modal-stacking-only -platform offscreen)
     set_tests_properties(snow-shot-recording-modal-stacking-tests PROPERTIES LABELS "unit" TIMEOUT 30)
@@ -7631,25 +7631,25 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-screen-recording-controller-tests --finalization-close-only -platform offscreen)
     set_tests_properties(snow-shot-recording-finalization-close-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60)
     add_test(NAME snow-shot-recording-delete-on-close-tests
         COMMAND snow-shot-screen-recording-controller-tests --delete-on-close-only -platform offscreen)
     set_tests_properties(snow-shot-recording-delete-on-close-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60)
     add_test(NAME snow-shot-recording-auto-exit-tests
         COMMAND snow-shot-screen-recording-controller-tests --auto-exit-only -platform offscreen)
     set_tests_properties(snow-shot-recording-auto-exit-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60)
     add_test(NAME snow-shot-recording-export-notification-tests
         COMMAND snow-shot-screen-recording-controller-tests --export-notifications-only -platform offscreen)
     set_tests_properties(snow-shot-recording-export-notification-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60)
     if(WIN32)
         add_test(NAME snow-shot-recording-effects-preview-native-tests
@@ -7663,7 +7663,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-screen-recording-controller-tests --effects-preview-only)
     set_tests_properties(snow-shot-recording-effects-preview-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60)
     if(APPLE)
         foreach(_preview_scale IN ITEMS 1 1.25 1.5 1.75 2)
@@ -7691,10 +7691,10 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-recording-magnifier-availability-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-screen-recording-controller-tests PROPERTIES
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         RUN_SERIAL TRUE TIMEOUT 60)
 
     add_executable(snow-shot-screenshot-recording-workflow-tests
@@ -7707,7 +7707,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         LABELS "unit" TIMEOUT 30)
     if(WIN32)
         set_tests_properties(snow-shot-screenshot-recording-workflow-tests PROPERTIES
-            ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt::Core>\;$ENV{PATH}")
+            ENVIRONMENT "PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>\;$ENV{PATH}")
     endif()
 
     add_executable(snow-shot-screen-recording-geometry-tests
@@ -7731,7 +7731,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT};QT_SCALE_FACTOR=1.25"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-screen-recording-area-window-tests
@@ -7790,7 +7790,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT};QT_SCALE_FACTOR=1.25"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(NAME snow-shot-recording-angle-wheel-tests
         COMMAND snow-shot-screen-recording-area-window-tests --angle-wheel-only -platform offscreen)
@@ -7807,7 +7807,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-ocr-background-tests COMMAND snow-shot-ocr-background-tests)
     set_tests_properties(snow-shot-ocr-background-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-ocr-presentation-tests
         tests/screenshot_ocr_presentation_tests.cpp
@@ -7840,7 +7840,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT
             "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-recognition-window-tests
@@ -7903,23 +7903,23 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-recognition-window-tests --ocr-box-selection-only -platform offscreen)
     set_tests_properties(snow-shot-recognition-box-selection-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-recognition-double-click-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-recognition-selection-only-rendering-tests
         COMMAND snow-shot-recognition-window-tests --selection-only-rendering -platform offscreen)
     add_test(NAME snow-shot-recognition-ocr-highlighting-tests
         COMMAND snow-shot-recognition-window-tests --ocr-highlighting-only -platform offscreen)
     set_tests_properties(snow-shot-recognition-ocr-highlighting-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-recognition-ocr-hover-tests
         COMMAND snow-shot-recognition-window-tests --ocr-hover-only -platform offscreen)
     add_test(NAME snow-shot-recognition-text-editor-layout-tests
         COMMAND snow-shot-recognition-window-tests --text-editor-layout-only -platform offscreen)
     set_tests_properties(snow-shot-recognition-text-editor-layout-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(
         NAME snow-shot-recognition-window-tests
         COMMAND snow-shot-recognition-window-tests
@@ -7929,14 +7929,14 @@ if(SNOW_SHOT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(snow-shot-recognition-window-tests PROPERTIES
             ENVIRONMENT
                 "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     endif()
 
@@ -7950,7 +7950,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     target_link_libraries(snow-shot-ocr-layout-tests PRIVATE Qt::Gui)
     add_test(NAME snow-shot-ocr-layout-tests COMMAND snow-shot-ocr-layout-tests)
     set_tests_properties(snow-shot-ocr-layout-tests PROPERTIES
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-recognition-session-controller-tests
@@ -8007,7 +8007,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-recognition-session-controller-tests PROPERTIES
         TIMEOUT 120
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     if(WIN32)
         set_tests_properties(snow-shot-recognition-session-controller-tests PROPERTIES
@@ -8031,7 +8031,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-recognition-defaults-tests
         COMMAND snow-shot-recognition-session-controller-tests --ocr-defaults-only -platform offscreen)
     set_tests_properties(snow-shot-recognition-defaults-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_test(NAME snow-shot-recognition-image-snapshot-tests
         COMMAND snow-shot-recognition-window-tests --image-snapshot-only -platform offscreen)
@@ -8043,44 +8043,44 @@ if(SNOW_SHOT_BUILD_TESTS)
         TIMEOUT 120
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
     add_test(NAME snow-shot-recognition-notification-lifetime-tests
         COMMAND snow-shot-recognition-session-controller-tests --notification-lifetime-only -platform offscreen)
     set_tests_properties(snow-shot-recognition-notification-lifetime-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-image-conversion-tests
         COMMAND snow-shot-recognition-session-controller-tests --image-conversion-only -platform offscreen)
     set_tests_properties(snow-shot-image-conversion-tests PROPERTIES TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-image-conversion-network-tests
         COMMAND snow-shot-recognition-session-controller-tests --image-conversion-network-only -platform offscreen)
     set_tests_properties(snow-shot-image-conversion-network-tests PROPERTIES TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-image-conversion-clipboard-tests
         COMMAND snow-shot-recognition-session-controller-tests --image-conversion-clipboard-only -platform offscreen)
     set_tests_properties(snow-shot-image-conversion-clipboard-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-image-conversion-storage-tests
         COMMAND snow-shot-application-storage-tests --image-conversion-only)
     set_tests_properties(snow-shot-image-conversion-storage-tests PROPERTIES TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-image-conversion-toolbar-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --image-conversion-only -platform offscreen)
     set_tests_properties(snow-shot-image-conversion-toolbar-tests PROPERTIES TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-image-conversion-pinned-tests
         COMMAND snow-shot-pinned-window-tests --image-conversion-only)
     set_tests_properties(snow-shot-image-conversion-pinned-tests PROPERTIES TIMEOUT 60
         ENVIRONMENT "QT_QPA_PLATFORM=windows"
         LABELS "unit;windows"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-table-recognition-session-tests
         COMMAND snow-shot-recognition-session-controller-tests --table-only -platform offscreen)
     set_tests_properties(snow-shot-table-recognition-session-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     snow_shot_import_offscreen_platform(snow-shot-recognition-session-controller-tests)
     get_target_property(_translation_tool_sources snow-shot-color-picker-lifecycle-tests SOURCES)
@@ -8105,7 +8105,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-translation-tool-tests
         COMMAND snow-shot-translation-tool-tests -platform offscreen)
     set_tests_properties(snow-shot-translation-tool-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     unset(_translation_tool_sources)
     unset(_translation_session_sources)
     get_target_property(_snow_mcp_document_sources snow-shot-recognition-session-controller-tests SOURCES)
@@ -8146,17 +8146,17 @@ if(SNOW_SHOT_BUILD_TESTS)
     snow_shot_import_offscreen_platform(snow-shot-mcp-document-tests)
     add_test(NAME snow-shot-mcp-storage-guard-tests COMMAND snow-shot-mcp-document-tests --jobs-only -platform offscreen)
     set_tests_properties(snow-shot-mcp-storage-guard-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-mcp-document-tests COMMAND snow-shot-mcp-document-tests -platform offscreen)
     add_test(NAME snow-shot-mcp-memory-activity-tests
         COMMAND snow-shot-mcp-document-tests --activity-only -platform offscreen)
     set_tests_properties(snow-shot-mcp-memory-activity-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-mcp-recognition-model-tests
         COMMAND snow-shot-mcp-document-tests --recognition-models-only -platform offscreen)
     set_tests_properties(snow-shot-mcp-recognition-model-tests PROPERTIES LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-mcp-eraser-tests COMMAND snow-shot-mcp-document-tests --eraser-only -platform offscreen)
     set_tests_properties(snow-shot-mcp-eraser-tests PROPERTIES LABELS "unit" TIMEOUT 60)
     add_test(NAME snow-shot-mcp-application-tests
@@ -8168,13 +8168,13 @@ if(SNOW_SHOT_BUILD_TESTS)
                 --screenshot-fixture "$<TARGET_FILE:snow-shot-mcp-screenshot-fixture>" --samples 1)
         set_tests_properties(snow-shot-mcp-fixture-tests PROPERTIES TIMEOUT 120 LABELS unit
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         add_test(NAME snow-shot-mcp-application-fixture-tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_application_fixture_tests.py"
                 "$<TARGET_FILE:snow_shot_mcp>" "$<TARGET_FILE:snow_shot>")
         set_tests_properties(snow-shot-mcp-application-fixture-tests PROPERTIES TIMEOUT 120 LABELS unit
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
     add_test(NAME snow-shot-mcp-history-transient-tests
         COMMAND snow-shot-screenshot-history-tests --mcp-transient-only -platform offscreen)
@@ -8183,7 +8183,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-mcp-document-tests snow-shot-mcp-application-tests snow-shot-mcp-recording-tests
         snow-shot-mcp-pinned-tests snow-shot-mcp-history-transient-tests PROPERTIES TIMEOUT 120 LABELS unit
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     if(SNOW_SHOT_BUILD_BENCHMARKS)
         if(SNOW_SHOT_ENABLE_MCP AND Python3_Interpreter_FOUND)
@@ -8221,7 +8221,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     )
     set_tests_properties(snow-shot-qr-recognition-service-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(snow-shot-selected-text-translation-tests
@@ -8282,7 +8282,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-screenshot-translation-settings-dialog-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-translation-page-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
@@ -8353,7 +8353,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-api-client-lifetime-tests PROPERTIES LABELS "unit" TIMEOUT 30)
     set_tests_properties(snow-shot-api-client-tests snow-shot-api-client-lifetime-tests PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     if(WIN32)
@@ -8620,7 +8620,7 @@ if(SNOW_SHOT_BUILD_BENCHMARKS)
         COMMAND snow-shot-pinned-window-management-performance-benchmark)
     set_tests_properties(snow-shot-pinned-window-management-performance-benchmark PROPERTIES
         LABELS "benchmark" TIMEOUT 180
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-ocr-background-performance-benchmark
         tests/screenshot_ocr_background_performance_benchmark.cpp
@@ -8633,7 +8633,7 @@ if(SNOW_SHOT_BUILD_BENCHMARKS)
         COMMAND snow-shot-ocr-background-performance-benchmark)
     set_tests_properties(snow-shot-ocr-background-performance-benchmark PROPERTIES
         LABELS "benchmark" TIMEOUT 120
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-recognition-image-performance-benchmark
         tests/screenshot_recognition_image_performance_benchmark.cpp
@@ -8663,7 +8663,7 @@ if(SNOW_SHOT_BUILD_BENCHMARKS)
         COMMAND snow-shot-ocr-selection-performance-benchmark -platform offscreen)
     set_tests_properties(snow-shot-ocr-selection-performance-benchmark PROPERTIES
         LABELS "benchmark" RUN_SERIAL TRUE TIMEOUT 600
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-memory-performance-benchmark
         tests/screenshot_memory_performance_benchmark.cpp
@@ -8684,7 +8684,7 @@ if(SNOW_SHOT_BUILD_BENCHMARKS)
         COMMAND snow-shot-memory-performance-benchmark -platform offscreen)
     set_tests_properties(snow-shot-memory-performance-benchmark PROPERTIES
         LABELS "benchmark" RUN_SERIAL TRUE TIMEOUT 180
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-translation-page-streaming-benchmark
         tests/translation_page_streaming_benchmark.cpp
@@ -8733,7 +8733,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-scrolling-hover-preview-tests
         COMMAND snow-shot-scrolling-hover-preview-tests)
     set_tests_properties(snow-shot-scrolling-hover-preview-tests PROPERTIES LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-scrolling-hover-geometry-tests
         tests/scrolling_hover_geometry_tests.cpp
@@ -8748,7 +8748,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-scrolling-hover-geometry-tests
         COMMAND snow-shot-scrolling-hover-geometry-tests -platform offscreen)
     set_tests_properties(snow-shot-scrolling-hover-geometry-tests PROPERTIES LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(snow-shot-scrolling-image-replay-tests tests/scrolling_image_replay_tests.cpp)
     snow_shot_configure_scrolling_replay_target(snow-shot-scrolling-image-replay-tests)
@@ -8759,27 +8759,27 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-scrolling-image-replay-tests --async-teardown-only)
     set_tests_properties(snow-shot-scrolling-async-teardown-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-scrolling-snapshot-lifetime-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-scrolling-thumbnail-drag-tests
         COMMAND snow-shot-scrolling-image-replay-tests --thumbnail-drag-only)
     add_test(NAME snow-shot-scrolling-hover-pipeline-tests
         COMMAND snow-shot-scrolling-image-replay-tests --hover-preview-only)
     set_tests_properties(snow-shot-scrolling-hover-pipeline-tests PROPERTIES LABELS "unit"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     set_tests_properties(snow-shot-scrolling-thumbnail-drag-tests PROPERTIES LABELS "unit")
     set_tests_properties(snow-shot-scrolling-image-replay-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(APPLE)
         foreach(_snow_qos IN ITEMS user_interactive user_initiated default utility background)
             add_test(NAME snow-shot-scrolling-qos-${_snow_qos}-tests
                 COMMAND snow-shot-scrolling-image-replay-tests --qos-only ${_snow_qos})
             set_tests_properties(snow-shot-scrolling-qos-${_snow_qos}-tests PROPERTIES
                 LABELS "unit;macos" TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         endforeach()
         unset(_snow_qos)
     endif()
@@ -9381,7 +9381,7 @@ if(WIN32 AND SNOW_SHOT_BUILD_BENCHMARKS)
             PROPERTIES LABELS "benchmark" RUN_SERIAL TRUE TIMEOUT 180
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
 
     add_custom_target(snow-shot-keyboard-recording-performance-benchmark
@@ -10720,7 +10720,7 @@ if(TARGET snow-shot-recognition-session-controller-tests)
     add_test(NAME snow-shot-recognition-model-session-tests
         COMMAND snow-shot-recognition-session-controller-tests --recognition-model-only -platform offscreen)
     set_tests_properties(snow-shot-recognition-model-session-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-latex-recognition-tests COMMAND snow-shot-recognition-session-controller-tests --latex-only -platform offscreen)
     set_tests_properties(snow-shot-latex-recognition-tests PROPERTIES LABELS "unit" TIMEOUT 60)
 endif()
@@ -10795,13 +10795,13 @@ if(SNOW_SHOT_BUILD_TESTS)
                 "$<TARGET_FILE:snow_shot_mcp>" "$<TARGET_FILE:snow_shot>" --clipboard-only)
         set_tests_properties(snow-shot-mcp-media-clipboard-tests PROPERTIES TIMEOUT 120
             LABELS "unit" RUN_SERIAL TRUE ENVIRONMENT "${_snow_clipboard_qpa_environment}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         add_test(NAME snow-shot-mcp-animation-tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_application_fixture_tests.py"
                 "$<TARGET_FILE:snow_shot_mcp>" "$<TARGET_FILE:snow_shot>" --animation-only)
         set_tests_properties(snow-shot-mcp-animation-tests PROPERTIES TIMEOUT 120
             LABELS "unit" RUN_SERIAL TRUE ENVIRONMENT "${_snow_clipboard_qpa_environment}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
 
     if(APPLE)
@@ -10868,7 +10868,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     snow_shot_offscreen_qpa_environment(_snow_clipboard_placement_qpa_environment)
     set_tests_properties(snow-shot-clipboard-placement-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "${_snow_clipboard_placement_qpa_environment}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     unset(_snow_clipboard_placement_qpa_environment)
     if(APPLE OR WIN32)
         add_test(NAME snow-shot-clipboard-placement-native-tests
@@ -10906,7 +10906,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-recording-audio-controller-tests
         COMMAND snow-shot-screen-recording-controller-tests --audio-gain-only -platform offscreen)
     set_tests_properties(snow-shot-recording-audio-controller-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 
 if(SNOW_SHOT_BUILD_TESTS)
@@ -10926,7 +10926,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-recording-audio-gain-popover-tests
         COMMAND snow-shot-recording-audio-gain-popover-tests -platform offscreen)
     set_tests_properties(snow-shot-recording-audio-gain-popover-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 if(SNOW_SHOT_BUILD_TESTS)
     # This isolated skin test exercises portable widget surfaces, including
@@ -11004,7 +11004,7 @@ if(SNOW_SHOT_BUILD_TESTS OR SNOW_APPS_BUILD_BENCHMARKS)
         set_tests_properties(snow-shot-floating-toolbar-icon-activation-tests PROPERTIES
             LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test-support/menu-screen.json"
             CONTENT "{\"screens\":[{\"name\":\"menu-screen\",\"width\":240,\"height\":600,\"dpr\":1.0}]}\n")
         add_test(NAME snow-shot-floating-toolbar-menu-lifecycle-tests
@@ -11014,23 +11014,23 @@ if(SNOW_SHOT_BUILD_TESTS OR SNOW_APPS_BUILD_BENCHMARKS)
             LABELS "unit" TIMEOUT 30 SNOW_TEST_CROSS_PLATFORM TRUE
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-support"
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         add_test(NAME snow-shot-floating-toolbar-content-drop-tests
             COMMAND snow-shot-floating-toolbar-tests --content-drops-only -platform offscreen)
         set_tests_properties(snow-shot-floating-toolbar-content-drop-tests PROPERTIES
             LABELS "unit" TIMEOUT 60 SNOW_TEST_CROSS_PLATFORM TRUE
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         set_tests_properties(snow-shot-floating-toolbar-tests PROPERTIES LABELS "unit" TIMEOUT 60
             SNOW_TEST_CROSS_PLATFORM TRUE
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         if(WIN32)
             add_test(NAME snow-shot-floating-toolbar-native-tests
                 COMMAND snow-shot-floating-toolbar-tests --native-probe -platform windows)
             set_tests_properties(snow-shot-floating-toolbar-native-tests PROPERTIES
                 LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 60
-                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         endif()
     endif()
     if(SNOW_APPS_BUILD_BENCHMARKS)
@@ -11106,19 +11106,19 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-latex-renderer-tests
         COMMAND snow-shot-latex-renderer-tests -platform offscreen)
     set_tests_properties(snow-shot-latex-renderer-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-latex-preview-window-tests
         COMMAND snow-shot-recognition-window-tests --latex-preview-only -platform offscreen)
     set_tests_properties(snow-shot-latex-preview-window-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-latex-toolbar-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --latex-only -platform offscreen)
     set_tests_properties(snow-shot-latex-toolbar-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-recognition-model-toolbar-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --recognition-model-only -platform offscreen)
     set_tests_properties(snow-shot-recognition-model-toolbar-tests PROPERTIES LABELS "unit" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 if(SNOW_SHOT_BUILD_BENCHMARKS)
     add_executable(snow-shot-latex-renderer-performance-benchmark
@@ -11130,7 +11130,7 @@ if(SNOW_SHOT_BUILD_BENCHMARKS)
         COMMAND snow-shot-latex-renderer-performance-benchmark -platform offscreen)
     set_tests_properties(snow-shot-latex-renderer-performance-benchmark PROPERTIES
         LABELS "benchmark" TIMEOUT 120
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 
 add_library(snow_shot_original_image_preview STATIC
@@ -11162,13 +11162,13 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-original-image-preview-tests
         COMMAND snow-shot-original-image-preview-tests -platform offscreen)
     set_tests_properties(snow-shot-original-image-preview-tests PROPERTIES LABELS "unit"
-        TIMEOUT 60 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        TIMEOUT 60 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-original-image-preview-mixed-dpi-tests
         COMMAND snow-shot-original-image-preview-tests --mixed-dpi-only
             -platform offscreen:configfile=original_image_preview_mixed_dpi_screens.json)
     set_tests_properties(snow-shot-original-image-preview-mixed-dpi-tests PROPERTIES
         LABELS "unit" TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(APPLE)
         set_source_files_properties(tests/screenshot_original_image_preview_tests.cpp
             PROPERTIES LANGUAGE OBJCXX)
@@ -11187,13 +11187,13 @@ if(SNOW_SHOT_BUILD_TESTS)
             set_tests_properties(snow-shot-original-image-preview-native-${_preview_scale}-tests
                 PROPERTIES LABELS "unit;windows" RUN_SERIAL TRUE TIMEOUT 60
                 ENVIRONMENT "QT_SCREEN_SCALE_FACTORS=2;QT_SCALE_FACTOR=${_preview_factor};SNOW_PREVIEW_TEST_DPR=${_preview_scale}"
-                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
             add_test(NAME snow-shot-pinned-original-image-preview-native-${_preview_scale}-tests
                 COMMAND snow-shot-pinned-window-tests --original-image-preview-only -platform windows)
             set_tests_properties(snow-shot-pinned-original-image-preview-native-${_preview_scale}-tests
                 PROPERTIES LABELS "unit;windows" RUN_SERIAL TRUE TIMEOUT 120
                 ENVIRONMENT "QT_SCREEN_SCALE_FACTORS=2;QT_SCALE_FACTOR=${_preview_factor};SNOW_PREVIEW_TEST_DPR=${_preview_scale}"
-                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         endforeach()
         add_test(NAME snow-shot-original-image-preview-native-platform-tests
             COMMAND snow-shot-original-image-preview-tests --native-only -platform windows)
@@ -11203,7 +11203,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             snow-shot-pinned-original-image-preview-native-platform-tests PROPERTIES
             LABELS "unit;windows" RUN_SERIAL TRUE TIMEOUT 120
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>;QT_SCREEN_SCALE_FACTORS=unset:;QT_SCALE_FACTOR=unset:;SNOW_PREVIEW_TEST_DPR=unset:")
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>;QT_SCREEN_SCALE_FACTORS=unset:;QT_SCALE_FACTOR=unset:;SNOW_PREVIEW_TEST_DPR=unset:")
     endif()
     add_test(NAME snow-shot-recognition-original-image-preview-tests
         COMMAND snow-shot-recognition-session-controller-tests --original-image-preview-only
@@ -11222,19 +11222,19 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-pinned-original-image-preview-tests snow-shot-original-image-preview-settings-tests
         snow-shot-large-image-slice-rendering-tests
         PROPERTIES LABELS "unit" TIMEOUT 120
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     foreach(_preview_scale IN ITEMS 1.25 2)
         add_test(NAME snow-shot-pinned-original-image-preview-${_preview_scale}-tests
             COMMAND snow-shot-pinned-window-tests --original-image-preview-only -platform offscreen)
         set_tests_properties(snow-shot-pinned-original-image-preview-${_preview_scale}-tests
             PROPERTIES LABELS "unit" TIMEOUT 120 ENVIRONMENT "QT_SCALE_FACTOR=${_preview_scale}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endforeach()
     add_test(NAME snow-shot-original-image-preview-retina-tests
         COMMAND snow-shot-original-image-preview-tests -platform offscreen)
     set_tests_properties(snow-shot-original-image-preview-retina-tests PROPERTIES LABELS "unit"
         TIMEOUT 60 ENVIRONMENT "QT_SCALE_FACTOR=2"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 if(SNOW_SHOT_BUILD_BENCHMARKS)
     add_executable(snow-shot-original-image-preview-performance-benchmark
@@ -11246,14 +11246,14 @@ if(SNOW_SHOT_BUILD_BENCHMARKS)
         COMMAND snow-shot-original-image-preview-performance-benchmark -platform offscreen)
     set_tests_properties(snow-shot-original-image-preview-performance-benchmark PROPERTIES
         LABELS "benchmark" TIMEOUT 120
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(WIN32)
         add_test(NAME snow-shot-original-image-preview-native-performance-benchmark
             COMMAND snow-shot-original-image-preview-performance-benchmark
                 --native-only -platform windows)
         set_tests_properties(snow-shot-original-image-preview-native-performance-benchmark PROPERTIES
             LABELS "benchmark;windows" RUN_SERIAL TRUE TIMEOUT 120
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
 endif()
 
@@ -11284,7 +11284,7 @@ foreach(_snow_hidden_shortcut_pair IN ITEMS
             COMMAND ${_snow_hidden_shortcut_target} --hidden-tools-only -platform offscreen)
         set_tests_properties(snow-shot-${_snow_hidden_shortcut_context}-hidden-tool-shortcut-tests
             PROPERTIES LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
 endforeach()
 
@@ -11303,7 +11303,7 @@ foreach(_right_selection_host IN ITEMS overlay pinned recording global)
             COMMAND ${_right_selection_target} --right-quick-selection-only -platform offscreen)
         set_tests_properties(snow-shot-${_right_selection_host}-right-quick-selection-tests PROPERTIES
             LABELS unit SNOW_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE TIMEOUT 60
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endif()
 endforeach()
 
@@ -11336,7 +11336,7 @@ if(SNOW_SHOT_BUILD_TESTS AND WIN32)
         target_link_libraries(${_shell_registration_test} PRIVATE snow_shot_administrator${_shell_suffix})
         add_test(NAME ${_shell_registration_test} COMMAND ${_shell_registration_test})
         set_tests_properties(${_shell_registration_test} PROPERTIES LABELS "unit;windows" TIMEOUT 30
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
         set(_shell_settings_test "snow-shot-shell-context-menu-settings-${_shell_edition}-tests")
         add_executable(${_shell_settings_test} tests/shell_context_menu_settings_tests.cpp
@@ -11352,7 +11352,7 @@ if(SNOW_SHOT_BUILD_TESTS AND WIN32)
         add_test(NAME ${_shell_settings_test} COMMAND ${_shell_settings_test} -platform offscreen)
         set_tests_properties(${_shell_settings_test} PROPERTIES LABELS "unit;windows" TIMEOUT 60
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endforeach()
 endif()
 
@@ -11367,7 +11367,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-memory-optimization-controller-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     foreach(_memory_settings_edition IN ITEMS full mini)
         set(_memory_settings_suffix "")
@@ -11389,20 +11389,20 @@ if(SNOW_SHOT_BUILD_TESTS)
         add_test(NAME ${_memory_settings_target} COMMAND ${_memory_settings_target} -platform offscreen)
         set_tests_properties(${_memory_settings_target} PROPERTIES LABELS "unit" TIMEOUT 60
             ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     endforeach()
     add_test(NAME snow-shot-memory-optimization-catalog-tests
         COMMAND snow-shot-settings-catalog-tests --memory-optimization-only)
     set_tests_properties(snow-shot-memory-optimization-catalog-tests PROPERTIES LABELS "unit"
-        TIMEOUT 30 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        TIMEOUT 30 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-capture-history-memory-activity-tests
         COMMAND snow-shot-capture-history-repository-tests --memory-activity-only)
     set_tests_properties(snow-shot-capture-history-memory-activity-tests PROPERTIES LABELS "unit"
-        TIMEOUT 30 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        TIMEOUT 30 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-window-memory-activity-tests
         COMMAND snow-shot-pinned-window-repository-tests --memory-activity-only)
     set_tests_properties(snow-shot-pinned-window-memory-activity-tests PROPERTIES LABELS "unit"
-        TIMEOUT 30 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        TIMEOUT 30 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-pinned-window-memory-idle-tests
         COMMAND snow-shot-pinned-window-tests --memory-idle-only -platform offscreen)
     add_test(NAME snow-shot-floating-toolbar-memory-idle-tests
@@ -11413,7 +11413,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         snow-shot-floating-toolbar-memory-idle-tests snow-shot-storage-memory-activity-tests
         PROPERTIES LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     if(APPLE)
         add_executable(snow-shot-macos-memory-optimization-tests
@@ -11435,7 +11435,7 @@ if(SNOW_SHOT_BUILD_TESTS)
             COMMAND snow-shot-memory-optimization-native-smoke-tests)
         set_tests_properties(snow-shot-memory-optimization-native-smoke-tests PROPERTIES
             LABELS "unit;windows" TIMEOUT 30
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
         if(SNOW_SHOT_BUILD_BENCHMARKS)
             get_target_property(_memory_pin_sources snow-shot-pinned-window-tests SOURCES)
             get_target_property(_memory_selection_sources snow-shot-selection-presentation-runtime SOURCES)
@@ -11624,7 +11624,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-shadow-renderer-tests -platform offscreen)
     set_tests_properties(snow-shot-pinned-shadow-renderer-tests PROPERTIES LABELS "unit"
         ENVIRONMENT "${_SNOW_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(TARGET snow-shot-pinned-window-tests)
         foreach(_snow_pinned_toolbar_dpr IN ITEMS 1 1.25 1.5 1.75 2)
             set(_snow_pinned_toolbar_test
@@ -11730,7 +11730,7 @@ if(SNOW_APPS_BUILD_BENCHMARKS AND TARGET snow-shot-recognition-session-controlle
         COMMAND snow-shot-recognition-model-benchmark -platform offscreen)
     set_tests_properties(snow-shot-recognition-model-benchmark PROPERTIES LABELS "benchmark"
         TIMEOUT 120 ENVIRONMENT "${_recognition_model_benchmark_environment}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 
 # Standalone tests compile presentation hosts independently of the application. Keep
@@ -11750,7 +11750,7 @@ if(SNOW_SHOT_BUILD_TESTS)
     add_test(NAME snow-shot-canvas-status-readout-tests
         COMMAND snow-shot-canvas-status-readout-tests -platform offscreen)
     set_tests_properties(snow-shot-canvas-status-readout-tests PROPERTIES LABELS unit TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 
 # Anything that compiles the shared platform sources also has to carry the X11

@@ -215,7 +215,7 @@ if(ADQT_BUILD_TESTS)
     add_test(NAME adqt-icon-subset-tests COMMAND adqt-icon-subset-tests)
     set_tests_properties(adqt-icon-subset-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_executable(adqt-checkerboard-tests
         packages/ant_design_qt/tests/checkerboard_tests.cpp)
     target_link_libraries(adqt-checkerboard-tests PRIVATE adqt::widgets Qt::Widgets)
@@ -300,7 +300,7 @@ if(ADQT_BUILD_TESTS)
     set_tests_properties(adqt-radio-rendering-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(adqt-focus-interaction-tests tests/focus_interaction_tests.cpp)
@@ -323,7 +323,7 @@ if(ADQT_BUILD_TESTS)
     set_tests_properties(adqt-text-edit-accessibility-tests PROPERTIES
         LABELS "unit"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         TIMEOUT 30)
 
     add_executable(adqt-button-lifetime-tests tests/button_lifetime_tests.cpp)
@@ -336,7 +336,7 @@ if(ADQT_BUILD_TESTS)
     add_test(NAME adqt-button-lifetime-tests COMMAND adqt-button-lifetime-tests)
     set_tests_properties(adqt-button-lifetime-tests PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 
     add_executable(adqt-value-widget-lifetime-tests tests/value_widget_lifetime_tests.cpp)
@@ -347,7 +347,7 @@ if(ADQT_BUILD_TESTS)
     add_test(NAME adqt-value-widget-lifetime-tests COMMAND adqt-value-widget-lifetime-tests)
     set_tests_properties(adqt-value-widget-lifetime-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(adqt-button-signal-lifetime-tests packages/ant_design_qt/tests/button_signal_lifetime_tests.cpp)
     set_target_properties(adqt-button-signal-lifetime-tests PROPERTIES AUTOMOC ON)
@@ -358,7 +358,7 @@ if(ADQT_BUILD_TESTS)
     add_test(NAME adqt-button-signal-lifetime-tests COMMAND adqt-button-signal-lifetime-tests -o -,txt)
     set_tests_properties(adqt-button-signal-lifetime-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 
     add_executable(adqt-icon-cache-tests tests/icon_cache_tests.cpp)
     target_link_libraries(adqt-icon-cache-tests PRIVATE adqt::icon_core Qt::Widgets)
@@ -368,7 +368,7 @@ if(ADQT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(adqt-icon-cache-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -382,7 +382,7 @@ if(ADQT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(adqt-icon-core-tests PROPERTIES
@@ -398,7 +398,7 @@ if(ADQT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(adqt-image-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -512,7 +512,7 @@ if(ADQT_BUILD_TESTS)
             ENVIRONMENT
                 "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(adqt-modal-window-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -660,7 +660,7 @@ if(ADQT_BUILD_TESTS)
             # suite runs offscreen like its sibling recovery entry.
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         )
     else()
         set_tests_properties(adqt-qt-tool-popup-tests PROPERTIES

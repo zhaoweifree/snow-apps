@@ -61,7 +61,7 @@ set_tests_properties(snow_image_viewer_image_notification_lifetime_tests PROPERT
     LABELS "unit" TIMEOUT 30)
 if(WIN32)
     set_tests_properties(snow_image_viewer_image_notification_lifetime_tests PROPERTIES
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 add_executable(snow_image_viewer_pipeline_notification_lifetime_tests
     pipeline_notification_lifetime_tests.cpp)
@@ -88,7 +88,7 @@ set_tests_properties(snow_image_viewer_pipeline_notification_lifetime_tests PROP
     LABELS "unit" TIMEOUT 60)
 if(WIN32)
     set_tests_properties(snow_image_viewer_pipeline_notification_lifetime_tests PROPERTIES
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
 endif()
 add_test(NAME snow_image_viewer_editor_lifecycle_tests
     COMMAND snow_image_viewer_editor_lifecycle_tests)
@@ -103,7 +103,7 @@ set_tests_properties(snow_image_viewer_editor_lifecycle_tests
 if(WIN32)
     set_tests_properties(snow_image_viewer_editor_lifecycle_tests
         snow_image_viewer_editor_reopen_tests PROPERTIES
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 endif()
 
@@ -129,7 +129,7 @@ if(WIN32)
         ENVIRONMENT
             "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>"
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
     )
 else()
     set_tests_properties(snow_image_viewer_generated_icon_pack_tests PROPERTIES

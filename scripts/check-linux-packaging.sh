@@ -76,6 +76,13 @@ echo "=== qt private module pairing"
 "$python_command" scripts/check-qt-private-modules.py
 
 echo
+echo "=== qt versionless generator expressions"
+# `$<TARGET_FILE_DIR:Qt::Core>` works on Qt6 and fails at generate time on Qt5,
+# where the versionless target is INTERFACE. 375 test registrations used it and
+# only the Linux job could notice (run 46, both architectures).
+"$python_command" scripts/check-qt-versionless-genex.py
+
+echo
 echo "=== linux dependency pins"
 # The imath/openexr/libwebp pins are *copies* of vcpkg builtin ports (CI has no
 # clone). A stale copy compiles an old API against a newer snow_image (9.6.12).
