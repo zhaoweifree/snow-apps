@@ -5780,6 +5780,128 @@ AppDir 根副本写字面量       → entry name is written once
 
 ---
 
+#### 9.6.42 run 43：`.deb` 全绿，`cmake -E chmod` 与一个"在树里却报缺"的依赖
+
+run 43（`40897097354`，`1b259db0`）第一次把整条 deb 路径走完，并在第一步**真正执行**的
+AppImage 上停住。
+
+```text
+Linux gates (no toolchain)          all steps  success   ← 含两步元数据校验
+Build and package arm64
+  10. Build                          success
+  11. Build the Debian package       success
+  12. Validate the packaged metadata success             ← 首次
+  13. Upload the package             success
+  14. Fetch appimagetool             success             ← 首次
+  15. Build the AppImage             failure             ← 首次，死因见下
+  16/17/18                           skipped
+```
+
+##### 死因一：`cmake -E` 里没有 `chmod`
+
+命令链最后一条自写出那天起就是：
+
+```cmake
+COMMAND "${CMAKE_COMMAND}" -E chmod +x "${SNOW_SHOT_APPIMAGE_DIR}/AppRun"
+```
+
+`cmake -E` 是一张**固定的命令表**（`Source/cmcmd.cxx`，4.4 上是 63 项），`chmod` 不在里面。
+未知子命令不是警告而是硬错误，并且会把四十行 usage 一起打出来：
+
+```text
+CMake Error: cmake version 4.4.4
+Usage: cmake -E <command> [arguments...]
+  bin2c / capabilities / cat / chdir / compare_files / copy / … / true / false
+```
+
+在那一长串里找 `chmod` 是找不到的——这正是它一直没被发现的原因：**这条命令只能失败，
+不能成功**，而它所在的 target 在 run 43 之前从未被执行过（AppImage 的三步一直排在
+`Validate the packaged metadata` 之后）。
+
+而且它本来就是**多余**的。`_cmake_E_copy` 走的是 `cmSystemTools::CopyFileAlways`：
+
+```cpp
+mode_t perm = 0;
+Status perms = SystemTools::GetPermissions(source, perm);
+...
+if (perms) {
+  status = CopyStatus{ SystemTools::SetPermissions(real_destination, perm), ... };
+}
+```
+
+源文件 `AppRun` 在索引里是 `100755`，所以 `-E copy` 已经把执行位带过去。修法是**删掉那行**，
+而不是找个替代的 chmod。
+
+门禁因此加了一条更通用的断言：把 AppImage 模块里**每一个** `-E <sub>` 抽出来，逐个对照
+CMake 真实的命令表。这样下一个 `-E mkdir` / `-E ln`（都是"听起来应该有"的名字）也会在秒级
+被发现，而不是等三十分钟构建。注释先被剥掉再匹配——文档里现在写着 `cmake -E chmod`，
+不剥就会匹配到自己的解释（§9.6.6 那个"门禁匹配到自己注释"的老坑）。
+
+##### 死因二：`unresolved libsnow_shot_image_codec_backend.so`
+
+bundle 脚本同一次运行里报了它：
+
+```text
+-- snow-shot bundle: 201 resolved dependency file(s), 1 unresolved
+-- snow-shot bundle: unresolved libsnow_shot_image_codec_backend.so
+```
+
+不是缺库，是**搜索路径没覆盖到它**。这个库（图像编解码后端）是项目自己的产物，装在
+`usr/lib`，**不在**私有目录 `usr/lib/snow-shot`：
+
+```cmake
+install(TARGETS snow_shot_image_codec_backend
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} ...)
+```
+
+这个位置是对的：`.deb` 里 `/usr/lib` 是加载器默认路径；AppImage 里 `AppRun` 有
+`LD_LIBRARY_PATH=$APPDIR/usr/lib`。但 `file(GET_RUNTIME_DEPENDENCIES)` 只查
+`DIRECTORIES` 加上**宿主**系统路径，暂存树里的 `usr/lib` 不在其中，于是它把"在树里的库"
+报成缺失。
+
+这种假缺失比噪音更坏：下一条**真的**缺失会藏在它后面。修法是把暂存库目录也交给求解器：
+
+```cmake
+DIRECTORIES "${_deps_lib_dir}" "${_staged}/${_lib_subdir}"
+```
+
+放进这个目录并不会多打包一个文件——决定"是否打包"的是下面那句 `realpath` 目录比较，只认
+依赖前缀下的条目。
+
+##### 第二条运行日志的 0 个库不是回归
+
+同一次 `cmake --install` 里脚本被调了两次：一次是安装规则（走 `DESTDIR`），一次是 AppImage
+target 手动的 `-DSTAGED_DIR=`。第二次打印 `$ORIGIN written into 0`、`nothing was bundled`：
+
+第一次已经把 13 个私有库复制进 `lib/snow-shot`，第二次求解器顺着刚写进去的
+`$ORIGIN/../lib/snow-shot` 就在暂存树里找到了它们，`realpath` 不在依赖前缀下 ⇒ 不再算"需要
+打包"。库是在的，`check-linux-appimage-build.py` 的 "the package bundles shared libraries"
+会证实。那句 `WARNING` 的措辞改成了三种情形的枚举，免得下次读日志的人以为坏了。
+
+##### 反向验证
+
+| 变异 | 结果 |
+|---|---|
+| 把 `-E chmod` 加回去 | 红：`'cmake -E chmod' … not one of the 63 sub-commands` |
+| 换成一个"应该有"的 `-E cp` | 红：同上 |
+| 从 `DIRECTORIES` 里去掉暂存库目录 | 红：`searches only the dependency prefix` |
+| 删掉 gates 里的 AppRun 检查 | 红：`gates job checks the AppRun bit` |
+| 把 `test -x` 改成 `test -f` | 红：同上 |
+
+五条全红、恢复全绿。另外 gates job 新增一步 `test -x AppRun`：执行位来自索引，而
+`-E copy` 只是把它带过去——万一某次重新添加文件把模式丢了，这一步一秒钟就能说，不必等
+`appimagetool` 在半小时后报错。
+
+##### 下一步的真正缺口
+
+`Build the AppImage` 通过之后，产物**仍然起不来**：`AppRun` 把 `QT_PLUGIN_PATH` 指向
+`$APPDIR/usr/plugins`，而 Linux 侧没有任何规则往那儿拷 Qt 插件（唯一的 plugin 部署块只有
+Windows 分支，只挑 `platforms/qwindows.dll`）。`.deb` 靠 `Depends: libqt5gui5` 用宿主的 Qt
+所以能跑，AppImage 不打包 Qt 就不行。`Validate the AppImage` 只做结构校验，看不出来。这是
+§9.6.43 要做的事。
+
+---
+
 ## 10. 工作量 / 优先级矩阵
 
 | 编号 | 工作项 | 规模 | 风险 | 优先级 |

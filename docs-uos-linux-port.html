@@ -7913,6 +7913,113 @@ AppDir 根副本写字面量       → entry name is written once
 不认识 <code>&lt;developer&gt;</code> 元素，会把 info 变成 error。info 不致命，先留；真机验证时用 UOS 20
 的 <code>appstreamcli</code> 复核一次再决定。</p>
 <hr>
+<h4>9.6.42 run 43：<code>.deb</code> 全绿，<code>cmake -E chmod</code> 与一个"在树里却报缺"的依赖</h4>
+<p>run 43（<code>40897097354</code>，<code>1b259db0</code>）第一次把整条 deb 路径走完，并在第一步<strong>真正执行</strong>的
+AppImage 上停住。</p>
+<pre><code class="language-text">Linux gates (no toolchain)          all steps  success   ← 含两步元数据校验
+Build and package arm64
+  10. Build                          success
+  11. Build the Debian package       success
+  12. Validate the packaged metadata success             ← 首次
+  13. Upload the package             success
+  14. Fetch appimagetool             success             ← 首次
+  15. Build the AppImage             failure             ← 首次，死因见下
+  16/17/18                           skipped
+</code></pre>
+<h5>死因一：<code>cmake -E</code> 里没有 <code>chmod</code></h5>
+<p>命令链最后一条自写出那天起就是：</p>
+<pre><code class="language-cmake">COMMAND &quot;${CMAKE_COMMAND}&quot; -E chmod +x &quot;${SNOW_SHOT_APPIMAGE_DIR}/AppRun&quot;
+</code></pre>
+<p><code>cmake -E</code> 是一张<strong>固定的命令表</strong>（<code>Source/cmcmd.cxx</code>，4.4 上是 63 项），<code>chmod</code> 不在里面。
+未知子命令不是警告而是硬错误，并且会把四十行 usage 一起打出来：</p>
+<pre><code class="language-text">CMake Error: cmake version 4.4.4
+Usage: cmake -E &lt;command&gt; [arguments...]
+  bin2c / capabilities / cat / chdir / compare_files / copy / … / true / false
+</code></pre>
+<p>在那一长串里找 <code>chmod</code> 是找不到的——这正是它一直没被发现的原因：<strong>这条命令只能失败，
+不能成功</strong>，而它所在的 target 在 run 43 之前从未被执行过（AppImage 的三步一直排在
+<code>Validate the packaged metadata</code> 之后）。</p>
+<p>而且它本来就是<strong>多余</strong>的。<code>_cmake_E_copy</code> 走的是 <code>cmSystemTools::CopyFileAlways</code>：</p>
+<pre><code class="language-cpp">mode_t perm = 0;
+Status perms = SystemTools::GetPermissions(source, perm);
+...
+if (perms) {
+  status = CopyStatus{ SystemTools::SetPermissions(real_destination, perm), ... };
+}
+</code></pre>
+<p>源文件 <code>AppRun</code> 在索引里是 <code>100755</code>，所以 <code>-E copy</code> 已经把执行位带过去。修法是<strong>删掉那行</strong>，
+而不是找个替代的 chmod。</p>
+<p>门禁因此加了一条更通用的断言：把 AppImage 模块里<strong>每一个</strong> <code>-E &lt;sub&gt;</code> 抽出来，逐个对照
+CMake 真实的命令表。这样下一个 <code>-E mkdir</code> / <code>-E ln</code>（都是"听起来应该有"的名字）也会在秒级
+被发现，而不是等三十分钟构建。注释先被剥掉再匹配——文档里现在写着 <code>cmake -E chmod</code>，
+不剥就会匹配到自己的解释（§9.6.6 那个"门禁匹配到自己注释"的老坑）。</p>
+<h5>死因二：<code>unresolved libsnow_shot_image_codec_backend.so</code></h5>
+<p>bundle 脚本同一次运行里报了它：</p>
+<pre><code class="language-text">-- snow-shot bundle: 201 resolved dependency file(s), 1 unresolved
+-- snow-shot bundle: unresolved libsnow_shot_image_codec_backend.so
+</code></pre>
+<p>不是缺库，是<strong>搜索路径没覆盖到它</strong>。这个库（图像编解码后端）是项目自己的产物，装在
+<code>usr/lib</code>，<strong>不在</strong>私有目录 <code>usr/lib/snow-shot</code>：</p>
+<pre><code class="language-cmake">install(TARGETS snow_shot_image_codec_backend
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} ...)
+</code></pre>
+<p>这个位置是对的：<code>.deb</code> 里 <code>/usr/lib</code> 是加载器默认路径；AppImage 里 <code>AppRun</code> 有
+<code>LD_LIBRARY_PATH=$APPDIR/usr/lib</code>。但 <code>file(GET_RUNTIME_DEPENDENCIES)</code> 只查
+<code>DIRECTORIES</code> 加上<strong>宿主</strong>系统路径，暂存树里的 <code>usr/lib</code> 不在其中，于是它把"在树里的库"
+报成缺失。</p>
+<p>这种假缺失比噪音更坏：下一条<strong>真的</strong>缺失会藏在它后面。修法是把暂存库目录也交给求解器：</p>
+<pre><code class="language-cmake">DIRECTORIES &quot;${_deps_lib_dir}&quot; &quot;${_staged}/${_lib_subdir}&quot;
+</code></pre>
+<p>放进这个目录并不会多打包一个文件——决定"是否打包"的是下面那句 <code>realpath</code> 目录比较，只认
+依赖前缀下的条目。</p>
+<h5>第二条运行日志的 0 个库不是回归</h5>
+<p>同一次 <code>cmake --install</code> 里脚本被调了两次：一次是安装规则（走 <code>DESTDIR</code>），一次是 AppImage
+target 手动的 <code>-DSTAGED_DIR=</code>。第二次打印 <code>$ORIGIN written into 0</code>、<code>nothing was bundled</code>：</p>
+<p>第一次已经把 13 个私有库复制进 <code>lib/snow-shot</code>，第二次求解器顺着刚写进去的
+<code>$ORIGIN/../lib/snow-shot</code> 就在暂存树里找到了它们，<code>realpath</code> 不在依赖前缀下 ⇒ 不再算"需要
+打包"。库是在的，<code>check-linux-appimage-build.py</code> 的 "the package bundles shared libraries"
+会证实。那句 <code>WARNING</code> 的措辞改成了三种情形的枚举，免得下次读日志的人以为坏了。</p>
+<h5>反向验证</h5>
+<table>
+<thead>
+<tr>
+<th>变异</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>把 <code>-E chmod</code> 加回去</td>
+<td>红：<code>'cmake -E chmod' … not one of the 63 sub-commands</code></td>
+</tr>
+<tr>
+<td>换成一个"应该有"的 <code>-E cp</code></td>
+<td>红：同上</td>
+</tr>
+<tr>
+<td>从 <code>DIRECTORIES</code> 里去掉暂存库目录</td>
+<td>红：<code>searches only the dependency prefix</code></td>
+</tr>
+<tr>
+<td>删掉 gates 里的 AppRun 检查</td>
+<td>红：<code>gates job checks the AppRun bit</code></td>
+</tr>
+<tr>
+<td>把 <code>test -x</code> 改成 <code>test -f</code></td>
+<td>红：同上</td>
+</tr>
+</tbody>
+</table>
+<p>五条全红、恢复全绿。另外 gates job 新增一步 <code>test -x AppRun</code>：执行位来自索引，而
+<code>-E copy</code> 只是把它带过去——万一某次重新添加文件把模式丢了，这一步一秒钟就能说，不必等
+<code>appimagetool</code> 在半小时后报错。</p>
+<h5>下一步的真正缺口</h5>
+<p><code>Build the AppImage</code> 通过之后，产物<strong>仍然起不来</strong>：<code>AppRun</code> 把 <code>QT_PLUGIN_PATH</code> 指向
+<code>$APPDIR/usr/plugins</code>，而 Linux 侧没有任何规则往那儿拷 Qt 插件（唯一的 plugin 部署块只有
+Windows 分支，只挑 <code>platforms/qwindows.dll</code>）。<code>.deb</code> 靠 <code>Depends: libqt5gui5</code> 用宿主的 Qt
+所以能跑，AppImage 不打包 Qt 就不行。<code>Validate the AppImage</code> 只做结构校验，看不出来。这是
+§9.6.43 要做的事。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

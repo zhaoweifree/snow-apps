@@ -207,6 +207,27 @@ else()
                 message(STATUS "ok   the bundle script uses ${_needle}")
             endif()
         endforeach()
+        # The solver searches `DIRECTORIES` plus the *host* system paths. The
+        # project installs one shared library of its own into `usr/lib` rather
+        # than into the private directory, so on a host where that path is not a
+        # system directory it looks unresolved:
+        #
+        #     snow-shot bundle: unresolved libsnow_shot_image_codec_backend.so
+        #
+        # A dependency that is in the tree and still reported missing hides the
+        # next one that really is. `string(FIND)` and not a regex: the needle is
+        # full of `${}` and `"`.
+        set(_directories_needle
+            [=[DIRECTORIES "${_deps_lib_dir}" "${_staged}/${_lib_subdir}"]=])
+        string(FIND "${_bundle_code}" "${_directories_needle}" _directories_position)
+        if(_directories_position EQUAL -1)
+            message(STATUS "FAIL the bundle script searches only the dependency prefix; "
+                           "the project's own libraries in the staged libdir then read "
+                           "as unresolved")
+            math(EXPR _snow_failures "${_snow_failures} + 1")
+        else()
+            message(STATUS "ok   the bundle script searches the staged library directory too")
+        endif()
         # The copy has to be named after the soname the loader asks for, which is
         # the name `GET_RUNTIME_DEPENDENCIES` resolved -- not the name of the file
         # the symlink points at. Taking the name from `REALPATH` ships
@@ -459,6 +480,45 @@ foreach(_needle
         math(EXPR _snow_failures "${_snow_failures} + 1")
     else()
         message(STATUS "ok   the AppImage target uses ${_needle}")
+    endif()
+endforeach()
+
+# `cmake -E` is a fixed command table (Source/cmcmd.cxx: 63 entries on 4.4), and
+# an unknown sub-command is a hard error that only appears when the target runs.
+# Run 43 -- the first run that ever reached the AppImage -- ended its whole job
+# on one:
+#
+#     CMake Error: cmake version 4.4.4
+#     Usage: cmake -E <command> [arguments...]
+#     ... forty lines of commands, none of them `chmod`
+#
+# The chain had ended with `cmake -E chmod +x AppRun` since it was written. It
+# was also redundant: `-E copy` goes through `cmSystemTools::CopyFileAlways`,
+# which reads `GetPermissions(source)` and applies `SetPermissions(destination)`,
+# so the 100755 in the index already carried over. Checking the sub-command
+# against the real table covers the next one too (`mkdir`, `chmod`, `ln` … are
+# all plausible names that do not exist).
+set(_snow_e_subcommands
+    bin2c capabilities cat chdir compare_files copy copy_directory
+    copy_directory_if_different copy_directory_if_newer copy_if_different
+    copy_if_newer create_hardlink create_symlink echo echo_append env environment
+    false make_directory md5sum remove remove_directory rename rm sha1sum sha224sum
+    sha256sum sha384sum sha512sum sleep tar time touch touch_nocreate true)
+string(REGEX MATCHALL [=[-E[" ]*[A-Za-z0-9_]+]=] _snow_e_uses "${_appimage_code}")
+if(NOT _snow_e_uses)
+    message(STATUS "FAIL the AppImage command chain runs nothing through cmake -E; the "
+                   "staging commands have to be found by this check")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+endif()
+foreach(_snow_e_use IN LISTS _snow_e_uses)
+    string(REGEX REPLACE [=[^-E[" ]*]=] "" _snow_e_sub "${_snow_e_use}")
+    if(NOT _snow_e_sub IN_LIST _snow_e_subcommands)
+        message(STATUS "FAIL the AppImage target runs 'cmake -E ${_snow_e_sub}'; that is "
+                       "not one of the 63 sub-commands CMake provides, so the target "
+                       "aborts with the usage text")
+        math(EXPR _snow_failures "${_snow_failures} + 1")
+    else()
+        message(STATUS "ok   cmake -E ${_snow_e_sub} is a real sub-command")
     endif()
 endforeach()
 

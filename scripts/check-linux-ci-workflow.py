@@ -28,6 +28,8 @@ Checked:
   * ``gates`` verifies that both cargo lockfiles are current -- ``snow_rust_ffi``
     is a second cargo project whose stale lockfile used to surface as a build
     failure instead of a gate failure;
+  * ``gates`` asserts the AppRun is executable, because the AppDir copies its
+    mode from the index and appimagetool only notices after the whole build;
   * ``build`` actually invokes ``scripts/build-linux-deps.sh``, the step that
     supplies zlib-ng and libjpeg-turbo, which no distribution package provides.
 
@@ -415,6 +417,15 @@ def main() -> int:
         check("gates job installs PyYAML",
               re.search(r"pip install[^\n]*pyyaml", gates_text) is not None,
               "the workflow's own structure checks would be skipped")
+
+        # The AppDir's entry point is executable only because `cmake -E copy`
+        # carries the index's 100755 across. `test -x` on the source file is the
+        # cheapest possible place to notice a checkout that lost the bit -- the
+        # alternative is appimagetool failing half an hour into the build job.
+        check("gates job checks the AppRun bit",
+              re.search(r"test[ \t]+-x[ \t]+\S*packaging/linux/appimage/AppRun",
+                        gates_text) is not None,
+              "a lost mode bit would only surface in the build job")
 
         # Two cargo projects live in this repository, and only one of them has
         # its lockfile checked anywhere: `snow_rust_ffi` is a separate project

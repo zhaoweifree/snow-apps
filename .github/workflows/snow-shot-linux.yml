@@ -85,6 +85,14 @@ jobs:
       - name: Packaging and freedesktop gates
         run: bash scripts/check-linux-packaging.sh
 
+      # `cmake -E copy` carries the source's mode across, so the AppRun bit comes
+      # from the index -- it is the only thing that makes the file executable in
+      # the AppDir. A re-add through a tool that drops modes leaves an AppImage
+      # whose entry point is not executable, and appimagetool only says so after
+      # the whole build. This costs one syscall here.
+      - name: The AppRun is executable in the index
+        run: test -x snow_shot/packaging/linux/appimage/AppRun
+
       # The two authorities for the metadata files, run in the job that is
       # allowed to be red. `check-linux-freedesktop.py` can only check the
       # *structure* (well-formedness, id agreement, icon naming); the AppStream

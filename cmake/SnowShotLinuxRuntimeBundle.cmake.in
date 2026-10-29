@@ -147,12 +147,27 @@ endif()
 
 # `DIRECTORIES` is the only place the solver may look for the private copies;
 # the default search path is still consulted for system libraries.
+#
+# The staged library directory is in the list because the project installs one
+# shared library of its own -- `libsnow_shot_image_codec_backend.so`, the codec
+# backend -- into `usr/lib`, not into the private directory. That placement is
+# deliberate and it is found at run time either through the loader's default
+# path (the .deb) or through `LD_LIBRARY_PATH=$APPDIR/usr/lib` (AppRun in the
+# AppImage). The solver, however, only looks in `DIRECTORIES` plus the *host*
+# system paths, so run 43 reported it as unresolved:
+#
+#     snow-shot bundle: unresolved libsnow_shot_image_codec_backend.so
+#
+# A dependency that is in the tree and still reported missing is worse than
+# noise: the next genuinely missing library hides behind it. Nothing is bundled
+# from this directory -- the filter below only keeps dependencies whose realpath
+# is under the dependency prefix.
 file(GET_RUNTIME_DEPENDENCIES
     EXECUTABLES ${_executables}
     LIBRARIES ${_staged_libraries}
     RESOLVED_DEPENDENCIES_VAR _resolved
     UNRESOLVED_DEPENDENCIES_VAR _unresolved
-    DIRECTORIES "${_deps_lib_dir}")
+    DIRECTORIES "${_deps_lib_dir}" "${_staged}/${_lib_subdir}")
 
 get_filename_component(_deps_real "${_deps_lib_dir}" REALPATH)
 
@@ -249,9 +264,14 @@ foreach(_library IN LISTS _bundled)
     message(STATUS "snow-shot bundle:   ${_name}")
 endforeach()
 if(NOT _bundled)
+    # Not necessarily wrong: the AppImage runs this script a second time, on a
+    # tree the first run already filled, and then every private library resolves
+    # from the staged `lib/snow-shot` instead of the dependency prefix. The three
+    # cases are spelled out so a genuinely empty result is not mistaken for that.
     message(WARNING
-        "snow-shot bundle: nothing was bundled. Either every dependency is a "
-        "distribution package, or the dependency prefix is wrong -- "
+        "snow-shot bundle: nothing was bundled on this run. Either every "
+        "dependency is a distribution package, or the private copies are already "
+        "in the staged tree, or the dependency prefix is wrong -- "
         "dpkg-shlibdeps will say which one.")
 endif()
 

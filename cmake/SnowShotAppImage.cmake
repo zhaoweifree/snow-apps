@@ -194,6 +194,21 @@ function(snow_shot_add_appimage_target)
         # an AppImage whose `libjxl` is missing is not a product.
         COMMAND "${CMAKE_COMMAND}" "-DSTAGED_DIR=${SNOW_SHOT_APPIMAGE_USR}"
                 -P "${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}"
+        # `-E copy` carries the source's mode across: `_cmake_E_copy` calls
+        # `cmSystemTools::CopyFileAlways`, which reads `GetPermissions(source)`
+        # and applies `SetPermissions(destination, perm)` afterwards. AppRun is
+        # 100755 in the index, so the copy is executable -- and
+        # `check-linux-appimage-build.py` verifies that on the unpacked image.
+        #
+        # There is no `cmake -E chmod`. This chain used to end with one, and run
+        # 43 -- the first run that ever reached this target -- found out:
+        #
+        #     CMake Error: cmake version 4.4.4
+        #     Usage: cmake -E <command> [arguments...]
+        #
+        # followed by the 40-line command list, in which `chmod` does not
+        # appear. The copy above already did the job; that command could only
+        # ever fail.
         COMMAND "${CMAKE_COMMAND}" -E copy "${_snow_apprun}" "${SNOW_SHOT_APPIMAGE_DIR}/AppRun"
         COMMAND "${CMAKE_COMMAND}" -E copy "${SNOW_SHOT_APPIMAGE_DESKTOP}"
                 "${SNOW_SHOT_APPIMAGE_DIR}/${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}"
@@ -203,7 +218,6 @@ function(snow_shot_add_appimage_target)
         # missing one only shows up as a blank icon in the file manager.
         COMMAND "${CMAKE_COMMAND}" -E create_symlink
                 "${SNOW_SHOT_APPIMAGE_ICON_NAME}" "${SNOW_SHOT_APPIMAGE_DIR}/.DirIcon"
-        COMMAND "${CMAKE_COMMAND}" -E chmod +x "${SNOW_SHOT_APPIMAGE_DIR}/AppRun"
         COMMAND "${CMAKE_COMMAND}" -E env
                 "ARCH=${SNOW_SHOT_APPIMAGE_ARCH}"
                 # Without FUSE -- containers, CI runners -- appimagetool refuses
