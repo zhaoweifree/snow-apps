@@ -45,6 +45,11 @@ MACHINES = {"x86_64": 0x3E, "aarch64": 0xB7}
 # The type-2 AppImage magic sits right after the ELF identification bytes.
 APPIMAGE_MAGIC = b"AI\x02"
 
+# The extensions appimagetool accepts for the AppDir root icon, in the order a
+# name lookup would prefer them. `Icon=` in the entry is a theme name, so the
+# file on disk carries one of these suffixes.
+ICON_SUFFIXES = (".png", ".svg", ".svgz", ".xpm")
+
 failures: list[str] = []
 
 
@@ -94,6 +99,52 @@ def check_plugin_path(app_run_text: str, unpacked: Path) -> None:
           plugin_dir.is_dir() or guarded,
           f"QT_PLUGIN_PATH names {export.group(1)}, the bundle has no such directory, "
           "and the export is not guarded")
+
+
+def check_root_icon(unpacked: Path, icon: str) -> None:
+    """The AppDir root must carry the icon the entry names, plus `.DirIcon`.
+
+    `Icon=` is a *name*, not a file name -- the freedesktop spec looks the name
+    up in the icon theme, and appimagetool maps it to `<name>.<ext>` at the
+    AppDir root. Run 45 failed here:
+
+        FAIL the named icon is at the root of the package: Icon=snow-shot
+
+    while `squashfs-root/snow-shot.png` was sitting right there, because this
+    check looked for the bare name. Accept the extensions appimagetool accepts
+    (and the bare name, which is also legal), then require `.DirIcon` on top:
+    that is the file the file manager draws the thumbnail from, and it is a
+    symlink to the icon, so a dangling link means the icon was never staged.
+    """
+    if not icon:
+        return
+    candidates = [unpacked / icon] + [unpacked / f"{icon}{suffix}" for suffix in ICON_SUFFIXES]
+    found = [path for path in candidates if path.is_file()]
+    check("the named icon is at the root of the package", bool(found),
+          f"Icon={icon}: no {' or '.join(path.name for path in candidates)} at the root")
+
+    dir_icon = unpacked / ".DirIcon"
+    # `is_file()` follows the symlink, so a link whose target is missing fails
+    # here -- which is the case worth failing on.
+    check("the package has a usable .DirIcon",
+          dir_icon.is_file(),
+          ".DirIcon is missing or points at a file the package does not contain")
+
+    if found and dir_icon.is_file():
+        # The two have to be the same application's icon: `.DirIcon` is a
+        # symlink to the staged icon in the packaging step, and a link to some
+        # unrelated file would put one icon on the launcher and another in the
+        # file manager. Which *size* or format it points at is not fixed -- a
+        # copy is accepted as well -- so the comparison is on the name, not on
+        # the bytes.
+        # A symlink is identified by the name it points at; a plain copy has no
+        # name to read, so the bytes are what has to match one of the icons.
+        if dir_icon.is_symlink():
+            same = dir_icon.resolve().stem == icon
+        else:
+            same = any(dir_icon.read_bytes() == path.read_bytes() for path in found)
+        check(".DirIcon is the entry's icon", same,
+              f".DirIcon is {dir_icon.resolve().name if dir_icon.is_symlink() else 'a copy'}, the entry names {icon}")
 
 
 def main() -> int:
@@ -164,9 +215,7 @@ def main() -> int:
             values = parse_desktop(desktop)
             icon = values.get("Icon", "")
             check("the desktop entry names an icon", bool(icon), "no Icon= key")
-            check("the named icon is at the root of the package",
-                  bool(icon) and (unpacked / icon).is_file(),
-                  f"Icon={icon}")
+            check_root_icon(unpacked, icon)
             check("the desktop entry has a type", values.get("Type") == "Application",
                   f"Type={values.get('Type')!r}")
             check("the desktop entry has an exec line", bool(values.get("Exec")))
