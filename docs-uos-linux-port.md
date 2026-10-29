@@ -438,7 +438,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**AppImage 路径的前两处"从未执行过的代码"已修**：`Fetch appimagetool` 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 指向仓库根（9.6.31）。**私有库随包带的三件套已落代码**（闭包复制 + RPATH + `SHLIBDEPS_PRIVATE_DIRS`，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：`file(RPATH_SET)` 的关键字签名、私有库必须按 soname 而非 `REALPATH` 命名（9.6.34）。**deb 路径已全绿**（run 43：`Build the Debian package`、`Validate the packaged metadata`、`Upload the package` 全过；9.6.41/9.6.42）。**AppImage 三步已开始真跑**：`Fetch appimagetool` 过，`Build the AppImage` 的 `cmake -E chmod` 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都**打出来了**，`Validate the AppImage` 红在门禁脚本自己 `chdir` 后用了相对路径（9.6.44）；run 45 里解包、AppRun、rdns、可执行位、依赖库、AppRun 一致性全过，只剩图标检查把 `Icon=` 当成文件名（9.6.46）。**剩余**：AppImage 的 Qt 依赖已定案为**发行版 Qt 5.15**（产物里不含任何 `libQt5*`，AppRun 的条件导出 + 两处门禁守住，见 9.6.45；真正自包含需静态 Qt 或 linuxdeploy-plugin-qt，未决）；`Unit tests` 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**AppImage 路径的前两处"从未执行过的代码"已修**：`Fetch appimagetool` 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 指向仓库根（9.6.31）。**私有库随包带的三件套已落代码**（闭包复制 + RPATH + `SHLIBDEPS_PRIVATE_DIRS`，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：`file(RPATH_SET)` 的关键字签名、私有库必须按 soname 而非 `REALPATH` 命名（9.6.34）。**deb 路径已全绿**（run 43：`Build the Debian package`、`Validate the packaged metadata`、`Upload the package` 全过；9.6.41/9.6.42）。**AppImage 三步已开始真跑**：`Fetch appimagetool` 过，`Build the AppImage` 的 `cmake -E chmod` 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都**打出来了**，`Validate the AppImage` 红在门禁脚本自己 `chdir` 后用了相对路径（9.6.44）；run 45 里解包、AppRun、rdns、可执行位、依赖库、AppRun 一致性全过，只剩图标检查把 `Icon=` 当成文件名（9.6.46）。**AppImage 链路已全绿**（run 46：`Build`/`Validate`/`Upload the AppImage` 两个架构全过，9.6.47），其 Qt 依赖定案为**发行版 Qt 5.15**（产物里不含任何 `libQt5*`，AppRun 条件导出 + 两处门禁守住，9.6.45；真正自包含需静态 Qt 或 linuxdeploy-plugin-qt，未决）；`Unit tests` 在 run 46 红于 configure —— 375 处 `$<TARGET_FILE_DIR:Qt::Core>` 在 Qt5 上是 INTERFACE 目标（9.6.47，已修 + 已加门禁）；PipeWire 帧消费 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -6159,12 +6159,67 @@ WARNING: AppStream upstream metadata is missing, please consider creating it
 2. `Categories=Graphics;Utility;` 的多主分类：freedesktop 允许，`desktop-file-validate`
    不报，只是菜单里可能出现两次。保持现状。
 
+#### 9.6.47 run 46：AppImage 链路全绿，`Unit tests` 红在 375 个 genex
+
+run 46 是打包这条线第一次**整条走通**：
+
+```text
+15. Build the AppImage      success     (x86_64 与 aarch64)
+16. Validate the AppImage   success
+17. Upload the AppImage     success
+18. Unit tests              failure
+```
+
+`Unit tests` 的红不在测试里，在 **configure 的 generate 阶段**，两个架构同一个原因：
+
+```text
+CMake Error at snow_shot/CMakeLists.txt:11302 (add_test):
+  Error evaluating generator expression:
+    $<TARGET_FILE_DIR:Qt::Core>
+  Target "Qt::Core" is not an executable or library.
+```
+
+`$<TARGET_FILE_DIR:…>` 这类"要文件"的表达式，参数必须是可以落盘的 target。Qt 5.15 的
+versionless 目标（`Qt::Core`）只是 `Qt5::Core` 的 **INTERFACE 包装**——链接、头文件都靠它，
+但它没有文件。Qt6 那边 `Qt::Core` 是真正的 IMPORTED SHARED 目标，所以 Windows 一侧
+（Qt6）从来没暴露过；Linux（Qt5）第一次带 `-DSNOW_APPS_BUILD_TESTS=ON` 配置就全线崩。
+
+这些表达式的作用是把 Qt 的库目录塞进测试的 `PATH`——**Windows 找 DLL 的需要**。
+共 **375 处**，分布在 6 个文件：
+
+| 文件 | 处数 |
+|---|---|
+| `snow_shot/CMakeLists.txt` | 335 |
+| `snow_draw_engine_qt/CMakeLists.txt` | 15 |
+| `ant_design_qt/CMakeLists.txt` | 11 |
+| `cmake/SnowShotRuntimeTests.cmake` | 7 |
+| `snow_image_viewer/tests/CMakeLists.txt` | 4 |
+| `cmake/SnowShotMini.cmake` | 3 |
+
+改法不是新造机制，是沿用工程里已有的写法：`${SNOW_QT_NS}::Core`
+（`cmake/SnowQtOffscreenTest.cmake` 一直这么用，`SNOW_QT_NS` 就是 `Qt6`/`Qt5`）。
+375 处一并替换，Qt6 路线展开成 `Qt6::Core`，行为不变。
+
+##### 门禁 `scripts/check-qt-versionless-genex.py`
+
+两条，缺一条都留着半个洞：
+
+1. 仓库里（排除 `build/`、`.tools/`）的 327 个 CMake 文件，不得出现把**文件表达式**用在
+   versionless Qt 目标上的写法：`$<TARGET_FILE*:Qt::…>`、`$<TARGET_LINKER_FILE*:Qt::…>`、
+   `$<TARGET_SONAME_FILE*:Qt::…>`、`$<TARGET_PDB_FILE*:Qt::…>`；
+2. `cmake/SnowQt.cmake` 必须给两条路线都设 `SNOW_QT_NS` —— 替换后的 `${SNOW_QT_NS}`
+   若展开为空，会变成 `$<TARGET_FILE_DIR::Core>`，同一类错往后挪一层，更难读。
+
+**门禁自己先错了一次**：第一版正则写成 `\$(?:TARGET_FILE|…)`，漏掉了 `$<` 里的 `<`，
+于是"放回一处 `Qt::Core`"的变异**没有变红**——假绿。补上 `<` 后变异立刻红。这是这条
+移植工作里第五次"尺子错"，也再一次说明：**门禁的第一次运行必须伴随一个已知会失败的输入**。
+
 ##### 一个反复出现的形状
 
-run 42 到 45 的四次红，依次是：`.desktop` 的 id 不合 rdns、`cmake -E chmod` 不存在、
-门禁 `chdir` 后用相对路径、校验器把 `Icon=` 当文件名。**四次都在"我们自己的工具"里，
-产品侧每轮都在变好**：deb 全绿 → AppImage 打得出来 → 打得对（ELF/type-2/架构）→
-解包后布局齐全。判据是稳定的：红在哪一行，先问那行是产品还是尺子。
+run 42→46 五次红，全部落在"我们自己的工具"里：`.desktop` 的 rdns、不存在的
+`cmake -E chmod`、门禁 `chdir` 后的相对路径、把 `Icon=` 当文件名、genex 用 versionless 目标。
+产品侧每一步都在前进：deb 全绿 → AppImage 打得出来 → 打得对 → 布局齐全 → **整条链路绿**。
+红在哪一行，先问那行是产品还是尺子。
 
 ---
 
