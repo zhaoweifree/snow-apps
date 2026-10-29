@@ -16,13 +16,24 @@ if [ -z "${APPDIR:-}" ]; then
 fi
 
 # Qt finds its platform plugin (xcb) and its image format plugins through
-# QT_PLUGIN_PATH. A bundle without it dies on the first window with
-# "this application failed to start because no Qt platform plugin could be
-# initialized" -- the most common way an AppImage is broken.
+# QT_PLUGIN_PATH. **This bundle does not ship Qt**: the Qt libraries come from
+# the distribution, exactly as the .deb declares them through `dpkg-shlibdeps`,
+# so the plugins that go with them are the distribution's too. A Qt plugin
+# records the Qt version it was built against in its metadata and a runtime
+# whose major.minor differs does not load it, so shipping the build host's
+# plugins next to the target's Qt libraries would be worse than shipping none.
+#
+# The directory is exported only when something was actually staged there. Qt
+# skips a search-path entry that does not exist -- `QFactoryLoader::update()`
+# in qtbase 5.15 starts its loop with `if (!QDir(path).exists(".")) continue;`
+# -- so an unconditional export is harmless today, and harmless is the problem:
+# it tells the next reader the plugins are inside the bundle and they are not.
 #
 # QT_QPA_PLATFORM_PLUGIN_PATH is deliberately not set: it is the deprecated
 # single-plugin override and it hides the rest of QT_PLUGIN_PATH.
-export QT_PLUGIN_PATH="$APPDIR/usr/plugins"
+if [ -d "$APPDIR/usr/plugins" ]; then
+    export QT_PLUGIN_PATH="$APPDIR/usr/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+fi
 
 # The loader cannot know about the mount point the AppImage picks at run time,
 # so the bundled shared libraries are reachable only through the search path.

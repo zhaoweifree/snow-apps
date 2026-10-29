@@ -1315,7 +1315,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <td><strong>P7 硬化与 CI</strong> <em>(进行中)</em></td>
 <td>稳定与回归</td>
 <td>Wayland 会话适配；CI 增 Linux job</td>
-<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。<strong>AppImage 路径的前两处"从未执行过的代码"已修</strong>：<code>Fetch appimagetool</code> 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 <code>CMAKE_CURRENT_SOURCE_DIR</code> 指向仓库根（9.6.31）。<strong>私有库随包带的三件套已落代码</strong>（闭包复制 + RPATH + <code>SHLIBDEPS_PRIVATE_DIRS</code>，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：<code>file(RPATH_SET)</code> 的关键字签名、私有库必须按 soname 而非 <code>REALPATH</code> 命名（9.6.34）。<strong>deb 路径已全绿</strong>（run 43：<code>Build the Debian package</code>、<code>Validate the packaged metadata</code>、<code>Upload the package</code> 全过；9.6.41/9.6.42）。<strong>AppImage 三步已开始真跑</strong>：<code>Fetch appimagetool</code> 过，<code>Build the AppImage</code> 的 <code>cmake -E chmod</code> 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都<strong>打出来了</strong>，<code>Validate the AppImage</code> 红在门禁脚本自己 <code>chdir</code> 后用了相对路径（9.6.44）。<strong>剩余</strong>：Qt 进 Linux 安装树（AppRun 已假定 <code>usr/plugins</code> 存在，而部署块仍是 <code>if(WIN32 …)</code>，见 9.6.45）；<code>Unit tests</code> 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。<strong>AppImage 路径的前两处"从未执行过的代码"已修</strong>：<code>Fetch appimagetool</code> 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 <code>CMAKE_CURRENT_SOURCE_DIR</code> 指向仓库根（9.6.31）。<strong>私有库随包带的三件套已落代码</strong>（闭包复制 + RPATH + <code>SHLIBDEPS_PRIVATE_DIRS</code>，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：<code>file(RPATH_SET)</code> 的关键字签名、私有库必须按 soname 而非 <code>REALPATH</code> 命名（9.6.34）。<strong>deb 路径已全绿</strong>（run 43：<code>Build the Debian package</code>、<code>Validate the packaged metadata</code>、<code>Upload the package</code> 全过；9.6.41/9.6.42）。<strong>AppImage 三步已开始真跑</strong>：<code>Fetch appimagetool</code> 过，<code>Build the AppImage</code> 的 <code>cmake -E chmod</code> 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都<strong>打出来了</strong>，<code>Validate the AppImage</code> 红在门禁脚本自己 <code>chdir</code> 后用了相对路径（9.6.44）。<strong>剩余</strong>：AppImage 的 Qt 依赖已定案为<strong>发行版 Qt 5.15</strong>（产物里不含任何 <code>libQt5*</code>，AppRun 的条件导出 + 两处门禁守住，见 9.6.45；真正自包含需静态 Qt 或 linuxdeploy-plugin-qt，未决）；<code>Unit tests</code> 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费</td>
 </tr>
 </tbody>
 </table>
@@ -8130,6 +8130,91 @@ appimage = Path(args.appimage).resolve()
 <strong>同一目录下 <code>ls</code> 看得见、<code>execve</code> 看不见 → 先怀疑路径解析，别怀疑产物。</strong>
 另外把 <code>check()</code> 的输出加了 <code>flush=True</code>：这次日志里 traceback 和 <code>ok</code> 行是交错的，
 stdout 块缓冲、stderr 不缓冲，而恰恰是出 traceback 的时候最需要顺序可读。</p>
+<hr>
+<h4>9.6.45 AppImage 不自带 Qt —— 一个被自家注释说反了的事实</h4>
+<p>run 44 的 <code>Build the AppImage</code> 顺手给出了一个此前只是猜测的答案。闭包脚本把
+AppDir 里复制到的私有库全列了出来：</p>
+<pre><code class="language-text">snow-shot bundle: private libraries (lib/snow-shot)
+  libIex-3_4.so.33  libIlmThread-3_4.so.33  libImath-3_2.so.30  libOpenEXR-3_4.so.33
+  libOpenEXRCore-3_4.so.33  libhwy.so.1  libjpeg.so.62  libjxl.so.0.11
+  libjxl_cms.so.0.11  libjxl_threads.so.0.11  liblunasvg.so.3  libplutovg.so.1
+  libturbojpeg.so.0
+</code></pre>
+<p>十三个，全是 <code>scripts/build-linux-deps.sh</code> 自建的依赖。<strong>没有一个 <code>libQt5*</code></strong> ——
+AppImage 里没有 Qt。原因在代码里很清楚：唯一的 Qt 部署块是
+<code>snow_shot/CMakeLists.txt</code> 的 <code>if(WIN32 AND NOT SNOW_SHOT_QT_STATIC)</code>，Linux 的安装树
+从来没有 plugins 目录；而闭包脚本只从<em>依赖前缀</em>里复制，Qt 来自 apt，不在前缀里。</p>
+<h5>注释说反了</h5>
+<p><code>AppRun</code> 原文写着「A bundle without it dies on the first window」。按 qtbase 5.15 的源码，
+这句是错的：</p>
+<pre><code class="language-cpp">// src/corelib/plugin/qfactoryloader.cpp, QFactoryLoader::update()
+if (!QDir(path).exists(QLatin1String(&quot;.&quot;)))
+    continue;
+</code></pre>
+<p>搜索路径里不存在的目录是<strong>跳过</strong>，不是致命。所以 <code>export QT_PLUGIN_PATH="$APPDIR/usr/plugins"</code>
+在今天的产物上是纯粹的空操作 —— 危险的不是它会崩，而是它让下一个读的人相信插件在包里。
+（<code>QT_PLUGIN_PATH</code> 为空/不设时，Qt 用编译期内置路径，也就是宿主发行版那套。）</p>
+<h5>为什么不是「把插件拷进去」了事</h5>
+<p>Qt5 在装载插件时按元数据判版本（<code>src/corelib/plugin/qlibrary.cpp</code>，
+<code>QLibraryPrivate::updatePluginState()</code>）：</p>
+<pre><code class="language-cpp">if ((qt_version &amp; 0x00ff00) &gt; (QT_VERSION &amp; 0x00ff00)
+    || (qt_version &amp; 0xff0000) != (QT_VERSION &amp; 0xff0000)) {
+    errorString = QLibrary::tr(&quot;The plugin '%1' uses incompatible Qt library. (%2.%3.%4) [%5]&quot;)
+</code></pre>
+<p>major 必须相等，插件的 minor 不得高于运行库的 minor，patch 不参与。于是构建机的
+5.15.13 插件在宿主的 5.15.10 上能装，在 5.12（老 UOS）上被拒——<strong>而被拒的插件会挡住宿主
+本来能用的那一个</strong>，把一台本来能跑的机器弄成不能跑。只拷插件、不拷库，比不拷更糟。</p>
+<h5>为什么也不是「连 Qt 库整闭包拷」</h5>
+<p>Debian/Ubuntu 把 Qt5 的库放在通用的多架构目录（<code>/usr/lib/x86_64-linux-gnu</code>），和
+<code>libGL</code>、<code>libX11</code> 同一个目录。闭包脚本的筛选判据是「依赖的文件在不在依赖前缀里」，
+多目录一混，按目录筛就会把 <code>libGL</code> 一起拷走——那是 A.6.2 明令禁止的（GPU 驱动失配）。
+改成按名字筛 <code>libQt5*</code> 又躲不开 <code>libQt5Core</code> 的 NEEDED：<code>libicu*</code>，体积与版本耦合再上一层。
+这活儿正是 <code>linuxdeploy-plugin-qt</code> 干的，不是二十行 CMake 能糊过去的。</p>
+<h5>落地的决定</h5>
+<p><strong>AppImage 的 Qt 依赖 = 发行版 Qt 5.15</strong>，与 <code>.deb</code> 通过 <code>dpkg-shlibdeps</code> 声明的是同一件事；
+信创渠道是 deb，而 A.7 本来也要求优先用系统基础库。代码上只做两件小事：</p>
+<ol>
+<li><code>AppRun</code> 改成条件导出，并把上面两条源码事实写进注释（否则下一个人还会「修」回去）：</li>
+</ol>
+<p><code>sh
+   if [ -d "$APPDIR/usr/plugins" ]; then
+       export QT_PLUGIN_PATH="$APPDIR/usr/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+   fi</code></p>
+<ol start="2">
+<li>两处门禁守住这个配对，缺一半就没有意义：
+   * 宿主侧 <code>check-linux-appimage.py</code>：导出的 <code>$APPDIR/...</code> 路径必须有 <code>-d</code> 守卫；
+   * 产物侧 <code>check-linux-appimage-build.py</code>（<code>check_plugin_path()</code>）：解包树里<strong>确实</strong>有那个
+     目录，或者导出被守卫。这条只有在真产物上才有意义——将来真开始打插件，守卫变真、目录
+     必须出现；去掉守卫而没打插件，立刻红。</li>
+</ol>
+<p>反向验证：宿主侧删守卫 → 1 条红（干净变异，只改这一处）；产物侧用探针跑四种入参组合
+（无条件+无目录 / 有守卫+无目录 / 无条件+有目录 / 完全不导出）→ 期望值与实际全部一致。</p>
+<h5>未决</h5>
+<p>真要「一个文件拷到任何机器就能跑」，只有两条路，都不在今天这一步的预算里：</p>
+<table>
+<thead>
+<tr>
+<th>路线</th>
+<th>代价</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SNOW_APPS_QT_STATIC</code>（A.6.10）</td>
+<td>需在 <code>build-linux-deps.sh</code> 里源码构建 Qt5 静态版</td>
+<td>GPL-3.0 下静态链接成立；插件路径问题整体消失</td>
+</tr>
+<tr>
+<td>引入 <code>linuxdeploy-plugin-qt</code></td>
+<td>打包链多一个外部工具，需固定版本 + 校验和</td>
+<td>与「不联网、可复现」的既定纪律要一起解决</td>
+</tr>
+</tbody>
+</table>
+<p>在这两条之前，AppImage 的定位是「发行版已有 Qt 5.15 时免安装试用」，deb 是信创交付渠道。
+这句话要写进发布说明，否则用户拿到 AppImage 在没装 Qt 的机器上会看到 loader 的
+<code>libQt5Core.so.5: cannot open shared object file</code>，而那不是 bug，是没声明的前提。</p>
 <hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>

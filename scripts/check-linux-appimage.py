@@ -152,8 +152,21 @@ def main() -> int:
         ("LD_LIBRARY_PATH", "the bundled libraries are not on the loader's path"),
         ("XDG_DATA_DIRS", "the bundled icon and AppStream file are never found"),
     ):
-        check(f"AppRun exports {variable}", re.search(rf"^export {variable}=", text, re.MULTILINE) is not None,
+        # Leading whitespace is allowed: QT_PLUGIN_PATH sits inside an `if`,
+        # because the bundle ships no plugins (see the check below).
+        check(f"AppRun exports {variable}",
+              re.search(rf"^\s*export {variable}=", text, re.MULTILINE) is not None,
               symptom)
+    # The bundle carries no Qt: the libraries come from the distribution, the
+    # way the .deb declares them. So the plugin directory must only be exported
+    # when the packaging step actually created it, or the export reads as "the
+    # plugins are inside the bundle" -- and they never are.
+    plugin_export = re.search(r'QT_PLUGIN_PATH="\$APPDIR/([^"$:]+)', text)
+    if plugin_export:
+        plugin_path = plugin_export.group(1)
+        check("AppRun exports QT_PLUGIN_PATH only when that directory exists",
+              re.search(rf'-d\s+"\$APPDIR/{re.escape(plugin_path)}"', text) is not None,
+              f"QT_PLUGIN_PATH names $APPDIR/{plugin_path}, which no install rule fills")
     # Only an assignment counts: the script explains in a comment why this
     # variable is not set, and that comment must not trip the check.
     check("AppRun does not set the deprecated QT_QPA_PLATFORM_PLUGIN_PATH",

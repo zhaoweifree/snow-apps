@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -69,6 +70,30 @@ def parse_desktop(path: Path) -> dict[str, str]:
         key, _, value = line.partition("=")
         values[key.strip()] = value.strip()
     return values
+
+
+def check_plugin_path(app_run_text: str, unpacked: Path) -> None:
+    """The entry may only export a Qt plugin directory the bundle contains.
+
+    The bundle ships no Qt -- the libraries come from the distribution, which is
+    what the .deb declares and what an AppImage has no way to declare. So the
+    entry exports QT_PLUGIN_PATH only when the directory is there, and this is
+    the half of that pair which can only be checked against a real bundle: if a
+    future packaging change starts staging plugins, the guard becomes true and
+    the directory has to appear here; if the guard is removed while nothing is
+    staged, this fails.
+    """
+    export = re.search(r'QT_PLUGIN_PATH="\$APPDIR/([^"$:]+)', app_run_text)
+    if export is None:
+        # No export at all is a different decision, and `check-linux-appimage.py`
+        # is where the entry itself is judged.
+        return
+    plugin_dir = unpacked / export.group(1)
+    guarded = re.search(rf'-d\s+"\$APPDIR/{re.escape(export.group(1))}"', app_run_text) is not None
+    check("the entry exports a Qt plugin directory only when the bundle has one",
+          plugin_dir.is_dir() or guarded,
+          f"QT_PLUGIN_PATH names {export.group(1)}, the bundle has no such directory, "
+          "and the export is not guarded")
 
 
 def main() -> int:
@@ -179,6 +204,12 @@ def main() -> int:
             check("the packaged AppRun is the reviewed one",
                   app_run.read_bytes() == reviewed.read_bytes(),
                   "the packaged AppRun differs from snow_shot/packaging/linux/appimage/AppRun")
+
+        # The bundle ships no Qt -- the libraries come from the distribution,
+        # which is what the .deb declares and what the AppImage has no way to
+        # declare. See `check_plugin_path()` for what the pair guarantees.
+        app_run_text = app_run.read_text(encoding="utf-8", errors="replace") if app_run.is_file() else ""
+        check_plugin_path(app_run_text, unpacked)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
