@@ -542,6 +542,20 @@ def main() -> int:
                 check(f"{job_name}: installs dpkg-dev", "dpkg-dev" in packages,
                       "missing from apt list")
 
+            # `ctest` on a runner has no display, and 183 of the 289 test
+            # sources construct a QApplication or a QWidget: without a platform
+            # plugin they abort with "could not connect to the display", so one
+            # environment gap reads as a hundred product bugs. Two halves, both
+            # required -- the package, and the wrapper that actually starts a
+            # server.
+            if re.search(r"(?m)^\s*(xvfb-run[^\n]*)?ctest\b", text):
+                check(f"{job_name}: installs xvfb", "xvfb" in packages,
+                      "the GUI tests would all fail on a display-less runner")
+                check(f"{job_name}: runs ctest under a virtual display",
+                      re.search(r"xvfb-run[^\n]*\\?\s*\n?\s*ctest\b", text) is not None
+                      or re.search(r"xvfb-run[^\n]*ctest\b", text) is not None,
+                      "ctest is invoked without xvfb-run")
+
             # Below this line the requirements are about compiling the project.
             # Two sources for the same library means a failed build silently
             # falls back to the old one, so `libopencv-dev` has to be absent

@@ -5898,7 +5898,60 @@ target 手动的 `-DSTAGED_DIR=`。第二次打印 `$ORIGIN written into 0`、`n
 `$APPDIR/usr/plugins`，而 Linux 侧没有任何规则往那儿拷 Qt 插件（唯一的 plugin 部署块只有
 Windows 分支，只挑 `platforms/qwindows.dll`）。`.deb` 靠 `Depends: libqt5gui5` 用宿主的 Qt
 所以能跑，AppImage 不打包 Qt 就不行。`Validate the AppImage` 只做结构校验，看不出来。这是
-§9.6.43 要做的事。
+§9.6.44 要做的事。
+
+---
+
+#### 9.6.43 `Unit tests` 的环境前提：183 个测试源要一个显示
+
+`Unit tests` 是 workflow 里最后一道关卡，也是唯一一条**从没执行过**的：
+
+```yaml
+cmake --preset ${{ matrix.preset }} -DSNOW_APPS_BUILD_TESTS=ON
+cmake --build --preset ${{ matrix.build-preset }} --parallel 4
+ctest --test-dir build/${{ matrix.preset }} --output-on-failure --no-tests=error
+```
+
+先确认了三件不成立会立刻失败的事：
+
+| 疑问 | 结论（按源码查，不是印象） |
+|---|---|
+| 根目录 `ctest --test-dir build/<preset>` 找得到子目录里的测试吗 | `CMakeLists.txt:176` 在 `if(SNOW_APPS_BUILD_TESTS OR …)` 里 `enable_testing()`，而 CI 正是带 `-DSNOW_APPS_BUILD_TESTS=ON` 重新配置，根 `CTestTestfile.cmake` 会有 `subdirs("snow_shot")` |
+| 测试可执行文件会不会被 `--build` 跳过 | `snow_shot/CMakeLists.txt` 里 `EXCLUDE_FROM_ALL` 出现 **0** 次，默认目标包含全部测试 |
+| 会不会有 Windows/macOS 名字的测试注册到 Linux | 660 处 `add_test` 里，名字带 `windows`/`macos` 的 68 处**全部**在 `if(WIN32)`/`if(APPLE)` 内 |
+
+##### 第四件事：runner 没有显示，而 183 个测试源要 `QApplication`
+
+`python` 扫一遍 `snow_shot/tests`：**289 个测试源里 183 个**引用 `QApplication` /
+`QWidget` / `QGuiApplication`。在无显示的 runner 上，这些用例会在
+`QApplication` 构造时就 abort：
+
+```text
+qt.qpa.xcb: could not connect to display
+This application failed to start because no Qt platform plugin could be initialized.
+```
+
+那不是一百个产品缺陷，是**一个环境缺陷**。修法是把 `ctest` 放进虚拟显示：
+
+```yaml
+xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+  ctest --test-dir build/${{ matrix.preset }} --output-on-failure --no-tests=error
+```
+
+选 `xvfb-run` 而不是 `QT_QPA_PLATFORM=offscreen`：项目里确实有 `snow_shot_offscreen_qpa_environment()`
+给少数用例用，但 offscreen 是**另一个 platform plugin**，而这个移植的产物是 X11 应用——
+用 xcb 跑测试，测的才是发货时走的那条路。`xvfb` 进 build job 的 apt 列表。
+
+门禁加两条，缺一条就是把环境缺陷留给 CI 去"证明"：`ctest` 出现的地方必须有 `xvfb` 包，
+并且 `ctest` 必须在 `xvfb-run` 之后。两条变异（删包、去掉包装）都变红。
+
+##### 与 Windows 侧的差异：不是照抄，是预算
+
+`release.yml` 的 Windows CI **不构建全部测试**，它只 `--target` 几个聚焦用例再 `-R` 跑。
+Linux 这条步骤构建全部。估算过成本：Linux 可见的测试可执行文件 **214 个**，列出的源条目
+**1099** 个（`${VAR}` 展开后会更多），每个 target 独立编译，4 核下约十几到几十分钟——在
+180 min 预算内。所以先保持"全跑"，不用 `-R` 收窄：收窄会把跨平台逻辑的编译错误藏起来，
+而那正是这次移植要发现的东西。
 
 ---
 

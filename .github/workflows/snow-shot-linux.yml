@@ -257,7 +257,7 @@ jobs:
             libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
             libswresample-dev libswscale-dev \
             python3 \
-            dpkg-dev desktop-file-utils appstream squashfs-tools
+            dpkg-dev desktop-file-utils appstream squashfs-tools xvfb
 
       # zlib here *is* zlib-ng (classic zlib does not define ZLIBNG_VERSION,
       # which `compression_backend.cpp` requires) and libjpeg-turbo has to be
@@ -460,4 +460,12 @@ jobs:
         run: |
           cmake --preset ${{ matrix.preset }} -DSNOW_APPS_BUILD_TESTS=ON
           cmake --build --preset ${{ matrix.build-preset }} --parallel 4
-          ctest --test-dir build/${{ matrix.preset }} --output-on-failure --no-tests=error
+          # A runner has no display, and 183 of the 289 test sources construct a
+          # QApplication or a QWidget: without a platform plugin every one of
+          # them aborts with "could not connect to the display", which reads like
+          # a hundred product bugs and is one environment bug. `xvfb-run` gives
+          # the xcb plugin a real (virtual) X server, so the tests exercise the
+          # same code path the product does -- `QT_QPA_PLATFORM=offscreen` would
+          # be cheaper but is a different plugin, and the port is an X11 port.
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            ctest --test-dir build/${{ matrix.preset }} --output-on-failure --no-tests=error
