@@ -302,6 +302,22 @@ def main() -> int:
         "a version macro is defined to something other than 0 or 1",
     )
 
+    # Rule 3: a shim that aliases a Qt enumerator has to carry the enumerator's
+    # type. The rewrite R17 (`QEvent::DevicePixelRatioChange` ->
+    # `snowDevicePixelRatioChange`) also lands inside braced initialiser lists
+    # that mix the shim with plain enumerators, and `int` there is
+    # `unable to deduce std::initializer_list<auto>` -- which is how run 47 lost
+    # `Unit tests` on both architectures, in files that had never been compiled
+    # before. `snowSafeAreaMarginsChange` stays `int` on purpose: its Qt 5 value
+    # is -1 so it can never collide with a real case label (see the comment
+    # above its definition), and no braced list mixes it with an enumerator.
+    declared = re.search(
+        r"^[ \t]*constexpr[ \t]+QEvent::Type[ \t]+snowDevicePixelRatioChange[ \t]*=",
+        code, re.MULTILINE)
+    check("snowDevicePixelRatioChange is declared QEvent::Type", declared is not None,
+          "an int shim breaks every braced initialiser list that mixes it with "
+          "QEvent enumerators")
+
     if failures:
         print()
         print(f"{len(failures)} check(s) failed:")

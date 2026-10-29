@@ -459,7 +459,12 @@ jobs:
       - name: Unit tests
         run: |
           cmake --preset ${{ matrix.preset }} -DSNOW_APPS_BUILD_TESTS=ON
-          cmake --build --preset ${{ matrix.build-preset }} --parallel 4
+          # `-k 0` keeps ninja going after a failing translation unit. This step
+          # is the first time the Linux-visible test corpus is compiled at all,
+          # and one error per fifty-minute run is a waste of the whole farm:
+          # run 47 stopped at the first `std::initializer_list` deduction and
+          # nothing else in 289 sources was ever attempted.
+          cmake --build --preset ${{ matrix.build-preset }} --parallel 4 -- -k 0
           # A runner has no display, and 183 of the 289 test sources construct a
           # QApplication or a QWidget: without a platform plugin every one of
           # them aborts with "could not connect to the display", which reads like

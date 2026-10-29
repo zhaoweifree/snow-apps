@@ -563,6 +563,16 @@ def main() -> int:
                       or re.search(r"xvfb-run[^\n]*ctest\b", text) is not None,
                       "ctest is invoked without xvfb-run")
 
+            # The test build is the first compile of the Linux-visible test
+            # corpus, so a stop-at-first-error build reports one problem per
+            # fifty-minute run. Measured on CMake 4.2 + ninja: with
+            # `--parallel 1`, three failing targets give one `FAILED:` line
+            # without `-k 0` and three with it.
+            if "SNOW_APPS_BUILD_TESTS=ON" in text:
+                check(f"{job_name}: keeps building after a failing test source",
+                      re.search(r"--build[^\n]*-k\s*0", text) is not None,
+                      "ninja stops at the first error; pass `-- -k 0`")
+
             # Below this line the requirements are about compiling the project.
             # Two sources for the same library means a failed build silently
             # falls back to the old one, so `libopencv-dev` has to be absent

@@ -1163,10 +1163,20 @@ template <typename... Args>
 // a widget moves to a screen with a different ratio. Mapping to it keeps the
 // DPR-refresh branches alive instead of turning them into dead code.
 // Mechanical rewrite rule R17: QEvent::DevicePixelRatioChange -> snowDevicePixelRatioChange
+//
+// The type is `QEvent::Type`, not `int`, because the rewrite also lands inside
+// braced initialiser lists that mix this shim with plain enumerators:
+//
+//     for (auto type : {QEvent::LanguageChange, snowDevicePixelRatioChange})
+//     for (const auto type : {snowDevicePixelRatioChange, QEvent::ScreenChangeInternal})
+//
+// With an `int` shim that is `unable to deduce std::initializer_list<auto>` and
+// nothing compiles -- found by `Unit tests` in run 47, which is the first time
+// those test sources were ever compiled (CI run 47, both architectures).
 #if SNOW_QT6
-constexpr int snowDevicePixelRatioChange = QEvent::DevicePixelRatioChange;
+constexpr QEvent::Type snowDevicePixelRatioChange = QEvent::DevicePixelRatioChange;
 #else
-constexpr int snowDevicePixelRatioChange = QEvent::ScreenChangeInternal;
+constexpr QEvent::Type snowDevicePixelRatioChange = QEvent::ScreenChangeInternal;
 #endif
 
 // Qt 6.0 renamed QLibraryInfo::location() to QLibraryInfo::path(); Qt 5.15.2 has
