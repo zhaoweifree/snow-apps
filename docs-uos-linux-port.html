@@ -1315,7 +1315,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <td><strong>P7 硬化与 CI</strong> <em>(进行中)</em></td>
 <td>稳定与回归</td>
 <td>Wayland 会话适配；CI 增 Linux job</td>
-<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。<strong>AppImage 路径的前两处"从未执行过的代码"已修</strong>：<code>Fetch appimagetool</code> 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 <code>CMAKE_CURRENT_SOURCE_DIR</code> 指向仓库根（9.6.31）。<strong>私有库随包带的三件套已落代码</strong>（闭包复制 + RPATH + <code>SHLIBDEPS_PRIVATE_DIRS</code>，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：<code>file(RPATH_SET)</code> 的关键字签名、私有库必须按 soname 而非 <code>REALPATH</code> 命名（9.6.34）。<strong>deb 路径已全绿</strong>（run 43：<code>Build the Debian package</code>、<code>Validate the packaged metadata</code>、<code>Upload the package</code> 全过；9.6.41/9.6.42）。<strong>AppImage 三步已开始真跑</strong>：<code>Fetch appimagetool</code> 过，<code>Build the AppImage</code> 的 <code>cmake -E chmod</code> 与依赖闭包两处已修（9.6.42）。<strong>剩余</strong>：Qt 进 Linux 安装树（AppRun 已假定 <code>usr/plugins</code> 存在，而部署块仍是 <code>if(WIN32 …)</code>，见 9.6.44）；<code>Unit tests</code> 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。<strong>AppImage 路径的前两处"从未执行过的代码"已修</strong>：<code>Fetch appimagetool</code> 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 <code>CMAKE_CURRENT_SOURCE_DIR</code> 指向仓库根（9.6.31）。<strong>私有库随包带的三件套已落代码</strong>（闭包复制 + RPATH + <code>SHLIBDEPS_PRIVATE_DIRS</code>，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：<code>file(RPATH_SET)</code> 的关键字签名、私有库必须按 soname 而非 <code>REALPATH</code> 命名（9.6.34）。<strong>deb 路径已全绿</strong>（run 43：<code>Build the Debian package</code>、<code>Validate the packaged metadata</code>、<code>Upload the package</code> 全过；9.6.41/9.6.42）。<strong>AppImage 三步已开始真跑</strong>：<code>Fetch appimagetool</code> 过，<code>Build the AppImage</code> 的 <code>cmake -E chmod</code> 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都<strong>打出来了</strong>，<code>Validate the AppImage</code> 红在门禁脚本自己 <code>chdir</code> 后用了相对路径（9.6.44）。<strong>剩余</strong>：Qt 进 Linux 安装树（AppRun 已假定 <code>usr/plugins</code> 存在，而部署块仍是 <code>if(WIN32 …)</code>，见 9.6.45）；<code>Unit tests</code> 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费</td>
 </tr>
 </tbody>
 </table>
@@ -8072,6 +8072,66 @@ Linux 这条步骤构建全部。估算过成本：Linux 可见的测试可执�
 180 min 预算内。所以先保持"全跑"，不用 <code>-R</code> 收窄：收窄会把跨平台逻辑的编译错误藏起来，
 而那正是这次移植要发现的东西。</p>
 <hr>
+<h4>9.6.44 run 44：<code>Validate the AppImage</code> 红在"门禁自己换了目录"</h4>
+<p>run 44 是第一次让 AppImage 打完就验：<code>Fetch appimagetool</code> 过、<code>Build the AppImage</code>
+过、<code>Validate the AppImage</code> 红，<strong>两个架构红在同一行</strong>：</p>
+<pre><code class="language-text">== build/snow-shot-linux-x64-release/snow-shot-1.2.8-x86_64.AppImage
+-rwxr-xr-x 1 runner runner 55871992 Oct 29 16:43 … snow-shot-1.2.8-x86_64.AppImage
+ok   the AppImage is an ELF file
+ok   the AppImage carries the type-2 magic
+ok   the AppImage is built for x86_64
+FileNotFoundError: [Errno 2] No such file or directory:
+    'build/snow-shot-linux-x64-release/snow-shot-1.2.8-x86_64.AppImage'
+</code></pre>
+<p>同一屏里，<code>ls -l</code> 刚把这个 55.8 MB 的文件列出来，<code>is_file()</code>、<code>read_bytes()</code> 也都读过它，
+然后 <code>subprocess.run</code> 说不存在。<strong>看见的文件 execve 看不见</strong>——这说明问题不在文件，
+在解析文件名的那个 <code>cwd</code>。</p>
+<h5>机制：execve 的相对路径按子进程的 cwd 解析</h5>
+<p>校验脚本要在 FUSE 缺席的机器上解包，所以它 <code>cwd=workdir</code> 切到临时目录再跑
+<code>[str(appimage), "--appimage-extract"]</code>；而 runner 传进来的 <code>--appimage</code> 是相对仓库根的
+<code>build/&lt;preset&gt;/…AppImage</code>。<code>chdir</code> 之后这个相对路径指向了 <code>tempdir/build/…</code>，内核
+<code>execve</code> 直接 ENOENT，Python 把它包成 <code>FileNotFoundError</code>（抛在
+<code>subprocess._execute_child</code>，所以没有"文件不存在"的 Python 栈内上下文）。</p>
+<pre><code class="language-python"># 修法：进门就绝对化，后面谁改 cwd 都无所谓
+appimage = Path(args.appimage).resolve()
+</code></pre>
+<p><strong>这个错误在 Windows 工作站上复现不出来</strong>，这不是"没试"：实测同一个探针
+（相对路径 + <code>cwd=</code>）在 Windows 上返回的是 <code>WinError 193</code>（不是有效的 Win32 应用程序），
+因为 <code>CreateProcess</code> 按<strong>父进程</strong>的 cwd 解析相对路径，<code>execve</code> 按<strong>子进程</strong>的 cwd 解析。
+平台差异正好把这类错封在 Linux 侧——它只能由"在 Linux 上真跑"暴露，或由文本门禁配对断言。</p>
+<h5>门禁：两条断言成对出现，缺一条就没有意义</h5>
+<p><code>scripts/check-linux-appimage.py</code> 新增：</p>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>为什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>校验器在临时 <code>cwd</code> 里跑这个文件（<code>cwd\s*=\s*(?:str\()?\s*workdir</code>）</td>
+<td>这是"必须先绝对化"的<strong>前提</strong>；前提没了，下面那条就不必再要求</td>
+</tr>
+<tr>
+<td>校验器先把 AppImage 路径绝对化（<code>Path(args.appimage).resolve()</code>）</td>
+<td>相对路径一换目录就解析不到</td>
+</tr>
+</tbody>
+</table>
+<p>三条变异：删掉 <code>.resolve()</code> → 红；把 <code>cwd=workdir</code> 改成等价的 <code>cwd=str(workdir)</code> → <strong>仍绿</strong>
+（这正是要的：门禁咬的是行为，不是某一行的写法）；把 <code>cwd</code> 参数整个删掉 → 红。</p>
+<h5>副产品：产物本身第一次被证明，而不只是"命令返回 0"</h5>
+<p>这次红之前的四行 <code>ok</code> 是<strong>真的过了</strong>，两个架构都过：ELF、<code>AI\x02</code> type-2 magic、
+<code>e_machine</code> 分别是 <code>0x3E</code> / <code>0xB7</code>。也就是说 appimagetool 拿固定版本的 type-2 runtime
+打出来的，确实是<strong>目标架构</strong>的 type-2 AppImage——之前只有"<code>COMMAND</code> 没报错"。</p>
+<h5>教训</h5>
+<p>门禁脚本自己出错时，报出来的形状和产品缺陷一模一样。区分判据是：
+<strong>同一目录下 <code>ls</code> 看得见、<code>execve</code> 看不见 → 先怀疑路径解析，别怀疑产物。</strong>
+另外把 <code>check()</code> 的输出加了 <code>flush=True</code>：这次日志里 traceback 和 <code>ok</code> 行是交错的，
+stdout 块缓冲、stderr 不缓冲，而恰恰是出 traceback 的时候最需要顺序可读。</p>
+<hr>
+
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>

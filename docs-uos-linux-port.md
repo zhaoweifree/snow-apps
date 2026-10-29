@@ -438,7 +438,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
 | **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
-| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**AppImage 路径的前两处"从未执行过的代码"已修**：`Fetch appimagetool` 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 指向仓库根（9.6.31）。**私有库随包带的三件套已落代码**（闭包复制 + RPATH + `SHLIBDEPS_PRIVATE_DIRS`，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：`file(RPATH_SET)` 的关键字签名、私有库必须按 soname 而非 `REALPATH` 命名（9.6.34）。**deb 路径已全绿**（run 43：`Build the Debian package`、`Validate the packaged metadata`、`Upload the package` 全过；9.6.41/9.6.42）。**AppImage 三步已开始真跑**：`Fetch appimagetool` 过，`Build the AppImage` 的 `cmake -E chmod` 与依赖闭包两处已修（9.6.42）。**剩余**：Qt 进 Linux 安装树（AppRun 已假定 `usr/plugins` 存在，而部署块仍是 `if(WIN32 …)`，见 9.6.44）；`Unit tests` 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费 |
+| **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**AppImage 路径的前两处"从未执行过的代码"已修**：`Fetch appimagetool` 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 指向仓库根（9.6.31）。**私有库随包带的三件套已落代码**（闭包复制 + RPATH + `SHLIBDEPS_PRIVATE_DIRS`，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：`file(RPATH_SET)` 的关键字签名、私有库必须按 soname 而非 `REALPATH` 命名（9.6.34）。**deb 路径已全绿**（run 43：`Build the Debian package`、`Validate the packaged metadata`、`Upload the package` 全过；9.6.41/9.6.42）。**AppImage 三步已开始真跑**：`Fetch appimagetool` 过，`Build the AppImage` 的 `cmake -E chmod` 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都**打出来了**，`Validate the AppImage` 红在门禁脚本自己 `chdir` 后用了相对路径（9.6.44）。**剩余**：Qt 进 Linux 安装树（AppRun 已假定 `usr/plugins` 存在，而部署块仍是 `if(WIN32 …)`，见 9.6.45）；`Unit tests` 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费 |
 
 **建议节奏**：P0→P2 可并行（构建立即受阻于 Qt5 决策，应最先定论）；P3 与 P4 是最大工作量，建议
 **先打通 X11 路径**（技术成熟、调试简单），**再补 Wayland/PipeWire**（UOS 20 默认 X11，Deepin 23 起 Wayland 占比上升）。
@@ -5952,6 +5952,68 @@ Linux 这条步骤构建全部。估算过成本：Linux 可见的测试可执�
 **1099** 个（`${VAR}` 展开后会更多），每个 target 独立编译，4 核下约十几到几十分钟——在
 180 min 预算内。所以先保持"全跑"，不用 `-R` 收窄：收窄会把跨平台逻辑的编译错误藏起来，
 而那正是这次移植要发现的东西。
+
+#### 9.6.44 run 44：`Validate the AppImage` 红在"门禁自己换了目录"
+
+run 44 是第一次让 AppImage 打完就验：`Fetch appimagetool` 过、`Build the AppImage`
+过、`Validate the AppImage` 红，**两个架构红在同一行**：
+
+```text
+== build/snow-shot-linux-x64-release/snow-shot-1.2.8-x86_64.AppImage
+-rwxr-xr-x 1 runner runner 55871992 Oct 29 16:43 … snow-shot-1.2.8-x86_64.AppImage
+ok   the AppImage is an ELF file
+ok   the AppImage carries the type-2 magic
+ok   the AppImage is built for x86_64
+FileNotFoundError: [Errno 2] No such file or directory:
+    'build/snow-shot-linux-x64-release/snow-shot-1.2.8-x86_64.AppImage'
+```
+
+同一屏里，`ls -l` 刚把这个 55.8 MB 的文件列出来，`is_file()`、`read_bytes()` 也都读过它，
+然后 `subprocess.run` 说不存在。**看见的文件 execve 看不见**——这说明问题不在文件，
+在解析文件名的那个 `cwd`。
+
+##### 机制：execve 的相对路径按子进程的 cwd 解析
+
+校验脚本要在 FUSE 缺席的机器上解包，所以它 `cwd=workdir` 切到临时目录再跑
+`[str(appimage), "--appimage-extract"]`；而 runner 传进来的 `--appimage` 是相对仓库根的
+`build/<preset>/…AppImage`。`chdir` 之后这个相对路径指向了 `tempdir/build/…`，内核
+`execve` 直接 ENOENT，Python 把它包成 `FileNotFoundError`（抛在
+`subprocess._execute_child`，所以没有"文件不存在"的 Python 栈内上下文）。
+
+```python
+# 修法：进门就绝对化，后面谁改 cwd 都无所谓
+appimage = Path(args.appimage).resolve()
+```
+
+**这个错误在 Windows 工作站上复现不出来**，这不是"没试"：实测同一个探针
+（相对路径 + `cwd=`）在 Windows 上返回的是 `WinError 193`（不是有效的 Win32 应用程序），
+因为 `CreateProcess` 按**父进程**的 cwd 解析相对路径，`execve` 按**子进程**的 cwd 解析。
+平台差异正好把这类错封在 Linux 侧——它只能由"在 Linux 上真跑"暴露，或由文本门禁配对断言。
+
+##### 门禁：两条断言成对出现，缺一条就没有意义
+
+`scripts/check-linux-appimage.py` 新增：
+
+| 断言 | 为什么 |
+|---|---|
+| 校验器在临时 `cwd` 里跑这个文件（`cwd\s*=\s*(?:str\()?\s*workdir`） | 这是"必须先绝对化"的**前提**；前提没了，下面那条就不必再要求 |
+| 校验器先把 AppImage 路径绝对化（`Path(args.appimage).resolve()`） | 相对路径一换目录就解析不到 |
+
+三条变异：删掉 `.resolve()` → 红；把 `cwd=workdir` 改成等价的 `cwd=str(workdir)` → **仍绿**
+（这正是要的：门禁咬的是行为，不是某一行的写法）；把 `cwd` 参数整个删掉 → 红。
+
+##### 副产品：产物本身第一次被证明，而不只是"命令返回 0"
+
+这次红之前的四行 `ok` 是**真的过了**，两个架构都过：ELF、`AI\x02` type-2 magic、
+`e_machine` 分别是 `0x3E` / `0xB7`。也就是说 appimagetool 拿固定版本的 type-2 runtime
+打出来的，确实是**目标架构**的 type-2 AppImage——之前只有"`COMMAND` 没报错"。
+
+##### 教训
+
+门禁脚本自己出错时，报出来的形状和产品缺陷一模一样。区分判据是：
+**同一目录下 `ls` 看得见、`execve` 看不见 → 先怀疑路径解析，别怀疑产物。**
+另外把 `check()` 的输出加了 `flush=True`：这次日志里 traceback 和 `ok` 行是交错的，
+stdout 块缓冲、stderr 不缓冲，而恰恰是出 traceback 的时候最需要顺序可读。
 
 ---
 

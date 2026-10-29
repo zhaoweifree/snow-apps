@@ -235,6 +235,21 @@ def main() -> int:
         check(f"{BUILD_CHECK.name} resolves {chain}", resolved.exists(),
               f"{chain} -> {resolved}")
 
+    # The product validator unpacks the file with `cwd` set to a temporary
+    # directory, so the path it was handed has to be absolute before that
+    # point. The runner hands it `build/<preset>/snow-shot-*.AppImage`, relative
+    # to the repository root; run 44 unpacked from the temp directory and died
+    # with `FileNotFoundError: … snow-shot-1.2.8-x86_64.AppImage` for a file
+    # that existed at the time. Nothing on the workstation can execute a Linux
+    # AppImage, so this pairing is the only place the hazard is visible here.
+    build_text = BUILD_CHECK.read_text(encoding="utf-8", errors="replace")
+    if check("the product validator runs the AppImage under a temporary cwd",
+             re.search(r"cwd\s*=\s*(?:str\()?\s*workdir", build_text) is not None,
+             "if this is no longer true the resolve below stops being required"):
+        check("the product validator makes the AppImage path absolute first",
+              "Path(args.appimage).resolve()" in build_text,
+              "a relative path stops resolving the moment cwd changes")
+
     if failures:
         print(f"\n{len(failures)} problem(s)")
         return 1

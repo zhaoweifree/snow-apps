@@ -48,11 +48,14 @@ failures: list[str] = []
 
 
 def check(label: str, condition: bool, detail: str = "") -> bool:
+    # Flushed per line: this script's stdout and a Python traceback otherwise
+    # interleave in the CI log (stdout is block-buffered, stderr is not), and a
+    # traceback is exactly when the ordering has to be readable.
     if condition:
-        print(f"ok   {label}")
+        print(f"ok   {label}", flush=True)
         return True
     failures.append(label)
-    print(f"FAIL {label}" + (f": {detail}" if detail else ""))
+    print(f"FAIL {label}" + (f": {detail}" if detail else ""), flush=True)
     return False
 
 
@@ -75,7 +78,13 @@ def main() -> int:
                         help="the architecture the AppImage must be built for")
     args = parser.parse_args()
 
-    appimage = Path(args.appimage)
+    # Absolute from here on: the unpack below runs with `cwd` set to a temporary
+    # directory, and a relative path stops resolving the moment the working
+    # directory changes. The runner passes `build/<preset>/snow-shot-*.AppImage`,
+    # so an unresolved path made `subprocess.run` raise FileNotFoundError naming
+    # a file that was right there -- the gate reporting its own bug as a
+    # packaging failure.
+    appimage = Path(args.appimage).resolve()
     if not appimage.is_file():
         check("the AppImage exists", False, f"missing: {appimage}")
         return 1
