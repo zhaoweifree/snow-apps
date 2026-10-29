@@ -1315,7 +1315,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 <td><strong>P7 硬化与 CI</strong> <em>(进行中)</em></td>
 <td>稳定与回归</td>
 <td>Wayland 会话适配；CI 增 Linux job</td>
-<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。<strong>AppImage 路径的前两处"从未执行过的代码"已修</strong>：<code>Fetch appimagetool</code> 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 <code>CMAKE_CURRENT_SOURCE_DIR</code> 指向仓库根（9.6.31）。<strong>私有库随包带的三件套已落代码</strong>（闭包复制 + RPATH + <code>SHLIBDEPS_PRIVATE_DIRS</code>，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：<code>file(RPATH_SET)</code> 的关键字签名、私有库必须按 soname 而非 <code>REALPATH</code> 命名（9.6.34）。<strong>deb 路径已全绿</strong>（run 43：<code>Build the Debian package</code>、<code>Validate the packaged metadata</code>、<code>Upload the package</code> 全过；9.6.41/9.6.42）。<strong>AppImage 三步已开始真跑</strong>：<code>Fetch appimagetool</code> 过，<code>Build the AppImage</code> 的 <code>cmake -E chmod</code> 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都<strong>打出来了</strong>，<code>Validate the AppImage</code> 红在门禁脚本自己 <code>chdir</code> 后用了相对路径（9.6.44）。<strong>剩余</strong>：AppImage 的 Qt 依赖已定案为<strong>发行版 Qt 5.15</strong>（产物里不含任何 <code>libQt5*</code>，AppRun 的条件导出 + 两处门禁守住，见 9.6.45；真正自包含需静态 Qt 或 linuxdeploy-plugin-qt，未决）；<code>Unit tests</code> 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费</td>
+<td>双会话（X11/Wayland）功能对等；关键用例回归通过。<strong>slice 1 已落代码</strong>：<code>.github/workflows/snow-shot-linux.yml</code>（<code>gates</code> 无工具链必过 + <code>build</code> 双架构真编译/deb/校验器，9.6）。<strong>slice 2 已让 workflow 真的跑起来</strong>：GitHub 镜像 + <code>github</code> 远程（9.6.8），三次运行把 <code>gates</code> 跑绿、把 <code>build</code> 推到第 4 个红灯。<strong>第三方库来源已定案并逐个落地</strong>：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、<strong>9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）</strong>。<strong>AppImage 已进 CI</strong>（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。<strong>编译侧已清零</strong>：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。<strong>AppImage 路径的前两处"从未执行过的代码"已修</strong>：<code>Fetch appimagetool</code> 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 <code>CMAKE_CURRENT_SOURCE_DIR</code> 指向仓库根（9.6.31）。<strong>私有库随包带的三件套已落代码</strong>（闭包复制 + RPATH + <code>SHLIBDEPS_PRIVATE_DIRS</code>，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：<code>file(RPATH_SET)</code> 的关键字签名、私有库必须按 soname 而非 <code>REALPATH</code> 命名（9.6.34）。<strong>deb 路径已全绿</strong>（run 43：<code>Build the Debian package</code>、<code>Validate the packaged metadata</code>、<code>Upload the package</code> 全过；9.6.41/9.6.42）。<strong>AppImage 三步已开始真跑</strong>：<code>Fetch appimagetool</code> 过，<code>Build the AppImage</code> 的 <code>cmake -E chmod</code> 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都<strong>打出来了</strong>，<code>Validate the AppImage</code> 红在门禁脚本自己 <code>chdir</code> 后用了相对路径（9.6.44）；run 45 里解包、AppRun、rdns、可执行位、依赖库、AppRun 一致性全过，只剩图标检查把 <code>Icon=</code> 当成文件名（9.6.46）。<strong>剩余</strong>：AppImage 的 Qt 依赖已定案为<strong>发行版 Qt 5.15</strong>（产物里不含任何 <code>libQt5*</code>，AppRun 的条件导出 + 两处门禁守住，见 9.6.45；真正自包含需静态 Qt 或 linuxdeploy-plugin-qt，未决）；<code>Unit tests</code> 首跑（环境前提已备，见 9.6.43）；PipeWire 帧消费</td>
 </tr>
 </tbody>
 </table>
@@ -8216,7 +8216,53 @@ if (!QDir(path).exists(QLatin1String(&quot;.&quot;)))
 这句话要写进发布说明，否则用户拿到 AppImage 在没装 Qt 的机器上会看到 loader 的
 <code>libQt5Core.so.5: cannot open shared object file</code>，而那不是 bug，是没声明的前提。</p>
 <hr>
-
+<h4>9.6.46 run 45：校验器把 <code>Icon=</code> 当成了文件名</h4>
+<p>run 45 是 <code>Validate the AppImage</code> 第一次真的跑完：</p>
+<pre><code class="language-text">ok   the AppImage unpacks
+ok   the package has an AppRun
+ok   the AppRun is executable
+ok   the package has one desktop entry at its root
+ok   the root entry is named after a reverse-DNS id
+ok   the desktop entry names an icon
+FAIL the named icon is at the root of the package: Icon=snow-shot
+ok   the package has the executable
+ok   the package bundles shared libraries
+ok   the packaged AppRun is the reviewed one
+</code></pre>
+<p><code>unpack</code>、<code>AppRun</code>、命名、可执行位、依赖库、以及「包里的 AppRun 就是仓库里审过的那份」全过。
+<code>Validate the AppImage</code> 剩下的唯一一条红，还是校验器自己的错：<code>Icon=</code> 是<strong>图标主题里的名字</strong>，
+不是文件名；appimagetool 把它映射成 AppDir 根下的 <code>&lt;name&gt;.&lt;ext&gt;</code>。<code>squashfs-root/snow-shot.png</code>
+就在那里，检查却在找 <code>squashfs-root/snow-shot</code>。</p>
+<p>修法不是「加个 .png」，是把判据换成语义：</p>
+<ul>
+<li>按 appimagetool 接受的扩展名找（<code>.png .svg .svgz .xpm</code>），裸名也算合法；</li>
+<li>补两条从来没检查过的事：</li>
+<li><code>.DirIcon</code> 必须存在<strong>且能解析</strong>（它是文件管理器画缩略图用的那个符号链接；
+    悬空链接意味着图标压根没进包）；</li>
+<li><code>.DirIcon</code> 必须是<strong>本应用</strong>的图标——符号链接比名字，普通文件（copy 形态）比字节。</li>
+</ul>
+<p>八组探针把边界钉住：只有 png 没有 <code>.DirIcon</code> / png+链接 / 只有 svg / 只有裸名 /
+什么都没有 / 悬空链接 / <code>.DirIcon</code> 是副本 / <code>.DirIcon</code> 指向别的应用。期望值与实际全部一致。</p>
+<h5>顺带看见了 appimagetool 的两句话（以前从没人读到过）</h5>
+<pre><code class="language-text">WARNING: AppStream upstream metadata is missing, please consider creating it
+         in usr/share/metainfo/com.snowshot.snow_shot.appdata.xml
+...com.snowshot.snow_shot.desktop: hint: value &quot;Graphics;Utility;&quot; for key &quot;Categories&quot;
+   contains more than one main category
+</code></pre>
+<ol>
+<li>AppStream 那条是<strong>假阴性</strong>：appimagetool 只找 <code>*.appdata.xml</code>，而项目装的是
+   <code>com.snowshot.snow_shot.metainfo.xml</code>——AppStream 现行推荐的写法，<code>appstreamcli validate</code>
+   也只认这个。改回 <code>.appdata.xml</code> 会同时把 deb 的元数据校验搞砸，所以<strong>不改文件名</strong>；
+   AppImage 的 AppStream 集成不是它能启动的前提，记录在此。</li>
+<li><code>Categories=Graphics;Utility;</code> 的多主分类：freedesktop 允许，<code>desktop-file-validate</code>
+   不报，只是菜单里可能出现两次。保持现状。</li>
+</ol>
+<h5>一个反复出现的形状</h5>
+<p>run 42 到 45 的四次红，依次是：<code>.desktop</code> 的 id 不合 rdns、<code>cmake -E chmod</code> 不存在、
+门禁 <code>chdir</code> 后用相对路径、校验器把 <code>Icon=</code> 当文件名。<strong>四次都在"我们自己的工具"里，
+产品侧每轮都在变好</strong>：deb 全绿 → AppImage 打得出来 → 打得对（ELF/type-2/架构）→
+解包后布局齐全。判据是稳定的：红在哪一行，先问那行是产品还是尺子。</p>
+<hr>
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>
 <thead>
