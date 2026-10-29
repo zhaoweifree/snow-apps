@@ -59,6 +59,29 @@ inline constexpr bool extendedFeatures = SNOW_SHOT_ENABLE_EXTENDED_FEATURES != 0
 [[nodiscard]] inline QString productId() {
     return isMini ? QStringLiteral("snow-shot-mini") : QStringLiteral("snow-shot");
 }
+/// The reverse-DNS identity the Linux desktop entry and the AppStream component
+/// are both built from, and the same string as the macOS bundle id.
+///
+/// It is *not* `productId()`, and that is the point: `productId()` is the
+/// executable and settings name (`snow_shot`, `snow-shot`), while AppStream 1.0
+/// requires a desktop application's component id to be a reverse-DNS name. CI
+/// run 42 rejected `snow-shot.desktop` with `cid-desktopapp-is-not-rdns`, and
+/// `appstreamcli` fails the command on a warning, so the packaging files had to
+/// be renamed rather than the validator relaxed:
+///
+///     /usr/share/applications/com.snowshot.snow_shot.desktop
+///     /usr/share/metainfo/com.snowshot.snow_shot.metainfo.xml
+///
+/// `QGuiApplication::setDesktopFileName()` is given this value plus `.desktop`,
+/// because a mismatch is what leaves a second, iconless dock slot. The autostart
+/// entry deliberately keeps the old `<productId>.desktop` name: it lives in a
+/// different directory, it is what users' existing `~/.config/autostart` stubs
+/// are named, and renaming it would resurrect auto-start for everyone who turned
+/// it off.
+[[nodiscard]] inline QString desktopEntryId() {
+    return isMini ? QStringLiteral("com.snowshot.snow_shot_mini")
+                  : QStringLiteral("com.snowshot.snow_shot");
+}
 [[nodiscard]] inline QString portableMarkerName() {
     return isMini ? QStringLiteral("__mini_data_directory") : QStringLiteral("__data_directory");
 }

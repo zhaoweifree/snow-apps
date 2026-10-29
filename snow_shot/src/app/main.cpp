@@ -477,11 +477,14 @@ int main(int argc, char* argv[]) {
     QGuiApplication::setApplicationDisplayName(snow_shot::app::edition::productName());
     QApplication app(argc, argv);
 #ifdef Q_OS_LINUX
-    // Ties the window to the installed `snow-shot.desktop` entry. Without it the
-    // compositor matches windows by WM_CLASS alone, so launching from the dock
-    // shows a second, iconless slot next to the pinned launcher, and a running
-    // instance is not marked as active on its own launcher.
-    QGuiApplication::setDesktopFileName(snow_shot::app::edition::productId() +
+    // Ties the window to the installed desktop entry. Without it the compositor
+    // matches windows by WM_CLASS alone, so launching from the dock shows a
+    // second, iconless slot next to the pinned launcher, and a running instance
+    // is not marked as active on its own launcher. The name is the reverse-DNS
+    // one the package installs (`com.snowshot.snow_shot.desktop`), not
+    // `productId()`: AppStream requires it, and this string has to match the
+    // installed file byte for byte or the tie does nothing.
+    QGuiApplication::setDesktopFileName(snow_shot::app::edition::desktopEntryId() +
                                         QStringLiteral(".desktop"));
 #endif
     adqt::widgets::initializePlatformCompatibility(app);

@@ -7757,6 +7757,162 @@ check(... &quot;patch&quot; ...)
 而门禁一旦把 A job 的要求套到 B job 上，它红得比 CI 还早——那时该改的是门禁的<strong>依据</strong>，
 不是被它指着的那个文件。</p>
 <hr>
+<h4>9.6.41 run 42：<code>gates</code> 秒级红在 <code>cid-desktopapp-is-not-rdns</code></h4>
+<p>run 42（<code>39881231963</code>，<code>be7f2da7</code>）里，<code>Build the Debian package</code> 继续绿，<strong>新加的那一步
+在 <code>gates</code> 里几秒钟就红了</strong>——这正是它存在的理由：同样一条规则如果留给
+<code>Validate the packaged metadata</code>，要等半小时编译之后才说出来。</p>
+<pre><code class="language-text">W: snow-shot.desktop:3: cid-desktopapp-is-not-rdns snow-shot.desktop
+I: snow-shot.desktop:21: developer-name-tag-deprecated
+I: snow-shot.desktop:~: developer-info-missing
+✘ Validation failed: warnings: 1, infos: 2                     (exit 3)
+</code></pre>
+<p>上一轮的 <code>release-time-missing</code>（error）消失了，露出的是<strong>警告级</strong>的失败：
+<code>appstreamcli validate</code> 把 warning 也算失败，只有 info 可以容忍。所以这条不能"忽略"。</p>
+<h5>规则本身（读源码，不靠印象）</h5>
+<p><code>as_validator_validate_component_id()</code>（appstream <code>src/as-validator.c</code>）对
+<code>desktop-application</code> 组件做的事，逐条翻译成中文：</p>
+<table>
+<thead>
+<tr>
+<th>判据</th>
+<th>触发的问题 id</th>
+<th>级别</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>点分段数 &lt; 3</td>
+<td><code>cid-desktopapp-is-not-rdns</code></td>
+<td>warning</td>
+</tr>
+<tr>
+<td>首段不是真实 TLD（<code>as_utils_is_tld()</code> 查内建 IANA 列表）</td>
+<td><code>cid-maybe-not-rdns</code></td>
+<td>warning</td>
+</tr>
+<tr>
+<td>前两段含大写</td>
+<td><code>cid-domain-not-lowercase</code></td>
+<td>warning</td>
+</tr>
+<tr>
+<td>非末段含连字符</td>
+<td><code>cid-rdns-contains-hyphen</code></td>
+<td>warning</td>
+</tr>
+<tr>
+<td>任意位置含大写</td>
+<td><code>cid-contains-uppercase-letter</code></td>
+<td>warning</td>
+</tr>
+<tr>
+<td>字符集超出 <code>[A-Za-z0-9._-]</code></td>
+<td><code>cid-invalid-character</code></td>
+<td>error</td>
+</tr>
+<tr>
+<td>任一段以数字开头</td>
+<td><code>cid-has-number-prefix</code></td>
+<td>warning</td>
+</tr>
+</tbody>
+</table>
+<p><code>cid-desktopapp-is-not-rdns</code> 只在<strong>段数</strong>上触发，注释写得很直白：因为 desktop app 的 id
+与 <code>.desktop</code> 文件名是绑在一起的，不能把它升级成 error。但 warning 已经足以让命令失败。</p>
+<h5>取值：<code>com.snowshot.snow_shot</code></h5>
+<p>不是随手取的，它同时满足七条判据，并且<strong>与 macOS 的 <code>bundleId()</code> 同源</strong>
+（<code>"com.snowshot." + applicationName()</code>）：</p>
+<ul>
+<li>三段：<code>com</code> / <code>snowshot</code> / <code>snow_shot</code>；</li>
+<li>首段 <code>com</code> 是真实 TLD；</li>
+<li>前两段全小写；</li>
+<li>非末段无连字符——这条排除了 <code>com.snowshot.snow-shot</code>（也就是 <code>productId()</code> 的写法，
+  它每一段都"看起来对"，但在 id 里是不合法的）；</li>
+<li>下划线在字符集内（源码里显式允许 <code>.</code> <code>-</code> <code>_</code>），所以 <code>snow_shot</code> 没问题；</li>
+<li>没有段以数字开头。</li>
+</ul>
+<h5>改名要落到四个不同的地方，而且两个地方<strong>不能</strong>跟着改</h5>
+<table>
+<thead>
+<tr>
+<th>落点</th>
+<th>值</th>
+<th>为什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snow_shot/packaging/linux/com.snowshot.snow_shot.desktop</code></td>
+<td>文件本身</td>
+<td>AppStream 要文件名 = <code>&lt;id&gt;.desktop</code></td>
+</tr>
+<tr>
+<td><code>&lt;id&gt;</code> / <code>&lt;launchable&gt;</code></td>
+<td><code>com.snowshot.snow_shot</code> / <code>…snow_shot.desktop</code></td>
+<td>组件 id 与启动目标</td>
+</tr>
+<tr>
+<td><code>QGuiApplication::setDesktopFileName()</code></td>
+<td><code>desktopEntryId() + ".desktop"</code></td>
+<td>不匹配就多一个无图标槽位</td>
+</tr>
+<tr>
+<td><code>Icon=</code> / 安装的 SVG/PNG 名</td>
+<td><code>snow-shot</code>（<strong>不改</strong>）</td>
+<td>图标名没有反向域名要求</td>
+</tr>
+<tr>
+<td><code>AutoStartRegistration</code> 的 <code>~/.config/autostart/&lt;name&gt;.desktop</code></td>
+<td><code>snow-shot.desktop</code>（<strong>不改</strong>）</td>
+<td>用户的既有覆盖文件就叫这个名，改了等于把所有人关掉的开机自启重新打开</td>
+</tr>
+</tbody>
+</table>
+<p>新增 <code>app::edition::desktopEntryId()</code>，注释里写明它<strong>不是</strong> <code>productId()</code> 以及为什么。
+<code>edition.h</code> 里因此出现两个"应用名"：一个给可执行文件/设置目录/自启条目，一个给桌面条目。</p>
+<h5>门禁当场抓到的那个错：<code>set(... PARENT_SCOPE)</code> 不定义本地变量</h5>
+<p>AppImage 布局函数里先写成：</p>
+<pre><code class="language-cmake">set(SNOW_SHOT_APPIMAGE_DESKTOP_NAME &quot;com.snowshot.snow_shot.desktop&quot; PARENT_SCOPE)
+set(SNOW_SHOT_APPIMAGE_DESKTOP
+    &quot;${_snow_dir}/usr/share/applications/${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}&quot; PARENT_SCOPE)
+</code></pre>
+<p>第二行的 <code>${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}</code> 在<strong>本作用域</strong>里是空的——<code>PARENT_SCOPE</code>
+只写出到调用方，不定义自己。于是路径变成 <code>…/applications/</code>，文件名为空。
+<code>check-linux-packaging.cmake</code> 的指纹断言立刻打印：</p>
+<pre><code class="language-text">FAIL appimage installed entry: expected '…/applications/com.snowshot.snow_shot.desktop',
+                               got '…/applications/'
+</code></pre>
+<p>修法是先设本地变量再导出。这和 9.6.38 的 <code>CMAKE_INSTALL_PREFIX</code>、9.6.10 的
+<code>CMAKE_CURRENT_LIST_DIR</code> 是同一族错误：<strong>CMake 的作用域是显式的，不能靠"它应该也在"。</strong></p>
+<h5>新加的三组断言（都能反向验证）</h5>
+<ol>
+<li><strong><code>check-linux-freedesktop.py</code></strong>：把上表七条判据全部写成断言，外加
+   <code>metainfo file is named after the id</code> 与 <code>metainfo id is the entry file name without
+   its suffix</code>。本地内建 <code>KNOWN_TLDS</code> 集合，注释说明它是"门槛"而不是 IANA 镜像。</li>
+<li><strong><code>check-linux-ci-workflow.py</code></strong>：两个校验步骤必须指向<strong>同一批</strong>文件——
+   <code>named == shipped</code>，<code>shipped</code> 取自 <code>snow_shot/packaging/linux/</code> 的实际文件。改名只改
+   一处、另一处留着旧路径，这条会红（<code>appstreamcli</code> 对不存在的文件同样 exit≠0）。</li>
+<li><strong><code>check-linux-packaging.cmake</code></strong>：<code>cmake/SnowShotAppImage.cmake</code> 里
+   <code>*.desktop</code> 字面量只能出现<strong>一次</strong>（定义处），AppDir 根副本必须经
+   <code>${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}</code>。否则同一个名字写两遍，改一处就够红一次。</li>
+</ol>
+<p>反向验证共 10 条变异，全部变红、恢复全部变绿：</p>
+<pre><code class="language-text">id 掉到两段               → cid-desktopapp-is-not-rdns（5 条断言同时红）
+id 换了不存在的 TLD        → 已知 TLD
+id 首段大写               → 小写 / 无大写
+id 在非末段插连字符         → 非末段无连字符
+id 与文件名不一致           → without its suffix
+desktopEntryId 改回 productId → entry file name
+一个校验步骤留旧路径        → validates the files that ship
+AppDir 根副本写字面量       → entry name is written once
+布局名置空 / 改成别的        → appimage installed entry
+</code></pre>
+<h5>一条没动的 info</h5>
+<p><code>I: developer-name-tag-deprecated</code> 说明 <code>&lt;developer_name&gt;</code> 在 AppStream 1.0 里已被
+<code>&lt;developer&gt;&lt;name&gt;</code> 取代。<strong>没改</strong>，因为 UOS 20 自带的 appstream 版本比 CI 的旧，老版本
+不认识 <code>&lt;developer&gt;</code> 元素，会把 info 变成 error。info 不致命，先留；真机验证时用 UOS 20
+的 <code>appstreamcli</code> 复核一次再决定。</p>
+<hr>
 
 <h2 id="10-工作量-优先级矩阵">10. 工作量 / 优先级矩阵</h2>
 <table>

@@ -285,6 +285,19 @@ def metadata_validator_checks(jobs: dict) -> None:
         "gates": "Freedesktop metadata with the real validators",
         "build": "Validate the packaged metadata",
     }
+    # The two steps name the files they validate by hand -- one runs against the
+    # source tree, the other against the extracted package -- so a rename that
+    # reached only one of them would leave the other validating a path that no
+    # longer exists (and appstreamcli, given a missing file, is a hard error;
+    # desktop-file-validate is too). Compare the names each step mentions to the
+    # files that actually ship rather than to a literal that would rot.
+    packaging = REPO / "snow_shot" / "packaging" / "linux"
+    shipped = {p.name for p in packaging.iterdir()
+               if p.name.endswith(".desktop") or p.name.endswith(".metainfo.xml")}
+    check("the packaging directory ships a fixed set of metadata files",
+          shipped == {"com.snowshot.snow_shot.desktop",
+                      "com.snowshot.snow_shot.metainfo.xml"},
+          f"found {sorted(shipped)}")
     for job_name, step_name in expected.items():
         job = jobs.get(job_name)
         if job is None:
@@ -303,6 +316,10 @@ def metadata_validator_checks(jobs: dict) -> None:
         for token in ("desktop-file-validate", "appstreamcli validate --no-net"):
             check(f"{job_name}: '{step_name}' runs {token}", token in text,
                   "the schema rules are only enforced by these two tools")
+        named = {token.rsplit("/", 1)[-1] for token in re.findall(r"[^\s'\"=;]+", text)
+                 if token.endswith(".desktop") or token.endswith(".metainfo.xml")}
+        check(f"{job_name}: '{step_name}' validates the files that ship",
+              named == shipped, f"names {sorted(named)}, ships {sorted(shipped)}")
 
 
 def main() -> int:

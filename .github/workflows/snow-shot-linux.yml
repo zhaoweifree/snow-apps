@@ -94,6 +94,10 @@ jobs:
       #     E: snow-shot.desktop:37: release-time-missing date
       #     Validation failed: errors: 1, warnings: 1, infos: 2
       #
+      # (the file has since been renamed to its reverse-DNS id, so a repeat of
+      # that message would name the new file -- run 42 added the second rule this
+      # step exists for: `W: ... cid-desktopapp-is-not-rdns`, which also exits 3.)
+      #
       # Neither tool needs a compiler, so this costs seconds here instead of
       # surfacing in `Validate the packaged metadata`. The flags match that
       # step exactly, so the two cannot disagree.
@@ -102,9 +106,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends appstream desktop-file-utils
-          desktop-file-validate snow_shot/packaging/linux/snow-shot.desktop
+          desktop-file-validate snow_shot/packaging/linux/com.snowshot.snow_shot.desktop
           appstreamcli validate --no-net \
-            snow_shot/packaging/linux/snow-shot.metainfo.xml
+            snow_shot/packaging/linux/com.snowshot.snow_shot.metainfo.xml
 
       # `snow-linux` and the platform-independent half of `snow-capture` are
       # pure logic on purpose (docs-uos-linux-port.md P3), so their tests run on
@@ -361,8 +365,8 @@ jobs:
 
           # The layout the launchers read.
           grep -q '/usr/bin/snow_shot$' /tmp/deb-contents.txt
-          grep -q '/usr/share/applications/snow-shot.desktop$' /tmp/deb-contents.txt
-          grep -q '/usr/share/metainfo/snow-shot.metainfo.xml$' /tmp/deb-contents.txt
+          grep -q '/usr/share/applications/com.snowshot.snow_shot.desktop$' /tmp/deb-contents.txt
+          grep -q '/usr/share/metainfo/com.snowshot.snow_shot.metainfo.xml$' /tmp/deb-contents.txt
           for size in 16 24 32 48 64 128 256; do
             grep -q "icons/hicolor/${size}x${size}/apps/snow-shot.png$" /tmp/deb-contents.txt
           done
@@ -370,9 +374,9 @@ jobs:
 
           rm -rf /tmp/extracted
           dpkg-deb -x "$deb" /tmp/extracted
-          desktop-file-validate /tmp/extracted/usr/share/applications/snow-shot.desktop
+          desktop-file-validate /tmp/extracted/usr/share/applications/com.snowshot.snow_shot.desktop
           appstreamcli validate --no-net \
-            /tmp/extracted/usr/share/metainfo/snow-shot.metainfo.xml
+            /tmp/extracted/usr/share/metainfo/com.snowshot.snow_shot.metainfo.xml
 
       - name: Upload the package
         uses: actions/upload-artifact@v4

@@ -49,6 +49,8 @@ endfunction()
 #   SNOW_SHOT_APPIMAGE_DIR             the staged AppDir (what gets deleted first)
 #   SNOW_SHOT_APPIMAGE_USR             the AppDir's usr/ prefix, i.e. the install prefix
 #   SNOW_SHOT_APPIMAGE_DESKTOP         the entry, as shipped by the install rules
+#   SNOW_SHOT_APPIMAGE_DESKTOP_NAME    its file name, which is also the AppDir root name
+#                                      (`app::edition::desktopEntryId()`, reverse-DNS)
 #   SNOW_SHOT_APPIMAGE_ICON_NAME       the icon file name at the AppDir root
 #   SNOW_SHOT_APPIMAGE_APPRUN_SOURCE   the reviewed launcher in the source tree
 #   SNOW_SHOT_APPIMAGE_ICON_SOURCE     the 256x256 PNG staged as the root icon
@@ -83,7 +85,19 @@ function(snow_shot_appimage_layout)
         "snow-shot-${SNOW_SHOT_VERSION_NUMERIC}-${_snow_architecture}.AppImage" PARENT_SCOPE)
     set(SNOW_SHOT_APPIMAGE_DIR "${_snow_dir}" PARENT_SCOPE)
     set(SNOW_SHOT_APPIMAGE_USR "${_snow_dir}/usr" PARENT_SCOPE)
-    set(SNOW_SHOT_APPIMAGE_DESKTOP "${_snow_dir}/usr/share/applications/snow-shot.desktop" PARENT_SCOPE)
+    # The entry name is reverse-DNS and comes from `app::edition::desktopEntryId()`;
+    # the two copies below -- the install rule's and the AppDir root one -- have to
+    # carry exactly that name. The gate reads this variable out of the layout
+    # function, so the three spellings cannot drift apart without a red check.
+    #
+    # The local is separate from the exported name on purpose: `set(... PARENT_SCOPE)`
+    # only writes to the caller, so the line below it would have expanded the
+    # *previous* value of the variable -- nothing on a first call -- and produced
+    # `.../applications/` with the file name missing.
+    set(_snow_desktop_name "com.snowshot.snow_shot.desktop")
+    set(SNOW_SHOT_APPIMAGE_DESKTOP_NAME "${_snow_desktop_name}" PARENT_SCOPE)
+    set(SNOW_SHOT_APPIMAGE_DESKTOP
+        "${_snow_dir}/usr/share/applications/${_snow_desktop_name}" PARENT_SCOPE)
     set(SNOW_SHOT_APPIMAGE_ICON_NAME "snow-shot.png" PARENT_SCOPE)
     set(SNOW_SHOT_APPIMAGE_APPRUN_SOURCE
         "${_snow_app_dir}/packaging/linux/appimage/AppRun" PARENT_SCOPE)
@@ -182,7 +196,7 @@ function(snow_shot_add_appimage_target)
                 -P "${SNOW_SHOT_LINUX_BUNDLE_SCRIPT}"
         COMMAND "${CMAKE_COMMAND}" -E copy "${_snow_apprun}" "${SNOW_SHOT_APPIMAGE_DIR}/AppRun"
         COMMAND "${CMAKE_COMMAND}" -E copy "${SNOW_SHOT_APPIMAGE_DESKTOP}"
-                "${SNOW_SHOT_APPIMAGE_DIR}/snow-shot.desktop"
+                "${SNOW_SHOT_APPIMAGE_DIR}/${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}"
         COMMAND "${CMAKE_COMMAND}" -E copy "${_snow_icon_source}"
                 "${SNOW_SHOT_APPIMAGE_DIR}/${SNOW_SHOT_APPIMAGE_ICON_NAME}"
         # appimagetool sizes the AppImage window thumbnail from .DirIcon; a

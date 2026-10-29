@@ -7,8 +7,12 @@ install time -- the entry and the AppStream metadata -- would otherwise never be
 checked. This script re-implements the subset of their rules that this project
 actually depends on, plus the cross-file checks a generic validator cannot do:
 
-  * the entry file name, the AppStream id and the icon name are all the
-    application id from ``app::edition::productId()``;
+  * the entry file name is ``app::edition::desktopEntryId()``, which has to be a
+    reverse-DNS name for AppStream, while the icon name is ``productId()`` --
+    two different strings on purpose;
+  * the AppStream id has to satisfy the rules ``appstreamcli`` enforces on a
+    ``desktop-application`` component, which is the check whose absence let CI
+    run 42 ship ``snow-shot.desktop`` and fail half an hour later;
   * ``StartupWMClass`` is ``app::edition::applicationName()``;
   * the release version in the AppStream file matches ``SNOW_SHOT_VERSION``.
 
@@ -25,11 +29,36 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PACKAGING = REPO / "snow_shot" / "packaging" / "linux"
-DESKTOP = PACKAGING / "snow-shot.desktop"
-METAINFO = PACKAGING / "snow-shot.metainfo.xml"
+# Named after the reverse-DNS component id, which is what AppStream requires of a
+# desktop application (see the RDNS check in main()). `appstreamcli` also wants
+# the metainfo file name to be `<id>.metainfo.xml`.
+DESKTOP = PACKAGING / "com.snowshot.snow_shot.desktop"
+METAINFO = PACKAGING / "com.snowshot.snow_shot.metainfo.xml"
 ICON = REPO / "snow_shot" / "resources" / "app-icon.svg"
 EDITION = REPO / "snow_shot" / "include" / "snow_shot" / "app" / "edition.h"
 ROOT_CMAKE = REPO / "CMakeLists.txt"
+
+# The reverse-DNS rule `as_validator_validate_component_id()` applies to a
+# desktop-application component, read out of appstream's `src/as-validator.c`:
+#
+#  * fewer than three dot-separated parts is `cid-desktopapp-is-not-rdns`;
+#  * with three or more, the first part has to be a known top-level domain or it
+#    is `cid-maybe-not-rdns` (`as_utils_is_tld()` against the bundled IANA list);
+#  * the first two parts have to be lowercase (`cid-domain-not-lowercase`);
+#  * a hyphen outside the last part is `cid-rdns-contains-hyphen`, and an
+#    uppercase letter anywhere is `cid-contains-uppercase-letter`;
+#  * the character set is alphanumerics plus `.`, `-` and `_`.
+#
+# Every one of those is a warning, and `appstreamcli validate` exits 3 on any
+# warning. The TLD list below is the subset that can plausibly start a project
+# domain -- it is a gate, not an IANA mirror, and a name that is not in it is
+# either a typo or an invented TLD, both of which appstreamcli rejects too.
+KNOWN_TLDS = {
+    "com", "org", "net", "io", "dev", "app", "edu", "gov", "info", "biz",
+    "de", "fr", "uk", "cn", "jp", "kr", "ru", "nl", "se", "no", "fi", "dk",
+    "it", "es", "pt", "pl", "cz", "at", "ch", "be", "ca", "au", "nz", "br",
+    "in", "za", "mx", "ar", "tr", "gr", "hu", "ie", "il", "sg", "tw", "ua",
+}
 
 # The main categories freedesktop.org defines. An entry has to name at least one
 # of these or it is only reachable by searching for its name.
@@ -115,15 +144,17 @@ def main() -> int:
 
     edition = read_text(EDITION)
     product_id = quote_value(edition, "productId")
+    desktop_id = quote_value(edition, "desktopEntryId")
     application_name = quote_value(edition, "applicationName")
     check("edition.h exposes a product id", product_id is not None)
+    check("edition.h exposes a desktop entry id", desktop_id is not None)
     check("edition.h exposes an application name", application_name is not None)
-    if product_id is None or application_name is None:
+    if product_id is None or desktop_id is None or application_name is None:
         return 1
     check(
-        "entry file name is the product id",
-        DESKTOP.name == f"{product_id}.desktop",
-        f"expected {product_id}.desktop, found {DESKTOP.name}",
+        "entry file name is the desktop entry id",
+        DESKTOP.name == f"{desktop_id}.desktop",
+        f"expected {desktop_id}.desktop, found {DESKTOP.name}",
     )
 
     # --- Encoding: a CRLF or BOM here makes the entry invisible to the menu ----
@@ -180,8 +211,42 @@ def main() -> int:
         return (node.text or "").strip() if node is not None else ""
 
     metainfo_id = text("id")
-    check("metainfo id is the entry file name", metainfo_id == DESKTOP.name,
-          f"{metainfo_id} vs {DESKTOP.name}")
+
+    # --- The component id has to be reverse-DNS -------------------------------
+    # CI run 42 is why this block exists. `Validate the packaged metadata` ran
+    # `appstreamcli validate` on `snow-shot.desktop` and got
+    #
+    #     W: snow-shot.desktop:3: cid-desktopapp-is-not-rdns snow-shot.desktop
+    #     Validation failed: warnings: 1, infos: 2     (exit 3)
+    #
+    # -- a "warning" that fails the command, half an hour into a build. Nothing
+    # local looked at the shape of the id: desktop-file-validate has no opinion on
+    # it, and the checks below used to compare the id to the file name, which is
+    # exactly the form that fails. Each rule appstreamcli applies is spelled out
+    # here so a rename has to be a name this gate accepts.
+    id_parts = metainfo_id.split(".")
+    check("metainfo id is reverse-DNS (three or more parts)", len(id_parts) >= 3,
+          f"{metainfo_id!r}: appstreamcli says cid-desktopapp-is-not-rdns")
+    check("metainfo id starts with a known top-level domain",
+          bool(id_parts) and id_parts[0] in KNOWN_TLDS,
+          f"{metainfo_id!r}: appstreamcli says cid-maybe-not-rdns")
+    check("metainfo id domain parts are lowercase",
+          [p for p in id_parts[:2] if p != p.lower()] == [],
+          f"{metainfo_id!r}: appstreamcli says cid-domain-not-lowercase")
+    check("metainfo id has no hyphen outside the last part",
+          not any("-" in p for p in id_parts[:-1]),
+          f"{metainfo_id!r}: appstreamcli says cid-rdns-contains-hyphen")
+    check("metainfo id has no uppercase letters",
+          metainfo_id == metainfo_id.lower(),
+          f"{metainfo_id!r}: appstreamcli says cid-contains-uppercase-letter")
+    check("metainfo id has no part starting with a digit",
+          not any(p[:1].isdigit() for p in id_parts),
+          f"{metainfo_id!r}: appstreamcli says cid-has-number-prefix")
+    check("metainfo id is the entry file name without its suffix",
+          metainfo_id == DESKTOP.stem, f"{metainfo_id} vs {DESKTOP.stem}")
+    check("metainfo file is named after the id",
+          METAINFO.name == f"{metainfo_id}.metainfo.xml",
+          f"{METAINFO.name} vs {metainfo_id}.metainfo.xml")
     check("metainfo metadata licence is reusable",
           text("metadata_license") in ALLOWED_METADATA_LICENSES, text("metadata_license"))
     check("metainfo declares a project licence", bool(text("project_license")))

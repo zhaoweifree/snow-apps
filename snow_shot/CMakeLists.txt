@@ -10060,25 +10060,34 @@ install(DIRECTORY
 )
 
 if(UNIX AND NOT APPLE)
-    # Freedesktop integration. Three names have to agree with the application,
-    # and they come from two different places:
+    # Freedesktop integration. Four names are involved and they are deliberately
+    # *not* all the same string:
     #
-    #  * the entry file name is the application id from `app::edition::productId()`
-    #    ("snow-shot"), because the autostart override and the hiding stub that
-    #    `AutoStartRegistration` writes look for exactly that file name, and a
-    #    package that installed `Snow Shot.desktop` instead would leave the user
-    #    with two entries that disagree about whether the app starts at login;
-    #  * the icon name in `Icon=` is the same id, which is why the shipped
-    #    `app-icon.svg` is renamed on the way in rather than duplicated;
+    #  * the entry file name is `app::edition::desktopEntryId()`
+    #    ("com.snowshot.snow_shot"), a reverse-DNS name. `appstreamcli validate`
+    #    rejects anything shorter with `cid-desktopapp-is-not-rdns` and exits
+    #    non-zero on a warning, so `snow-shot.desktop` -- which is what this
+    #    package shipped until CI run 42 -- cannot be the installed name. The
+    #    AppStream id is the file name without `.desktop`, and the file itself is
+    #    named after the id;
+    #  * `QGuiApplication::setDesktopFileName()` is given the same value plus
+    #    `.desktop`, or the compositor leaves a second, iconless dock slot;
+    #  * the autostart entry is *not* renamed. `AutoStartRegistration` writes
+    #    `~/.config/autostart/<productId>.desktop`, users' existing stubs are
+    #    named that way, and renaming it would resurrect auto-start for everyone
+    #    who turned it off. Different directory, so the two never collide;
+    #  * the icon name in `Icon=` stays `productId()` ("snow-shot"), which is why
+    #    the shipped `app-icon.svg` is renamed on the way in rather than
+    #    duplicated. Icon names carry no reverse-DNS requirement;
     #  * `StartupWMClass` is the Qt application name ("snow_shot"), which is what
     #    the xcb platform plugin puts in WM_CLASS.
     #
     # The AppStream file is not decoration: dde-launcher and most software
     # centres read it for the name, the screenshot list and the release notes.
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/snow-shot.desktop"
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/com.snowshot.snow_shot.desktop"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
     )
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/snow-shot.metainfo.xml"
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/com.snowshot.snow_shot.metainfo.xml"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo"
     )
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon.svg"

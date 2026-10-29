@@ -526,8 +526,8 @@ set(CMAKE_SYSTEM_PROCESSOR "x86_64")
 
 # --- 3. The freedesktop files are installed, not just present ----------------
 foreach(_installed
-        "packaging/linux/snow-shot.desktop"
-        "packaging/linux/snow-shot.metainfo.xml"
+        "packaging/linux/com.snowshot.snow_shot.desktop"
+        "packaging/linux/com.snowshot.snow_shot.metainfo.xml"
         "resources/app-icon.svg")
     if(NOT EXISTS "${_snow_repo}/snow_shot/${_installed}")
         message(STATUS "FAIL missing packaging input: snow_shot/${_installed}")
@@ -537,8 +537,8 @@ endforeach()
 
 file(READ "${_snow_repo}/snow_shot/CMakeLists.txt" _snow_shot_cmake)
 foreach(_needle
-        "packaging/linux/snow-shot.desktop"
-        "packaging/linux/snow-shot.metainfo.xml"
+        "packaging/linux/com.snowshot.snow_shot.desktop"
+        "packaging/linux/com.snowshot.snow_shot.metainfo.xml"
         "resources/app-icon.svg")
     string(FIND "${_snow_shot_cmake}" "${_needle}" _snow_position)
     if(_snow_position EQUAL -1)
@@ -576,7 +576,7 @@ foreach(_size 16 24 32 48 64 128 256)
 endforeach()
 
 # --- 4. The desktop entry and the package agree on the application id -------
-file(READ "${_snow_repo}/snow_shot/packaging/linux/snow-shot.desktop" _snow_desktop)
+file(READ "${_snow_repo}/snow_shot/packaging/linux/com.snowshot.snow_shot.desktop" _snow_desktop)
 foreach(_required
         "Type=Application"
         "Exec=snow_shot"
@@ -586,16 +586,16 @@ foreach(_required
         "StartupWMClass=snow_shot")
     string(FIND "${_snow_desktop}" "${_required}" _snow_position)
     if(_snow_position EQUAL -1)
-        message(STATUS "FAIL snow-shot.desktop is missing '${_required}'")
+        message(STATUS "FAIL com.snowshot.snow_shot.desktop is missing '${_required}'")
         math(EXPR _snow_failures "${_snow_failures} + 1")
     endif()
 endforeach()
 
 # The package must not disagree with the source tree about its own version.
-file(READ "${_snow_repo}/snow_shot/packaging/linux/snow-shot.metainfo.xml" _snow_metainfo)
-string(FIND "${_snow_metainfo}" "<id>snow-shot.desktop</id>" _snow_position)
+file(READ "${_snow_repo}/snow_shot/packaging/linux/com.snowshot.snow_shot.metainfo.xml" _snow_metainfo)
+string(FIND "${_snow_metainfo}" "<id>com.snowshot.snow_shot</id>" _snow_position)
 if(_snow_position EQUAL -1)
-    message(STATUS "FAIL snow-shot.metainfo.xml does not launch snow-shot.desktop")
+    message(STATUS "FAIL com.snowshot.snow_shot.metainfo.xml does not carry the reverse-DNS id")
     math(EXPR _snow_failures "${_snow_failures} + 1")
 endif()
 
@@ -654,6 +654,45 @@ snow_expect("appimage install prefix" "${CMAKE_BINARY_DIR}/appimage/snow_shot-1.
 # appimagetool reads the entry and the icon from the AppDir root, and the icon
 # has to be named exactly what Icon= says.
 snow_expect("appimage root icon name" "snow-shot.png" "${SNOW_SHOT_APPIMAGE_ICON_NAME}")
+
+# The entry exists under three names by the time the AppImage is built: the file
+# in the source tree, the install rule's copy under `usr/share/applications`, and
+# the AppDir root copy that appimagetool reads. The layout function answers with
+# one name, so both consumers use it; these two checks tie that name back to a
+# file that actually exists and to the place the install rules put it.
+snow_expect("appimage installed entry"
+            "${CMAKE_BINARY_DIR}/appimage/snow_shot-1.2.8-x86_64.AppDir/usr/share/applications/com.snowshot.snow_shot.desktop"
+            "${SNOW_SHOT_APPIMAGE_DESKTOP}")
+if(EXISTS "${_snow_repo}/snow_shot/packaging/linux/${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}")
+    message(STATUS "ok   appimage entry source is packaging/linux/${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}")
+else()
+    message(STATUS "FAIL appimage entry source does not exist: "
+                   "packaging/linux/${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+endif()
+
+# The AppDir root copy has to carry the same name as the installed entry, and the
+# only way that stays true is if the command goes through the layout variable.
+# A second literal would still build an AppImage -- and fail `appstreamcli` on a
+# machine with no toolchain to rebuild it. So: the file defines the name once.
+file(READ "${_snow_repo}/cmake/SnowShotAppImage.cmake" _snow_appimage_cmake)
+string(REGEX MATCHALL "[A-Za-z0-9_.-]+\\.desktop" _snow_entry_literals "${_snow_appimage_cmake}")
+list(LENGTH _snow_entry_literals _snow_entry_literal_count)
+if(_snow_entry_literal_count EQUAL 1)
+    message(STATUS "ok   the AppImage entry name is written once")
+else()
+    message(STATUS "FAIL cmake/SnowShotAppImage.cmake writes the entry name "
+                   "${_snow_entry_literal_count} time(s) (${_snow_entry_literals}); it has to be "
+                   "defined once and used through SNOW_SHOT_APPIMAGE_DESKTOP_NAME")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+endif()
+string(FIND "${_snow_appimage_cmake}" "\${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}" _snow_position)
+if(_snow_position EQUAL -1)
+    message(STATUS "FAIL the AppDir root copy does not use SNOW_SHOT_APPIMAGE_DESKTOP_NAME")
+    math(EXPR _snow_failures "${_snow_failures} + 1")
+else()
+    message(STATUS "ok   the AppDir root copy uses the layout name")
+endif()
 
 # The two files staged into the AppDir have to exist where the layout says they
 # are. They used to be built from `${CMAKE_CURRENT_SOURCE_DIR}` inside a function

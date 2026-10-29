@@ -113,7 +113,18 @@ def main() -> int:
         check("the package has an AppRun", app_run.is_file())
         check("the AppRun is executable", app_run.is_file() and os.access(app_run, os.X_OK))
 
-        desktop = unpacked / "snow-shot.desktop"
+        # The root entry is what appimagetool records and what the launcher reads.
+        # Its name is the reverse-DNS component id, and `appstreamcli` refuses a
+        # shorter one (`cid-desktopapp-is-not-rdns`), so the name is checked
+        # against that shape instead of being hard-coded here: the identity lives
+        # in `edition.h` and in the install rules, not in a third copy.
+        entries = sorted(unpacked.glob("*.desktop"))
+        check("the package has one desktop entry at its root", len(entries) == 1,
+              ", ".join(p.name for p in entries) or "none")
+        desktop = entries[0] if entries else unpacked / "(none).desktop"
+        check("the root entry is named after a reverse-DNS id",
+              len(desktop.stem.split(".")) >= 3,
+              f"{desktop.name}: appstreamcli says cid-desktopapp-is-not-rdns")
         check("the package has a desktop entry at its root", desktop.is_file())
         if desktop.is_file():
             values = parse_desktop(desktop)

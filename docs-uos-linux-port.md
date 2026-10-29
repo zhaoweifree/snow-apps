@@ -2509,17 +2509,20 @@ RED —— **编译失败比断言失败证明得少**，它可能说明这条�
 这样 `cmake -P` 能在没有工具链的机器上把整段配置真跑一遍 —— 否则这个模块只会在 Linux
 configure 时被解析，又是一块盲区。
 
-**决定 4：三个名字必须同源。**
+**决定 4：四个名字，两个来源。**（本节写于 2026-10-21，当时三个名字都取自
+`productId()`；9.6.41 记录了为什么入口文件名必须改，表已按现状更新。）
 
 | 出现在哪里 | 值 | 来源 |
 |---|---|---|
-| 入口文件名 | `snow-shot.desktop` | `app::edition::productId()` |
-| `Icon=` | `snow-shot` | 同上 |
+| 入口文件名 / AppStream `<id>` | `com.snowshot.snow_shot`（文件 `com.snowshot.snow_shot.desktop`） | `app::edition::desktopEntryId()` |
+| `Icon=` | `snow-shot` | `app::edition::productId()` |
 | `StartupWMClass=` | `snow_shot` | `app::edition::applicationName()` |
+| 自启动条目名 | `snow-shot.desktop`（在 `~/.config/autostart/`，另一个目录） | `app::edition::productId()` |
 
-- 文件名不是装饰：`AutoStartRegistration` 写自启动覆盖和 `Hidden=true` 隐藏桩时都按
-  `<productId>.desktop` 找文件。包里叫 `Snow Shot.desktop` 的话，用户会看到两个互相矛盾的条目
-  （一个进菜单、一个管自启动），且后者的"已启用"状态与系统菜单的勾选对不上。
+- 入口文件名不是装饰：`QGuiApplication::setDesktopFileName()` 必须给出同一个值（加
+  `.desktop`），否则合成器按 WM_CLASS 单独匹配，从 dock 启动时会出现第二个没有图标的槽位。
+- 自启动条目**不跟着改**：它在 `~/.config/autostart/` 下，用户已有的覆盖文件就是那个名字，
+  改名等于把所有人手动关掉的开机自启重新打开。两个目录互不相干，不存在冲突。
 - 图标不复制：install 时 `RENAME` 成 `snow-shot.svg`。同一份 `app-icon.svg` 也是 Windows
   `.ico` 的来源，复制一份就等着两边漂移。
 - 另给 `main.cpp` 补 `QGuiApplication::setDesktopFileName()`：没有它，合成器只按 WM_CLASS
@@ -2563,8 +2566,8 @@ Linux 现在走自己的模块。
 ```
 snow-shot_1.2.8_amd64.deb        # 或 _arm64.deb，文件名由 CPACK_DEBIAN_FILE_NAME=DEB-DEFAULT 决定
 /usr/bin/snow_shot
-/usr/share/applications/snow-shot.desktop
-/usr/share/metainfo/snow-shot.metainfo.xml
+/usr/share/applications/com.snowshot.snow_shot.desktop
+/usr/share/metainfo/com.snowshot.snow_shot.metainfo.xml
 /usr/share/icons/hicolor/scalable/apps/snow-shot.svg
 ```
 
@@ -2690,7 +2693,7 @@ AppImage 把树挂到一个运行时才决定的路径上，装好的系统里�
 snow-shot-1.2.8-x86_64.AppImage       # 或 -aarch64
 <build>/appimage/snow_shot-1.2.8-x86_64.AppDir/   # 落盘中间产物，可直接跑
 ├── AppRun                            # 0755，POSIX sh
-├── snow-shot.desktop                 # 与 usr/share/applications 里同名同内容
+├── com.snowshot.snow_shot.desktop    # 与 usr/share/applications 里同名同内容
 ├── snow-shot.png                     # 256x256，名字与 Icon= 一致
 ├── .DirIcon -> snow-shot.png
 └── usr/{bin,lib,plugins,share/...}
@@ -2790,6 +2793,9 @@ checkout 里解析到、`windows-qt5-full` configure 仍然 EXIT=0。以下没�
   非 error（`--pedantic` 才会升为失败）**，但这是推断，没跑过。如果它其实报 error，就得在
   "文件名与 productId 同源"和"AppStream 合规"之间做取舍 —— 那是一个需要重新论证的决定，
   不是一个可以打补丁的地方。
+  → **这条推断错了，而且错在最关键的那半句。** run 42 的 `appstreamcli validate` 给出
+  `W: cid-desktopapp-is-not-rdns` 并 **exit 3**：warning 本身就使命令失败，不需要 `--pedantic`。
+  于是取舍变成了"改名字"，而不是"放宽校验"。见 9.6.41。
 - `ubuntu-24.04-arm` runner 在私有仓库/免费额度下是否可用。
 
 **下一步**：把这个 workflow 推上去跑一次，按红的地方改。红是预期输出，不是失败。
@@ -5656,6 +5662,121 @@ check(... "patch" ...)
 **这一节的结论**：`Build` 和打包容器的绿灯是靠"每一步只信机器给的证据"攒出来的；
 而门禁一旦把 A job 的要求套到 B job 上，它红得比 CI 还早——那时该改的是门禁的**依据**，
 不是被它指着的那个文件。
+
+#### 9.6.41 run 42：`gates` 秒级红在 `cid-desktopapp-is-not-rdns`
+
+run 42（`39881231963`，`be7f2da7`）里，`Build the Debian package` 继续绿，**新加的那一步
+在 `gates` 里几秒钟就红了**——这正是它存在的理由：同样一条规则如果留给
+`Validate the packaged metadata`，要等半小时编译之后才说出来。
+
+```text
+W: snow-shot.desktop:3: cid-desktopapp-is-not-rdns snow-shot.desktop
+I: snow-shot.desktop:21: developer-name-tag-deprecated
+I: snow-shot.desktop:~: developer-info-missing
+✘ Validation failed: warnings: 1, infos: 2                     (exit 3)
+```
+
+上一轮的 `release-time-missing`（error）消失了，露出的是**警告级**的失败：
+`appstreamcli validate` 把 warning 也算失败，只有 info 可以容忍。所以这条不能"忽略"。
+
+##### 规则本身（读源码，不靠印象）
+
+`as_validator_validate_component_id()`（appstream `src/as-validator.c`）对
+`desktop-application` 组件做的事，逐条翻译成中文：
+
+| 判据 | 触发的问题 id | 级别 |
+|---|---|---|
+| 点分段数 < 3 | `cid-desktopapp-is-not-rdns` | warning |
+| 首段不是真实 TLD（`as_utils_is_tld()` 查内建 IANA 列表） | `cid-maybe-not-rdns` | warning |
+| 前两段含大写 | `cid-domain-not-lowercase` | warning |
+| 非末段含连字符 | `cid-rdns-contains-hyphen` | warning |
+| 任意位置含大写 | `cid-contains-uppercase-letter` | warning |
+| 字符集超出 `[A-Za-z0-9._-]` | `cid-invalid-character` | error |
+| 任一段以数字开头 | `cid-has-number-prefix` | warning |
+
+`cid-desktopapp-is-not-rdns` 只在**段数**上触发，注释写得很直白：因为 desktop app 的 id
+与 `.desktop` 文件名是绑在一起的，不能把它升级成 error。但 warning 已经足以让命令失败。
+
+##### 取值：`com.snowshot.snow_shot`
+
+不是随手取的，它同时满足七条判据，并且**与 macOS 的 `bundleId()` 同源**
+（`"com.snowshot." + applicationName()`）：
+
+- 三段：`com` / `snowshot` / `snow_shot`；
+- 首段 `com` 是真实 TLD；
+- 前两段全小写；
+- 非末段无连字符——这条排除了 `com.snowshot.snow-shot`（也就是 `productId()` 的写法，
+  它每一段都"看起来对"，但在 id 里是不合法的）；
+- 下划线在字符集内（源码里显式允许 `.` `-` `_`），所以 `snow_shot` 没问题；
+- 没有段以数字开头。
+
+##### 改名要落到四个不同的地方，而且两个地方**不能**跟着改
+
+| 落点 | 值 | 为什么 |
+|---|---|---|
+| `snow_shot/packaging/linux/com.snowshot.snow_shot.desktop` | 文件本身 | AppStream 要文件名 = `<id>.desktop` |
+| `<id>` / `<launchable>` | `com.snowshot.snow_shot` / `…snow_shot.desktop` | 组件 id 与启动目标 |
+| `QGuiApplication::setDesktopFileName()` | `desktopEntryId() + ".desktop"` | 不匹配就多一个无图标槽位 |
+| `Icon=` / 安装的 SVG/PNG 名 | `snow-shot`（**不改**） | 图标名没有反向域名要求 |
+| `AutoStartRegistration` 的 `~/.config/autostart/<name>.desktop` | `snow-shot.desktop`（**不改**） | 用户的既有覆盖文件就叫这个名，改了等于把所有人关掉的开机自启重新打开 |
+
+新增 `app::edition::desktopEntryId()`，注释里写明它**不是** `productId()` 以及为什么。
+`edition.h` 里因此出现两个"应用名"：一个给可执行文件/设置目录/自启条目，一个给桌面条目。
+
+##### 门禁当场抓到的那个错：`set(... PARENT_SCOPE)` 不定义本地变量
+
+AppImage 布局函数里先写成：
+
+```cmake
+set(SNOW_SHOT_APPIMAGE_DESKTOP_NAME "com.snowshot.snow_shot.desktop" PARENT_SCOPE)
+set(SNOW_SHOT_APPIMAGE_DESKTOP
+    "${_snow_dir}/usr/share/applications/${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}" PARENT_SCOPE)
+```
+
+第二行的 `${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}` 在**本作用域**里是空的——`PARENT_SCOPE`
+只写出到调用方，不定义自己。于是路径变成 `…/applications/`，文件名为空。
+`check-linux-packaging.cmake` 的指纹断言立刻打印：
+
+```text
+FAIL appimage installed entry: expected '…/applications/com.snowshot.snow_shot.desktop',
+                               got '…/applications/'
+```
+
+修法是先设本地变量再导出。这和 9.6.38 的 `CMAKE_INSTALL_PREFIX`、9.6.10 的
+`CMAKE_CURRENT_LIST_DIR` 是同一族错误：**CMake 的作用域是显式的，不能靠"它应该也在"。**
+
+##### 新加的三组断言（都能反向验证）
+
+1. **`check-linux-freedesktop.py`**：把上表七条判据全部写成断言，外加
+   `metainfo file is named after the id` 与 `metainfo id is the entry file name without
+   its suffix`。本地内建 `KNOWN_TLDS` 集合，注释说明它是"门槛"而不是 IANA 镜像。
+2. **`check-linux-ci-workflow.py`**：两个校验步骤必须指向**同一批**文件——
+   `named == shipped`，`shipped` 取自 `snow_shot/packaging/linux/` 的实际文件。改名只改
+   一处、另一处留着旧路径，这条会红（`appstreamcli` 对不存在的文件同样 exit≠0）。
+3. **`check-linux-packaging.cmake`**：`cmake/SnowShotAppImage.cmake` 里
+   `*.desktop` 字面量只能出现**一次**（定义处），AppDir 根副本必须经
+   `${SNOW_SHOT_APPIMAGE_DESKTOP_NAME}`。否则同一个名字写两遍，改一处就够红一次。
+
+反向验证共 10 条变异，全部变红、恢复全部变绿：
+
+```text
+id 掉到两段               → cid-desktopapp-is-not-rdns（5 条断言同时红）
+id 换了不存在的 TLD        → 已知 TLD
+id 首段大写               → 小写 / 无大写
+id 在非末段插连字符         → 非末段无连字符
+id 与文件名不一致           → without its suffix
+desktopEntryId 改回 productId → entry file name
+一个校验步骤留旧路径        → validates the files that ship
+AppDir 根副本写字面量       → entry name is written once
+布局名置空 / 改成别的        → appimage installed entry
+```
+
+##### 一条没动的 info
+
+`I: developer-name-tag-deprecated` 说明 `<developer_name>` 在 AppStream 1.0 里已被
+`<developer><name>` 取代。**没改**，因为 UOS 20 自带的 appstream 版本比 CI 的旧，老版本
+不认识 `<developer>` 元素，会把 info 变成 error。info 不致命，先留；真机验证时用 UOS 20
+的 `appstreamcli` 复核一次再决定。
 
 ---
 

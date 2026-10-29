@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>snow-shot.desktop</id>
+  <!-- The id is reverse-DNS and the file name is `<id>.metainfo.xml`, which is
+       what AppStream 1.0 requires of a desktop application. Both were
+       `snow-shot`(`.desktop`) until CI run 42, where `appstreamcli validate`
+       rejected the id as non-RDNS:
+
+           W: snow-shot.desktop:3: cid-desktopapp-is-not-rdns snow-shot.desktop
+
+       and, unlike what "warning" suggests, that fails the command (exit 3):
+       `appstreamcli validate` treats warnings as failure and only infos as
+       tolerable. Renaming also made the component id equal the macOS bundle id
+       (`app::edition::desktopEntryId()`), so one product has one identity. -->
+  <id>com.snowshot.snow_shot</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <name>Snow Shot</name>
@@ -16,7 +27,7 @@
       <li>Text, table and QR-code recognition</li>
     </ul>
   </description>
-  <launchable type="desktop-id">snow-shot.desktop</launchable>
+  <launchable type="desktop-id">com.snowshot.snow_shot.desktop</launchable>
   <url type="homepage">https://snowshot.top</url>
   <developer_name>Snow Apps</developer_name>
   <provides>
