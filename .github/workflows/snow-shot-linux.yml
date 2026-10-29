@@ -257,7 +257,7 @@ jobs:
             libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
             libswresample-dev libswscale-dev \
             python3 \
-            dpkg-dev desktop-file-utils appstream squashfs-tools xvfb
+            dpkg-dev desktop-file-utils appstream squashfs-tools xvfb xauth
 
       # zlib here *is* zlib-ng (classic zlib does not define ZLIBNG_VERSION,
       # which `compression_backend.cpp` requires) and libjpeg-turbo has to be

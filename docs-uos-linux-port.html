@@ -8063,8 +8063,11 @@ This application failed to start because no Qt platform plugin could be initiali
 <p>选 <code>xvfb-run</code> 而不是 <code>QT_QPA_PLATFORM=offscreen</code>：项目里确实有 <code>snow_shot_offscreen_qpa_environment()</code>
 给少数用例用，但 offscreen 是<strong>另一个 platform plugin</strong>，而这个移植的产物是 X11 应用——
 用 xcb 跑测试，测的才是发货时走的那条路。<code>xvfb</code> 进 build job 的 apt 列表。</p>
-<p>门禁加两条，缺一条就是把环境缺陷留给 CI 去"证明"：<code>ctest</code> 出现的地方必须有 <code>xvfb</code> 包，
-并且 <code>ctest</code> 必须在 <code>xvfb-run</code> 之后。两条变异（删包、去掉包装）都变红。</p>
+<p>门禁加三条，缺一条就是把环境缺陷留给 CI 去"证明"：<code>ctest</code> 出现的地方必须有 <code>xvfb</code> 包、
+必须有 <code>xauth</code> 包，并且 <code>ctest</code> 必须在 <code>xvfb-run</code> 之后。变异（删 <code>xvfb</code>、删 <code>xauth</code>、去掉包装）全红。</p>
+<p><code>xauth</code> 单独列出来是因为它不是依赖：<code>xvfb</code> 包只 <strong>Recommends</strong> <code>xauth</code>，而 <code>xvfb-run</code>
+每次都要用它生成授权文件，缺了就直接失败（Debian bug #830661 的结论是"加 Depends 才是错的"）。
+apt 默认装 Recommends，所以今天能过——但这是"默认值恰好对"，不是"依赖成立"。</p>
 <h5>与 Windows 侧的差异：不是照抄，是预算</h5>
 <p><code>release.yml</code> 的 Windows CI <strong>不构建全部测试</strong>，它只 <code>--target</code> 几个聚焦用例再 <code>-R</code> 跑。
 Linux 这条步骤构建全部。估算过成本：Linux 可见的测试可执行文件 <strong>214 个</strong>，列出的源条目

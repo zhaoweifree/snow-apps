@@ -551,6 +551,13 @@ def main() -> int:
             if re.search(r"(?m)^\s*(xvfb-run[^\n]*)?ctest\b", text):
                 check(f"{job_name}: installs xvfb", "xvfb" in packages,
                       "the GUI tests would all fail on a display-less runner")
+                # `xvfb-run` runs `xauth` to create the server's authority file
+                # and fails outright when it is missing. The `xvfb` package only
+                # *Recommends* xauth (Debian bug #830661 was closed as
+                # "a Depends would be wrong"), so the dependency holds for apt's
+                # defaults and breaks the moment someone turns recommends off.
+                check(f"{job_name}: installs xauth", "xauth" in packages,
+                      "xvfb only recommends xauth, and xvfb-run needs it")
                 check(f"{job_name}: runs ctest under a virtual display",
                       re.search(r"xvfb-run[^\n]*\\?\s*\n?\s*ctest\b", text) is not None
                       or re.search(r"xvfb-run[^\n]*ctest\b", text) is not None,

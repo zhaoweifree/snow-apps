@@ -5942,8 +5942,12 @@ xvfb-run -a --server-args="-screen 0 1280x1024x24" \
 给少数用例用，但 offscreen 是**另一个 platform plugin**，而这个移植的产物是 X11 应用——
 用 xcb 跑测试，测的才是发货时走的那条路。`xvfb` 进 build job 的 apt 列表。
 
-门禁加两条，缺一条就是把环境缺陷留给 CI 去"证明"：`ctest` 出现的地方必须有 `xvfb` 包，
-并且 `ctest` 必须在 `xvfb-run` 之后。两条变异（删包、去掉包装）都变红。
+门禁加三条，缺一条就是把环境缺陷留给 CI 去"证明"：`ctest` 出现的地方必须有 `xvfb` 包、
+必须有 `xauth` 包，并且 `ctest` 必须在 `xvfb-run` 之后。变异（删 `xvfb`、删 `xauth`、去掉包装）全红。
+
+`xauth` 单独列出来是因为它不是依赖：`xvfb` 包只 **Recommends** `xauth`，而 `xvfb-run`
+每次都要用它生成授权文件，缺了就直接失败（Debian bug #830661 的结论是"加 Depends 才是错的"）。
+apt 默认装 Recommends，所以今天能过——但这是"默认值恰好对"，不是"依赖成立"。
 
 ##### 与 Windows 侧的差异：不是照抄，是预算
 
