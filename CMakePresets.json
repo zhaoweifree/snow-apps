@@ -616,6 +616,15 @@
       }
     },
     {
+      "name": "windows-qt5-tests",
+      "displayName": "Windows Qt 5.15 full application plus its test corpus",
+      "description": "`windows-qt5-full` with `SNOW_APPS_BUILD_TESTS=ON`, which is the only rung where the Qt5 route compiles a test translation unit at all. The Linux CI `Unit tests` step does exactly this to the release preset (`cmake --preset <release> -DSNOW_APPS_BUILD_TESTS=ON`, then ninja with `-k 0`), and until this preset existed that was the only place the test corpus met Qt5 -- roughly 2300 test sources, none of which the Windows workstation ever parsed. Kept separate from `windows-qt5-full` so a failure here cannot be mistaken for a failure of the application build.",
+      "inherits": "windows-qt5-full",
+      "cacheVariables": {
+        "SNOW_APPS_BUILD_TESTS": "ON"
+      }
+    },
+    {
       "name": "windows-qt5-engine",
       "displayName": "Windows Qt 5.15 draw engine",
       "description": "Middle rung of the Qt5 route: the Snow Draw Engine Qt library and its demo. Inherits `windows-qt5-full` rather than `windows-qt5-smoke` because the draw engine calls `find_package(OpenCV CONFIG REQUIRED)` unconditionally, so it is *not* a dependency-free rung -- what it isolates is the C++ surface above ant_design_qt/snow_image, with `snow_shot` itself still off. The demo is built because it is the first Qt5 executable on this route that can actually be launched; the smoke rung only produced libraries.",
@@ -862,6 +871,10 @@
     {
       "name": "build-windows-qt5-full",
       "configurePreset": "windows-qt5-full"
+    },
+    {
+      "name": "build-windows-qt5-tests",
+      "configurePreset": "windows-qt5-tests"
     },
     {
       "name": "build-snow-shot-linux-x64-debug",
