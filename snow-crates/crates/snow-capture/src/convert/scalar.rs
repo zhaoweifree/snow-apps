@@ -7,6 +7,12 @@
 /// of being spelled out per ISA. A divergence would show up as a red/blue
 /// swapped capture that only reproduces on one architecture -- the kind of bug
 /// that costs a day on the target machine.
+///
+/// Only the x86 SSSE3 kernel executes a table lookup; AArch64 goes through
+/// `simd_arm`, which gathers red, green and blue with explicit lane maths and
+/// never reads this. The gate is therefore `x86_64` plus `test`, where the
+/// table-free reference below still walks it.
+#[cfg(any(target_arch = "x86_64", test))]
 pub(crate) const BGRA_TO_RGBA_SHUFFLE: [u8; 16] =
     [2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15];
 

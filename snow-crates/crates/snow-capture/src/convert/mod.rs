@@ -8,8 +8,6 @@ pub(crate) use parallel::{conversion_workers, pool_initialized};
 mod scalar;
 #[cfg(target_arch = "aarch64")]
 pub(crate) mod simd_arm;
-#[cfg(target_arch = "aarch64")]
-mod simd_neon;
 #[cfg(target_arch = "x86_64")]
 mod simd_x86;
 
@@ -2172,12 +2170,6 @@ fn select_bgra_kernel() -> PixelKernel {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if simd_neon::neon_available() {
-            return simd_neon::convert_bgra_to_rgba_neon_unchecked;
-        }
-    }
 
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
@@ -2204,12 +2196,6 @@ fn select_bgra_opaque_kernel() -> PixelKernel {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if simd_neon::neon_available() {
-            return simd_neon::convert_bgra_to_rgba_neon_opaque_unchecked;
-        }
-    }
 
     scalar::convert_bgra_to_rgba_scalar_opaque_unchecked
 }
@@ -2236,12 +2222,6 @@ fn select_bgra_kernel_nt() -> PixelKernel {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if simd_neon::neon_available() {
-            return simd_neon::convert_bgra_to_rgba_neon_nt_unchecked;
-        }
-    }
 
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
@@ -2268,12 +2248,6 @@ fn select_bgra_opaque_kernel_nt() -> PixelKernel {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if simd_neon::neon_available() {
-            return simd_neon::convert_bgra_to_rgba_neon_nt_opaque_unchecked;
-        }
-    }
 
     scalar::convert_bgra_to_rgba_scalar_opaque_unchecked
 }
@@ -2300,12 +2274,6 @@ fn select_bgra_kernel_nt_nofence() -> PixelKernel {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if simd_neon::neon_available() {
-            return simd_neon::convert_bgra_to_rgba_neon_nt_nofence_unchecked;
-        }
-    }
 
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
@@ -2332,12 +2300,6 @@ fn select_bgra_opaque_kernel_nt_nofence() -> PixelKernel {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if simd_neon::neon_available() {
-            return simd_neon::convert_bgra_to_rgba_neon_nt_nofence_opaque_unchecked;
-        }
-    }
 
     scalar::convert_bgra_to_rgba_scalar_opaque_unchecked
 }

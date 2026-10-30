@@ -404,7 +404,7 @@ inline int keySequenceKey(const QKeySequence& s) { return s[0]; }
 
 | 优先级 | 位置 | 说明 |
 |---|---|---|
-| P0 | `snow-capture/src/convert/simd_x86.rs` ↔ 新增 `simd_neon.rs` | 像素格式转换热路径，影响采集帧率。**已完成（9.4.18）**：六个 BGRA→RGBA 入口全部有 NEON 版本，两个架构共用同一张 `BGRA_TO_RGBA_SHUFFLE`；AArch64 不提供 NT store，`_nt_*` 别名普通内核 |
+| P0 | `snow-capture/src/convert/simd_x86.rs` ↔ aarch64 `simd_arm.rs` | 像素格式转换热路径，影响采集帧率。**已完成**：上游 `392a75a9` 的 `simd_arm.rs` 覆盖 BGRA + f16 + HDR，取代了本移植的 `simd_neon.rs`（后者已在 2026-10-30 删除，见 9.4.18 后续修正）；AArch64 不提供 NT store，`_nt_*` 回落普通内核 |
 | P1 | `snow_image/src/raster.cpp:135,168`、`snow_canvas_filter_avx2.cpp` | 绘制/滤镜 |
 | P1 | `snow-stitch-images/src/{orb,region,estimator}.rs` | 滚动拼接（可先容忍标量） |
 | P2 | `snow-recording-export/src/{resize,editing}.rs` | 录制缩放 |
@@ -436,7 +436,7 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 | **P2 构建系统 Linux 化** | preset / 依赖 / 工具链 | `CMakePresets.json` 增 `linux-*`；`cmake/vcpkg-overlay-triplets/{x64,arm64}-linux.cmake`；`rust-toolchain.toml` 补 target | `cmake --preset linux-x64-debug` 配置成功 |
 | **P3 Rust 平台后端** *(进行中)* | 补齐 L2/L3 平台能力 | `snow-linux` crate；capture(X11→PipeWire)、cursor、audio、input hooks、text、window picking | `cargo test -p snow-capture` 在 UOS 通过；能截到主屏。**已达成（slice 1–15）**：`snow-linux`（X11 会话 / RandR / 光标 / `GetImage` 解码 / XInput2 输入观测 / `ab_glyph` 键帽光栅化 / X11 窗口树拾取 / MIT-SHM 零拷贝采集 / Damage 跳帧与脏矩形 / portal ScreenCast 协商）+ `snow-capture` 多屏区域脏矩形（9.4.21）+ `snow-cursor` Linux 后端 + `snow-capture` X11 后端 + `snow-recording-effects` 键鼠观测与键帽渲染 + `snow-ui-selector` Linux 窗口级 provider + `snow-selected-text` X11 PRIMARY selection（9.4.22）+ X11 区域采集只读子矩形（9.4.23）+ X11 采集的 `record_stage_timings` 真正产出（9.4.24）+ AT-SPI2 访问层（9.4.25）+ AT-SPI2 抽成 `snow-atspi` 并接进 `snow-selected-text`（9.4.26）+ AT-SPI2 点命中接进 `snow-ui-selector` 的控件级拾取（9.4.27），双架构跨目标类型检查全绿、纯逻辑单测在 Windows 上跑。**剩余**：PipeWire 帧消费（Wayland 的 portal 协商已落地，见 9.4.20）（**音频按决策 4 不做**） |
 | **P4 C++ 平台层** *(代码面完成，待真机)* | 主程序平台层 | `snow_shot/src/platform/linux/*`；3 个 dispatcher 增分支；`screenshotnative.h` 重构 | 截图→标注→贴图闭环在 X11 会话可用。**全部 slice 已落代码（slice 1–9）**：物理光标（9.4.8）、全局快捷键（9.4.9）、全屏窗口检测（9.4.10）、全局鼠标手势（9.4.11）、自启动 XDG autostart（9.4.12）、桌面通知（9.4.13）、托盘 StatusNotifierItem（9.4.14）、单实例端点（9.4.15）、`screenshotnative.h` 三分（9.4.16）、窗口级捕获目标（9.4.17）。**剩余全部是只能在 UOS 上回答的问题**：各片「本片未覆盖」段罗列的真机项、首页卡片拖拽在 X11 上明确不实现（9.4.11 第 7 条） |
-| **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已落代码**：`snow-capture` 的 BGRA→RGBA 六个入口全部有 NEON 实现（9.4.18），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
+| **P5 双架构 + SIMD** *(进行中)* | arm64 可用可跑 | NEON 内核；`SnowSimd.cmake` aarch64 分支 | 飞腾真机截屏成功，帧率 ≥ 目标准。**slice 1 已由上游取代**：BGRA→RGBA 的 NEON 内核现由上游 `simd_arm.rs` 提供（含 f16/HDR），本移植的 `simd_neon.rs` 已删除（9.4.18 后续修正），`--all-features` 在非 Windows 上恢复可编译。**剩余**：§7.2 的 P1/P2 项（`raster.cpp` CRC32C、`snow_canvas_filter_*_avx2`、拼接/录制/OCR 标量容忍）、真机性能数字 |
 | **P6 打包与系统集成** *(进行中)* | 可交付安装包 | `cmake/SnowShotLinuxPackage.cmake`；`.desktop`；deb + AppImage | 双架构 deb 在 UOS 20/Deepin 23 安装并可启动。**slice 1 已落代码**：deb（CPack DEB + `dpkg-shlibdeps` 依赖推导 + 五架构映射）、`.desktop`、AppStream metainfo、hicolor 安装规则、门禁 43 项（9.5.1）。**slice 2 已落代码**：7 个尺寸的 hicolor PNG（从 `app-icon.ico` 抽取）、AppImage（`cmake/SnowShotAppImage.cmake` + `AppRun` + `snow-shot-appimage` 目标）、门禁扩到 101 项（9.5.2）。**剩余**：真机 `dpkg -i` 与两个 freedesktop 校验器、AppImage 真机 `--appimage-extract` 与 FUSE 验证、真机性能数字 |
 | **P7 硬化与 CI** *(进行中)* | 稳定与回归 | Wayland 会话适配；CI 增 Linux job | 双会话（X11/Wayland）功能对等；关键用例回归通过。**slice 1 已落代码**：`.github/workflows/snow-shot-linux.yml`（`gates` 无工具链必过 + `build` 双架构真编译/deb/校验器，9.6）。**slice 2 已让 workflow 真的跑起来**：GitHub 镜像 + `github` 远程（9.6.8），三次运行把 `gates` 跑绿、把 `build` 推到第 4 个红灯。**第三方库来源已定案并逐个落地**：9.6.9（zlib-ng / libjpeg-turbo / lunasvg / minizip-ng / onnxruntime 等）、9.6.12–9.6.13（OpenEXR+Imath / libwebp / highway / libjxl / libheif）、**9.6.20（OpenCV 4.12 + contrib，自建、与 overlay port 同源同补丁）**。**AppImage 已进 CI**（9.6.25：appimagetool + type-2 runtime 固定版本与校验和，验产物不验工具）。**编译侧已清零**：run 27 的 608/608 个编译单元全过，红落到链接 —— Rust 静态库的档案名与 cargo 实际写出的不一致（9.6.28，已加门禁）；紧接着链接又报出"两个 Rust 静态库 = 两份运行时"与"OpenCV 的 NEON 分发单元从未生成"（9.6.29）。**AppImage 路径的前两处"从未执行过的代码"已修**：`Fetch appimagetool` 调用没传必填参数（9.6.30），暂存的两个源文件因函数体里的 `CMAKE_CURRENT_SOURCE_DIR` 指向仓库根（9.6.31）。**私有库随包带的三件套已落代码**（闭包复制 + RPATH + `SHLIBDEPS_PRIVATE_DIRS`，9.6.33），其中两处"CPack 才会说话"的错在 run 37 跑到 CPack 之前就被静态读码拦下：`file(RPATH_SET)` 的关键字签名、私有库必须按 soname 而非 `REALPATH` 命名（9.6.34）。**deb 路径已全绿**（run 43：`Build the Debian package`、`Validate the packaged metadata`、`Upload the package` 全过；9.6.41/9.6.42）。**AppImage 三步已开始真跑**：`Fetch appimagetool` 过，`Build the AppImage` 的 `cmake -E chmod` 与依赖闭包两处已修（9.6.42）；run 44 里两个架构的 AppImage 都**打出来了**，`Validate the AppImage` 红在门禁脚本自己 `chdir` 后用了相对路径（9.6.44）；run 45 里解包、AppRun、rdns、可执行位、依赖库、AppRun 一致性全过，只剩图标检查把 `Icon=` 当成文件名（9.6.46）。**AppImage 链路已全绿**（run 46：`Build`/`Validate`/`Upload the AppImage` 两个架构全过，9.6.47），其 Qt 依赖定案为**发行版 Qt 5.15**（产物里不含任何 `libQt5*`，AppRun 条件导出 + 两处门禁守住，9.6.45；真正自包含需静态 Qt 或 linuxdeploy-plugin-qt，未决）；`Unit tests` 在 run 46 红于 configure —— 375 处 `$<TARGET_FILE_DIR:Qt::Core>` 在 Qt5 上是 INTERFACE 目标（9.6.47，已修 + 已加门禁）；PipeWire 帧消费 |
 
@@ -1846,6 +1846,23 @@ Windows 专有。P7 的 CI 一定会跑 `--all-features`，
   （AArch64 有 CRC32 指令，属 §7.2 的 P1）、`snow_canvas_filter_*_avx2.cpp` 在 aarch64 上
   整体退化标量（属 P1/P2）。
 - **f16/HDR 全链**（见决定 4）。
+
+**后续修正（2026-10-30，合入上游 92 个提交之后）**：`simd_neon.rs` **已被删除**，本片的内核
+由上游的 `simd_arm.rs`（上游 `392a75a9 perf(arm64): accelerate image and recording pipelines
+with SIMD`）取代。合并时 `select_bgra_kernel` 一族函数被上游改成了两只互斥的
+`#[cfg(target_arch = "aarch64")]` / `#[cfg(not(target_arch = "aarch64"))]`，aarch64 那只直接
+返回 `simd_arm::convert_bgra`，于是我们这六个 `simd_neon` 入口再没有任何调用者；而它们原先是
+写在**另一只** `not(aarch64)` 函数体里的，那段 `#[cfg(target_arch = "aarch64")]` 块在 aarch64 上
+永不编译——合并把它变成了纯粹的孤儿。CI 的 arm64 job 因此报 9 条 `-D dead-code`
+（`neon_available` / `convert_bgra_to_rgba_neon_*` / `neon_bgra_core` /
+`BGRA_TO_RGBA_SHUFFLE`）。
+
+处置：删 `simd_neon.rs`、删 `mod simd_neon;`、删 6 处死分派；`BGRA_TO_RGBA_SHUFFLE` 收窄为
+`#[cfg(any(target_arch = "x86_64", test))]`——aarch64 走 `simd_arm`，它用显式车道运算取
+RGB，根本不读这张表，只有 SSSE3 与测试用的逐字节参考实现读。上游那份覆盖 BGRA **加** f16/HDR，
+比本片更全，所以是取代而不是并存。
+
+验证：本机 `cargo check` 交叉检查 aarch64（dev + `--profile release`）与 x86_64 三个组合全绿。
 
 #### 9.4.19 P3 slice 7：X11 Damage 脏矩形（2026-10-21）
 
