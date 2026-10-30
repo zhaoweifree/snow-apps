@@ -66,8 +66,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      # The OCR helper is a git submodule and a path dependency of
+      # `snow-ocr-process`, so `cargo metadata --locked` cannot resolve the
+      # workspace without it. Upstream moved it out of the registry into that
+      # submodule, which is why this job needs the checkout to fetch it before
+      # the lockfile step can say anything at all.
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Python
         uses: actions/setup-python@v5
@@ -225,8 +232,13 @@ jobs:
     # library in that step; the project's own build is on top of it.
     timeout-minutes: 180
     steps:
+      # `cmake/SnowOcrToolchain.cmake` fails the configure outright when the OCR
+      # submodule is absent, and the helper is built from its sources, so this
+      # job cannot start without it.
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # The dependency list is docs-uos-linux-port.md §9.1 plus the packaging
       # tools. Every entry is a distribution package: the Linux presets set no
@@ -305,6 +317,23 @@ jobs:
           rustup toolchain install 1.97.1 --profile minimal --no-self-update --force-non-host
           rustup default 1.97.1 --force-non-host
           echo "RUSTUP_TOOLCHAIN=1.97.1" >> "$GITHUB_ENV"
+          # The OCR helper is built with `RUSTUP_TOOLCHAIN=<its own channel>`,
+          # read out of the submodule by cmake/SnowOcrToolchain.cmake, and that
+          # channel is a dated nightly because the crate uses `portable_simd`.
+          # Deriving it from the same file keeps one source of truth: pin a new
+          # nightly in the submodule and this step follows without an edit.
+          ocr_channel="$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' \
+            snow-crates/crates/simd-paddle-ocr-rs/rust-toolchain.toml)"
+          if [ -z "$ocr_channel" ]; then
+            echo "no channel in the OCR submodule's rust-toolchain.toml" >&2
+            exit 1
+          fi
+          case "$ocr_channel" in
+            nightly-*) ;;
+            *) echo "the OCR channel must be a dated nightly, got '$ocr_channel'" >&2; exit 1 ;;
+          esac
+          rustup toolchain install "$ocr_channel" --profile minimal --no-self-update \
+            --force-non-host --component rustfmt --component clippy
           rustup show active-toolchain
           rustc -vV
 
