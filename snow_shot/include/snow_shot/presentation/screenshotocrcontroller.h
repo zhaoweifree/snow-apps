@@ -74,6 +74,7 @@ class ScreenshotOcrController final : public QObject {
     ~ScreenshotOcrController() override;
 
     void activate();
+    void activateAndCopy();
     void activateTextTranslation();
     void activateTable();
     void activateQr();
@@ -115,7 +116,7 @@ class ScreenshotOcrController final : public QObject {
     [[nodiscard]] bool translating() const;
     [[nodiscard]] bool hasTextResult() const;
     [[nodiscard]] QString sourceTextDraft() const;
-    [[nodiscard]] std::optional<ScreenshotRecognitionFileSnapshot> fileExportSnapshot() const;
+    [[nodiscard]] std::optional<ScreenshotRecognitionFileSnapshot> fileExportSnapshot();
     [[nodiscard]] ScreenshotRecognitionResults cachedRecognitionResults() const;
     [[nodiscard]] ScreenshotRecognitionResults recognitionResultsSnapshot() const;
     void setTextDraft(const QString& text);
@@ -142,7 +143,7 @@ class ScreenshotOcrController final : public QObject {
         bool selectionHandlesVisible = true;
         bool selectionBorderVisible = true;
     };
-    void activateMode(Mode mode, bool textTranslation = false);
+    void activateMode(Mode mode, bool textTranslation = false, bool copyAndEndCapture = false);
     void handleQrLinkActivated(const QUrl& url);
     void updateOverlays() const;
     void
@@ -174,6 +175,8 @@ class ScreenshotOcrController final : public QObject {
     std::shared_ptr<ScreenshotOcrPresentation> m_backgroundPresentation;
     Mode m_mode = Mode::Text;
     bool m_active = false;
+    bool m_copyAndEndCapture = false;
+    quint64 m_activationId = 0;
 };
 
 #endif // SNOW_SHOT_PRESENTATION_SCREENSHOTOCRCONTROLLER_H

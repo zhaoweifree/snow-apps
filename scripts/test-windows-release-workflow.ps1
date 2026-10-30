@@ -21,6 +21,8 @@ try {
     $expectedConfigure = @("--preset", "snow-shot-msvc-release", "-S", $repoRoot,
         "-B", $customBuild, "-DVCPKG_HOST_TRIPLET=$((Get-SnowWindowsTarget).HostTriplet)",
         '-DSNOW_RUST_TARGET=x86_64-pc-windows-msvc')
+    $toolset = (Get-SnowWindowsTarget -Preset snow-shot-msvc-release).Toolset
+    if ($toolset) { $expectedConfigure += @('-T', $toolset) }
     if ($env:LIBCLANG_PATH) {
         $expectedConfigure += "-DSNOW_LIBCLANG_BIN_DIR:PATH=$env:LIBCLANG_PATH"
         $expectedConfigure += "-DSNOW_SHOT_LIBCLANG_DIR:PATH=$env:LIBCLANG_PATH"
@@ -33,18 +35,15 @@ try {
     Require-Arguments $missingCacheArguments $expectedConfigure "A new build must use the requested directory."
 
     Set-Content -LiteralPath (Join-Path $customBuild "CMakeCache.txt") -Value "fixture" -Encoding utf8
-    function Test-SnowCacheAlignment {
-        param([string]$CachePath, [string]$Preset)
-        return $script:CacheAligned
-    }
-    $script:CacheAligned = $true
+    $compatibility = [pscustomobject]@{ Action = 'Reuse'; Differences = @()
+        Cache = @{ CMAKE_GENERATOR_TOOLSET = $toolset } }
     $alignedArguments = @(Get-SnowConfigureArguments -Preset snow-shot-msvc-release `
-        -BuildDirectory $customBuild)
+        -BuildDirectory $customBuild -Compatibility $compatibility)
     Require-Arguments $alignedArguments $expectedConfigure "An aligned cache must be reused."
 
-    $script:CacheAligned = $false
+    $compatibility.Action = 'Fresh'
     $unalignedArguments = @(Get-SnowConfigureArguments -Preset snow-shot-msvc-release `
-        -BuildDirectory $customBuild)
+        -BuildDirectory $customBuild -Compatibility $compatibility)
     Require-Arguments $unalignedArguments (@("--fresh") + $expectedConfigure) `
         "An unaligned cache must be replaced."
 
@@ -81,9 +80,15 @@ function Get-SnowWindowsTarget {
         Architecture = $(if ($Preset -match '-arm64-') { 'arm64' } else { 'x64' }) }
 }
 function Get-SnowConfigureArguments {
-    param([string]$Preset, [string]$BuildDirectory)
+    param([string]$Preset, [string]$BuildDirectory, [object]$Compatibility)
     return @("--preset", $Preset, "-B", $BuildDirectory)
 }
+function Get-SnowCacheCompatibility {
+    param([string]$CachePath, [string]$Preset)
+    return [pscustomobject]@{ Action = 'New' }
+}
+function Get-SnowConfigureFingerprint { param([string]$Preset, [object]$BuildEnvironment) return 'fixture' }
+function Save-SnowConfigureState { param([string]$BuildDirectory, [string]$Fingerprint) }
 '@ | Set-Content -LiteralPath (Join-Path $fixtureScripts "snow-build-environment.ps1") -Encoding utf8
     @'
 param([switch]$SkipDependencyInstall, [string[]]$VcpkgVariants, [string]$Architecture, [string]$Preset)

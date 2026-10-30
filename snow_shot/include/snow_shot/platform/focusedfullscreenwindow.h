@@ -15,11 +15,14 @@ struct FocusedWindowSnapshot {
     QRectF bounds;
 };
 
+// Only windows from another process may trigger fullscreen suppression.
+[[nodiscard]] bool isExternalFocusedWindowProcess(qint64 processId);
+
 [[nodiscard]] bool focusedWindowCoversDisplay(qint64 frontmostProcessId,
                                               const QVector<FocusedWindowSnapshot>& orderedWindows,
                                               const QVector<QRectF>& displayBounds);
 
-// Permission-free best-effort check used only to suppress configured global shortcuts.
+// Permission-free best-effort checks for external focused fullscreen windows.
 [[nodiscard]] bool focusedFullscreenWindowExists();
 [[nodiscard]] bool focusedFullscreenWindowOnScreen(QScreen* screen);
 

@@ -46,8 +46,8 @@
             <translation>Could not insert the annotation template</translation>
         </message>
         <message>
-            <source>Could not open the selected image file: %1</source>
-            <translation>Could not open the selected image file: %1</translation>
+            <source>Could not open the selected file: %1</source>
+            <translation>Could not open the selected file: %1</translation>
         </message>
         <message>
             <source>Could not read the selected files from Finder. Please try again.</source>
@@ -82,8 +82,8 @@
             <translation>Preparing cloud upload...</translation>
         </message>
         <message>
-            <source>Save recognition text</source>
-            <translation>Save recognition text</translation>
+            <source>Save recognition result</source>
+            <translation>Save recognition result</translation>
         </message>
         <message>
             <source>Save screenshot</source>
@@ -114,6 +114,10 @@
             <translation>The clipboard does not contain content that can be pinned</translation>
         </message>
         <message>
+            <source>The clipboard export directory could not be locked</source>
+            <translation>The clipboard export directory could not be locked</translation>
+        </message>
+        <message>
             <source>The clipboard pin could not be presented</source>
             <translation>The clipboard pin could not be presented</translation>
         </message>
@@ -138,8 +142,8 @@
             <translation>The pinned windows could not be hidden</translation>
         </message>
         <message>
-            <source>The recognition text could not be saved: %1</source>
-            <translation>The recognition text could not be saved: %1</translation>
+            <source>The recognition result could not be saved: %1</source>
+            <translation>The recognition result could not be saved: %1</translation>
         </message>
         <message>
             <source>The screenshot clipboard operation could not be started</source>

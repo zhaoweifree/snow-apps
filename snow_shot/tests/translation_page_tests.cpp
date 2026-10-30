@@ -22,6 +22,7 @@
 #include "snow_shot/translation/translationlanguages.h"
 #include "widgets/button.h"
 #include "widgets/input_text_edit.h"
+#include "widgets/input_number.h"
 #include "widgets/navigation_menu.h"
 #include "widgets/context_menu.h"
 #include "widgets/scroll_area.h"
@@ -127,14 +128,16 @@ void sharedServiceSelectors() {
         registry.catalog().page(QStringLiteral("text-recognition-translation"));
     require(definition->sections[1].id == QStringLiteral("interface-text-recognition") &&
                 definition->sections[2].id == QStringLiteral("translation-settings") &&
-                definition->sections[2].items.size() == 6 &&
+                definition->sections[2].items.size() == 7 &&
                 definition->sections[2].items[0].id ==
                     QStringLiteral("translation.source-language") &&
                 definition->sections[2].items[1].id ==
                     QStringLiteral("translation.primary-target-language") &&
                 definition->sections[2].items[2].id ==
                     QStringLiteral("translation.secondary-target-language") &&
-                definition->sections[2].items[3].id == QStringLiteral("translation.service"),
+                definition->sections[2].items[3].id ==
+                    QStringLiteral("translation.language-detection-confidence-threshold") &&
+                definition->sections[2].items[4].id == QStringLiteral("translation.service"),
             "expanded Translation Settings follows Text background in the requested order");
     require(runtime.state(QStringLiteral("translation.secondary-target-language")).acceptedValue ==
                 QStringLiteral("en"),
@@ -145,7 +148,7 @@ void sharedServiceSelectors() {
     int sharedCommits = 0;
     const auto watchSharedFields = [&](AdModal* editor) {
         const auto fields = editor->contentWidget()->findChildren<form_fields::FormField*>();
-        require(fields.size() == 5, "screenshot settings uses five shared fields");
+        require(fields.size() == 6, "screenshot settings uses six shared fields");
         for (auto* field : fields) {
             require(!field->item()->isTouched() && !field->item()->isDirty(),
                     "screenshot settings initializes a clean AdForm baseline");
@@ -160,6 +163,20 @@ void sharedServiceSelectors() {
         child<AdSelect>(*modal->contentWidget(), "screenshotTranslationTargetLanguage");
     auto* secondaryTarget =
         child<AdSelect>(*modal->contentWidget(), "screenshotTranslationSecondaryTargetLanguage");
+    auto* confidenceThreshold = child<adqt::widgets::AdInputNumber>(
+        *modal->contentWidget(), "screenshotTranslationLanguageDetectionConfidenceThreshold");
+    const QString confidenceId =
+        QStringLiteral("translation.language-detection-confidence-threshold");
+    settingsPage.reveal({QStringLiteral("text-recognition-translation"),
+                         QStringLiteral("translation-settings"), confidenceId});
+    auto* generatedConfidence = settingsPage.findChild<adqt::widgets::AdInputNumber*>(
+        settings::generatedObjectName(QStringLiteral("settings-control"), confidenceId));
+    require(generatedConfidence != nullptr && generatedConfidence->minimum() == 30 &&
+                generatedConfidence->maximum() == 100 && generatedConfidence->singleStep() == 1 &&
+                confidenceThreshold->minimum() == 30 && confidenceThreshold->maximum() == 100 &&
+                confidenceThreshold->singleStep() == 1 && confidenceThreshold->value() == 60 &&
+                runtime.state(confidenceId).acceptedValue.toInt() == 60,
+            "both confidence editors expose the shared default and percentage bounds");
     const auto primaryOptions = primaryTarget->options();
     const auto secondaryOptions = secondaryTarget->options();
     require(primaryOptions.size() == secondaryOptions.size() &&
@@ -229,13 +246,16 @@ void sharedServiceSelectors() {
                 options[1].group == options[2].group &&
                 options[3].value == QStringLiteral("specialist"),
             "both selectors show server vision-capable general models alongside custom models");
-    require(service.savePreferences(
-                {QStringLiteral("en"), QStringLiteral("fr"), QStringLiteral("specialist")}),
+    require(service.savePreferences({QStringLiteral("en"), QStringLiteral("fr"),
+                                     QStringLiteral("specialist"), QStringLiteral("en"), 85}),
             "change shared preferences while the settings dialog is open");
+    flushEvents();
     require(pageSelect->currentValue() == screenshotSelect->currentValue() &&
                 child<AdSelect>(*modal->contentWidget(), "screenshotTranslationTargetLanguage")
                         ->currentValue()
-                        .toString() == QStringLiteral("fr"),
+                        .toString() == QStringLiteral("fr") &&
+                confidenceThreshold->value() == 85 &&
+                runtime.state(confidenceId).acceptedValue.toInt() == 85,
             "unedited dialog fields follow committed shared preferences");
     require(service.savePreferences(
                 {QStringLiteral("auto"), QStringLiteral("ja"), model.selectionId()}),
@@ -250,18 +270,26 @@ void sharedServiceSelectors() {
         "catalog changes and external preferences must not report shared user edits or commits");
     screenshotSelect->setCurrentValue(QStringLiteral("specialist"));
     secondaryTarget->setCurrentValue(QStringLiteral("pt"));
-    require(service.savePreferences(
-                {QStringLiteral("en"), QStringLiteral("de"), QStringLiteral("general")}),
+    confidenceThreshold->setValue(70);
+    require(service.savePreferences({QStringLiteral("en"), QStringLiteral("de"),
+                                     QStringLiteral("general"), QStringLiteral("en"), 80}),
             "commit preferences while the screenshot dialog has a model draft");
     require(screenshotSelect->currentValue().toString() == QStringLiteral("specialist") &&
                 pageSelect->currentValue().toString() == QStringLiteral("general") &&
-                secondaryTarget->currentValue() == QStringLiteral("pt"),
+                secondaryTarget->currentValue() == QStringLiteral("pt") &&
+                confidenceThreshold->value() == 70,
             "an uncommitted dialog edit remains local until OK");
+    QEvent languageChange(QEvent::LanguageChange);
+    QApplication::sendEvent(modal->contentWidget(), &languageChange);
+    require(confidenceThreshold->value() == 70 &&
+                service.preferences().languageDetectionConfidenceThreshold == 80,
+            "dialog retranslation preserves the confidence draft without committing it");
     modal->reject();
     flushEvents();
-    require(sharedEdits == 2 && sharedCommits == 0 &&
+    require(sharedEdits == 3 && sharedCommits == 0 &&
                 service.preferences().modelId == QStringLiteral("general") &&
-                service.preferences().secondaryTargetLanguage == QStringLiteral("en"),
+                service.preferences().secondaryTargetLanguage == QStringLiteral("en") &&
+                service.preferences().languageDetectionConfidenceThreshold == 80,
             "cancelling a model draft must not commit it or replace shared preferences");
     sharedEdits = 0;
     modal = snow_shot::presentation::createScreenshotTranslationSettingsDialog(service, &page,
@@ -273,22 +301,33 @@ void sharedServiceSelectors() {
         ->setCurrentValue(QStringLiteral("ja"));
     child<AdSelect>(*modal->contentWidget(), "screenshotTranslationSecondaryTargetLanguage")
         ->setCurrentValue(QStringLiteral("ko"));
-    require(sharedEdits == 3 && sharedCommits == 0,
+    child<adqt::widgets::AdInputNumber>(*modal->contentWidget(),
+                                        "screenshotTranslationLanguageDetectionConfidenceThreshold")
+        ->setValue(95);
+    require(sharedEdits == 4 && sharedCommits == 0,
             "screenshot preference edits remain local until OK");
     modal->acceptButton()->click();
     flushEvents();
-    require(sharedCommits == 3 && service.preferences().modelId == QStringLiteral("specialist") &&
+    require(sharedCommits == 4 && service.preferences().modelId == QStringLiteral("specialist") &&
                 service.preferences().targetLanguage == QStringLiteral("ja") &&
-                service.preferences().secondaryTargetLanguage == QStringLiteral("ko"),
+                service.preferences().secondaryTargetLanguage == QStringLiteral("ko") &&
+                service.preferences().languageDetectionConfidenceThreshold == 95,
             "successful screenshot save commits only changed shared fields once");
-    require(runtime.state(QStringLiteral("translation.secondary-target-language")).acceptedValue ==
-                    QStringLiteral("ko") &&
-                runtime.applySelectValue(
-                    settings::SettingsSelectBinding::TranslationPrimaryTargetLanguage,
-                    QStringLiteral("zh-Hant")) &&
-                service.preferences().targetLanguage == QStringLiteral("zh-Hant") &&
-                service.preferences().secondaryTargetLanguage == QStringLiteral("ko"),
-            "main settings and dialog synchronize without resetting the secondary target");
+    require(
+        runtime.state(QStringLiteral("translation.secondary-target-language")).acceptedValue ==
+                QStringLiteral("ko") &&
+            runtime.applySelectValue(
+                settings::SettingsSelectBinding::TranslationPrimaryTargetLanguage,
+                QStringLiteral("zh-Hant")) &&
+            service.preferences().targetLanguage == QStringLiteral("zh-Hant") &&
+            service.preferences().secondaryTargetLanguage == QStringLiteral("ko") &&
+            service.preferences().languageDetectionConfidenceThreshold == 95 &&
+            runtime.state(confidenceId).acceptedValue.toInt() == 95 &&
+            runtime.applyIntegerValue(
+                settings::SettingsIntegerBinding::TranslationLanguageDetectionConfidenceThreshold,
+                30) &&
+            service.preferences().languageDetectionConfidenceThreshold == 30,
+        "main settings and dialog synchronize without resetting the secondary target");
     require(configuration.setValue(customKey, previousModels), "restore custom models");
     require(
         snow_shot::storage::ScreenshotTranslationSettings().setConfiguration(previousPreferences),
@@ -332,10 +371,12 @@ void screenshotSettingsGeometry() {
         for (int i = 0; i < 8; ++i)
             flushEvents();
         auto* body = modal->contentWidget();
-        require(qAbs(body->height() - body->sizeHint().height()) <= 1,
+        const int expectedHeight = body->hasHeightForWidth() ? body->heightForWidth(body->width())
+                                                             : body->sizeHint().height();
+        require(qAbs(body->height() - expectedHeight) <= 1,
                 "screenshot settings body fits its content without vertical blank space");
         const auto labels = body->findChildren<QLabel*>(QStringLiteral("ad-form-item-label"));
-        require(labels.size() == 5, "screenshot settings has five form labels");
+        require(labels.size() == 6, "screenshot settings has six form labels");
         for (auto* label : labels) {
             require(label->width() >= label->fontMetrics().horizontalAdvance(label->text()) &&
                         label->height() >= label->fontMetrics().height(),
@@ -978,21 +1019,27 @@ void navigationThemesLanguagesAndGeometry() {
                 child<AdButton>(*page, "translationActions")->click();
                 auto* copyAction = child<QAction>(*page, "translationCopy");
                 auto* copyCloseAction = child<QAction>(*page, "translationCopyAndClose");
+                const auto expectedMenuText = [&](const char* sourceText) {
+                    // Release catalogs strip source-identical English entries.
+                    if (locale == QStringLiteral("en_US"))
+                        return QString::fromUtf8(sourceText);
+                    const QString translated =
+                        translator.translate("TranslationPageWidget", sourceText);
+                    require(!translated.isEmpty(),
+                            "localized menu labels must exist in the catalog");
+                    return translated;
+                };
                 require(copyCloseAction->text() ==
-                            translator.translate("TranslationPageWidget", "Copy and Close (%1)")
-                                .arg(copyCloseShortcut),
+                            expectedMenuText("Copy and Close (%1)").arg(copyCloseShortcut),
                         "floating actions retranslate immediately");
                 copyAction->setText(QStringLiteral("stale copy legend"));
                 copyCloseAction->setText(QStringLiteral("stale copy-and-close legend"));
                 snow_shot::shortcuts::ShortcutDisplayService::instance().refresh();
                 const QString copyShortcut = snow_shot::shortcuts::formatShortcutDisplayText(
                     snow_shot::shortcuts::bindingFromPortableText(QStringLiteral("Ctrl+C")));
-                require(copyAction->text() ==
-                                translator.translate("TranslationPageWidget", "Copy (%1)")
-                                    .arg(copyShortcut) &&
+                require(copyAction->text() == expectedMenuText("Copy (%1)").arg(copyShortcut) &&
                             copyCloseAction->text() ==
-                                translator.translate("TranslationPageWidget", "Copy and Close (%1)")
-                                    .arg(copyCloseShortcut),
+                                expectedMenuText("Copy and Close (%1)").arg(copyCloseShortcut),
                         "a keyboard-layout refresh must update fixed translation shortcuts");
                 for (const bool collapsed : {false, true}) {
                     sidebar->setCollapsed(collapsed);

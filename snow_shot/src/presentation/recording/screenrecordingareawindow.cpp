@@ -23,6 +23,7 @@
 
 #include "snow_draw_engine_qt/snow_canvas_runtime.h"
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
+#include "snow_shot/presentation/crosshaircursor.h"
 
 #include <QEvent>
 #include "snow_shot/compat/qt_compat.h"
@@ -105,6 +106,7 @@ ScreenRecordingAreaWindow::ScreenRecordingAreaWindow(QWidget* parent)
       m_canvasRuntime(std::make_unique<SnowCanvasRuntime>(
           SnowCanvasRuntimeConfig{snow_shot::presentation::screenshotCanvasToolStyleDefaults()})),
       m_canvas(new SnowCanvasWidget(*m_canvasRuntime, this)) {
+    snow_shot::presentation::configureCanvasCrosshairCursor(*m_canvas);
 #ifdef Q_OS_MACOS
     m_canvas->setCommandKeyResolver(
         [](const QKeyEvent& event) { return snow_shot::shortcuts::commandKey(event); });

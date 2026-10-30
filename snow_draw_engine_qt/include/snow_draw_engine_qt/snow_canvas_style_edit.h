@@ -166,6 +166,8 @@ inline void snowCanvasMergeStyle(SnowCanvasShapeStyle& target, const SnowCanvasS
         target.endArrowhead = value.endArrowhead;
     if ((properties & SnowCanvasShapeStylePropertyStrokeStyle) != 0)
         target.strokeStyle = value.strokeStyle;
+    if ((properties & SnowCanvasShapeStylePropertyStrokeRenderingStyle) != 0)
+        target.strokeRenderingStyle = value.strokeRenderingStyle;
     if ((properties & SnowCanvasShapeStylePropertyArrowShaftType) != 0)
         target.arrowShaftType = value.arrowShaftType;
     if ((properties & SnowCanvasShapeStylePropertyArrowRatio) != 0)
@@ -176,6 +178,8 @@ inline void snowCanvasMergeStyle(SnowCanvasShapeStyle& target, const SnowCanvasS
         target.opacity = value.opacity;
     if ((properties & SnowCanvasShapeStylePropertyShape) != 0)
         target.shape = value.shape;
+    if ((properties & SnowCanvasShapeStylePropertyBrushMode) != 0)
+        target.brushMode = value.brushMode;
 }
 
 inline void snowCanvasMergeStyle(SnowCanvasTextStyle& target, const SnowCanvasTextStyle& value,
@@ -232,6 +236,8 @@ inline void snowCanvasMergeStyle(SnowCanvasSerialNumberStyle& target,
         target.numericType = value.numericType;
     if ((properties & SnowCanvasSerialNumberStyleMixedType) != 0)
         target.type = value.type;
+    if ((properties & SnowCanvasSerialNumberStyleMixedStrokeRenderingStyle) != 0)
+        target.strokeRenderingStyle = value.strokeRenderingStyle;
 }
 
 inline void snowCanvasMergeStyle(SnowCanvasFilterStyle& target, const SnowCanvasFilterStyle& value,

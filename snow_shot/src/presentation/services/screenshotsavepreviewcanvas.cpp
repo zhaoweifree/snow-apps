@@ -42,12 +42,23 @@ ScreenshotSavePreviewCanvas::ScreenshotSavePreviewCanvas(QWidget* parent) : QWid
     m_busy = new CanvasStatusReadout(this);
     m_busy->setObjectName(QStringLiteral("savePreviewStatus"));
     m_busy->setMessage(CanvasStatusReadout::Message::RenderingPreview);
+    m_detailTimer.setSingleShot(true);
+    m_detailTimer.setInterval(60);
+    connect(&m_detailTimer, &QTimer::timeout, this, [this] { requestDetails(); });
     updateReadout();
 }
-void ScreenshotSavePreviewCanvas::setSource(QImage image, QSize pixels) {
+ScreenshotSavePreviewCanvas::~ScreenshotSavePreviewCanvas() {
+    m_detailJob.cancel();
+}
+void ScreenshotSavePreviewCanvas::setSource(QImage image, QSize pixels, DetailRenderer renderer) {
     m_original = std::move(image);
     m_output = {};
     m_sourcePixels = pixels;
+    m_sourceRenderer = std::move(renderer);
+    m_outputRenderer = {};
+    m_sourceDetail = {};
+    m_outputDetail = {};
+    m_outputPixels = {};
     m_readout->dismiss();
     fitImage();
 }
@@ -58,9 +69,100 @@ void ScreenshotSavePreviewCanvas::setPdfLayout(screenshot_pdf::Layout layout) {
     m_pdfLayout = layout;
     update();
 }
-void ScreenshotSavePreviewCanvas::setOutput(QImage image) {
+void ScreenshotSavePreviewCanvas::setOutput(QImage image, QSize pixels, DetailRenderer renderer) {
+    m_outputPixels = pixels.isEmpty() ? image.size() : pixels;
     m_output = std::move(image);
+    m_outputRenderer = std::move(renderer);
+    m_outputDetail = {};
+    scheduleDetails();
     update();
+}
+
+QRectF ScreenshotSavePreviewCanvas::imageBounds() const {
+    const QSizeF dimensions = QSizeF(m_sourcePixels) * m_zoom;
+    const QPointF center = QRectF(rect()).center() + m_pan;
+    return {center.x() - dimensions.width() / 2, center.y() - dimensions.height() / 2,
+            dimensions.width(), dimensions.height()};
+}
+QRect ScreenshotSavePreviewCanvas::detailRequest(const QImage& preview, QSize pixels,
+                                                 const DetailRenderer& renderer,
+                                                 const Detail& detail) const {
+    if (!renderer || pixels.isEmpty() || preview.isNull())
+        return {};
+    const QRectF bounds = imageBounds();
+    if (bounds.isEmpty() ||
+        (preview.width() >= qMin(qreal(pixels.width()), bounds.width() * devicePixelRatioF()) &&
+         preview.height() >= qMin(qreal(pixels.height()), bounds.height() * devicePixelRatioF())))
+        return {};
+    const QRectF visible = bounds.intersected(QRectF(rect()));
+    if (visible.isEmpty())
+        return {};
+    const qreal scaleX = pixels.width() / bounds.width();
+    const qreal scaleY = pixels.height() / bounds.height();
+    const QRect request =
+        QRectF((visible.left() - bounds.left()) * scaleX, (visible.top() - bounds.top()) * scaleY,
+               visible.width() * scaleX, visible.height() * scaleY)
+            .toAlignedRect()
+            .adjusted(-2, -2, 2, 2)
+            .intersected(QRect(QPoint{}, pixels));
+    if (detail.region.contains(request) && !detail.image.isNull() &&
+        detail.image.width() >=
+            detail.region.width() * qMin(qreal{1}, devicePixelRatioF() / scaleX) &&
+        detail.image.height() >=
+            detail.region.height() * qMin(qreal{1}, devicePixelRatioF() / scaleY))
+        return {};
+    return request;
+}
+void ScreenshotSavePreviewCanvas::scheduleDetails() {
+    ++m_detailSerial;
+    m_detailJob.cancel();
+    m_detailJob = {};
+    if (m_rendering)
+        m_detailTimer.stop();
+    else
+        m_detailTimer.start();
+}
+void ScreenshotSavePreviewCanvas::requestDetails() {
+    const QRect original =
+        detailRequest(m_original, m_sourcePixels, m_sourceRenderer, m_sourceDetail);
+    const QRect output = detailRequest(m_output, m_outputPixels, m_outputRenderer, m_outputDetail);
+    if (original.isEmpty() && output.isEmpty())
+        return;
+    struct Result {
+        QImage original;
+        QImage output;
+    };
+    auto images = std::make_shared<Result>();
+    const quint64 serial = m_detailSerial;
+    m_detailJob = ScreenshotExportCoordinator::shared().submit(
+        this, ScreenshotExportCoordinator::Priority::Foreground,
+        [original, output, sourceRenderer = m_sourceRenderer, outputRenderer = m_outputRenderer,
+         images](const ScreenshotExportCancellation& cancellation) {
+            ScreenshotExportTaskResult result;
+            if (!original.isEmpty())
+                images->original = sourceRenderer(original, cancellation, &result.error);
+            if (!output.isEmpty() && !cancellation.isCancellationRequested())
+                images->output = outputRenderer(output, cancellation, &result.error);
+            if ((!original.isEmpty() && images->original.isNull()) ||
+                (!output.isEmpty() && images->output.isNull()))
+                result.failureStage = ScreenshotExportFailureStage::Render;
+            return result;
+        },
+        [this, serial, original, output, images](ScreenshotExportTaskResult result) {
+            if (serial != m_detailSerial)
+                return;
+            m_detailJob = {};
+            if (!result.succeeded()) {
+                setProperty("detailError", result.error);
+                return;
+            }
+            if (!original.isEmpty())
+                m_sourceDetail = {std::move(images->original), original};
+            if (!output.isEmpty())
+                m_outputDetail = {std::move(images->output), output};
+            setProperty("detailGeneration", QVariant::fromValue(serial));
+            update();
+        });
 }
 void ScreenshotSavePreviewCanvas::setSplitRatio(double value) {
     m_split = std::clamp(value, 0.0, 1.0);
@@ -78,6 +180,7 @@ void ScreenshotSavePreviewCanvas::fitImage(bool showZoomReadout) {
     updateReadout();
     if (showZoomReadout && !qFuzzyCompare(previousZoom, m_zoom))
         showReadout();
+    scheduleDetails();
     update();
 }
 void ScreenshotSavePreviewCanvas::updateReadout() {
@@ -91,6 +194,8 @@ void ScreenshotSavePreviewCanvas::showReadout() {
     m_readout->showTransient();
 }
 void ScreenshotSavePreviewCanvas::setBusy(bool busy) {
+    m_rendering = busy;
+    scheduleDetails();
     if (busy)
         m_busy->showPersistent();
     else
@@ -98,32 +203,54 @@ void ScreenshotSavePreviewCanvas::setBusy(bool busy) {
 }
 void ScreenshotSavePreviewCanvas::paintEvent(QPaintEvent*) {
     QPainter painter(this);
-    painter.fillRect(rect(), QBrush(m_checkerboard));
+    const QBrush checkerboard(m_checkerboard);
+    const auto drawBacking = [&](QRectF area, QRectF paper = {}) {
+        painter.save();
+        // Preserve the same crisp checker pixels when restoring detail at any device scale.
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        painter.fillRect(area, checkerboard);
+        if (!paper.isEmpty())
+            painter.fillRect(area.intersected(paper), Qt::white);
+        painter.restore();
+    };
+    drawBacking(rect());
     if (m_sourcePixels.isEmpty() || m_original.isNull())
         return;
-    const QSizeF dimensions = QSizeF(m_sourcePixels) * m_zoom;
-    const QPointF center = QRectF(rect()).center() + m_pan;
-    const QRectF bounds(center.x() - dimensions.width() / 2, center.y() - dimensions.height() / 2,
-                        dimensions.width(), dimensions.height());
+    const QRectF bounds = imageBounds();
+    const auto drawDetail = [&](const Detail& detail, QSize pixels, QRectF paper = {}) {
+        if (detail.image.isNull() || pixels.isEmpty())
+            return;
+        const QRectF detailBounds(bounds.x() + detail.region.x() * bounds.width() / pixels.width(),
+                                  bounds.y() +
+                                      detail.region.y() * bounds.height() / pixels.height(),
+                                  detail.region.width() * bounds.width() / pixels.width(),
+                                  detail.region.height() * bounds.height() / pixels.height());
+        // Detail replaces the preview, so restore its backing before compositing alpha once.
+        drawBacking(detailBounds, paper);
+        painter.drawImage(detailBounds, detail.image);
+    };
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     const double split = m_split * width();
     painter.save();
     painter.setClipRect(QRectF(0, 0, split, height()));
     painter.drawImage(bounds, m_original);
+    drawDetail(m_sourceDetail, m_sourcePixels);
     painter.restore();
     painter.save();
     painter.setClipRect(QRectF(split, 0, width() - split, height()));
+    QRectF pageBounds;
     if (!m_pdfLayout.pagePoints.isEmpty() && !m_pdfLayout.imagePoints.isEmpty()) {
         // Map paper into the shared image bounds; paper never owns the comparison viewport.
         const double scaleX = bounds.width() / m_pdfLayout.imagePoints.width();
         const double scaleY = bounds.height() / m_pdfLayout.imagePoints.height();
-        const QRectF pageBounds(bounds.topLeft() - QPointF(m_pdfLayout.imagePoints.x() * scaleX,
-                                                           m_pdfLayout.imagePoints.y() * scaleY),
-                                QSizeF(m_pdfLayout.pagePoints.width() * scaleX,
-                                       m_pdfLayout.pagePoints.height() * scaleY));
+        pageBounds = QRectF(bounds.topLeft() - QPointF(m_pdfLayout.imagePoints.x() * scaleX,
+                                                       m_pdfLayout.imagePoints.y() * scaleY),
+                            QSizeF(m_pdfLayout.pagePoints.width() * scaleX,
+                                   m_pdfLayout.pagePoints.height() * scaleY));
         painter.fillRect(pageBounds, Qt::white);
     }
     painter.drawImage(bounds, m_output.isNull() ? m_original : m_output);
+    drawDetail(m_outputDetail, m_outputPixels, pageBounds);
     painter.restore();
 
     const auto theme = adqt::theme::ThemeManager::instance().resolveTheme(this);
@@ -166,6 +293,7 @@ void ScreenshotSavePreviewCanvas::resizeEvent(QResizeEvent*) {
     if (m_fit)
         fitImage();
     updateReadout();
+    scheduleDetails();
 }
 void ScreenshotSavePreviewCanvas::mousePressEvent(QMouseEvent* event) {
     if (event->button() != Qt::LeftButton)
@@ -193,6 +321,7 @@ void ScreenshotSavePreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
     else {
         m_fit = false;
         m_pan += snowPos(event) - m_last;
+        scheduleDetails();
         update();
     }
     m_last = snowPos(event);
@@ -224,6 +353,7 @@ void ScreenshotSavePreviewCanvas::zoomAt(double value, QPointF position) {
     m_fit = false;
     updateReadout();
     showReadout();
+    scheduleDetails();
     update();
 }
 bool ScreenshotSavePreviewCanvas::splitHandleContains(QPointF position) const {

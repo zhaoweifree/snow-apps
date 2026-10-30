@@ -1,5 +1,6 @@
 #include "snow_shot/shortcuts/shortcutbinding.h"
 #include "snow_shot/presentation/screenshottoolpalette.h"
+#include "snow_shot/presentation/components/pointerhoverevents.h"
 #include "snow_shot/ocrtextoptions.h"
 #include "snow_shot/translation/translationlanguagecatalog.h"
 #include "../recording/recordingaudiogainpopover.h"
@@ -1009,9 +1010,8 @@ ScreenshotToolPalette::ScreenshotToolPalette(const Options& options, QWidget* pa
             ScreenshotToolPaletteStyleControlCallbacks{
                 [this](const SnowCanvasShapeStyle& style, quint32 properties,
                        SnowCanvasShapeKind kind) {
-                    if (!submitStyleEdit(SnowCanvasShapeEdit{style, properties, kind}))
-                        return;
-                    emit shapeStyleChanged(style, properties, kind);
+                    static_cast<void>(
+                        submitStyleEdit(SnowCanvasShapeEdit{style, properties, kind}));
                 },
                 [this](const SnowCanvasDistanceStyle& style, quint32 properties) {
                     static_cast<void>(submitStyleEdit(SnowCanvasDistanceEdit{style, properties}));
@@ -1024,24 +1024,19 @@ ScreenshotToolPalette::ScreenshotToolPalette(const Options& options, QWidget* pa
                         submitStyleEdit(SnowCanvasAngleStyleEdit{style, properties, target}));
                 },
                 [this](const SnowCanvasTextStyle& style, quint32 properties) {
-                    if (!submitStyleEdit(SnowCanvasTextEdit{style, properties}))
-                        return;
-                    emit textStyleChanged(style, properties);
+                    static_cast<void>(submitStyleEdit(SnowCanvasTextEdit{style, properties}));
                 },
                 [this]() { emit textStylePopupInteractionBegan(); },
                 [this]() { emit textStylePopupInteractionEnded(); },
                 [this](const SnowCanvasSerialNumberStyle& style, quint32 properties) {
-                    if (!submitStyleEdit(SnowCanvasSerialNumberEdit{style, properties}))
-                        return;
-                    emit serialNumberStyleChanged(style);
+                    static_cast<void>(
+                        submitStyleEdit(SnowCanvasSerialNumberEdit{style, properties}));
                 },
                 [this]() { emit serialNumberDecrementRequested(); },
                 [this]() { emit serialNumberIncrementRequested(); },
                 [this]() { emit serialNumberCreateTextRequested(); },
                 [this](const SnowCanvasWatermarkConfig& config, quint32 properties) {
-                    if (!submitStyleEdit(SnowCanvasWatermarkEdit{config, properties}))
-                        return;
-                    emit watermarkConfigChanged(config);
+                    static_cast<void>(submitStyleEdit(SnowCanvasWatermarkEdit{config, properties}));
                 },
                 [this](const SnowCanvasWatermarkConfig& config) {
                     emit watermarkPreviewChanged(config);
@@ -1393,7 +1388,6 @@ void ScreenshotToolPalette::notifyFilterStyleChanged(const SnowCanvasFilterStyle
                                SnowCanvasFilterStyleMixedContainsBothFamilies) != 0;
     if (!submitStyleEdit(SnowCanvasFilterEdit{style, properties, pen, bothFamilies}))
         return;
-    emit filterStyleChanged(style, properties);
 }
 
 SnowCanvasStyleDefaults ScreenshotToolPalette::creationStyleDefaults() const {
@@ -2503,6 +2497,18 @@ QColor ScreenshotToolPalette::recordingMouseHighlightColor() const {
     return m_recordingMouseHighlightColor;
 }
 
+void ScreenshotToolPalette::setRecordingMouseHighlightRadius(int value) {
+    m_recordingMouseHighlightRadius = std::clamp(value, 8, 128);
+    if (m_recordHighlightRadiusInput) {
+        const QSignalBlocker blocker(m_recordHighlightRadiusInput);
+        m_recordHighlightRadiusInput->setValue(m_recordingMouseHighlightRadius);
+    }
+}
+
+int ScreenshotToolPalette::recordingMouseHighlightRadius() const {
+    return m_recordingMouseHighlightRadius;
+}
+
 void ScreenshotToolPalette::setRecordingPostProcessingEnabled(bool enabled) {
     m_recordPostProcessingEnabled = enabled;
     if (m_recordPostProcessingButton) {
@@ -2643,6 +2649,45 @@ void ScreenshotToolPalette::setScreenshotRegionType(ScreenshotRegionType type) {
             QStringLiteral("screenshotMoveRegionTypeButtonGroup"))) {
         const QSignalBlocker blocker(group);
         group->setCheckedId(int(type));
+    }
+}
+
+void ScreenshotToolPalette::setSelectionBackgroundOpacityState(int percent, bool available) {
+    m_backgroundOpacityPercent = std::clamp(percent, 0, 100);
+    m_backgroundOpacityAvailable = available;
+    if (m_backgroundOpacityEditor) {
+        m_backgroundOpacityEditor->setEnabled(available);
+        m_backgroundOpacityEditor->setValue(m_backgroundOpacityPercent);
+        m_backgroundOpacityEditor->setValueSuffix(QStringLiteral("%"));
+        m_backgroundOpacityEditor->setAccessibleName(tr("Selection background opacity"));
+        m_backgroundOpacityEditor->setAccessibleDescription(m_backgroundOpacityEditor->valueText());
+        if (!available)
+            emit selectionBackgroundPreviewVisibleChanged(false);
+    }
+}
+
+void ScreenshotToolPalette::setLayoutCompactionState(ScreenshotLayoutCompaction options,
+                                                     bool available, bool canvasUsesPoints) {
+    m_layoutCompaction = options.normalized();
+    m_layoutCompactionAvailable = available;
+    m_layoutCompactionCanvasUsesPoints = canvasUsesPoints;
+    if (m_layoutCompactionButton) {
+        m_layoutCompactionButton->setEnabled(available);
+        setScreenshotToolPaletteButtonActive(m_layoutCompactionButton, m_layoutCompaction.enabled);
+        m_layoutCompactionButton->setAccessibleDescription(
+            !available                   ? tr("Available for multi-region selections")
+            : m_layoutCompaction.enabled ? tr("Layout compaction enabled")
+                                         : tr("Layout compaction disabled"));
+    }
+    if (m_layoutSpacingEditor) {
+        m_layoutSpacingEditor->setEnabled(available);
+        m_layoutSpacingEditor->setValue(m_layoutCompaction.spacing);
+        m_layoutSpacingEditor->setValueSuffix(screenshotSelectionDisplayUnitText(
+            canvasUsesPoints ? ScreenshotSelectionDisplayUnit::LogicalPixels
+                             : ScreenshotSelectionDisplayUnit::PhysicalPixels));
+        m_layoutSpacingEditor->setAccessibleDescription(
+            available ? m_layoutSpacingEditor->valueText()
+                      : tr("Available for multi-region selections"));
     }
 }
 
@@ -3283,7 +3328,6 @@ void ScreenshotToolPalette::restoreWatermarkContentForActivation(
     }
     m_watermarkContentRestorePending = false;
     m_styleControls->setWatermarkConfig(restored, true);
-    emit watermarkConfigChanged(restored);
 }
 
 void ScreenshotToolPalette::setWatermarkTemplateModalOwnerWindow(QWidget* owner) {
@@ -3664,9 +3708,9 @@ void ScreenshotToolPalette::applyScaledToolbarMetrics() {
         const auto metrics = actionButtonMetrics(m_physicalScale);
         for (adqt::widgets::AdButton* button :
              m_selectActionPanel->findChildren<adqt::widgets::AdButton*>()) {
-            if (button != nullptr && button != m_scrollingAutoScrollIntervalEditor) {
-                const QByteArray tooltip = button->toolTip().toUtf8();
-                configureScreenshotToolPaletteStyleButton(button, tooltip.constData(), metrics);
+            if (button != nullptr && button != m_scrollingAutoScrollIntervalEditor &&
+                button != m_layoutSpacingEditor && button != m_backgroundOpacityEditor) {
+                configureScreenshotToolPaletteStyleButton(button, nullptr, metrics);
             }
         }
         for (adqt::widgets::AdSelect* select : {m_textFormattingSelect, m_textPunctuationSelect,
@@ -3778,6 +3822,14 @@ void ScreenshotToolPalette::applyScaledToolbarMetrics() {
     if (m_recordPreferencesButton != nullptr) {
         configureScreenshotToolPaletteStyleButton(m_recordPreferencesButton, "Recording settings",
                                                   styleButtonMetrics(m_physicalScale));
+    }
+    if (m_backgroundOpacityEditor) {
+        configureScreenshotToolPaletteScrollingIntervalEditor(m_backgroundOpacityEditor,
+                                                              actionButtonMetrics(m_physicalScale));
+    }
+    if (m_layoutSpacingEditor) {
+        configureScreenshotToolPaletteScrollingIntervalEditor(m_layoutSpacingEditor,
+                                                              actionButtonMetrics(m_physicalScale));
     }
     if (m_scrollingAutoScrollIntervalEditor != nullptr) {
         configureScreenshotToolPaletteScrollingIntervalEditor(m_scrollingAutoScrollIntervalEditor,
@@ -4125,6 +4177,34 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
         return false;
     }
     const int direction = deltaY > 0 ? 1 : -1;
+    if (m_backgroundOpacityEditor && m_backgroundOpacityEditor->isEnabled() &&
+        m_backgroundOpacityEditor->isVisible() &&
+        m_backgroundOpacityEditor->rect().contains(
+            m_backgroundOpacityEditor->mapFromGlobal(event->globalPosition().toPoint()))) {
+        const int opacityDelta = direction * 10;
+        const int percent = std::clamp(m_backgroundOpacityPercent + opacityDelta, 0, 100);
+        if (percent != m_backgroundOpacityPercent) {
+            setSelectionBackgroundOpacityState(percent, m_backgroundOpacityAvailable);
+        }
+        emit selectionBackgroundOpacityWheelAdjusted(opacityDelta);
+        event->accept();
+        return true;
+    }
+    if (m_layoutSpacingEditor && m_layoutSpacingEditor->isEnabled() &&
+        m_layoutSpacingEditor->isVisible() &&
+        m_layoutSpacingEditor->rect().contains(
+            m_layoutSpacingEditor->mapFromGlobal(event->globalPosition().toPoint()))) {
+        auto options = m_layoutCompaction;
+        options.spacing = std::clamp(options.spacing + direction * 5, 0,
+                                     ScreenshotLayoutCompaction::maximumSpacing);
+        if (options != m_layoutCompaction) {
+            setLayoutCompactionState(options, m_layoutCompactionAvailable,
+                                     m_layoutCompactionCanvasUsesPoints);
+            emit layoutCompactionChanged(options.enabled, options.spacing);
+        }
+        event->accept();
+        return true;
+    }
     if (m_scrollingAutoScrollIntervalEditor != nullptr &&
         m_scrollingAutoScrollIntervalEditor->isEnabled() &&
         m_scrollingAutoScrollIntervalEditor->isVisible() &&
@@ -4282,6 +4362,15 @@ void ScreenshotToolPalette::finishScrollingSelectionMove() {
 }
 
 bool ScreenshotToolPalette::eventFilter(QObject* watched, QEvent* event) {
+    if (event && watched && watched == m_backgroundOpacityEditor) {
+        if (snow_shot::presentation::pointerHoverPositionWithin(m_backgroundOpacityEditor, event))
+            emit selectionBackgroundPreviewVisibleChanged(true);
+        else if (event->type() == QEvent::Leave || event->type() == QEvent::HoverLeave ||
+                 event->type() == QEvent::Hide ||
+                 (event->type() == QEvent::EnabledChange &&
+                  !m_backgroundOpacityEditor->isEnabled()))
+            emit selectionBackgroundPreviewVisibleChanged(false);
+    }
     if (event && watched &&
         (watched == m_scrollingMoveHorizontalButton || watched == m_scrollingMoveVerticalButton)) {
         auto* button = static_cast<adqt::widgets::AdButton*>(watched);
@@ -4415,6 +4504,9 @@ void ScreenshotToolPalette::retranslateUi() {
         m_scrollingAutoScrollIntervalEditor->setValueSuffix(tr("ms", "Auto-scroll interval unit"));
     }
     retranslateScreenshotToolPalette(this);
+    setSelectionBackgroundOpacityState(m_backgroundOpacityPercent, m_backgroundOpacityAvailable);
+    setLayoutCompactionState(m_layoutCompaction, m_layoutCompactionAvailable,
+                             m_layoutCompactionCanvasUsesPoints);
     refreshRecognitionModelSelect();
     retranslateDrawTemplateUi();
     if (m_styleControls != nullptr) {
@@ -4997,7 +5089,7 @@ bool ScreenshotToolPalette::activateToolFromToolbar(Tool tool, bool toggleVisibl
         toolbar_settings::DrawingSettings().alwaysShowFirstToolbarGroupButton();
     const bool alreadyActive =
         !toggleVisibleButton || fixedGroupButton ? m_activeTool.has_value() && *m_activeTool == tool
-        : requestedButton != nullptr ? m_activeToolButton == requestedButton
+        : requestedButton != nullptr             ? m_activeToolButton == requestedButton
                                      : m_activeTool.has_value() && *m_activeTool == tool;
     const Tool requestedTool = alreadyActive && tool != Tool::Select ? Tool::Select : tool;
     activateDrawingTool(requestedTool);
@@ -7207,6 +7299,7 @@ bool ScreenshotToolPalette::ensureRecordingEffectSettingsModal() {
                 }
                 m_recordProgressBarColorPicker = nullptr;
                 m_recordHighlightColorPicker = nullptr;
+                m_recordHighlightRadiusInput = nullptr;
                 m_recordHighlightSwatch = nullptr;
                 m_recordSettingsModal = nullptr;
                 m_recordSettingsForm = nullptr;
@@ -7306,6 +7399,31 @@ bool ScreenshotToolPalette::ensureRecordingEffectSettingsModal() {
     m_recordKeyboardForegroundPicker = addKeyboardPicker(
         QStringLiteral("screenRecordingKeyboardForegroundColor"), tr("Keyboard Foreground Color"),
         QStringLiteral("foreground"), m_recordingKeyboardForegroundColor);
+    m_recordHighlightRadiusInput = new adqt::widgets::AdInputNumber;
+    m_recordHighlightRadiusInput->setObjectName(
+        QStringLiteral("screenRecordingMouseHighlightRadius"));
+    m_recordHighlightRadiusInput->setMinimum(8);
+    m_recordHighlightRadiusInput->setMaximum(128);
+    m_recordHighlightRadiusInput->setSingleStep(1);
+    m_recordHighlightRadiusInput->setDecimals(0);
+    m_recordHighlightRadiusInput->setFixedWidth(kRecordingSettingsColumnWidth);
+    m_recordHighlightRadiusInput->setStepButtonLayout(
+        adqt::widgets::AdInputNumber::StepButtonLayout::Compact);
+    {
+        const QSignalBlocker blocker(m_recordHighlightRadiusInput);
+        m_recordHighlightRadiusInput->setValue(m_recordingMouseHighlightRadius);
+    }
+    form->addField(tr("Mouse highlight radius"), m_recordHighlightRadiusInput,
+                   QStringLiteral("highlightRadius"))
+        ->setFixedWidth(kRecordingSettingsContentWidth);
+    connect(m_recordHighlightRadiusInput, &adqt::widgets::AdInputNumber::valueChanged, this,
+            [this](double value) {
+                const int previous = m_recordingMouseHighlightRadius;
+                setRecordingMouseHighlightRadius(qRound(value));
+                if (previous != m_recordingMouseHighlightRadius) {
+                    emit recordingMouseHighlightRadiusChanged(m_recordingMouseHighlightRadius);
+                }
+            });
     m_recordHighlightColorPicker = addKeyboardPicker(
         QStringLiteral("screenRecordingMouseHighlightColor"), tr("Mouse highlight color"),
         QStringLiteral("highlightColor"), m_recordingMouseHighlightColor);
@@ -7394,6 +7512,10 @@ void ScreenshotToolPalette::refreshRecordingEffectSettingsModalText() {
         return;
     }
     m_recordHighlightColorPicker->setAccessibleName(tr("Mouse highlight color"));
+    m_recordHighlightRadiusInput->setAccessibleName(tr("Mouse highlight radius"));
+    m_recordHighlightRadiusInput->setSuffixText(tr("px"));
+    m_recordSettingsForm->field(QStringLiteral("highlightRadius"))
+        ->setLabel(tr("Mouse highlight radius"));
     m_recordHighlightSwatch->setAccessibleName(tr("Mouse highlight preview"));
     m_recordSettingsForm->field(QStringLiteral("highlightColor"))
         ->setLabel(tr("Mouse highlight color"));
@@ -7648,6 +7770,10 @@ void ScreenshotToolPalette::clearSecondaryResourceBindings() {
     m_rectangleStyleControlsWidget = nullptr;
     m_speechBubbleStyleControlsWidget = nullptr;
     m_moveActionControls = nullptr;
+    m_layoutCompactionButton = nullptr;
+    m_layoutSpacingEditor = nullptr;
+    m_backgroundOpacityEditor = nullptr;
+    emit selectionBackgroundPreviewVisibleChanged(false);
     m_selectionDisplayUnitGroup = nullptr;
     m_cursorButton = nullptr;
     m_hideSelectionToolbarButton = nullptr;
@@ -8900,6 +9026,57 @@ void ScreenshotToolPalette::createMoveActionFamily() {
             &ScreenshotToolPalette::addScreenshotRegionRequested);
     connect(m_subtractRegionButton, &adqt::widgets::AdButton::clicked, this,
             &ScreenshotToolPalette::subtractScreenshotRegionRequested);
+    m_layoutCompactionButton = createScreenshotToolPaletteStyleActionButton(
+        m_moveActionControls, QT_TR_NOOP("Compact layout"),
+        custom_outlined_icons::LayoutCompaction(), actionButtonMetrics(m_physicalScale));
+    m_layoutCompactionButton->setObjectName(QStringLiteral("screenshotLayoutCompactionButton"));
+    layout->addWidget(m_layoutCompactionButton);
+    addStyleToolbarSpacing(layout, STYLE_ITEM_SPACING);
+    m_layoutSpacingEditor = createScreenshotToolPaletteIconNumericValueButton(
+        m_moveActionControls, QT_TR_NOOP("Layout spacing (scroll to adjust; click to reset to 0)"),
+        custom_outlined_icons::LayoutSpacing(), m_layoutCompaction.spacing, QStringLiteral("100dp"),
+        actionButtonMetrics(m_physicalScale));
+    m_layoutSpacingEditor->setObjectName(QStringLiteral("screenshotLayoutSpacingEditor"));
+    configureScreenshotToolPaletteScrollingIntervalEditor(m_layoutSpacingEditor,
+                                                          actionButtonMetrics(m_physicalScale));
+    layout->addWidget(m_layoutSpacingEditor);
+    addStyleToolbarSpacing(layout, STYLE_ITEM_SPACING);
+    m_backgroundOpacityEditor = createScreenshotToolPaletteIconNumericValueButton(
+        m_moveActionControls,
+        QT_TR_NOOP("Selection background opacity (scroll to adjust; click to reset to 0%)"),
+        custom_outlined_icons::SelectionBackgroundOpacity(), m_backgroundOpacityPercent,
+        QStringLiteral("100%"), actionButtonMetrics(m_physicalScale));
+    m_backgroundOpacityEditor->setObjectName(
+        QStringLiteral("screenshotSelectionBackgroundOpacityEditor"));
+    configureScreenshotToolPaletteScrollingIntervalEditor(m_backgroundOpacityEditor,
+                                                          actionButtonMetrics(m_physicalScale));
+    m_backgroundOpacityEditor->installEventFilter(this);
+    layout->addWidget(m_backgroundOpacityEditor);
+    connect(m_backgroundOpacityEditor, &adqt::widgets::AdButton::clicked, this, [this] {
+        if (m_backgroundOpacityPercent == 0)
+            return;
+        setSelectionBackgroundOpacityState(0, m_backgroundOpacityAvailable);
+        emit selectionBackgroundOpacityChanged(0);
+    });
+    connect(m_layoutCompactionButton, &adqt::widgets::AdButton::clicked, this, [this] {
+        auto options = m_layoutCompaction;
+        options.enabled = !options.enabled;
+        setLayoutCompactionState(options, m_layoutCompactionAvailable,
+                                 m_layoutCompactionCanvasUsesPoints);
+        emit layoutCompactionChanged(options.enabled, options.spacing);
+    });
+    connect(m_layoutSpacingEditor, &adqt::widgets::AdButton::clicked, this, [this] {
+        if (m_layoutCompaction.spacing == 0)
+            return;
+        auto options = m_layoutCompaction;
+        options.spacing = 0;
+        setLayoutCompactionState(options, m_layoutCompactionAvailable,
+                                 m_layoutCompactionCanvasUsesPoints);
+        emit layoutCompactionChanged(options.enabled, options.spacing);
+    });
+    setSelectionBackgroundOpacityState(m_backgroundOpacityPercent, m_backgroundOpacityAvailable);
+    setLayoutCompactionState(m_layoutCompaction, m_layoutCompactionAvailable,
+                             m_layoutCompactionCanvasUsesPoints);
     addStyleToolbarSpacing(layout, STYLE_GROUP_SPACING * 2);
     auto* regionActionsSeparator = createStyleToolbarSeparator(m_moveActionControls);
     regionActionsSeparator->setObjectName(QStringLiteral("screenshotRegionActionsSeparator"));
@@ -8973,11 +9150,13 @@ void ScreenshotToolPalette::createMoveActionFamily() {
     });
     m_selectActionLayout->addWidget(m_moveActionControls);
     stampScreenshotToolbarReferenceWidth(
-        m_moveActionControls, actionButtonMetrics(1.0).buttonSize * 6 +
-                                  screenshotToolbarReferenceWidth(regionTypes.container) +
-                                  screenshotToolbarReferenceWidth(units.container) +
-                                  STYLE_ITEM_SPACING * 3 + STYLE_GROUP_SPACING * 10 + 6 +
-                                  TOOLBAR_SEPARATOR_WIDTH * 2);
+        m_moveActionControls,
+        actionButtonMetrics(1.0).buttonSize * 7 +
+            screenshotToolbarReferenceWidth(m_layoutSpacingEditor) +
+            screenshotToolbarReferenceWidth(m_backgroundOpacityEditor) + STYLE_ITEM_SPACING +
+            screenshotToolbarReferenceWidth(regionTypes.container) +
+            screenshotToolbarReferenceWidth(units.container) + STYLE_ITEM_SPACING * 4 +
+            STYLE_GROUP_SPACING * 10 + 6 + TOOLBAR_SEPARATOR_WIDTH * 2);
     setCursorVisible(m_cursorVisible);
     setCursorAvailable(m_cursorAvailable);
     setSelectionToolbarHidden(m_selectionToolbarHidden);
@@ -9066,6 +9245,14 @@ void ScreenshotToolPalette::createScrollingRecognitionActionFamily() {
     settingsSeparator->setObjectName(QStringLiteral("screenshotScrollingSettingsSeparator"));
     layout->addWidget(settingsSeparator);
     addStyleToolbarSpacing(layout, STYLE_GROUP_SPACING * 2);
+    auto* splitButton = createScreenshotToolPaletteStyleActionButton(
+        m_scrollingRecognitionControls, QT_TR_NOOP("Image Splitting"),
+        custom_outlined_icons::ImageSplitting(), actionButtonMetrics(m_physicalScale));
+    splitButton->setObjectName(QStringLiteral("screenshotScrollingImageSplittingButton"));
+    layout->addWidget(splitButton);
+    addStyleToolbarSpacing(layout, STYLE_ITEM_SPACING);
+    connect(splitButton, &adqt::widgets::AdButton::clicked, this,
+            &ScreenshotToolPalette::scrollingImageSplittingRequested);
     auto* settingsButton = createScreenshotToolPaletteStyleActionButton(
         m_scrollingRecognitionControls, QT_TR_NOOP("Settings"), outlined_icons::Setting(),
         actionButtonMetrics(m_physicalScale));
@@ -9076,9 +9263,9 @@ void ScreenshotToolPalette::createScrollingRecognitionActionFamily() {
     m_selectActionLayout->addWidget(m_scrollingRecognitionControls);
     stampScreenshotToolbarReferenceWidth(
         m_scrollingRecognitionControls,
-        actionButtonMetrics(1.0).buttonSize * 6 +
+        actionButtonMetrics(1.0).buttonSize * 7 +
             screenshotToolbarReferenceWidth(m_scrollingAutoScrollIntervalEditor) +
-            STYLE_GROUP_SPACING * 12 + STYLE_ITEM_SPACING * 3 + TOOLBAR_SEPARATOR_WIDTH * 3);
+            STYLE_GROUP_SPACING * 12 + STYLE_ITEM_SPACING * 4 + TOOLBAR_SEPARATOR_WIDTH * 3);
     connect(m_scrollingAutoScrollButton, &adqt::widgets::AdButton::clicked, this, [this]() {
         m_scrollingAutoScroll = !m_scrollingAutoScroll;
         updateScrollingRecognitionButtons();
@@ -9424,7 +9611,6 @@ void ScreenshotToolPalette::createStyleFamily(Tool tool) {
                 if (!submitStyleEdit(SnowCanvasSpotlightEdit{
                         m_styleControls->styleState().spotlightConfig, SnowCanvasSpotlightColor}))
                     return;
-                emit spotlightConfigChanged(m_styleControls->styleState().spotlightConfig);
             }
         };
         spotlightCallbacks.previewColor = [this](const QColor& color) {
@@ -9439,7 +9625,6 @@ void ScreenshotToolPalette::createStyleFamily(Tool tool) {
                 if (!submitStyleEdit(SnowCanvasSpotlightEdit{
                         m_styleControls->styleState().spotlightConfig, SnowCanvasSpotlightOpacity}))
                     return;
-                emit spotlightConfigChanged(m_styleControls->styleState().spotlightConfig);
             }
         };
         m_spotlightStyleControlsWidget = m_styleControls->buildSpotlightFamily(
@@ -10153,13 +10338,13 @@ void ScreenshotToolPalette::updateRecordingControls() {
         const QColor microphoneIconColor =
             m_recordingMicrophoneEnabled ? scheme.map.colorSuccess : scheme.map.colorTextQuaternary;
 
-        // Match the original recording toolbar: this is always a text button,
-        // with a green microphone icon when the setting is enabled and a
-        // disabled-text icon when it is not.  Disabling interaction while
-        // recording must not alter that visual state.
+        // The audio setting controls both glyph and tint. Temporarily disabling
+        // interaction while recording must not imply that audio is muted.
         setScreenshotToolPaletteButtonActive(m_recordMicrophoneButton, false);
         m_recordMicrophoneButton->setIconRef(snow_shot::presentation::icons::withPrimaryColor(
-            custom_outlined_icons::RecordingMicrophone(), microphoneIconColor));
+            m_recordingMicrophoneEnabled ? custom_outlined_icons::RecordingMicrophone()
+                                         : custom_outlined_icons::RecordingMicrophoneOff(),
+            microphoneIconColor));
         m_recordMicrophoneButton->setEnabled(microphoneControlEnabled);
         if (m_recordMicrophoneGainPopover) {
             m_recordMicrophoneGainPopover->setAudioEnabled(m_recordingMicrophoneEnabled);
@@ -10180,12 +10365,12 @@ void ScreenshotToolPalette::updateRecordingControls() {
                                                 ? scheme.map.colorSuccess
                                                 : scheme.map.colorTextQuaternary;
 
-        // Keep the system-audio toggle visually consistent with the
-        // microphone toggle: no filled state, and disabling interaction must
-        // not change the icon color selected by the setting.
+        // Keep the speaker glyph and tint consistent with its audio setting.
         setScreenshotToolPaletteButtonActive(m_recordSystemAudioButton, false);
         m_recordSystemAudioButton->setIconRef(snow_shot::presentation::icons::withPrimaryColor(
-            outlined_icons::Sound(), systemAudioIconColor));
+            m_recordingSystemAudioEnabled ? outlined_icons::Sound()
+                                          : custom_outlined_icons::RecordingSpeakerOff(),
+            systemAudioIconColor));
         m_recordSystemAudioButton->setEnabled(systemAudioControlEnabled);
         if (m_recordSystemAudioGainPopover) {
             m_recordSystemAudioGainPopover->setAudioEnabled(m_recordingSystemAudioEnabled);

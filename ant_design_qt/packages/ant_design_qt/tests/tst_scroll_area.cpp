@@ -4,6 +4,7 @@
 #include <QScrollBar>
 #include <QTest>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <QWidget>
 
 namespace {
@@ -51,6 +52,7 @@ class ScrollAreaTest final : public QObject {
 
  private slots:
   void horizontalOverlayMirrorsTheNativeScrollRange();
+  void shiftWheelScrollsHorizontally();
   void embeddedHorizontalScrollBarKeepsAStableExtent();
   void compactScrollBarBoundsItsMinimumSliderLength();
   void fitToWidthDoesNotStretchToTheMinimumHintHeight();
@@ -85,6 +87,66 @@ void ScrollAreaTest::horizontalOverlayMirrorsTheNativeScrollRange() {
   QCOMPARE(source->value(), source->maximum());
   source->setValue(source->minimum());
   QCOMPARE(overlay->value(), overlay->minimum());
+}
+
+void ScrollAreaTest::shiftWheelScrollsHorizontally() {
+  adqt::widgets::AdScrollArea area;
+  area.resize(180, 120);
+  area.setFitToWidth(false);
+  auto* content = new QWidget;
+  content->setFixedSize(560, 360);
+  area.setContentWidget(content);
+  area.show();
+  QCoreApplication::processEvents();
+
+  auto* horizontal = area.horizontalScrollBar();
+  auto* vertical = area.verticalScrollBar();
+  QVERIFY(horizontal->maximum() > 0);
+  QVERIFY(vertical->maximum() > 0);
+  QVERIFY(!horizontal->isVisible());
+  QVERIFY(!vertical->isVisible());
+  const auto wheel = [&](QPoint delta, Qt::KeyboardModifiers modifiers) {
+    auto* viewport = area.viewport();
+    const QPointF position(viewport->rect().center());
+    QWheelEvent event(position, viewport->mapToGlobal(position.toPoint()), {}, delta, Qt::NoButton,
+                      modifiers, Qt::NoScrollPhase, false);
+    QCoreApplication::sendEvent(viewport, &event);
+    return event.isAccepted();
+  };
+
+  QVERIFY(wheel({0, -120}, Qt::ShiftModifier));
+  QVERIFY(horizontal->value() > 0);
+  QCOMPARE(vertical->value(), 0);
+  QCOMPARE(area.overlayHorizontalScrollBar()->value(), horizontal->value());
+  QCOMPARE(content->x(), -horizontal->value());
+  QVERIFY(wheel({0, 120}, Qt::ShiftModifier));
+  QCOMPARE(horizontal->value(), 0);
+  QCOMPARE(vertical->value(), 0);
+
+  // A real horizontal wheel already carries its axis, with or without Shift.
+  for (const auto modifiers : {Qt::NoModifier, Qt::ShiftModifier}) {
+    QVERIFY(wheel({-120, 0}, modifiers));
+    QVERIFY(horizontal->value() > 0);
+    QCOMPARE(vertical->value(), 0);
+    horizontal->setValue(0);
+  }
+  QVERIFY(wheel({0, -120}, Qt::NoModifier));
+  QCOMPARE(horizontal->value(), 0);
+  QVERIFY(vertical->value() > 0);
+
+  horizontal->setValue(horizontal->maximum());
+  const int verticalBefore = vertical->value();
+  QVERIFY(!wheel({0, -120}, Qt::ShiftModifier));
+  QCOMPARE(horizontal->value(), horizontal->maximum());
+  QCOMPARE(vertical->value(), verticalBefore);
+
+  // Vertical-only areas retain Qt's normal Shift + wheel behavior.
+  content->setFixedWidth(area.viewport()->width());
+  QCoreApplication::processEvents();
+  QCOMPARE(horizontal->maximum(), 0);
+  vertical->setValue(0);
+  QVERIFY(wheel({0, -120}, Qt::ShiftModifier));
+  QVERIFY(vertical->value() > 0);
 }
 
 void ScrollAreaTest::embeddedHorizontalScrollBarKeepsAStableExtent() {

@@ -63,6 +63,86 @@ void requireUpdateAppearance() {
                 appearance.value(QStringLiteral("motion")).toBool() == resolved.config.motion,
             "updater inherits application typography, popup radius, and motion preference");
 }
+
+void requireThemeConfigConversions() {
+    namespace styles = snow_shot::presentation::styles;
+    auto& theme = styles::ThemeManager::instance();
+    for (const auto appearance : {styles::ThemeAppearance::Light, styles::ThemeAppearance::Dark}) {
+        for (const auto preset : {styles::ThemePreset::Default, styles::ThemePreset::Compact}) {
+            styles::ThemeStyleConfig config;
+            config.appearance = appearance;
+            config.preset = preset;
+            config.colorPrimary = QColor("#13c2c2");
+            config.colorSuccess = QColor("#389e0d");
+            config.colorWarning = QColor("#d48806");
+            config.colorError = QColor("#cf1322");
+            config.colorLink = QColor("#531dab");
+            config.presetColors = {{QStringLiteral(" BLUE "), QColor("#123456")},
+                                   {QStringLiteral("Pink"), QColor("#654321")},
+                                   {QStringLiteral("lime"), QColor()},
+                                   {QStringLiteral("unknown"), QColor("#ffffff")}};
+            config.appFont.setFamily(QStringLiteral("Theme conversion test family"));
+            config.fontSize = 17;
+            config.lineWidth = preset == styles::ThemePreset::Compact ? 0 : 3;
+            config.borderRadius = 9;
+            config.sizeUnit = 5;
+            config.sizeStep = 3;
+            config.controlHeight = 31;
+            config.motionUnit = appearance == styles::ThemeAppearance::Dark ? 0.0 : 0.1;
+
+            auto expected = adqt::theme::defaultThemeConfig(
+                appearance == styles::ThemeAppearance::Dark ? adqt::theme::ThemeScheme::Dark
+                                                            : adqt::theme::ThemeScheme::Light,
+                preset == styles::ThemePreset::Compact ? adqt::theme::ThemeDensity::Compact
+                                                       : adqt::theme::ThemeDensity::Comfortable);
+            expected.primary = config.colorPrimary;
+            expected.success = config.colorSuccess;
+            expected.warning = config.colorWarning;
+            expected.error = config.colorError;
+            expected.link = config.colorLink;
+            expected.blue = QColor("#123456");
+            expected.pink = QColor("#654321");
+            expected.appFont = config.appFont;
+            expected.fontSize = 17.0;
+            expected.lineWidth = static_cast<double>(config.lineWidth);
+            expected.borderRadius = 9.0;
+            expected.sizeUnit = 5.0;
+            expected.sizeStep = 3.0;
+            expected.controlHeight = 31.0;
+            expected.motion = config.motionUnit > 0.0;
+
+            const auto resolved = adqt::theme::makeResolvedTheme(expected);
+            const auto scheme = styles::generateThemeColorScheme(config);
+            require(scheme.appearance == appearance &&
+                        scheme.map.colorPrimary == resolved.values.colorPrimary &&
+                        scheme.map.colorSuccess == resolved.values.colorSuccess &&
+                        scheme.map.colorWarning == resolved.values.colorWarning &&
+                        scheme.map.colorError == resolved.values.colorError &&
+                        scheme.map.colorInfo == resolved.values.colorInfo &&
+                        scheme.map.colorLink == resolved.values.colorLink &&
+                        scheme.map.presetColorHover.value(QStringLiteral("blue")) ==
+                            resolved.values.blue &&
+                        scheme.map.presetColorHover.value(QStringLiteral("pink")) ==
+                            resolved.values.pink &&
+                        scheme.map.presetColorHover.value(QStringLiteral("lime")) ==
+                            resolved.values.lime,
+                    "standalone schemes preserve valid overrides, normalized presets and defaults");
+            require(scheme.metricMap.control.lineWidth == (config.lineWidth == 0 ? 1 : 3) &&
+                        scheme.metricMap.font.fontSize == 17 &&
+                        (scheme.metricMap.control.motionDurationFastMs > 0) == expected.motion,
+                    "scheme metrics preserve minimum visible borders and motion preferences");
+
+            theme.setThemeStyleConfig(config);
+            require(adqt::theme::ThemeManager::instance().config() == expected,
+                    "live themes and standalone schemes use the same input conversion");
+            theme.setThemePreset(preset == styles::ThemePreset::Compact
+                                     ? styles::ThemePreset::Default
+                                     : styles::ThemePreset::Compact);
+            require(adqt::theme::ThemeManager::instance().config().lineWidth == expected.lineWidth,
+                    "live theme round trips preserve zero-width borders");
+        }
+    }
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -153,6 +233,7 @@ int main(int argc, char** argv) {
     requireUpdateAppearance();
     require(!theme.updateProgressAppearance().value(QStringLiteral("motion")).toBool(),
             "updater respects disabled Ant motion");
+    requireThemeConfigConversions();
     require(appStorage.flushNow().success, "flush theme preferences");
     appStorage.shutdown();
     return 0;

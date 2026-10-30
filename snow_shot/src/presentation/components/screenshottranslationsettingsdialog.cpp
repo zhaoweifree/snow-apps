@@ -9,6 +9,7 @@
 #include "widgets/alert.h"
 #include "widgets/button.h"
 #include "widgets/form.h"
+#include "widgets/input_number.h"
 #include "widgets/modal.h"
 #include "widgets/select.h"
 #include "widgets/switch.h"
@@ -38,6 +39,7 @@ struct TranslationSettingsDraft {
     bool sourceEdited = false;
     bool targetEdited = false;
     bool secondaryTargetEdited = false;
+    bool confidenceThresholdEdited = false;
     bool modelEdited = false;
 };
 QString text(const char* source) {
@@ -93,14 +95,21 @@ createScreenshotTranslationSettingsDialog(translation::TranslationService& servi
     const auto targetField = fields::select({QStringLiteral("target")}, {}, options);
     const auto secondaryTargetField =
         fields::select({QStringLiteral("secondaryTarget")}, {}, options);
+    const auto confidenceThresholdField =
+        fields::number({QStringLiteral("confidenceThreshold")}, {30, 100, 1, 0}, options);
     const auto modelsField = fields::select({QStringLiteral("service")}, {}, options);
     auto* source = sourceField.editor;
     auto* target = targetField.editor;
     auto* secondaryTarget = secondaryTargetField.editor;
+    auto* confidenceThreshold = confidenceThresholdField.editor;
     auto* models = modelsField.editor;
     source->setObjectName(QStringLiteral("screenshotTranslationSourceLanguage"));
     target->setObjectName(QStringLiteral("screenshotTranslationTargetLanguage"));
     secondaryTarget->setObjectName(QStringLiteral("screenshotTranslationSecondaryTargetLanguage"));
+    confidenceThreshold->setObjectName(
+        QStringLiteral("screenshotTranslationLanguageDetectionConfidenceThreshold"));
+    confidenceThresholdField.field->syncValue(
+        service.preferences().languageDetectionConfidenceThreshold);
     models->setObjectName(QStringLiteral("screenshotTranslationService"));
     for (auto* select : {source, target, secondaryTarget, models}) {
         select->setSearchEnabled(true);
@@ -127,17 +136,29 @@ createScreenshotTranslationSettingsDialog(translation::TranslationService& servi
             QT_TRANSLATE_NOOP("ScreenshotTranslationSettingsDialog", "Source language"),
             QT_TRANSLATE_NOOP("ScreenshotTranslationSettingsDialog", "Primary Target Language"),
             QT_TRANSLATE_NOOP("ScreenshotTranslationSettingsDialog", "Secondary Target Language"),
+            QT_TRANSLATE_NOOP("ScreenshotTranslationSettingsDialog",
+                              "Language Detection Confidence Threshold"),
             QT_TRANSLATE_NOOP("ScreenshotTranslationSettingsDialog", "Translation service"),
             QT_TRANSLATE_NOOP("ScreenshotTranslationSettingsDialog", "Original Image Translation")};
-        fields::FormField* const fieldControllers[] = {sourceField.field, targetField.field,
-                                                       secondaryTargetField.field,
-                                                       modelsField.field, imageField.field};
-        for (int i = 0; i < 5; ++i) {
+        fields::FormField* const fieldControllers[] = {
+            sourceField.field,          targetField.field,
+            secondaryTargetField.field, confidenceThresholdField.field,
+            modelsField.field,          imageField.field};
+        for (int i = 0; i < 6; ++i) {
             auto* field = fieldControllers[i];
             auto metadata = field->metadata();
             metadata.label = {"ScreenshotTranslationSettingsDialog", labels[i]};
             field->setMetadata(metadata);
         }
+        auto confidenceMetadata = confidenceThresholdField.field->metadata();
+        confidenceMetadata.description = {
+            "ScreenshotTranslationSettingsDialog",
+            QT_TRANSLATE_NOOP(
+                "ScreenshotTranslationSettingsDialog",
+                "Minimum confidence required to switch to the secondary target language")};
+        confidenceMetadata.suffix = {"ScreenshotTranslationSettingsDialog",
+                                     QT_TRANSLATE_NOOP("ScreenshotTranslationSettingsDialog", "%")};
+        confidenceThresholdField.field->setMetadata(confidenceMetadata);
         const auto selectedSource = source->currentValue();
         const auto selectedTarget = target->currentValue();
         const auto selectedSecondaryTarget = secondaryTarget->currentValue();
@@ -206,6 +227,9 @@ createScreenshotTranslationSettingsDialog(translation::TranslationService& servi
                          if (!draft->secondaryTargetEdited)
                              secondaryTargetField.field->syncValue(
                                  service.preferences().secondaryTargetLanguage);
+                         if (!draft->confidenceThresholdEdited)
+                             confidenceThresholdField.field->syncValue(
+                                 service.preferences().languageDetectionConfidenceThreshold);
                          sync();
                      });
     QObject::connect(source, &AdSelect::currentValueChanged, modal, [draft] {
@@ -219,6 +243,10 @@ createScreenshotTranslationSettingsDialog(translation::TranslationService& servi
     QObject::connect(secondaryTarget, &AdSelect::currentValueChanged, modal, [draft] {
         if (!draft->applying)
             draft->secondaryTargetEdited = true;
+    });
+    QObject::connect(confidenceThreshold, &AdInputNumber::valueChanged, modal, [draft] {
+        if (!draft->applying)
+            draft->confidenceThresholdEdited = true;
     });
     QObject::connect(models, &AdSelect::currentValueChanged, modal, [draft] {
         if (!draft->applying)
@@ -253,7 +281,8 @@ createScreenshotTranslationSettingsDialog(translation::TranslationService& servi
             return;
         if (!liveService->savePreferences(
                 {source->currentValue().toString(), target->currentValue().toString(),
-                 models->currentValue().toString(), secondaryTarget->currentValue().toString()}))
+                 models->currentValue().toString(), secondaryTarget->currentValue().toString(),
+                 static_cast<int>(confidenceThreshold->value())}))
             return;
         const storage::ScreenshotTranslationSettings settings;
         const bool changed = settings.originalImageTranslationEnabled() != image->isChecked();
@@ -270,7 +299,7 @@ createScreenshotTranslationSettingsDialog(translation::TranslationService& servi
             displayModeChanged(false);
         }
         for (auto* field : {sourceField.field, targetField.field, secondaryTargetField.field,
-                            modelsField.field, imageField.field})
+                            confidenceThresholdField.field, modelsField.field, imageField.field})
             field->notifyCommitted();
         modal->accept();
     });

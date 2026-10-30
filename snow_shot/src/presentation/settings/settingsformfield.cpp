@@ -5,7 +5,10 @@
 #include "snow_shot/network/snowshotapiclient.h"
 #endif
 #include "snow_shot/storage/configurationschema.h"
+#include "snow_shot/storage/timevariables.h"
+#include "snow_shot/storage/screenshotexportvariables.h"
 #include "widgets/radio.h"
+#include "widgets/modal.h"
 
 #include <QEvent>
 #include <QFileDialog>
@@ -29,6 +32,19 @@ struct SettingsFormField::Impl {
         : q(owner), descriptor(fieldDescriptor), session(runtime) {
         const auto& definition = *descriptor.definition;
         fields::Metadata metadata{descriptor.id, definition.title, definition.description};
+        const auto* text = std::get_if<SettingsTextDefinition>(&definition.payload);
+        const auto* directory = std::get_if<SettingsDirectoryPathDefinition>(&definition.payload);
+        if ((directory != nullptr &&
+             (directory->binding == SettingsDirectoryPathBinding::ScreenshotImageDirectory ||
+              directory->binding == SettingsDirectoryPathBinding::ScreenRecordingVideoDirectory)) ||
+            (text != nullptr &&
+             (text->binding == SettingsTextBinding::ScreenshotManualFilenameFormat ||
+              text->binding == SettingsTextBinding::ScreenshotAutoFilenameFormat ||
+              text->binding == SettingsTextBinding::ScreenRecordingVideoFilenameFormat))) {
+            metadata.descriptionAction = {
+                "SettingsVariableHelp",
+                QT_TRANSLATE_NOOP("SettingsVariableHelp", "Variable Description")};
+        }
         options.allowClear = descriptor.kind == SettingsFieldKind::FilePath ||
                              descriptor.kind == SettingsFieldKind::DirectoryPath;
         std::visit(
@@ -47,7 +63,7 @@ struct SettingsFormField::Impl {
                                              session.requestSelectOptions(binding);
                                          });
                     }
-                    if (payload.binding == SettingsSelectBinding::AppFont) {
+                    if (payload.source == SettingsSelectSource::FontFamilies) {
                         field->setChoiceUpdater(
                             [this](const auto& choices) { updateFontModel(choices); });
                         QObject::connect(handle.editor, &adqt::widgets::AdSelect::popupOpening, &q,
@@ -202,13 +218,21 @@ struct SettingsFormField::Impl {
                     const auto handle = fields::directoryPath(metadata, options);
                     field = handle.field;
                     editor = handle.editor;
-                    QObject::connect(handle.editor, &DirectoryPathInput::browseRequested, &q,
-                                     [this, payload](const QString& current) {
-                                         const QString path = QFileDialog::getExistingDirectory(
-                                             field->viewWidget()->window(),
-                                             payload.dialogTitle.translated(), current);
-                                         commitBrowsedPath(path);
-                                     });
+                    QObject::connect(
+                        handle.editor, &DirectoryPathInput::browseRequested, &q,
+                        [this, payload](const QString& current) {
+                            const QString path = QFileDialog::getExistingDirectory(
+                                field->viewWidget()->window(), payload.dialogTitle.translated(),
+                                (payload.binding == SettingsDirectoryPathBinding::
+                                                        ScreenshotImageDirectory ||
+                                         payload.binding == SettingsDirectoryPathBinding::
+                                                                ScreenRecordingVideoDirectory
+                                     ? storage::expandScreenshotExportVariables(
+                                           current, QDateTime::currentDateTime())
+                                     : storage::expandTimeVariables(current,
+                                                                    QDateTime::currentDateTime())));
+                            commitBrowsedPath(path);
+                        });
                 } else if constexpr (std::is_same_v<Payload, SettingsTextDefinition>) {
                     options.commitPolicy = fields::CommitPolicy::OnFinish;
                     options.allowClear = payload.binding == SettingsTextBinding::ServerUrl;
@@ -223,6 +247,8 @@ struct SettingsFormField::Impl {
             },
             definition.payload);
         Q_ASSERT(field != nullptr && editor != nullptr);
+        QObject::connect(field, &fields::FormField::descriptionActionRequested, &q,
+                         [this] { showVariableDescription(); });
         q.setParent(field->viewWidget());
         field->viewWidget()->setObjectName(
             generatedObjectName(QStringLiteral("settings-item"), descriptor.id));
@@ -274,6 +300,57 @@ struct SettingsFormField::Impl {
         retranslateUi();
     }
 
+    void retranslateVariableDescription() {
+        if (!variableModal)
+            return;
+        variableModal->setWindowTitle(
+            QCoreApplication::translate("SettingsVariableHelp", "Variable Description"));
+        variableModal->setAcceptText(QCoreApplication::translate("SettingsVariableHelp", "OK"));
+        QString text = QCoreApplication::translate("SettingsVariableHelp", "%1: Current time")
+                           .arg(QStringLiteral("{YYYY}"));
+        const auto* directory =
+            std::get_if<SettingsDirectoryPathDefinition>(&descriptor.definition->payload);
+        const auto* filename = std::get_if<SettingsTextDefinition>(&descriptor.definition->payload);
+        const bool windowVariables =
+            (directory &&
+             (directory->binding == SettingsDirectoryPathBinding::ScreenshotImageDirectory ||
+              directory->binding == SettingsDirectoryPathBinding::ScreenRecordingVideoDirectory)) ||
+            (filename &&
+             (filename->binding == SettingsTextBinding::ScreenshotManualFilenameFormat ||
+              filename->binding == SettingsTextBinding::ScreenshotAutoFilenameFormat ||
+              filename->binding == SettingsTextBinding::ScreenRecordingVideoFilenameFormat));
+        if (windowVariables) {
+            text += QLatin1Char('\n') +
+                    QCoreApplication::translate("SettingsVariableHelp", "%1: Application Name")
+                        .arg(QStringLiteral("{AN}"));
+            text += QLatin1Char('\n') +
+                    QCoreApplication::translate("SettingsVariableHelp", "%1: Window Name")
+                        .arg(QStringLiteral("{WN}"));
+        }
+        variableModal->setText(text);
+    }
+
+    void showVariableDescription() {
+        if (variableModal)
+            return;
+        auto* modal = new adqt::widgets::AdModal(field->viewWidget());
+        variableModal = modal;
+        modal->setObjectName(QStringLiteral("settingsVariableDescriptionModal"));
+        modal->setMode(adqt::widgets::AdModal::Mode::Overlay);
+        modal->setOwnerWindow(field->viewWidget()->window());
+        modal->setCentered(true);
+        modal->setPreferredWidth(480);
+        modal->setPreset(adqt::widgets::AdModal::Preset::Plain);
+        modal->setStandardButtons(adqt::widgets::AdModal::StandardButton::Ok);
+        QObject::connect(modal, &adqt::widgets::AdModal::finished, &q,
+                         [this, modal](adqt::widgets::AdModal::DialogCode) {
+                             variableModal = nullptr;
+                             modal->deleteLater();
+                         });
+        retranslateVariableDescription();
+        modal->setOpen(true);
+    }
+
     void commitBrowsedPath(const QString& path) {
         if (path.isEmpty())
             return;
@@ -287,7 +364,7 @@ struct SettingsFormField::Impl {
         QVector<fields::Choice> choices;
         for (const auto& option : definition.options)
             choices.push_back({option.value, option.label});
-        const bool font = definition.binding == SettingsSelectBinding::AppFont;
+        const bool font = definition.source == SettingsSelectSource::FontFamilies;
         if (!font || fontOptionsLoaded) {
             for (const auto& option : session.dynamicSelectOptions(definition.binding))
                 choices.push_back({option.value, {}, option.label});
@@ -364,7 +441,7 @@ struct SettingsFormField::Impl {
         if (!hasState || lastDraft != state.draftValue) {
             if (const auto* select =
                     std::get_if<SettingsSelectDefinition>(&descriptor.definition->payload);
-                select != nullptr && select->binding == SettingsSelectBinding::AppFont)
+                select != nullptr && select->source == SettingsSelectSource::FontFamilies)
                 syncChoices();
             field->syncValue(state.draftValue);
             lastDraft = state.draftValue;
@@ -424,6 +501,7 @@ struct SettingsFormField::Impl {
     }
 
     void retranslateUi() {
+        retranslateVariableDescription();
         syncChoices();
         field->retranslateUi();
         if (const auto* file =
@@ -452,6 +530,7 @@ struct SettingsFormField::Impl {
     const SettingsFieldDescriptor& descriptor;
     SettingsRuntimeSession& session;
     fields::FormField* field = nullptr;
+    QPointer<adqt::widgets::AdModal> variableModal;
     QWidget* editor = nullptr;
     adqt::widgets::AdRadioButtonGroup* radioGroup = nullptr;
     QVariant lastDraft;

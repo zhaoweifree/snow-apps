@@ -11,11 +11,13 @@ mod scene_order;
 mod scene_order_tests;
 mod selection_visuals;
 #[cfg(test)]
+mod shape_text_tests;
+#[cfg(test)]
 mod smart_erase_tests;
 #[cfg(test)]
 mod speech_bubble_tests;
 
-use dirty_regions::finalize_dirty_regions;
+use dirty_regions::{finalize_dirty_regions, finalize_sparse_dirty_regions};
 use item_bounds::*;
 use item_conversions::*;
 use overlay_composition::*;
@@ -23,7 +25,7 @@ pub use scene_cache::DocumentSceneCache;
 use scene_composition::*;
 use selection_visuals::*;
 use snow_draw_engine_core::{
-    ColorRgba8, CornerRadii, DrawRect, Point, SnapConfig, SnapGuide, ViewportQuery,
+    ColorRgba8, CornerRadii, DrawRect, Point, SnapConfig, ViewportQuery,
     arrow::{
         ArrowEndpointPosition, ArrowPathCommand, ArrowType, ArrowheadDashMode, ArrowheadFillMode,
         ArrowheadRenderPrimitive, StrokeStyle,
@@ -308,33 +310,14 @@ impl ViewportComposer {
                 })
             })
             .collect();
-        let path_geometry_ops = scene
+        let mut path_geometry_ops = Vec::new();
+        for item in scene
             .ops
             .iter()
             .flat_map(|operation| operation.insert_items.iter())
-            .filter_map(|item| {
-                let path = match item {
-                    SceneDisplayItem::Arrow(path) => path,
-                    SceneDisplayItem::SpeechBubble(bubble) => &bubble.path,
-                    _ => return None,
-                };
-                Some(PathGeometryPatch {
-                    id: path.id,
-                    expected_geometry_revision: 0,
-                    resulting_geometry_revision: path.geometry.revision,
-                    ranges: vec![PathChunkReplacement {
-                        start: 0,
-                        delete_count: 0,
-                        insert_chunks: path.geometry.chunks.to_vec(),
-                    }],
-                    old_changed_bounds: [0.0; 4],
-                    new_changed_bounds: path.geometry.canvas_bounds,
-                    closed: path.geometry.closed,
-                    full_reset: true,
-                    element_removed: false,
-                })
-            })
-            .collect();
+        {
+            append_path_geometry_change(&mut path_geometry_ops, None, Some(item));
+        }
         ViewportPatch {
             frame_view: self.frame_view,
             decoration: DecorationPatch {
@@ -412,78 +395,120 @@ fn append_path_geometry_change(
         SceneDisplayItem::SpeechBubble(bubble) => Some(&bubble.path),
         _ => None,
     });
+    let style_unchanged = old.zip(next).is_some_and(|(old, next)| {
+        old.id == next.id
+            && old.stroke == next.stroke
+            && old.stroke_width == next.stroke_width
+            && old.stroke_style == next.stroke_style
+            && old.stroke_rendering_style == next.stroke_rendering_style
+            && old.stroke_rendering_seed == next.stroke_rendering_seed
+            && old.fill == next.fill
+            && old.fill_style == next.fill_style
+            && old.opacity == next.opacity
+            && old.blend_mode == next.blend_mode
+            && old.brush_mode == next.brush_mode
+    });
+    append_geometry_change(
+        result,
+        old.map(|p| (p.id, p.geometry.as_ref())),
+        next.map(|p| (p.id, p.geometry.as_ref())),
+        snow_draw_engine_display::PathGeometryRole::Centerline,
+        style_unchanged,
+    );
+    append_geometry_change(
+        result,
+        old.and_then(|p| p.pressure_geometry.as_deref().map(|g| (p.id, g))),
+        next.and_then(|p| p.pressure_geometry.as_deref().map(|g| (p.id, g))),
+        snow_draw_engine_display::PathGeometryRole::PressureOutline,
+        style_unchanged,
+    );
+}
+
+fn append_geometry_change(
+    result: &mut Vec<PathGeometryPatch>,
+    old: Option<(DisplayItemId, &snow_draw_engine_core::PathGeometry)>,
+    next: Option<(DisplayItemId, &snow_draw_engine_core::PathGeometry)>,
+    role: snow_draw_engine_display::PathGeometryRole,
+    style_unchanged: bool,
+) {
     match (old, next) {
-        (Some(old), Some(next)) if old.id == next.id => {
-            let style_unchanged = old.stroke == next.stroke
-                && old.stroke_width == next.stroke_width
-                && old.stroke_style == next.stroke_style
-                && old.fill == next.fill
-                && old.fill_style == next.fill_style
-                && old.opacity == next.opacity
-                && old.blend_mode == next.blend_mode;
-            if old.geometry == next.geometry && style_unchanged {
+        (Some((old_id, old)), Some((id, next))) if old_id == id => {
+            if old == next && style_unchanged {
                 return;
             }
-            let full_reset = !style_unchanged || old.geometry.revision == next.geometry.revision;
+            let full_reset = !style_unchanged || old.revision == next.revision;
             let ranges = if full_reset {
                 vec![PathChunkReplacement {
                     start: 0,
-                    delete_count: old.geometry.chunks.len() as u32,
-                    insert_chunks: next.geometry.chunks.to_vec(),
+                    delete_count: old.chunks.len() as u32,
+                    insert_chunks: next.chunks.to_vec(),
                 }]
             } else {
-                diff_path_chunks(&old.geometry.chunks, &next.geometry.chunks)
+                diff_path_chunks(&old.chunks, &next.chunks)
             };
-            let (old_bounds, new_bounds) =
-                changed_chunk_bounds(&old.geometry.chunks, &next.geometry.chunks, &ranges);
+            let (old_bounds, new_bounds) = changed_chunk_bounds(&old.chunks, &next.chunks, &ranges);
             result.push(PathGeometryPatch {
-                id: next.id,
-                expected_geometry_revision: old.geometry.revision,
-                resulting_geometry_revision: next.geometry.revision,
+                role,
+                id,
+                expected_geometry_revision: old.revision,
+                resulting_geometry_revision: next.revision,
                 ranges,
                 old_changed_bounds: if full_reset {
-                    old.geometry.canvas_bounds
+                    old.canvas_bounds
                 } else {
                     old_bounds
                 },
                 new_changed_bounds: if full_reset {
-                    next.geometry.canvas_bounds
+                    next.canvas_bounds
                 } else {
                     new_bounds
                 },
-                closed: next.geometry.closed,
+                closed: next.closed,
                 full_reset,
                 element_removed: false,
             });
         }
-        (Some(old), _) => result.push(PathGeometryPatch {
-            id: old.id,
-            expected_geometry_revision: old.geometry.revision,
+        (Some((id, old)), _) => result.push(PathGeometryPatch {
+            role,
+            id,
+            expected_geometry_revision: old.revision,
             resulting_geometry_revision: 0,
             ranges: Vec::new(),
-            old_changed_bounds: old.geometry.canvas_bounds,
+            old_changed_bounds: old.canvas_bounds,
             new_changed_bounds: [0.0; 4],
             closed: false,
             full_reset: false,
             element_removed: true,
         }),
-        (_, Some(next)) => result.push(PathGeometryPatch {
-            id: next.id,
+        (_, Some((id, next))) => result.push(PathGeometryPatch {
+            role,
+            id,
             expected_geometry_revision: 0,
-            resulting_geometry_revision: next.geometry.revision,
+            resulting_geometry_revision: next.revision,
             ranges: vec![PathChunkReplacement {
                 start: 0,
                 delete_count: 0,
-                insert_chunks: next.geometry.chunks.to_vec(),
+                insert_chunks: next.chunks.to_vec(),
             }],
             old_changed_bounds: [0.0; 4],
-            new_changed_bounds: next.geometry.canvas_bounds,
-            closed: next.geometry.closed,
+            new_changed_bounds: next.canvas_bounds,
+            closed: next.closed,
             full_reset: true,
             element_removed: false,
         }),
         _ => {}
     }
+}
+
+fn path_chunk_equal(
+    a: &snow_draw_engine_core::PathChunk,
+    b: &snow_draw_engine_core::PathChunk,
+) -> bool {
+    (Arc::ptr_eq(&a.commands, &b.commands)
+        && a.stable_id == b.stable_id
+        && a.command_start == b.command_start
+        && a.canvas_bounds == b.canvas_bounds)
+        || a == b
 }
 
 fn diff_path_chunks(
@@ -494,12 +519,12 @@ fn diff_path_chunks(
         let mut ranges = Vec::new();
         let mut index = 0;
         while index < old.len() {
-            if old[index] == next[index] {
+            if path_chunk_equal(&old[index], &next[index]) {
                 index += 1;
                 continue;
             }
             let start = index;
-            while index < old.len() && old[index] != next[index] {
+            while index < old.len() && !path_chunk_equal(&old[index], &next[index]) {
                 index += 1;
             }
             ranges.push(PathChunkReplacement {
@@ -513,13 +538,13 @@ fn diff_path_chunks(
     let prefix = old
         .iter()
         .zip(next)
-        .take_while(|(left, right)| left == right)
+        .take_while(|(left, right)| path_chunk_equal(left, right))
         .count();
     let suffix = old[prefix..]
         .iter()
         .rev()
         .zip(next[prefix..].iter().rev())
-        .take_while(|(left, right)| left == right)
+        .take_while(|(left, right)| path_chunk_equal(left, right))
         .count();
     vec![PathChunkReplacement {
         start: prefix as u32,
@@ -1120,6 +1145,64 @@ fn pen_filter_tail_dirty_region(
     ))
 }
 
+fn pressure_geometry_dirty_regions(
+    old_item: &SceneDisplayItem,
+    new_item: &SceneDisplayItem,
+    frame: FrameView,
+) -> Option<Vec<DirtyRegion>> {
+    let (SceneDisplayItem::Arrow(old), SceneDisplayItem::Arrow(new)) = (old_item, new_item) else {
+        return None;
+    };
+    if old.id != new.id
+        || !old.is_free_draw
+        || !new.is_free_draw
+        || old.stroke != new.stroke
+        || old.stroke_width != new.stroke_width
+        || old.stroke_style != new.stroke_style
+        || old.stroke_rendering_style != new.stroke_rendering_style
+        || old.stroke_rendering_seed != new.stroke_rendering_seed
+        || old.fill != new.fill
+        || old.fill_style != new.fill_style
+        || old.opacity != new.opacity
+        || old.blend_mode != new.blend_mode
+        || old.brush_mode != new.brush_mode
+        || ((old.geometry.closed || new.geometry.closed)
+            && (old.fill_style.is_visible(old.fill) || new.fill_style.is_visible(new.fill)))
+    {
+        return None;
+    }
+    let (Some(old_pressure), Some(new_pressure)) = (&old.pressure_geometry, &new.pressure_geometry)
+    else {
+        return None;
+    };
+    let ranges = diff_path_chunks(&old_pressure.chunks, &new_pressure.chunks);
+    let mut dirty = Vec::new();
+    for range in &ranges {
+        // Visit real chunks only: an absent side has no coverage at the canvas origin.
+        for chunk in old_pressure
+            .chunks
+            .iter()
+            .skip(range.start as usize)
+            .take(range.delete_count as usize)
+            .chain(range.insert_chunks.iter())
+        {
+            let bounds = chunk.canvas_bounds;
+            if bounds.iter().any(|value| !value.is_finite()) {
+                return None;
+            }
+            let top = canvas_point_to_surface(frame, Point::new(bounds[0], bounds[1]));
+            let bottom = canvas_point_to_surface(frame, Point::new(bounds[2], bounds[3]));
+            dirty.push(DirtyRegion::new(
+                top.x.min(bottom.x) - 2.0,
+                top.y.min(bottom.y) - 2.0,
+                top.x.max(bottom.x) + 2.0,
+                top.y.max(bottom.y) + 2.0,
+            ));
+        }
+    }
+    Some(dirty)
+}
+
 fn path_geometry_dirty_region(
     old_item: &SceneDisplayItem,
     new_item: &SceneDisplayItem,
@@ -1132,14 +1215,18 @@ fn path_geometry_dirty_region(
         && old.stroke == new.stroke
         && old.stroke_width == new.stroke_width
         && old.stroke_style == new.stroke_style
+        && old.stroke_rendering_style == new.stroke_rendering_style
+        && old.stroke_rendering_seed == new.stroke_rendering_seed
         && old.fill == new.fill
         && old.fill_style == new.fill_style
         && old.opacity == new.opacity
-        && old.blend_mode == new.blend_mode;
+        && old.blend_mode == new.blend_mode
+        && old.brush_mode == new.brush_mode;
     if !style_unchanged
         || old.geometry == new.geometry
         || old.geometry.revision == new.geometry.revision
-        || ((old.geometry.closed || new.geometry.closed) && (old.fill.a != 0 || new.fill.a != 0))
+        || ((old.geometry.closed || new.geometry.closed)
+            && (old.fill_style.is_visible(old.fill) || new.fill_style.is_visible(new.fill)))
     {
         return None;
     }
@@ -1311,6 +1398,22 @@ fn build_scene_layer_patch_with_plan(
     let new_end = start
         .saturating_add(operation.insert_items.len())
         .min(next_items.len());
+    if operation.delete_count == 1
+        && operation.insert_items.len() == 1
+        && let Some(deltas) =
+            pressure_geometry_dirty_regions(&current_items[start], &next_items[start], frame_view)
+    {
+        patch.dirty_regions = finalize_sparse_dirty_regions(
+            deltas
+                .into_iter()
+                .map(|delta| {
+                    dirty_region_through_plan(next_items, start, delta, frame_view, next_plan)
+                })
+                .collect(),
+            frame_view.surface,
+        );
+        return (patch, revision);
+    }
     if operation.delete_count == 1
         && operation.insert_items.len() == 1
         && let Some(delta) =
@@ -1614,6 +1717,9 @@ mod tests {
 
     fn spotlight_rect(center: Point<f64>, width: f64, height: f64) -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center,
@@ -1701,6 +1807,10 @@ mod tests {
             false,
         ));
         SceneDisplayItem::Arrow(ArrowDisplayItem {
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
+            brush_mode: Default::default(),
+            pressure_geometry: None,
             bound_text_id: None,
             label_bounds: None,
             bound_text_overlay: false,
@@ -1825,6 +1935,110 @@ mod tests {
             "unchanged path prefix was invalidated: {dirty:?}"
         );
         assert!(dirty.max_x >= 528.0);
+    }
+
+    fn pressure_damage_display(revision: u64, rectangles: &[[f64; 4]]) -> SceneDisplayItem {
+        let mut item = long_path_display(revision, 10.0);
+        let SceneDisplayItem::Arrow(arrow) = &mut item else {
+            unreachable!()
+        };
+        arrow.brush_mode = snow_draw_engine_core::BrushMode::PressureSensitive;
+        let tail = rectangles
+            .iter()
+            .enumerate()
+            .map(|(index, bounds)| {
+                (
+                    vec![
+                        PathCommand::MoveTo {
+                            point: [bounds[0], bounds[1]],
+                        },
+                        PathCommand::LineTo {
+                            point: [bounds[2], bounds[1]],
+                        },
+                        PathCommand::LineTo {
+                            point: [bounds[2], bounds[3]],
+                        },
+                        PathCommand::LineTo {
+                            point: [bounds[0], bounds[3]],
+                        },
+                        PathCommand::LineTo {
+                            point: [bounds[0], bounds[1]],
+                        },
+                    ],
+                    index as f64,
+                    (index + 1) as f64,
+                )
+            })
+            .collect();
+        arrow.pressure_geometry = Some(Arc::new(PathGeometry::replace_contour_tail(
+            None, revision, 0, tail,
+        )));
+        item
+    }
+
+    #[test]
+    fn pressure_chunk_insertions_and_removals_never_dirty_the_canvas_origin() {
+        let prefix = [100.0, 100.0, 120.0, 120.0];
+        let tail = [200.0, 200.0, 220.0, 220.0];
+        for (old, new) in [
+            (
+                pressure_damage_display(1, &[prefix]),
+                pressure_damage_display(2, &[prefix, tail]),
+            ),
+            (
+                pressure_damage_display(1, &[prefix, tail]),
+                pressure_damage_display(2, &[prefix]),
+            ),
+        ] {
+            let (patch, _) = build_scene_layer_patch(&[old], 1, &[new], frame_view(), false, false);
+            assert_eq!(patch.dirty_regions.len(), 1);
+            assert_eq!(
+                patch.dirty_regions[0],
+                DirtyRegion::new(698.0, 698.0, 722.0, 722.0)
+            );
+        }
+    }
+
+    #[test]
+    fn pressure_changed_chunks_keep_distant_damage_separate() {
+        let old = pressure_damage_display(1, &[[100.0, 100.0, 120.0, 120.0]]);
+        let new = pressure_damage_display(2, &[[300.0, 300.0, 320.0, 320.0]]);
+        let (patch, _) = build_scene_layer_patch(&[old], 1, &[new], frame_view(), false, false);
+        assert_eq!(patch.dirty_regions.len(), 2);
+        assert!(dirty_regions_cover(
+            &patch.dirty_regions,
+            DirtyRegion::new(598.0, 598.0, 622.0, 622.0)
+        ));
+        assert!(dirty_regions_cover(
+            &patch.dirty_regions,
+            DirtyRegion::new(798.0, 798.0, 822.0, 822.0)
+        ));
+        assert!(
+            patch
+                .dirty_regions
+                .iter()
+                .all(|region| !(region.min_x < 700.0
+                    && region.max_x > 700.0
+                    && region.min_y < 700.0
+                    && region.max_y > 700.0))
+        );
+    }
+
+    #[test]
+    fn pressure_closed_filled_paths_keep_the_full_face_damage_fallback() {
+        let mut old = pressure_damage_display(1, &[[100.0, 100.0, 120.0, 120.0]]);
+        let mut new = pressure_damage_display(2, &[[110.0, 110.0, 130.0, 130.0]]);
+        for item in [&mut old, &mut new] {
+            let SceneDisplayItem::Arrow(arrow) = item else {
+                unreachable!()
+            };
+            Arc::make_mut(&mut arrow.geometry).closed = true;
+            arrow.fill.a = 255;
+        }
+        assert!(pressure_geometry_dirty_regions(&old, &new, frame_view()).is_none());
+        let old_bounds = scene_display_item_bounds(&old, frame_view()).unwrap();
+        let (patch, _) = build_scene_layer_patch(&[old], 1, &[new], frame_view(), false, false);
+        assert!(dirty_regions_cover(&patch.dirty_regions, old_bounds));
     }
 
     fn patch_for_creation_preview(preview: ElementCreationPreview) -> Arc<ViewportPatch> {
@@ -2139,6 +2353,9 @@ mod tests {
     fn spotlight_decoration_tracks_first_drag_and_visible_cutouts() {
         let mut model = DocumentModel::new();
         let spotlight = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(100.0, 80.0),
@@ -2544,6 +2761,9 @@ mod tests {
     #[test]
     fn rectangle_creation_preview_updates_only_scene_channel() {
         let patch = patch_for_creation_preview(ElementCreationPreview::Rectangle(RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(20.0, 30.0),

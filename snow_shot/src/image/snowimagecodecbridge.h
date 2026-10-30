@@ -20,7 +20,7 @@
 #define SNOW_SHOT_IMAGE_CODEC_CALL
 #endif
 
-#define SNOW_SHOT_IMAGE_CODEC_ABI_VERSION 3U
+#define SNOW_SHOT_IMAGE_CODEC_ABI_VERSION 4U
 
 #ifdef __cplusplus
 extern "C" {
@@ -179,6 +179,20 @@ typedef struct SnowShotImageCodecByteSink {
     uint8_t reserved[7];
 } SnowShotImageCodecByteSink;
 
+// Synchronous decode callbacks. Storage is optional and, when supplied, remains valid until
+// decode returns. Rows are published in order even when a codec writes directly into storage.
+typedef struct SnowShotImageCodecRgba8Sink {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    void* context;
+    int32_t(SNOW_SHOT_IMAGE_CODEC_CALL* begin)(void* context, uint32_t width, uint32_t height);
+    uint8_t*(SNOW_SHOT_IMAGE_CODEC_CALL* storage)(void* context, uint64_t stride, uint64_t size);
+    int32_t(SNOW_SHOT_IMAGE_CODEC_CALL* write_rows)(void* context, uint32_t first_row,
+                                                    uint32_t row_count, uint64_t stride,
+                                                    const uint8_t* pixels, uint64_t size);
+    SnowShotImageCodecCancelCallback is_cancelled;
+} SnowShotImageCodecRgba8Sink;
+
 typedef struct SnowShotImageCodecEncodeResult {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -232,6 +246,12 @@ SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL snow_shot_image_cod
     const uint8_t* encoded, uint64_t encoded_size, uint32_t expected_format,
     SnowShotImageCodecBuffer* output, char* error, uint64_t error_capacity);
 
+// Borrows encoded storage only for this call and stops when frame zero is complete.
+SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL
+snow_shot_image_codec_decode_first_rgba8(const uint8_t* encoded, uint64_t encoded_size,
+                                         uint32_t expected_format, SnowShotImageCodecBuffer* output,
+                                         char* error, uint64_t error_capacity);
+
 // Decode only the ICO frame nearest the requested extent (first entry wins ties).
 SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL
 snow_shot_image_codec_decode_icon_rgba8(const uint8_t* encoded, uint64_t encoded_size,
@@ -253,11 +273,29 @@ SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL snow_shot_image_cod
 SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL snow_shot_image_codec_inspect(
     const uint8_t* encoded, uint64_t encoded_size, uint32_t expected_format,
     SnowShotImageCodecImageInfo* output, char* error, uint64_t error_capacity);
+SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL snow_shot_image_codec_inspect_canvas(
+    const uint8_t* encoded, uint64_t encoded_size, uint32_t expected_format,
+    SnowShotImageCodecImageInfo* output, char* error, uint64_t error_capacity);
 
 SNOW_SHOT_IMAGE_CODEC_API void SNOW_SHOT_IMAGE_CODEC_CALL
 snow_shot_image_codec_release_buffer(SnowShotImageCodecBuffer* buffer);
 
 // Export-only operations use caller-owned, optionally file-mapped RGBA buffers.
+typedef struct SnowShotImageCodecResizePlan SnowShotImageCodecResizePlan;
+SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL snow_shot_image_codec_resize_resources(
+    uint32_t source_width, uint32_t source_height, uint32_t output_width, uint32_t output_height,
+    uint64_t* retained_bytes, uint64_t* working_bytes);
+// Source callbacks and their context must remain alive until the plan is destroyed.
+SNOW_SHOT_IMAGE_CODEC_API SnowShotImageCodecResizePlan* SNOW_SHOT_IMAGE_CODEC_CALL
+snow_shot_image_codec_prepare_resize(const SnowShotImageCodecRgba8Source* source,
+                                     uint32_t output_width, uint32_t output_height, char* error,
+                                     uint64_t error_capacity);
+SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL snow_shot_image_codec_resize_rows(
+    const SnowShotImageCodecResizePlan* plan, uint32_t first_row, uint32_t row_count,
+    uint8_t* destination, uint64_t destination_stride, uint64_t destination_size, char* error,
+    uint64_t error_capacity);
+SNOW_SHOT_IMAGE_CODEC_API void SNOW_SHOT_IMAGE_CODEC_CALL
+snow_shot_image_codec_destroy_resize(SnowShotImageCodecResizePlan* plan);
 SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL snow_shot_image_codec_resize_rgba8(
     const SnowShotImageCodecRgba8Source* source, uint8_t* destination, uint64_t destination_stride,
     uint64_t destination_size, uint32_t output_width, uint32_t output_height, char* error,
@@ -266,6 +304,11 @@ SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL snow_shot_image_cod
     const char* utf8_path, uint8_t* destination, uint32_t width, uint32_t height,
     void* cancel_context, SnowShotImageCodecCancelCallback cancelled, char* error,
     uint64_t error_capacity);
+SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL
+snow_shot_image_codec_decode_file_rgba8_stream(const char* utf8_path, uint32_t expected_format,
+                                               uint32_t maximum_extent,
+                                               const SnowShotImageCodecRgba8Sink* sink, char* error,
+                                               uint64_t error_capacity);
 SNOW_SHOT_IMAGE_CODEC_API int32_t SNOW_SHOT_IMAGE_CODEC_CALL
 snow_shot_image_codec_export_limits(uint32_t format, uint32_t* width, uint32_t* height);
 

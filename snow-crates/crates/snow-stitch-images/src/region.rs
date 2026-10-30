@@ -18,6 +18,10 @@ use std::arch::x86_64::{
     _mm256_sub_ps,
 };
 
+#[cfg(target_arch = "aarch64")]
+#[path = "region_neon.rs"]
+mod neon;
+
 const DOWNSAMPLE: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,7 +96,9 @@ impl GrayImage {
         } else {
             downsample_pixels_scalar(frame, width, height)
         };
-        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        #[cfg(target_arch = "aarch64")]
+        let mut pixels = unsafe { neon::downsample(frame, width, height) };
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
         let mut pixels = downsample_pixels_scalar(frame, width, height);
 
         pixels = blur_3x3(&pixels, width, height);
@@ -139,6 +145,7 @@ fn downsample_row_scalar(frame: &Frame, scaled_y: usize, output: &mut [f32], fir
     }
 }
 
+#[cfg(any(test, not(target_arch = "aarch64")))]
 fn downsample_pixels_scalar(frame: &Frame, width: usize, height: usize) -> RasterArray<f32> {
     let mut pixels = RasterArray::<f32>::zeroed(width.saturating_mul(height));
     pixels
@@ -331,6 +338,10 @@ fn blur_3x3(source: &[f32], width: usize, height: usize) -> RasterArray<f32> {
     if std::arch::is_x86_feature_detected!("avx2") {
         return unsafe { blur_3x3_avx2(source, width, height) };
     }
+    #[cfg(target_arch = "aarch64")]
+    if std::arch::is_aarch64_feature_detected!("neon") {
+        return unsafe { neon::blur(source, width, height) };
+    }
     blur_3x3_scalar(source, width, height)
 }
 
@@ -437,6 +448,10 @@ fn sobel_magnitude(source: &[f32], width: usize, height: usize) -> RasterArray<f
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     if std::arch::is_x86_feature_detected!("avx2") {
         return unsafe { sobel_magnitude_avx2(source, width, height) };
+    }
+    #[cfg(target_arch = "aarch64")]
+    if std::arch::is_aarch64_feature_detected!("neon") {
+        return unsafe { neon::sobel(source, width, height) };
     }
     sobel_magnitude_scalar(source, width, height)
 }

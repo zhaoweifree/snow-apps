@@ -482,6 +482,8 @@ fn magnifier_lens_drag_ignores_other_button_releases() {
             .process_input(
                 viewport,
                 InputEvent::Pointer(PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 1,
                     event_type: PointerEventType::Up,
                     device: PointerDevice::Mouse,
@@ -507,6 +509,8 @@ fn magnifier_lens_drag_ignores_other_button_releases() {
             .process_input(
                 viewport,
                 InputEvent::Pointer(PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 1,
                     event_type: PointerEventType::Up,
                     device: PointerDevice::Mouse,

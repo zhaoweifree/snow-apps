@@ -98,6 +98,7 @@ pub(crate) struct UiState {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct CreateRectangleState {
+    pub(crate) stroke_rendering_seed: u32,
     pub(crate) pointer_id: u32,
     pub(crate) start_canvas_position: Point<f64>,
 }
@@ -112,6 +113,7 @@ pub(crate) enum ArrowCreationPhase {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct CreateArrowState {
+    pub(crate) stroke_rendering_seed: u32,
     pub(crate) pointer_id: u32,
     pub(crate) committed_points: Vec<Point<f64>>,
     pub(crate) press_view_position: Point<f64>,
@@ -515,6 +517,8 @@ pub(crate) struct EditorState {
     pub(crate) ui: UiState,
     pub(crate) interaction: InteractionState,
     pub(crate) active_text_draft: Option<ActiveTextDraftPresentation>,
+    pub(crate) shape_text_drag: Option<crate::shape_text::ShapeTextDrag>,
+    pub(crate) shape_text_generation: u32,
     pub(crate) pending_text_edit: Option<ElementId>,
     pub(crate) pending_speech_bubble_text_edit: Option<ElementId>,
     pub(crate) default_speech_bubble_style: RectangleShapeStyle,
@@ -638,6 +642,8 @@ impl EditorState {
             ui: UiState::default(),
             interaction: InteractionState::default(),
             active_text_draft: None,
+            shape_text_drag: None,
+            shape_text_generation: 0,
             pending_text_edit: None,
             pending_speech_bubble_text_edit: None,
             default_speech_bubble_style: default_styles.speech_bubble,
@@ -658,6 +664,7 @@ impl EditorState {
                 ..default_styles.arrow
             },
             default_line_style: ShapeStyle {
+                brush_mode: Default::default(),
                 arrow_type: normalized_line_arrow_type(default_styles.line.arrow_type),
                 arrow_shaft_type: Default::default(),
                 arrow_ratio: 1.0,

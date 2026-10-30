@@ -24,11 +24,10 @@ bool ScreenshotSelectionExportWorkflow::copySelectionToClipboard(ResultValidator
         selection.width() < 1 || selection.height() < 1) {
         return false;
     }
-    const ScreenshotSelectionParams savedSelectionParams = currentSelectionParams();
 
     return m_context.imageComposer.requestSelectionClipboard(
         selection, resultStyle(m_context.selection), &m_context.callbackContext,
-        [this, savedSelectionParams, publicationId, validator = std::move(validator),
+        [this, publicationId, validator = std::move(validator),
          completion = std::move(completion)](ScreenshotSelectionClipboardResult result) mutable {
             if (validator && !validator()) {
                 if (completion) {
@@ -45,8 +44,7 @@ bool ScreenshotSelectionExportWorkflow::copySelectionToClipboard(ResultValidator
             QImage resultImage = std::move(result.image);
             auto terminal = std::make_shared<bool>(false);
             auto publishCompletion = std::make_shared<std::function<void(bool)>>();
-            *publishCompletion = [this, terminal, savedSelectionParams,
-                                  validator = std::move(validator),
+            *publishCompletion = [terminal, validator = std::move(validator),
                                   completion = std::move(completion),
                                   resultImage = std::move(resultImage)](bool success) mutable {
                 if (*terminal) {
@@ -55,9 +53,6 @@ bool ScreenshotSelectionExportWorkflow::copySelectionToClipboard(ResultValidator
                 *terminal = true;
                 if (validator && !validator()) {
                     success = false;
-                }
-                if (success) {
-                    persistSelectionParams(savedSelectionParams);
                 }
                 if (completion) {
                     completion(success, success ? std::move(resultImage) : QImage{});
@@ -70,7 +65,8 @@ bool ScreenshotSelectionExportWorkflow::copySelectionToClipboard(ResultValidator
             if (!scheduled) {
                 (*publishCompletion)(false);
             }
-        });
+        },
+        m_context.selection.exportLayoutCompaction());
 }
 
 bool ScreenshotSelectionExportWorkflow::pinSelectionToScreen(ResultValidator validator,
@@ -83,20 +79,21 @@ bool ScreenshotSelectionExportWorkflow::pinSelectionToScreen(ResultValidator val
     }
 
     std::optional<ScreenshotPinnedSelectionRequest> request =
-        m_context.imageComposer.preparePinnedSelection(selection, resultStyle(m_context.selection));
+        m_context.imageComposer.preparePinnedSelection(
+            selection, resultStyle(m_context.selection),
+            m_context.selection.exportLayoutCompaction());
     if (!request.has_value()) {
         return false;
     }
     if (m_context.cachedRecognitionResults) {
         request->recognitionResults = m_context.cachedRecognitionResults();
     }
-    const ScreenshotSelectionParams savedSelectionParams = currentSelectionParams();
 
     return m_context.imageComposer.schedulePinnedSelection(
         std::move(*request), &m_context.callbackContext,
-        [this, validator = std::move(validator), completion = std::move(completion),
-         savedSelectionParams](ScreenshotPinnedSelectionRequest pinRequest,
-                               ScreenshotPinnedSelectionResultHandle result) mutable {
+        [this, validator = std::move(validator),
+         completion = std::move(completion)](ScreenshotPinnedSelectionRequest pinRequest,
+                                             ScreenshotPinnedSelectionResultHandle result) mutable {
             if (validator && !validator()) {
                 result.cancel();
                 if (completion) {
@@ -112,7 +109,7 @@ bool ScreenshotSelectionExportWorkflow::pinSelectionToScreen(ResultValidator val
             }
             const auto terminal = std::make_shared<bool>(false);
             const auto finish = std::make_shared<std::function<void(bool, QImage)>>();
-            *finish = [this, terminal, savedSelectionParams, validator = std::move(validator),
+            *finish = [terminal, validator = std::move(validator),
                        completion = std::move(completion)](bool success, QImage image) mutable {
                 if (*terminal)
                     return;
@@ -120,8 +117,6 @@ bool ScreenshotSelectionExportWorkflow::pinSelectionToScreen(ResultValidator val
                 if (validator && !validator())
                     success = false;
                 SNOW_SHOT_PIN_PERF_MILESTONE("workflow.destination_complete");
-                if (success)
-                    persistSelectionParams(savedSelectionParams);
                 if (completion)
                     completion(success, success ? std::move(image) : QImage{});
             };
@@ -132,27 +127,4 @@ bool ScreenshotSelectionExportWorkflow::pinSelectionToScreen(ResultValidator val
                 (*finish)(false, {});
             }
         });
-}
-
-ScreenshotSelectionParams ScreenshotSelectionExportWorkflow::currentSelectionParams() const {
-    return m_context.selection.params(selectionBounds());
-}
-
-QRect ScreenshotSelectionExportWorkflow::selectionBounds() const {
-    const QRectF bounds = m_context.geometry.canvasBounds();
-    if (bounds.isNull() || bounds.isEmpty()) {
-        return {};
-    }
-    return ScreenshotHalfOpenRect::fromRectF(bounds).toAlignedQRect();
-}
-
-void ScreenshotSelectionExportWorkflow::persistSelectionParams(
-    const ScreenshotSelectionParams& params) {
-    const QRect bounds = selectionBounds();
-    if (bounds.isEmpty()) {
-        m_context.selectionSettings.setPreviousSelectionParams(params);
-        return;
-    }
-    m_context.selectionSettings.setPreviousSelectionParams(
-        clampScreenshotSelectionParams(params, bounds));
 }

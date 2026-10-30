@@ -2,7 +2,9 @@
 
 mod desktop_layout;
 mod frame_geometry;
+mod target_screenshot;
 pub use desktop_layout::*;
+pub use target_screenshot::{SnowCaptureTargetScreenshotRequest, snow_capture_target_screenshot};
 
 use snow_capture::exclusions::SnowCaptureExclusions;
 use std::cell::RefCell;
@@ -74,6 +76,40 @@ pub struct SnowCaptureScreenshotResultImpl {
 
 pub struct SnowCaptureCursorSnapshotImpl {
     snapshot: ScreenshotCursorSnapshot,
+}
+
+/// Borrowed, immutable cursor artwork whose pixels outlive every caller.
+#[repr(C)]
+pub struct SnowCaptureCursorImageView {
+    pub rgba: *const u8,
+    pub rgba_len: usize,
+    pub width: u32,
+    pub height: u32,
+    pub hotspot_x: u32,
+    pub hotspot_y: u32,
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_capture_crosshair_cursor_image(
+    view: *mut SnowCaptureCursorImageView,
+) -> u8 {
+    let Some(view) = (unsafe { view.as_mut() }) else {
+        set_last_error("crosshair cursor image view must not be null");
+        return 0;
+    };
+    static SHAPE: std::sync::OnceLock<snow_cursor::CursorShape> = std::sync::OnceLock::new();
+    let shape = SHAPE.get_or_init(|| {
+        snow_cursor::crosshair_cursor_shape(32, 32).expect("valid base crosshair dimensions")
+    });
+    *view = SnowCaptureCursorImageView {
+        rgba: shape.shape_rgba.as_ptr(),
+        rgba_len: shape.shape_rgba.len(),
+        width: shape.width,
+        height: shape.height,
+        hotspot_x: shape.hotspot_x,
+        hotspot_y: shape.hotspot_y,
+    };
+    1
 }
 
 #[unsafe(no_mangle)]
@@ -2611,6 +2647,25 @@ pub mod macos;
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn crosshair_image_view_exposes_shared_immutable_artwork() {
+        unsafe {
+            let mut first: SnowCaptureCursorImageView = std::mem::zeroed();
+            let mut second: SnowCaptureCursorImageView = std::mem::zeroed();
+            assert_eq!(snow_capture_crosshair_cursor_image(&mut first), 1);
+            assert_eq!(snow_capture_crosshair_cursor_image(&mut second), 1);
+            assert_eq!(first.rgba, second.rgba);
+            assert_eq!((first.width, first.height), (32, 32));
+            assert_eq!((first.hotspot_x, first.hotspot_y), (16, 16));
+            let expected = snow_cursor::crosshair_cursor_shape(32, 32).unwrap();
+            assert_eq!(
+                std::slice::from_raw_parts(first.rgba, first.rgba_len),
+                expected.shape_rgba.as_ref()
+            );
+            assert_eq!(snow_capture_crosshair_cursor_image(ptr::null_mut()), 0);
+        }
+    }
 
     #[cfg(target_os = "macos")]
     #[test]

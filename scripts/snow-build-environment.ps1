@@ -9,8 +9,10 @@ if ($script:SnowQtToolchain.schemaVersion -cne 1 -or
     throw "The repository Qt toolchain manifest is invalid."
 }
 $script:SnowQtVersion = $script:SnowQtToolchain.qtVersion
-$script:SnowMsvcToolset = "14.51"
-$script:SnowRustToolchain = "1.97.1"
+$script:SnowBuildToolchain = Get-Content -Raw -LiteralPath (
+    Join-Path $PSScriptRoot "build-toolchain.json") | ConvertFrom-Json
+$script:SnowMsvcMinimum = [version]$script:SnowBuildToolchain.msvcToolsetMinimum
+$script:SnowRustMinimum = [version]$script:SnowBuildToolchain.rustMinimum
 $script:SnowRustTarget = "x86_64-pc-windows-msvc"
 $script:SnowStaticQtSchemaVersion = 6
 $script:SnowStaticQtFeaturePolicy = Get-Content -Raw -LiteralPath (
@@ -91,8 +93,9 @@ function Get-SnowWindowsTarget {
         Configuration = $configuration
         IsStatic = [bool]$static
         GeneratorPlatform = if ($Architecture -eq "arm64") { "ARM64" } else { "x64" }
-        Toolset = if ($Architecture -eq "arm64") { "version=14.51" }
-            else { "host=x64,version=14.51" }
+        Toolset = (@($(if ($Architecture -eq "x64") { "host=x64" }),
+            $(if ($env:VCToolsVersion) { "version=$($env:VCToolsVersion.TrimEnd('\', '/'))" })) |
+            Where-Object { $_ }) -join ','
     }
 }
 
@@ -138,17 +141,7 @@ function Test-SnowWindowsLibraryArchitecture {
         [Parameter(Mandatory = $true)][string]$Path,
         [ValidateSet("x64", "arm64")][string]$Architecture = "x64"
     )
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    $machine = if ($Architecture -eq "arm64") { 0xAA64 } else { 0x8664 }
-    # MSVC archives may contain /GL objects. dumpbin understands those and the
-    # archive linker members; use it instead of guessing from a directory name.
-    $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
-    if (-not $dumpbin) { return $false }
-    $headers = (& $dumpbin.Source /nologo /headers $Path 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) { return $false }
-    $machines = @([regex]::Matches($headers, '(?im)^\s*([0-9a-f]{4}) machine\s*\(') |
-        ForEach-Object { [Convert]::ToInt32($_.Groups[1].Value, 16) } | Select-Object -Unique)
-    return $machines.Count -eq 1 -and $machines[0] -eq $machine
+    return Test-SnowCachedWindowsLibraryArchitecture -Path $Path -Architecture $Architecture
 }
 
 function Get-SnowQtHostToolVersion {
@@ -581,14 +574,16 @@ function Add-SnowMsvcToolsToPath {
     $env:VSINSTALLDIR = [System.IO.Path]::GetFullPath($visualStudioRoot)
     $env:VCINSTALLDIR = Join-Path $env:VSINSTALLDIR "VC"
     $msvcTools = Get-ChildItem -LiteralPath (Join-Path $env:VCINSTALLDIR "Tools\MSVC") -Directory |
-        Where-Object { $_.Name -match '^14\.51' } |
-        Sort-Object Name -Descending |
+        Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' -and
+            [version]$_.Name -ge $script:SnowMsvcMinimum } |
+        Sort-Object { [version]$_.Name } -Descending |
         Select-Object -First 1
     if (-not $msvcTools) {
-        throw "MSVC toolset $script:SnowMsvcToolset was not found under $env:VCINSTALLDIR."
+        throw "MSVC toolset $script:SnowMsvcMinimum or newer was not found under $env:VCINSTALLDIR."
     }
 
     $env:VCToolsInstallDir = "$($msvcTools.FullName)\"
+    $env:VCToolsVersion = $msvcTools.Name
     $msvcBin = Join-Path $msvcTools.FullName "bin\Host$hostArchitecture\$Architecture"
     foreach ($tool in @("cl.exe", "link.exe", "lib.exe", "dumpbin.exe") +
             $(if ($Architecture -eq "arm64") { @("armasm64.exe") } else { @() })) {
@@ -604,6 +599,7 @@ function Add-SnowMsvcToolsToPath {
 
     $sdkRoot = $env:WindowsSdkDir
     $sdkVersion = $env:WindowsSDKVersion
+    if ($sdkVersion) { $sdkVersion = $sdkVersion.TrimEnd('\', '/') }
     if ([string]::IsNullOrWhiteSpace($sdkRoot) -or [string]::IsNullOrWhiteSpace($sdkVersion)) {
         $sdkIncludeRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Include"
         $sdkInclude = Get-ChildItem -LiteralPath $sdkIncludeRoot -Directory -ErrorAction SilentlyContinue |
@@ -617,7 +613,7 @@ function Add-SnowMsvcToolsToPath {
     if ([string]::IsNullOrWhiteSpace($sdkRoot) -or [string]::IsNullOrWhiteSpace($sdkVersion)) {
         throw "A Windows 10 SDK was not found. Install one or set WindowsSdkDir and WindowsSDKVersion."
     }
-    $env:WindowsSdkDir = "$([System.IO.Path]::GetFullPath($sdkRoot))\"
+    $env:WindowsSdkDir = "$([System.IO.Path]::GetFullPath($sdkRoot).TrimEnd('\', '/'))\"
     $env:WindowsSDKVersion = "$sdkVersion\"
     $sdkBin = Join-Path $env:WindowsSdkDir "bin\$sdkVersion\$hostArchitecture"
     if ($hostArchitecture -eq "arm64" -and
@@ -650,20 +646,43 @@ function Add-SnowMsvcToolsToPath {
     return $msvcBin
 }
 
+function Set-SnowVcpkgEnvironment {
+    $env:VCPKG_ROOT = Join-Path $script:SnowRepoRoot ".tools\vcpkg"
+    # Let vcpkg accept installed tools meeting its minimum versions, downloading
+    # a suitable tool when needed. Neither force flag permits that normal policy.
+    Remove-Item Env:VCPKG_FORCE_SYSTEM_BINARIES -ErrorAction SilentlyContinue
+    Remove-Item Env:VCPKG_FORCE_DOWNLOADED_BINARIES -ErrorAction SilentlyContinue
+}
+
+function Get-SnowRustToolchainInfo {
+    Push-Location $script:SnowRepoRoot
+    try { $output = (& rustc -vV | Out-String) }
+    finally { Pop-Location }
+    $release = [regex]::Match($output, '(?m)^release: (\d+\.\d+\.\d+)\s*$')
+    $hostMatch = [regex]::Match($output, '(?m)^host: ((x86_64|aarch64)-pc-windows-msvc)\s*$')
+    if ($LASTEXITCODE -ne 0 -or -not $release.Success -or -not $hostMatch.Success -or
+        [version]$release.Groups[1].Value -lt $script:SnowRustMinimum) {
+        throw "Rust $script:SnowRustMinimum or newer for an x64 or ARM64 Windows MSVC host is required. Run scripts/bootstrap.ps1 after installing a supported Rust toolchain."
+    }
+    return [pscustomobject]@{
+        Version = $release.Groups[1].Value
+        Host = $hostMatch.Groups[1].Value
+        Architecture = if ($hostMatch.Groups[2].Value -ceq 'aarch64') { "arm64" } else { "x64" }
+    }
+}
+
 function Set-SnowBuildEnvironment {
     param([string]$Preset = "")
 
     $target = if ($Preset) { Get-SnowWindowsTarget -Preset $Preset } else { Get-SnowWindowsTarget }
     $msvcBin = Add-SnowMsvcToolsToPath -Architecture $target.Architecture
+    $target = if ($Preset) { Get-SnowWindowsTarget -Preset $Preset } else { Get-SnowWindowsTarget }
     $qtDir = Set-SnowQtEnvironment -Preset $Preset
     $env:PATH = "$msvcBin;$env:PATH"
-    $env:VCPKG_ROOT = Join-Path $script:SnowRepoRoot ".tools\vcpkg"
+    Set-SnowVcpkgEnvironment
     $env:VCPKG_DEFAULT_HOST_TRIPLET = $target.HostTriplet
-    $rustVersion = (& rustc -vV | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $rustVersion -notmatch '(?m)^host: (x86_64|aarch64)-pc-windows-msvc\s*$') {
-        throw 'Rust 1.97.1 for an x64 or ARM64 Windows MSVC host is required.'
-    }
-    $clangArchitecture = if ($Matches[1] -ceq 'aarch64') { "arm64" } else { "x64" }
+    $rustToolchain = Get-SnowRustToolchainInfo
+    $clangArchitecture = $rustToolchain.Architecture
     $hostLibclang = Join-Path $script:SnowRepoRoot ".tools/llvm-$clangArchitecture/bin"
     $clangCommand = Get-Command clang.exe -ErrorAction SilentlyContinue
     $clangCandidates = @($env:LIBCLANG_PATH, $hostLibclang,
@@ -691,8 +710,8 @@ function Set-SnowBuildEnvironment {
         RepoRoot = $script:SnowRepoRoot
         Qt6Dir = $qtDir
         QtVersion = $script:SnowQtVersion
-        MsvcToolset = $script:SnowMsvcToolset
-        RustToolchain = $script:SnowRustToolchain
+        MsvcToolset = $env:VCToolsVersion
+        RustToolchain = $rustToolchain.Version
         RustTarget = $target.RustTarget
         Architecture = $target.Architecture
         HostArchitecture = $target.HostArchitecture
@@ -726,93 +745,7 @@ function Invoke-SnowCMake {
     finally { Pop-Location }
 }
 
-function Test-SnowCacheAlignment {
-    param(
-        [Parameter(Mandatory = $true)][string]$CachePath,
-        [Parameter(Mandatory = $true)][string]$Preset
-    )
-    if (-not (Test-Path -LiteralPath $CachePath -PathType Leaf)) { return $false }
-    $cache = Get-Content -LiteralPath $CachePath -Raw
-    $qtNeedle = [regex]::Escape(($env:SNOW_QT_STATIC_DIR -replace '\\', '/'))
-    $repoNeedle = [regex]::Escape(($script:SnowRepoRoot -replace '\\', '/'))
-    $target = Get-SnowWindowsTarget -Preset $Preset
-    $expectedTriplet = $target.Triplet
-    $installedDir = $target.InstalledRoot
-    $installedDirNeedle = [regex]::Escape(($installedDir -replace '\\', '/'))
-    $lineEnd = '\r?$'
-
-    $qtAligned = $cache -match "(?m)^Qt6_DIR:PATH=$qtNeedle$lineEnd"
-    if ($target.IsStatic) {
-        $qtAligned = $qtAligned -and $cache -match "(?m)^SNOW_QT_STATIC_DIR:PATH=.+$lineEnd"
-    }
-    $powerShellMatch = [regex]::Match(
-        $cache,
-        "(?m)^Z_VCPKG_POWERSHELL_PATH:INTERNAL=(.+)$lineEnd"
-    )
-    $powerShellAligned = $powerShellMatch.Success
-    if ($powerShellAligned) {
-        $cachedPowerShell = $powerShellMatch.Groups[1].Value.Trim()
-        if ([System.IO.Path]::IsPathRooted($cachedPowerShell)) {
-            $powerShellAligned = Test-Path -LiteralPath $cachedPowerShell -PathType Leaf
-        }
-        else {
-            $powerShellAligned = $null -ne (Get-Command $cachedPowerShell -ErrorAction SilentlyContinue)
-        }
-    }
-
-    $generatorAligned = if ($Preset -eq "windows-clang-portability") {
-        $cache -match "(?m)^CMAKE_GENERATOR:INTERNAL=Ninja$lineEnd" -and
-            $cache -match "(?im)^CMAKE_CXX_COMPILER:(?:FILEPATH|STRING)=.*clang-cl(?:\.exe)?$lineEnd"
-    }
-    else {
-        $cache -match "(?m)^CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026$lineEnd" -and
-            $cache -match "(?m)^CMAKE_GENERATOR_PLATFORM:INTERNAL=$($target.GeneratorPlatform)$lineEnd" -and
-            $cache -match "(?m)^CMAKE_GENERATOR_TOOLSET:INTERNAL=$([regex]::Escape($target.Toolset))$lineEnd"
-    }
-
-    $crossAligned = $true
-    if ($target.Architecture -cne $target.HostArchitecture) {
-        $hostNeedle = [regex]::Escape(($env:QT_HOST_PATH -replace '\\', '/'))
-        $crossAligned = $cache -match "(?m)^QT_HOST_PATH:PATH=$hostNeedle$lineEnd"
-    }
-    $rustAligned = ($target.Architecture -eq 'x64' -and $cache -notmatch '(?m)^SNOW_RUST_TARGET:') -or
-        $cache -match "(?m)^SNOW_RUST_TARGET:.*=$($target.RustTarget)$lineEnd"
-    $hostAligned = ($target.Architecture -eq 'x64' -and $target.HostArchitecture -eq 'x64' -and
-        $cache -notmatch '(?m)^VCPKG_HOST_TRIPLET:') -or
-        $cache -match "(?m)^VCPKG_HOST_TRIPLET:.*=$($target.HostTriplet)$lineEnd"
-    return $qtAligned -and $powerShellAligned -and $generatorAligned -and
-        $crossAligned -and $rustAligned -and $hostAligned -and
-        $cache -match "(?m)^VCPKG_TARGET_TRIPLET:.*=$([regex]::Escape($expectedTriplet))$lineEnd" -and
-        $cache -match "(?m)^VCPKG_INSTALLED_DIR:PATH=$installedDirNeedle$lineEnd" -and
-        $cache -match "(?m)^CMAKE_HOME_DIRECTORY:INTERNAL=$repoNeedle$lineEnd"
-}
-
-function Get-SnowConfigureArguments {
-    param(
-        [Parameter(Mandatory = $true)][string]$Preset,
-        [Parameter(Mandatory = $true)][string]$BuildDirectory
-    )
-
-    $cachePath = Join-Path $BuildDirectory "CMakeCache.txt"
-    $target = Get-SnowWindowsTarget -Preset $Preset
-    $arguments = @("--preset", $Preset, "-S", $script:SnowRepoRoot, "-B", $BuildDirectory,
-        "-DVCPKG_HOST_TRIPLET=$($target.HostTriplet)", "-DSNOW_RUST_TARGET=$($target.RustTarget)")
-    if ($env:LIBCLANG_PATH) {
-        $arguments += "-DSNOW_LIBCLANG_BIN_DIR:PATH=$env:LIBCLANG_PATH"
-        $arguments += "-DSNOW_SHOT_LIBCLANG_DIR:PATH=$env:LIBCLANG_PATH"
-    }
-    if ($target.Architecture -cne $target.HostArchitecture) {
-        $arguments += "-DQT_HOST_PATH:PATH=$env:QT_HOST_PATH"
-    } else { $arguments += "-UQT_HOST_PATH" }
-    if (Test-Path -LiteralPath $cachePath -PathType Leaf) {
-        if (-not (Test-SnowCacheAlignment -CachePath $cachePath -Preset $Preset)) {
-            Write-Host "The existing CMake cache does not match preset $Preset; configuring from a fresh cache."
-            return @("--fresh") + $arguments
-        }
-        Write-Host "Reusing the existing CMake cache for preset $Preset."
-    }
-    return $arguments
-}
+. (Join-Path $PSScriptRoot "snow-build-cache.ps1")
 
 function Resolve-SnowExecutable {
     param(

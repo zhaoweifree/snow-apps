@@ -1,22 +1,15 @@
 #ifndef SNOW_SHOT_PRESENTATION_SCREENSHOTSELECTIONSETTINGSSTORE_H
 #define SNOW_SHOT_PRESENTATION_SCREENSHOTSELECTIONSETTINGSSTORE_H
 
-#include "snow_shot/presentation/screenshotselectionexportworkflowports.h"
 #include "snow_shot/presentation/screenshotselectionparams.h"
 #include "snow_shot/presentation/screenshotintelligentselectionmodel.h"
 #include "snow_shot/presentation/screenshotselectionaspectratio.h"
 
 #include <QVector>
 
-class ScreenshotSelectionSettingsStore final : public ScreenshotSelectionParamsStorePort {
+class ScreenshotSelectionSettingsStore final {
   public:
     explicit ScreenshotSelectionSettingsStore();
-
-    [[nodiscard]] bool hasPreviousSelectionParams() const;
-    [[nodiscard]] ScreenshotSelectionParams previousSelectionParams() const;
-    [[nodiscard]] std::optional<ScreenshotSelectionParams>
-    previousSelectionParams(const QRect& bounds) const;
-    void setPreviousSelectionParams(const ScreenshotSelectionParams& params) override;
 
     ScreenshotRegionType regionType() const;
     void setRegionType(ScreenshotRegionType type);
@@ -34,6 +27,12 @@ class ScreenshotSelectionSettingsStore final : public ScreenshotSelectionParamsS
 
     [[nodiscard]] QVector<ScreenshotSelectionPreset> presets() const;
     void setPresets(const QVector<ScreenshotSelectionPreset>& presets);
+
+    [[nodiscard]] ScreenshotLayoutCompaction layoutCompaction() const;
+    void setLayoutCompaction(ScreenshotLayoutCompaction options);
+
+    [[nodiscard]] int backgroundOpacityPercent() const;
+    void setBackgroundOpacityPercent(int percent);
 
     void clear();
 };

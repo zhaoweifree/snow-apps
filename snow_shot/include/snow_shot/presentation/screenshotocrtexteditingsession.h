@@ -11,6 +11,8 @@ class ScreenshotOcrTextEditingSession final {
     ~ScreenshotOcrTextEditingSession();
 
     [[nodiscard]] const QString& originalText() const;
+    // Refreshes the source while retaining an edited draft and its undo history.
+    void refreshOriginalText(const QString& text);
     [[nodiscard]] QString text() const;
     [[nodiscard]] QTextDocument* document();
 

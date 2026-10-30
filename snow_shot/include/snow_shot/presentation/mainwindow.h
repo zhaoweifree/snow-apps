@@ -3,10 +3,12 @@
 
 #include <QByteArray>
 #include <QMainWindow>
+#include <QStringList>
 
 #include "snow_shot/presentation/globalshortcuttypes.h"
 #include "snow_shot/presentation/globalmousetypes.h"
 #include "snow_shot/presentation/windowgeometrymemory.h"
+#include "snow_shot/storage/capturehistorytypes.h"
 
 class SnowShotApiClient;
 class QCloseEvent;
@@ -53,6 +55,11 @@ class MainWindow : public QMainWindow {
     globalMouseDragRequested(snow_shot::presentation::settings::SettingsGlobalMouseAction action);
     void screenshotHistoryEditRequested(const QString& recordId);
     void screenshotHistoryPinRequested(const QString& recordId);
+    void screenshotHistoryCollageRequested(
+        const QVector<snow_shot::storage::CaptureHistoryRecord>& records);
+    void screenshotHistorySplitRequested(const snow_shot::storage::CaptureHistoryRecord& record);
+    void pinnedWindowCollageRequested(const QStringList& recordIds);
+    void pinnedWindowSplitRequested(const QString& recordId);
 
   protected:
     bool event(QEvent* event) override;

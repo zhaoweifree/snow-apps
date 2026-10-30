@@ -18,7 +18,7 @@ pub struct SnowArrowPathCommand {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SnowArrowheadPrimitive {
     pub kind: SnowArrowheadPrimitiveKind,
     pub fill_mode: SnowArrowheadFillMode,
@@ -27,6 +27,22 @@ pub struct SnowArrowheadPrimitive {
     pub points: [SnowArrowPoint; SNOW_ARROWHEAD_PRIMITIVE_POINT_CAPACITY],
     pub center: SnowArrowPoint,
     pub diameter: f64,
+    pub roughness_cap: f64,
+}
+
+impl Default for SnowArrowheadPrimitive {
+    fn default() -> Self {
+        Self {
+            kind: SnowArrowheadPrimitiveKind::None,
+            fill_mode: SnowArrowheadFillMode::Stroke,
+            dash_mode: SnowArrowheadDashMode::Inherit,
+            point_count: 0,
+            points: [SnowArrowPoint::default(); SNOW_ARROWHEAD_PRIMITIVE_POINT_CAPACITY],
+            center: SnowArrowPoint::default(),
+            diameter: 0.0,
+            roughness_cap: -1.0,
+        }
+    }
 }
 
 snow_c_enum! {

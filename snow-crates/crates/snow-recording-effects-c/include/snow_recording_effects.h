@@ -14,7 +14,7 @@ typedef struct SnowRecordingEffectsKeyLabel {
     const char* label_utf8;
 } SnowRecordingEffectsKeyLabel;
 
-#define SNOW_RECORDING_EFFECTS_CONFIG_VERSION 6u
+#define SNOW_RECORDING_EFFECTS_CONFIG_VERSION 7u
 typedef struct SnowRecordingEffectsConfig {
     uint32_t version;
     uint32_t struct_size;
@@ -44,6 +44,8 @@ typedef struct SnowRecordingEffectsConfig {
     /* Version 6: physical display pixels per native desktop unit.
        Use the display DPR for macOS points and 1 for Windows physical pixels. */
     double canvas_scale;
+    /* Version 7: highlight radius in physical display pixels (8..128); older callers use 41. */
+    uint32_t highlight_radius;
 } SnowRecordingEffectsConfig;
 
 typedef struct SnowRecordingEffectsTile {

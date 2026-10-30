@@ -64,6 +64,12 @@ class CaptureHistoryRepository {
     displayAssets(const CaptureHistoryRecord& record) const = 0;
     [[nodiscard]] virtual std::optional<QImage>
     loadResultImage(const CaptureHistoryRecord& record) const = 0;
+    // Independent editors must not remove a history record when its pixels cannot be read.
+    [[nodiscard]] virtual std::optional<QImage>
+    loadResultImagePreservingRecord(const CaptureHistoryRecord& record) const {
+        Q_UNUSED(record);
+        return std::nullopt;
+    }
     [[nodiscard]] virtual std::optional<PreparedPngImage>
     loadResultPng(const CaptureHistoryRecord& record) const = 0;
     virtual void reportReadFailure(const CaptureHistoryRecord& record, const QString& reason) = 0;

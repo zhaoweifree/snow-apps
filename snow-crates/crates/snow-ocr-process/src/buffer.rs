@@ -112,8 +112,10 @@ impl SharedImage {
         // The packed layout and complete byte range have already been checked.
         // Borrow once so each pixel writes directly into its final allocation.
         for (pixel, output) in source
-            .chunks_exact(4)
-            .zip(bgr.as_mut_slice().chunks_exact_mut(3))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(bgr.as_mut_slice().as_chunks_mut::<3>().0.iter_mut())
         {
             output.copy_from_slice(&[pixel[2], pixel[1], pixel[0]]);
         }
@@ -143,7 +145,7 @@ mod tests {
         ] {
             map[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
         }
-        for pixel in map[SLOT_HEADER..].chunks_exact_mut(4) {
+        for pixel in map[SLOT_HEADER..].as_chunks_mut::<4>().0.iter_mut() {
             pixel.copy_from_slice(&[1, 2, 3, 255]);
         }
         let mapped = SharedImage {
@@ -155,17 +157,26 @@ mod tests {
         #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         assert!(pixels.is_page_backed());
         drop(mapped);
-        let image = rapid_ocr_rs::RecImage::from_bgr_buffer(width, height, pixels).unwrap();
+        let image = super::super::engine::InputImage {
+            width,
+            height,
+            pixels,
+        };
+        let view = image.view().unwrap();
+        assert_eq!(view.width(), width);
         assert_eq!(
-            image.as_bytes().as_ptr(),
+            image.pixels.as_ptr(),
             pointer,
             "staging must not copy the raster again"
         );
         assert!(
             image
-                .as_bytes()
-                .chunks_exact(3)
-                .all(|pixel| pixel == [3, 2, 1])
+                .pixels
+                .as_slice()
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [3, 2, 1])
         );
     }
 
@@ -220,7 +231,9 @@ mod tests {
             }
             let mut expected = Vec::with_capacity(width * height * 3);
             for (index, pixel) in map[slot_bytes + SLOT_HEADER..]
-                .chunks_exact_mut(4)
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
                 .enumerate()
             {
                 let red = (index % 251) as u8;

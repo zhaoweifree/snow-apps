@@ -13,9 +13,10 @@ makeScreenshotToolbarPresentationState(const ScreenshotInteractionState& interac
     state.selectionCanvas = selection.normalizedSelection();
     state.inactive = interaction.inactive();
     state.selectionToolbarMode =
-        interaction.selectionToolbarMode() && !selection.regionOperationActive();
+        interaction.selectionToolbarMode() && !selection.regionOperationActive() &&
+        !(interaction.marqueeSelecting() && state.regionType != ScreenshotRegionType::Rectangle);
     state.selectionEditable = interaction.canResizeSelection();
-    state.selectionResizable = selection.rectangular() && state.selectionEditable;
+    state.selectionResizable = selection.resizable() && state.selectionEditable;
     state.intelligentSelecting = interaction.intelligentSelecting();
     state.selectionDragging = interaction.dragging();
     state.editing = interaction.editing();
@@ -26,6 +27,13 @@ makeScreenshotToolbarPresentationState(const ScreenshotInteractionState& interac
     state.aspectRatioPreset = selection.aspectRatioPreset();
     state.cornerRadius = selection.cornerRadius();
     state.cornerRadiusApplicable = selection.cornerRadiusApplicable();
+    state.backgroundOpacityPercent = selection.backgroundOpacityPercent();
+    state.backgroundOpacityAvailable = selection.hasPixelSelection() && !state.selectionDragging &&
+                                       !selection.constructionActive() &&
+                                       !selection.regionOperationActive();
+    state.layoutCompaction = selection.layoutCompaction();
+    state.layoutCompactionAvailable =
+        selection.layoutCompactionAvailable() && !state.selectionDragging;
     state.shadowWidth = selection.shadowWidth();
     state.shadowColor = selection.shadowColor();
     return state;

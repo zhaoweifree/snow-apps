@@ -39,6 +39,9 @@
 #include <QCursor>
 #include <QContextMenuEvent>
 #include "snow_shot/compat/qt_compat.h"
+
+#include <QEnterEvent>
+#include <QElapsedTimer>
 #include <QEvent>
 #include <QFocusEvent>
 #include <QGraphicsDropShadowEffect>
@@ -50,6 +53,7 @@
 #include <QKeyEvent>
 #include <QLineF>
 #include <QMouseEvent>
+#include <QTabletEvent>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPointer>
@@ -421,8 +425,9 @@ struct SnowCanvasWidget::Impl : public snow_canvas_runtime::Client {
     bool setCanvasTool(SnowCanvasTool tool);
     void setCursorForLayer(SnowCanvasCursorLayer layer, const QCursor& cursor);
     void clearCursorForLayer(SnowCanvasCursorLayer layer);
+    void setCrosshairCursorFactory(CrosshairCursorFactory factory);
     void refreshCursorDevicePixelRatio() {
-        cursorController.refreshDevicePixelRatio();
+        cursorController.refreshDevicePixelRatio(widget.devicePixelRatioF());
     }
     SnowCanvasStyleToolbarState canvasStyleToolbarState() const;
     bool setCanvasDistanceStyle(const SnowCanvasDistanceStyle& style, quint32 properties);
@@ -536,10 +541,13 @@ struct SnowCanvasWidget::Impl : public snow_canvas_runtime::Client {
     SnowCanvasRenderContext renderContext(QPainter& painter, const QRegion& exposedRegion) const;
     void renderBeforeCanvas(QPainter& painter, const SnowCanvasRenderContext& context) const;
     void renderAfterCanvas(QPainter& painter, const SnowCanvasRenderContext& context) const;
-    bool handleMousePress(QMouseEvent* event);
+    bool handleMousePress(QMouseEvent* event, const SnowInputEvent* pointerInput = nullptr);
     bool handleMouseDoubleClick(QMouseEvent* event);
-    bool handleMouseMove(QMouseEvent* event);
-    bool handleMouseRelease(QMouseEvent* event);
+    bool handleMouseMove(QMouseEvent* event, const SnowInputEvent* pointerInput = nullptr);
+    bool handleMouseRelease(QMouseEvent* event, const SnowInputEvent* pointerInput = nullptr);
+    bool handleTablet(QTabletEvent* event);
+    bool suppressTabletMouseEvent(QMouseEvent* event);
+    void handleTabletCaptureLoss(QEvent::Type type);
     void beginMiddleClickTracking(const QPointF& position);
     void updateMiddleClickTracking(const QPointF& position);
     bool finishMiddleClickTracking();
@@ -570,8 +578,7 @@ struct SnowCanvasWidget::Impl : public snow_canvas_runtime::Client {
     bool prepareActiveTextResizeMeasurementForPointerUp(const SnowInputEvent& input);
     bool dispatchInput(QEvent* event, const SnowInputEvent& input);
     bool processInput(const SnowInputEvent& input);
-    bool queueLiveStrokeMove(QMouseEvent* event, const SnowInputEvent& input,
-                             bool preserveEverySample);
+    bool queueLiveStrokeMove(QEvent* event, const SnowInputEvent& input, bool preserveEverySample);
     void flushLiveStrokeMoves();
     bool queueEraserMove(QMouseEvent* event, const SnowInputEvent& input);
     void flushEraserMove();
@@ -629,6 +636,10 @@ struct SnowCanvasWidget::Impl : public snow_canvas_runtime::Client {
     bool suppressNextTextToolCreate = false;
     bool restoredSelectionForNextTextToolPress = false;
     bool suppressMouseContextMenu = false;
+    bool tabletGestureActive = false;
+    bool suppressSynthesizedTabletMouse = false;
+    quint64 lastTabletTimestamp = 0;
+    QElapsedTimer tabletMouseSuppressionClock;
     SnowCanvasTool requestedCanvasTool = SnowCanvasTool::Select;
     SnowCanvasCustomRenderer* installedCustomRenderer = nullptr;
     std::vector<BaseImageSamplingFootprint> paintedBaseImageSamplingFootprints;
@@ -816,6 +827,7 @@ void SnowCanvasWidget::Impl::initializeWidget() {
     widget.setAttribute(Qt::WA_OpaquePaintEvent);
     widget.setAttribute(Qt::WA_InputMethodEnabled, false);
     widget.setMouseTracking(true);
+    widget.setTabletTracking(true);
     widget.setFocusPolicy(Qt::StrongFocus);
     watermarkPreviewTimer.setSingleShot(true);
     QObject::connect(&watermarkPreviewTimer, &QTimer::timeout, &widget, [this]() {
@@ -1050,6 +1062,14 @@ void SnowCanvasWidget::Impl::clearCursorForLayer(SnowCanvasCursorLayer layer) {
 
 void SnowCanvasWidget::clearCursorForLayer(SnowCanvasCursorLayer layer) {
     m_impl->clearCursorForLayer(layer);
+}
+
+void SnowCanvasWidget::Impl::setCrosshairCursorFactory(CrosshairCursorFactory factory) {
+    cursorController.setCrosshairCursorFactory(std::move(factory));
+}
+
+void SnowCanvasWidget::setCrosshairCursorFactory(CrosshairCursorFactory factory) {
+    m_impl->setCrosshairCursorFactory(std::move(factory));
 }
 
 SnowCanvasStyleToolbarState SnowCanvasWidget::Impl::canvasStyleToolbarState() const {
@@ -1668,6 +1688,15 @@ bool SnowCanvasWidget::Impl::handleContextMenu(QContextMenuEvent* event) {
 
 void SnowCanvasWidget::Impl::setInteractionEnabled(bool enabled) {
     if (!enabled) {
+        const QPointer<SnowCanvasWidget> lifetime(&widget);
+        if (tabletGestureActive) {
+            handleFocusOut();
+            if (!lifetime) {
+                return;
+            }
+        }
+        tabletGestureActive = false;
+        suppressSynthesizedTabletMouse = false;
         ++liveStrokeMoveFlushGeneration;
         liveStrokeMoveFlushScheduled = false;
         pendingLiveStrokeMoves.clear();
@@ -2314,6 +2343,8 @@ bool SnowCanvasWidget::createSerialNumberText() {
 
 bool SnowCanvasWidget::Impl::resetEditingState(bool restoreSelectTool) {
     const QPointer<SnowCanvasWidget> lifetime(&widget);
+    tabletGestureActive = false;
+    suppressSynthesizedTabletMouse = false;
     const SnowCanvasTool previousTool = canvasTool();
     if (pendingLiveStrokePreservesEverySample) {
         flushLiveStrokeMoves();
@@ -2485,6 +2516,13 @@ void SnowCanvasWidget::Impl::handleApplicationStateChanged(Qt::ApplicationState 
     const QPointer<SnowCanvasWidget> lifetime(&widget);
     if (state == Qt::ApplicationActive) {
         return;
+    }
+
+    if (tabletGestureActive) {
+        handleFocusOut();
+        if (!lifetime) {
+            return;
+        }
     }
 
     clearTextStylePopupInteraction();
@@ -3126,6 +3164,12 @@ void SnowCanvasWidget::paintEvent(QPaintEvent* event) {
 
 bool SnowCanvasWidget::event(QEvent* event) {
     const QPointer<SnowCanvasWidget> lifetime(this);
+    if (m_impl) {
+        m_impl->handleTabletCaptureLoss(event->type());
+        if (!lifetime) {
+            return true;
+        }
+    }
     if (m_impl && event->type() == QEvent::ContextMenu &&
         m_impl->handleContextMenu(static_cast<QContextMenuEvent*>(event))) {
         return true;
@@ -3153,7 +3197,8 @@ bool SnowCanvasWidget::eventFilter(QObject* watched, QEvent* event) {
     return QWidget::eventFilter(watched, event);
 }
 
-bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event) {
+bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event,
+                                              const SnowInputEvent* pointerInput) {
     const QPointer<SnowCanvasWidget> lifetime(&widget);
     if (event == nullptr || !interactionEnabled()) {
         return false;
@@ -3266,8 +3311,10 @@ bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event) {
         event->accept();
         return true;
     }
-    const bool handled =
-        dispatchInput(event, snow_canvas_input::makePointerInput(*event, SNOW_POINTER_EVENT_DOWN));
+    const bool handled = dispatchInput(
+        event, pointerInput != nullptr
+                   ? *pointerInput
+                   : snow_canvas_input::makePointerInput(*event, SNOW_POINTER_EVENT_DOWN));
     if (handled && plan.shouldBeginText && plan.allowCreateText) {
         const SnowTextStyle textStyle = displayState.snapshot().styleToolbarState.text_style;
         SnowCanvasWidgetTextInteraction::BeginResult draft =
@@ -3286,6 +3333,9 @@ bool SnowCanvasWidget::Impl::handleMousePress(QMouseEvent* event) {
 
 void SnowCanvasWidget::mousePressEvent(QMouseEvent* event) {
     const QPointer<SnowCanvasWidget> lifetime(this);
+    if (m_impl->suppressTabletMouseEvent(event)) {
+        return;
+    }
     if (canvasTool() == SnowCanvasTool::AutoFilter && event->button() == Qt::LeftButton) {
         emit autoFilterInteractionStarting();
         if (!lifetime) {
@@ -3309,7 +3359,8 @@ void SnowCanvasWidget::mousePressEvent(QMouseEvent* event) {
     QWidget::mousePressEvent(event);
 }
 
-bool SnowCanvasWidget::Impl::handleMouseMove(QMouseEvent* event) {
+bool SnowCanvasWidget::Impl::handleMouseMove(QMouseEvent* event,
+                                             const SnowInputEvent* pointerInput) {
     const QPointer<SnowCanvasWidget> lifetime(&widget);
     if (event == nullptr || !interactionEnabled()) {
         return false;
@@ -3318,7 +3369,9 @@ bool SnowCanvasWidget::Impl::handleMouseMove(QMouseEvent* event) {
         return true;
     }
     const SnowInputEvent input =
-        snow_canvas_input::makePointerInput(*event, SNOW_POINTER_EVENT_MOVE);
+        pointerInput != nullptr
+            ? *pointerInput
+            : snow_canvas_input::makePointerInput(*event, SNOW_POINTER_EVENT_MOVE);
     if ((canvasTool() == SnowCanvasTool::FreeDraw || canvasTool() == SnowCanvasTool::PenFilter ||
          canvasTool() == SnowCanvasTool::BrushEraser) &&
         (event->buttons() & Qt::LeftButton) != 0) {
@@ -3401,6 +3454,9 @@ bool SnowCanvasWidget::Impl::handleMouseDoubleClick(QMouseEvent* event) {
 
 void SnowCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     const QPointer<SnowCanvasWidget> lifetime(this);
+    if (m_impl->suppressTabletMouseEvent(event)) {
+        return;
+    }
     const bool handled = m_impl->handleMouseDoubleClick(event);
     if (!lifetime) {
         return;
@@ -3417,7 +3473,7 @@ void SnowCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     QWidget::mouseDoubleClickEvent(event);
 }
 
-bool SnowCanvasWidget::Impl::queueLiveStrokeMove(QMouseEvent* event, const SnowInputEvent& input,
+bool SnowCanvasWidget::Impl::queueLiveStrokeMove(QEvent* event, const SnowInputEvent& input,
                                                  bool preserveEverySample) {
     const QPointer<SnowCanvasWidget> lifetime(&widget);
     if (!pendingLiveStrokeMoves.empty() &&
@@ -3489,6 +3545,9 @@ void SnowCanvasWidget::Impl::flushLiveStrokeMoves() {
 
 void SnowCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
     const QPointer<SnowCanvasWidget> lifetime(this);
+    if (m_impl->suppressTabletMouseEvent(event)) {
+        return;
+    }
     if (event != nullptr) {
         m_impl->updateMiddleClickTracking(snowPos(event));
     }
@@ -3498,7 +3557,8 @@ void SnowCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
     QWidget::mouseMoveEvent(event);
 }
 
-bool SnowCanvasWidget::Impl::handleMouseRelease(QMouseEvent* event) {
+bool SnowCanvasWidget::Impl::handleMouseRelease(QMouseEvent* event,
+                                                const SnowInputEvent* pointerInput) {
     const QPointer<SnowCanvasWidget> lifetime(&widget);
     if (event == nullptr || !interactionEnabled()) {
         return false;
@@ -3514,8 +3574,10 @@ bool SnowCanvasWidget::Impl::handleMouseRelease(QMouseEvent* event) {
     if (!lifetime) {
         return false;
     }
-    const bool handled =
-        dispatchInput(event, snow_canvas_input::makePointerInput(*event, SNOW_POINTER_EVENT_UP));
+    const bool handled = dispatchInput(
+        event, pointerInput != nullptr
+                   ? *pointerInput
+                   : snow_canvas_input::makePointerInput(*event, SNOW_POINTER_EVENT_UP));
     if (handled && event->button() == Qt::LeftButton) {
         auto result = textInteraction.beginRequestedTextEdit(
             runtimeBinding.engine(), runtimeBinding.viewportHandle(), displayState.displayCache());
@@ -3540,6 +3602,9 @@ bool SnowCanvasWidget::Impl::handleMouseRelease(QMouseEvent* event) {
 
 void SnowCanvasWidget::mouseReleaseEvent(QMouseEvent* event) {
     const QPointer<SnowCanvasWidget> lifetime(this);
+    if (m_impl->suppressTabletMouseEvent(event)) {
+        return;
+    }
     const bool middleClick = event != nullptr && event->button() == Qt::MiddleButton &&
                              m_impl->finishMiddleClickTracking();
     const bool handled = m_impl->handleMouseRelease(event);
@@ -3555,6 +3620,106 @@ void SnowCanvasWidget::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     QWidget::mouseReleaseEvent(event);
+}
+
+bool SnowCanvasWidget::Impl::suppressTabletMouseEvent(QMouseEvent* event) {
+    if (event == nullptr || !suppressSynthesizedTabletMouse) {
+        return false;
+    }
+    if (event->source() != Qt::MouseEventSynthesizedByQt &&
+        event->source() != Qt::MouseEventSynthesizedBySystem) {
+        suppressSynthesizedTabletMouse = false;
+        return false;
+    }
+    if (!tabletGestureActive && canvasTool() != SnowCanvasTool::FreeDraw) {
+        suppressSynthesizedTabletMouse = false;
+        return false;
+    }
+    const auto* device = event->pointingDevice();
+    const bool touchFallback =
+        device != nullptr && (device->type() == QInputDevice::DeviceType::TouchScreen ||
+                              device->type() == QInputDevice::DeviceType::TouchPad);
+    constexpr quint64 kTabletMouseDuplicateWindowMs = 64;
+    const bool expired =
+        event->timestamp() != 0 && lastTabletTimestamp != 0
+            ? event->timestamp() > lastTabletTimestamp &&
+                  event->timestamp() - lastTabletTimestamp > kTabletMouseDuplicateWindowMs
+            : tabletMouseSuppressionClock.hasExpired(
+                  static_cast<qint64>(kTabletMouseDuplicateWindowMs));
+    if (touchFallback || (!tabletGestureActive && expired)) {
+        // Later mouse-only stylus or touch input must retain the normal fallback route.
+        suppressSynthesizedTabletMouse = false;
+        return false;
+    }
+    event->accept();
+    return true;
+}
+
+void SnowCanvasWidget::tabletEvent(QTabletEvent* event) {
+    if (m_impl->handleTablet(event)) {
+        return;
+    }
+    QWidget::tabletEvent(event);
+}
+
+bool SnowCanvasWidget::Impl::handleTablet(QTabletEvent* event) {
+    if (event == nullptr || !interactionEnabled() ||
+        (canvasTool() != SnowCanvasTool::FreeDraw && !tabletGestureActive)) {
+        return false;
+    }
+    const QPointer<SnowCanvasWidget> lifetime(&widget);
+    const bool ownedGesture = tabletGestureActive;
+    const bool barrelButtonChange =
+        ownedGesture && event->button() != Qt::LeftButton &&
+        event->buttons().testFlag(Qt::LeftButton) &&
+        (event->type() == QEvent::TabletPress || event->type() == QEvent::TabletRelease);
+    const auto pointerType = barrelButtonChange                       ? SNOW_POINTER_EVENT_MOVE
+                             : event->type() == QEvent::TabletPress   ? SNOW_POINTER_EVENT_DOWN
+                             : event->type() == QEvent::TabletRelease ? SNOW_POINTER_EVENT_UP
+                                                                      : SNOW_POINTER_EVENT_MOVE;
+    const auto mouseType = barrelButtonChange                       ? QEvent::MouseMove
+                           : event->type() == QEvent::TabletPress   ? QEvent::MouseButtonPress
+                           : event->type() == QEvent::TabletRelease ? QEvent::MouseButtonRelease
+                                                                    : QEvent::MouseMove;
+    QMouseEvent mouse(mouseType, event->position(), event->globalPosition(),
+                      barrelButtonChange ? Qt::NoButton : event->button(), event->buttons(),
+                      event->modifiers(), event->pointingDevice());
+    mouse.setTimestamp(event->timestamp());
+    SnowInputEvent input = snow_canvas_input::makePointerInput(*event, pointerType);
+    if (barrelButtonChange) {
+        input.pointer.button = SNOW_POINTER_BUTTON_NONE;
+    }
+    bool handled = false;
+    if (pointerType == SNOW_POINTER_EVENT_DOWN) {
+        handled = handleMousePress(&mouse, &input);
+        if (lifetime && handled) {
+            tabletGestureActive = true;
+            updateMouseContextMenuOwnership(&mouse, true);
+        }
+    } else if (pointerType == SNOW_POINTER_EVENT_UP) {
+        tabletGestureActive = false;
+        handled = handleMouseRelease(&mouse, &input);
+    } else {
+        handled = handleMouseMove(&mouse, &input);
+    }
+    if (!lifetime) {
+        return true;
+    }
+    if (handled || ownedGesture) {
+        // Accepting the native event prevents Qt from generating another mouse stroke.
+        suppressSynthesizedTabletMouse = true;
+        lastTabletTimestamp = event->timestamp();
+        tabletMouseSuppressionClock.start();
+        event->accept();
+        return true;
+    }
+    return false;
+}
+
+void SnowCanvasWidget::Impl::handleTabletCaptureLoss(QEvent::Type type) {
+    if (tabletGestureActive && (type == QEvent::UngrabMouse || type == QEvent::Hide)) {
+        handleFocusOut();
+    }
 }
 
 void SnowCanvasWidget::Impl::beginMiddleClickTracking(const QPointF& position) {
@@ -4015,6 +4180,8 @@ QVariant SnowCanvasWidget::inputMethodQuery(Qt::InputMethodQuery query) const {
 
 void SnowCanvasWidget::Impl::handleFocusOut() {
     const QPointer<SnowCanvasWidget> lifetime(&widget);
+    tabletGestureActive = false;
+    suppressSynthesizedTabletMouse = false;
     if (pendingLiveStrokePreservesEverySample) {
         flushLiveStrokeMoves();
         if (!lifetime) {

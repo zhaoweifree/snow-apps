@@ -76,6 +76,17 @@ void ScreenshotOverlayEventAdapter::completeRightClickCancellation() {
     }
 }
 
+void ScreenshotOverlayEventAdapter::updateOverlayModifiers(Qt::KeyboardModifiers modifiers,
+                                                           bool recompute) {
+    if (m_inputHandler)
+        m_inputHandler->updateRegionSnapModifiers(modifiers, recompute);
+}
+
+void ScreenshotOverlayEventAdapter::clearOverlaySnapping() {
+    if (m_inputHandler)
+        m_inputHandler->clearRegionSnapping();
+}
+
 bool ScreenshotOverlayEventAdapter::effectDragActive() const {
     return m_inputHandler != nullptr && m_inputHandler->effectDragActive();
 }

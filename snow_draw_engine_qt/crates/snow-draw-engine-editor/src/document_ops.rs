@@ -171,6 +171,11 @@ pub(crate) fn append_delete_dependencies(
         {
             delete_ids.push(text_id);
         }
+        if let Some(text_id) = document.bound_text_id_for_shape(id)
+            && !delete_ids.contains(&text_id)
+        {
+            delete_ids.push(text_id);
+        }
         if let Some(text_id) = document.bound_text_id_for_speech_bubble(id)
             && !delete_ids.contains(&text_id)
         {
@@ -184,6 +189,15 @@ pub(crate) fn append_delete_dependencies(
     }
 
     for id in ids {
+        for owner in document.shape_ids_with_text(*id) {
+            if !delete_ids.contains(&owner)
+                && let Ok(value) = document.rectangle(owner)
+            {
+                let mut shape = *value;
+                shape.text_element_id = None;
+                transaction.update_rectangle(owner, shape);
+            }
+        }
         if let Some(owner) = document.speech_bubble_id_for_text(*id)
             && !delete_ids.contains(&owner)
             && let Ok(value) = document.speech_bubble(owner)
@@ -239,6 +253,11 @@ pub(crate) fn expanded_duplicate_ids(
         {
             ids.push(text_id);
         }
+        if let Some(text_id) = document.bound_text_id_for_shape(id)
+            && !ids.contains(&text_id)
+        {
+            ids.push(text_id);
+        }
         if let Some(text_id) = document.bound_text_id_for_speech_bubble(id)
             && !ids.contains(&text_id)
         {
@@ -287,6 +306,9 @@ pub(crate) fn duplicate_selection_transaction(
         match data_overrides.get(&id).unwrap_or(&element.data) {
             ElementData::Rectangle(rect) => {
                 let mut duplicate = *rect;
+                duplicate.text_element_id = document
+                    .bound_text_id_for_shape(id)
+                    .and_then(|text_id| id_map.get(&text_id).copied());
                 duplicate.center.x += offset.x;
                 duplicate.center.y += offset.y;
                 validate_rectangle(&duplicate)?;
@@ -482,6 +504,9 @@ fn align_unit_owners(
         if let Some(label_id) = document.bound_text_id_for_serial_number(*id) {
             label_owner.insert(label_id, *id);
         }
+        if let Some(label_id) = document.bound_text_id_for_shape(*id) {
+            label_owner.insert(label_id, *id);
+        }
     }
     let mut units = Vec::with_capacity(selected.len());
     for id in selected {
@@ -509,7 +534,8 @@ fn align_unit_bounds(document: &DocumentModel, id: ElementId) -> Option<DrawRect
     };
     let label_id = document
         .bound_text_id_for_arrow(id)
-        .or_else(|| document.bound_text_id_for_serial_number(id));
+        .or_else(|| document.bound_text_id_for_serial_number(id))
+        .or_else(|| document.bound_text_id_for_shape(id));
     if let Some(label_id) = label_id
         && let Some(rect) = document.element_rect_proxy(label_id)
     {
@@ -603,6 +629,7 @@ fn append_bound_label_alignment(
     let Some(label_id) = document
         .bound_text_id_for_arrow(owner)
         .or_else(|| document.bound_text_id_for_serial_number(owner))
+        .or_else(|| document.bound_text_id_for_shape(owner))
     else {
         return Ok(());
     };
@@ -1621,6 +1648,7 @@ mod tests {
                 vec![PathSegmentMode::Curve],
                 false,
                 snow_draw_engine_document::FreeDrawStyle {
+                    brush_mode: Default::default(),
                     stroke: ColorRgba8::default(),
                     stroke_width: 2.0,
                     stroke_style: snow_draw_engine_document::StrokeStyle::Solid,
@@ -1657,6 +1685,9 @@ mod tests {
 
     fn rectangle_with_colors(fill: ColorRgba8, stroke: ColorRgba8) -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(50.0, 50.0),
@@ -2234,6 +2265,153 @@ mod tests {
             panic!("expected only the serial removal");
         };
         assert_eq!(*id, serial_id);
+    }
+
+    #[test]
+    fn shape_text_binding_duplicate_template_delete_and_history() {
+        let mut document = DocumentModel::new();
+        let label = insert_text(
+            &mut document,
+            TextData {
+                center: Point::new(200.0, 120.0),
+                text: "bound label".into(),
+                ..TextData::default()
+            },
+        );
+        let mut shape = rectangle_at(Point::new(50.0, 30.0), 100.0, 60.0, 0.0);
+        shape.text_element_id = Some(label);
+        let owner = insert_rectangle(&mut document, shape);
+        let (copy, selection) = duplicate_selection_transaction(
+            &document,
+            &[owner],
+            Point::new(12.0, 8.0),
+            &HashMap::new(),
+        )
+        .unwrap();
+        document.apply_transaction(copy).unwrap();
+        let copy_owner = selection[0];
+        let copy_label = document.bound_text_id_for_shape(copy_owner).unwrap();
+        assert_ne!(copy_label, label);
+        assert_eq!(
+            document.text(copy_label).unwrap().center,
+            Point::new(212.0, 128.0)
+        );
+
+        let mut editor = Editor::new(EngineConfig::default()).unwrap();
+        editor.select_element(&document, owner).unwrap();
+        let template = editor.selected_draw_template(&document).unwrap();
+        assert_eq!(template.elements.len(), 2);
+        let pasted = editor
+            .insert_draw_template(&document, &template, Point::new(400.0, 400.0))
+            .unwrap();
+        apply_editor_command(&mut document, pasted);
+        let pasted_owner = editor.selected_ids()[0];
+        let pasted_label = document.bound_text_id_for_shape(pasted_owner).unwrap();
+        assert_ne!(pasted_label, label);
+        assert_ne!(pasted_label, copy_label);
+
+        let mut remove_label = Transaction::new("delete shape label");
+        append_delete_dependencies(&mut remove_label, &document, &[label]);
+        let removed = document.apply_transaction(remove_label).unwrap();
+        assert!(document.bound_text_id_for_shape(owner).is_none());
+        assert!(document.rectangle(owner).is_ok());
+        document
+            .apply_history_transaction(&removed.inverse)
+            .unwrap();
+        assert_eq!(document.bound_text_id_for_shape(owner), Some(label));
+        let mut remove_owner = Transaction::new("delete shape owner");
+        append_delete_dependencies(&mut remove_owner, &document, &[owner]);
+        let removed = document.apply_transaction(remove_owner).unwrap();
+        assert!(document.element(owner).is_err());
+        assert!(document.element(label).is_err());
+        document
+            .apply_history_transaction(&removed.inverse)
+            .unwrap();
+        assert_eq!(document.bound_text_id_for_shape(owner), Some(label));
+    }
+
+    #[test]
+    fn shape_text_binding_survives_resize_move_rotation_and_style() {
+        let mut document = DocumentModel::new();
+        let original_label = TextData {
+            center: Point::new(160.0, 130.0),
+            text: "external label".into(),
+            ..TextData::default()
+        };
+        let label = insert_text(&mut document, original_label.clone());
+        let mut shape = rectangle_at(Point::new(0.0, 0.0), 100.0, 60.0, 0.0);
+        shape.text_element_id = Some(label);
+        let owner = insert_rectangle(&mut document, shape);
+        let mut resized = crate::geometry::resized_selection_rect(
+            &shape,
+            &crate::SelectionBounds {
+                center: shape.center,
+                width: shape.width,
+                height: shape.height,
+                rotation: shape.rotation,
+            },
+            Point::new(-50.0, -30.0),
+            2.0,
+            1.5,
+        );
+        resized.center.x += 40.0;
+        resized.rotation = 0.7;
+        let mut style = crate::RectangleShapeStyle::from_rectangle(&resized);
+        style.shape = snow_draw_engine_document::HighlightShape::Ellipse;
+        style.stroke_width = 8.0;
+        let styled = crate::style::rectangle_with_style(&resized, style);
+        let mut update = Transaction::new("transform and restyle bound shape");
+        append_selection_element_update(
+            &mut update,
+            &document,
+            SelectionRectState {
+                id: owner,
+                rect: styled,
+            },
+            None,
+            false,
+            None,
+        )
+        .unwrap();
+        document.apply_transaction(update).unwrap();
+        assert_eq!(document.bound_text_id_for_shape(owner), Some(label));
+        assert_eq!(document.rectangle(owner).unwrap(), &styled);
+        assert_eq!(styled.width, 200.0);
+        assert_eq!(styled.height, 90.0);
+        assert_eq!(document.text(label).unwrap(), &original_label);
+    }
+
+    #[test]
+    fn shape_text_binding_alignment_moves_label_once_and_preserves_shape_geometry() {
+        let mut document = DocumentModel::new();
+        let label = insert_text(
+            &mut document,
+            TextData {
+                center: Point::new(120.0, 120.0),
+                layout: TextLayoutSize::new(80.0, 24.0),
+                ..TextData::default()
+            },
+        );
+        let mut shape = rectangle_at(Point::new(0.0, 0.0), 100.0, 60.0, 0.0);
+        shape.text_element_id = Some(label);
+        let owner = insert_rectangle(&mut document, shape);
+        let other = insert_rectangle(
+            &mut document,
+            rectangle_at(Point::new(400.0, 300.0), 40.0, 30.0, 0.0),
+        );
+        let mut editor = Editor::new(EngineConfig::default()).unwrap();
+        editor.set_selection_state(vec![owner, label, other], Some(other));
+        let aligned = editor.align_selected(&document, 5).unwrap().unwrap();
+        apply_editor_command(&mut document, aligned);
+        let owner_after = document.rectangle(owner).unwrap();
+        let label_after = document.text(label).unwrap();
+        assert_eq!(owner_after.width, 100.0);
+        assert_eq!(owner_after.height, 60.0);
+        assert_eq!(label_after.center.y - owner_after.center.y, 120.0);
+        assert_eq!(
+            label_after.center.y + 12.0,
+            document.rectangle(other).unwrap().center.y + 15.0
+        );
     }
 
     #[test]

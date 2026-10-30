@@ -20,6 +20,7 @@ class QLabel;
 class QLayout;
 class QPushButton;
 class QScrollArea;
+class QSpacerItem;
 class QTimer;
 class QToolButton;
 class QVBoxLayout;
@@ -241,6 +242,8 @@ class AdFormItem final : public QWidget {
   Q_OBJECT
 
   Q_PROPERTY(QString label READ label WRITE setLabel NOTIFY labelChanged)
+  Q_PROPERTY(QWidget* labelAccessoryWidget READ labelAccessoryWidget WRITE setLabelAccessoryWidget
+                 NOTIFY labelAccessoryWidgetChanged)
   Q_PROPERTY(QString fieldKey READ fieldKey WRITE setFieldKey NOTIFY fieldKeyChanged)
   Q_PROPERTY(QStringList fieldPath READ fieldPath WRITE setFieldPath NOTIFY fieldPathChanged)
   Q_PROPERTY(QString fieldName READ fieldName WRITE setFieldName NOTIFY fieldNameChanged)
@@ -314,6 +317,10 @@ class AdFormItem final : public QWidget {
 
   QString label() const;
   void setLabel(const QString& value);
+
+  QWidget* labelAccessoryWidget() const;
+  // The item owns the accessory; replacing it detaches the previous widget.
+  void setLabelAccessoryWidget(QWidget* widget);
 
   QString fieldKey() const;
   void setFieldKey(const QString& value);
@@ -419,6 +426,7 @@ class AdFormItem final : public QWidget {
 
  signals:
   void labelChanged(const QString& value);
+  void labelAccessoryWidgetChanged(QWidget* widget);
   void fieldKeyChanged(const QString& value);
   void fieldNameChanged(const QString& value);
   void fieldPathChanged(const QStringList& value);
@@ -495,6 +503,8 @@ class AdFormItem final : public QWidget {
   bool effectiveDisabled() const;
 
   QString label_;
+  QPointer<QWidget> labelAccessoryWidget_;
+  QMetaObject::Connection labelAccessoryDestroyedConnection_;
   QString fieldName_;
   QStringList dependencies_;
   bool required_ = false;
@@ -540,6 +550,7 @@ class AdFormItem final : public QWidget {
   QGridLayout* itemLayoutGrid_ = nullptr;
   QWidget* labelHost_ = nullptr;
   QHBoxLayout* labelLayout_ = nullptr;
+  QSpacerItem* labelAccessorySpacer_ = nullptr;
   QLabel* requiredMarkWidget_ = nullptr;
   QLabel* labelWidget_ = nullptr;
   QLabel* optionalWidget_ = nullptr;

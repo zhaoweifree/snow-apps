@@ -5,6 +5,7 @@ use std::collections::HashMap;
 enum TextOwnerKind {
     Arrow,
     SerialNumber,
+    Shape,
     SpeechBubble,
 }
 
@@ -15,6 +16,7 @@ pub struct RelationIndex {
     bubble_labels: Vec<(ElementId, ElementId)>,
     bubble_label_owners: HashMap<ElementId, ElementId>,
     serials_by_text: HashMap<ElementId, Vec<ElementId>>,
+    shapes_by_text: HashMap<ElementId, Vec<ElementId>>,
     text_links: HashMap<ElementId, (ElementId, TextOwnerKind)>,
     rebuild_count: u64,
     bound_arrows_by_bindable: Vec<Vec<ElementId>>,
@@ -29,6 +31,7 @@ impl RelationIndex {
         self.bubble_labels.clear();
         self.bubble_label_owners.clear();
         self.serials_by_text.clear();
+        self.shapes_by_text.clear();
         self.text_links.clear();
         for id in document.paint_order().iter().copied() {
             if let Some((text, kind)) = Self::text_link(document, id) {
@@ -45,6 +48,9 @@ impl RelationIndex {
                         }
                         TextOwnerKind::SerialNumber => {
                             self.serials_by_text.entry(text).or_default().push(id);
+                        }
+                        TextOwnerKind::Shape => {
+                            self.shapes_by_text.entry(text).or_default().push(id);
                         }
                     }
                 }
@@ -94,6 +100,14 @@ impl RelationIndex {
 
     fn text_link(document: &Document, id: ElementId) -> Option<(ElementId, TextOwnerKind)> {
         match &document.element(id).ok()?.data {
+            ElementData::Rectangle(shape)
+                if shape.rectangle_kind
+                    == snow_draw_engine_document::RectangleElementKind::Rectangle =>
+            {
+                shape
+                    .text_element_id
+                    .map(|text| (text, TextOwnerKind::Shape))
+            }
             ElementData::Arrow(arrow) => arrow
                 .text_element_id
                 .map(|text| (text, TextOwnerKind::Arrow)),
@@ -130,6 +144,20 @@ impl RelationIndex {
             .get(&text)
             .map(Vec::as_slice)
             .unwrap_or_default()
+    }
+
+    pub fn shapes_for_text(&self, text: ElementId) -> &[ElementId] {
+        self.shapes_by_text
+            .get(&text)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    pub fn connector_text_ids(&self) -> impl Iterator<Item = ElementId> + '_ {
+        self.serials_by_text
+            .keys()
+            .chain(self.shapes_by_text.keys())
+            .copied()
     }
 
     pub fn bound_arrow_ids(&self, bindable_id: ElementId) -> &[ElementId] {

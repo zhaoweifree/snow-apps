@@ -21,7 +21,9 @@ use crate::config::{ExportExecutionMode, ExportFormat, SoftwareH264Priority};
 use crate::error::{RecordingExportError, Result};
 #[cfg(test)]
 use crate::ffmpeg_util::copy_rgba_into_frame;
-use crate::ffmpeg_util::{VideoPacketDurations, ensure_ffmpeg_initialized};
+use crate::ffmpeg_util::{
+    VideoPacketDurations, ensure_ffmpeg_initialized, validate_cpu_video_frame,
+};
 #[cfg(test)]
 use crate::output_scaler::convert_owned_rgba;
 use crate::video_quality::smart_quality_bitrate_bps;
@@ -119,7 +121,8 @@ pub struct StreamingEncoderBuilder {
     software_fallback_threads: Option<u8>,
     force_hardware_failure: bool,
     recoverable: bool,
-    recording_source: bool,
+    purpose: VideoEncoderPurpose,
+    audio_input_channels: Option<u16>,
     cpu_input_format_hint: Option<ffmpeg::format::Pixel>,
     #[cfg(windows)]
     gpu_input: Option<crate::gpu::GpuInputConfig>,
@@ -135,7 +138,8 @@ impl From<StreamingEncoderConfig> for StreamingEncoderBuilder {
             software_fallback_threads: None,
             force_hardware_failure: false,
             recoverable: false,
-            recording_source: false,
+            purpose: VideoEncoderPurpose::LiveOutput,
+            audio_input_channels: None,
             cpu_input_format_hint: None,
             #[cfg(windows)]
             gpu_input: None,
@@ -169,9 +173,21 @@ impl StreamingEncoderBuilder {
     }
     /// A high-quality, bounded-delay clean source for deterministic later rendering.
     pub fn recording_source(mut self) -> Self {
-        self.recording_source = true;
+        self.purpose = VideoEncoderPurpose::RecordingSource;
         self.config.video.quality = self.config.video.quality.max(95);
         self.config.video.speed = snow_recording_model::VideoEncodingSpeed::VeryFast;
+        self
+    }
+    /// Enable buffered compression for rendering after capture has finished.
+    /// Live GPU surface pools and segmented recovery cannot use this policy.
+    pub fn offline_output(mut self) -> Self {
+        self.purpose = VideoEncoderPurpose::OfflineOutput;
+        self
+    }
+    /// Describe supplied PCM channels independently of each encoded track layout.
+    /// Input and output use the track's sample rate; clip replay supplies stereo.
+    pub(crate) fn audio_input_channels(mut self, channels: u16) -> Self {
+        self.audio_input_channels = Some(channels);
         self
     }
     /// Stage independent video segments and continuous audio for live recovery.
@@ -219,6 +235,28 @@ impl StreamingEncoderBuilder {
     }
 
     pub fn create(self) -> Result<StreamingEncoder> {
+        if self
+            .audio_input_channels
+            .is_some_and(|channels| channels == 0)
+        {
+            return Err(RecordingExportError::InvalidConfig(
+                "invalid audio input format".into(),
+            ));
+        }
+        if self.recoverable
+            && (self.purpose != VideoEncoderPurpose::LiveOutput
+                || self.audio_input_channels.is_some())
+        {
+            return Err(RecordingExportError::InvalidConfig(
+                "segmented recovery requires live output with matching PCM input".into(),
+            ));
+        }
+        #[cfg(windows)]
+        if self.purpose == VideoEncoderPurpose::OfflineOutput && self.gpu_input.is_some() {
+            return Err(RecordingExportError::InvalidConfig(
+                "offline output cannot use the bounded live GPU surface pool".into(),
+            ));
+        }
         if self.recoverable && self.cpu_hdr_input {
             return Err(RecordingExportError::InvalidConfig(
                 "native input recovery is not available".into(),
@@ -231,7 +269,8 @@ impl StreamingEncoderBuilder {
             self.config,
             self.force_hardware_failure,
             self.software_fallback_threads,
-            self.recording_source,
+            self.purpose,
+            self.audio_input_channels,
             self.cpu_input_format_hint,
             #[cfg(windows)]
             self.gpu_input,
@@ -390,8 +429,11 @@ pub struct StreamingEncoder {
     recovery: Option<recovery::RecoveryState>,
     audio_output: Option<ffmpeg::format::context::Output>,
     output: Option<ffmpeg::format::context::Output>,
+    // For GIF this context supplies muxer parameters and the shared time base;
+    // frame packets come from the RGB-difference encoder below.
     encoder: ffmpeg::encoder::video::Encoder,
-    gif_delta: crate::gif_palette::GifDeltaState,
+    gif: Option<crate::gif_encoder::GifEncoder>,
+    gif_packet: Option<ffmpeg::Packet>,
     stream_index: usize,
     stream_time_base: ffmpeg::Rational,
     #[cfg(any(test, feature = "bench-experiments"))]
@@ -480,7 +522,8 @@ impl StreamingEncoder {
         config: StreamingEncoderConfig,
         force_hardware_failure: bool,
         software_fallback_threads: Option<u8>,
-        recording_source: bool,
+        purpose: VideoEncoderPurpose,
+        audio_input_channels: Option<u16>,
         cpu_input_format_hint: Option<ffmpeg::format::Pixel>,
         #[cfg(windows)] gpu_input: Option<crate::gpu::GpuInputConfig>,
         #[cfg(target_os = "macos")] native_input: Option<snow_media::PixelFormat>,
@@ -504,7 +547,8 @@ impl StreamingEncoder {
             staging_path.clone(),
             force_hardware_failure,
             software_fallback_threads,
-            recording_source,
+            purpose,
+            audio_input_channels,
             cpu_input_format_hint,
             #[cfg(windows)]
             gpu_input,
@@ -529,7 +573,8 @@ impl StreamingEncoder {
         staging_path: PathBuf,
         force_hardware_failure: bool,
         software_fallback_threads: Option<u8>,
-        recording_source: bool,
+        purpose: VideoEncoderPurpose,
+        audio_input_channels: Option<u16>,
         cpu_input_format_hint: Option<ffmpeg::format::Pixel>,
         #[cfg(windows)] gpu_input: Option<crate::gpu::GpuInputConfig>,
         #[cfg(target_os = "macos")] native_input: Option<snow_media::PixelFormat>,
@@ -719,7 +764,7 @@ impl StreamingEncoder {
                     &effective_video,
                     false,
                 );
-                encoder.set_bit_rate(if recording_source {
+                encoder.set_bit_rate(if purpose == VideoEncoderPurpose::RecordingSource {
                     bitrate.saturating_mul(2).clamp(1_200_000, 240_000_000)
                 } else {
                     bitrate
@@ -742,11 +787,7 @@ impl StreamingEncoder {
                 encoder,
                 &codec,
                 &effective_video,
-                if recording_source {
-                    VideoEncoderPurpose::RecordingSource
-                } else {
-                    VideoEncoderPurpose::Output
-                },
+                purpose,
                 config.fps,
                 surface_capacity,
             )
@@ -852,6 +893,7 @@ impl StreamingEncoder {
             global_header,
             &config.audio,
             config.encode_threads,
+            audio_input_channels,
         )?;
         let mut options = ffmpeg::Dictionary::new();
         match config.format {
@@ -884,6 +926,17 @@ impl StreamingEncoder {
         if fragmented {
             options.set("movflags", "frag_every_frame+empty_moov+default_base_moof");
         }
+        if config.format == ExportFormat::Mp4 && !config.audio.is_empty() {
+            crate::codec::write_audio_bitrate_metadata(&mut output, &config.audio);
+            options.set(
+                "movflags",
+                if fragmented {
+                    "frag_every_frame+empty_moov+default_base_moof+use_metadata_tags"
+                } else {
+                    "use_metadata_tags"
+                },
+            );
+        }
         output.write_header_with(options).map_err(|error| {
             RecordingExportError::Encode(format!(
                 "failed to write streaming output header: {error}"
@@ -911,6 +964,18 @@ impl StreamingEncoder {
             ffmpeg::format::Pixel::P010LE
         } else {
             ffmpeg::format::Pixel::RGBA
+        };
+        // Keep source colors until GIF submission, including prepared frames
+        // from editing. Quantizing in a scaler would lose RGB change identity.
+        let gif = if config.format == ExportFormat::Gif {
+            pixel_format = ffmpeg::format::Pixel::RGB24;
+            Some(crate::gif_encoder::GifEncoder::new(
+                config.width,
+                config.height,
+                config.video.quality,
+            )?)
+        } else {
+            None
         };
         let mut scaler = if gpu_enabled {
             None
@@ -968,7 +1033,8 @@ impl StreamingEncoder {
             audio_output: None,
             output: Some(output),
             encoder,
-            gif_delta: crate::gif_palette::GifDeltaState::default(),
+            gif,
+            gif_packet: None,
             stream_index,
             stream_time_base,
             scaler,
@@ -1051,11 +1117,6 @@ impl StreamingEncoder {
         if self.pending.is_some() || self.report.encoded_frames != 0 || threads > 4 {
             return Err(RecordingExportError::InvalidConfig(
                 "conversion workers require an unstarted encoder and at most four threads".into(),
-            ));
-        }
-        if threads != 0 && self.encode_frame.format() == ffmpeg::format::Pixel::PAL8 {
-            return Err(RecordingExportError::InvalidConfig(
-                "GIF uses adaptive palette conversion instead of swscale workers".into(),
             ));
         }
         self.frame_converter = if threads == 0 {
@@ -1452,9 +1513,13 @@ impl StreamingEncoder {
         Ok(())
     }
 
-    /// The exact CPU transport pixel format selected by the opened encoder.
+    /// The exact CPU transport pixel format accepted by this encoding backend.
     pub fn input_pixel_format(&self) -> ffmpeg::format::Pixel {
-        self.encoder.format()
+        if self.gif.is_some() {
+            ffmpeg::format::Pixel::RGB24
+        } else {
+            self.encoder.format()
+        }
     }
 
     /// Convert a borrowed RGBA image through the normal encoder color pipeline.
@@ -1495,6 +1560,8 @@ impl StreamingEncoder {
 
     /// Admit a converted CPU frame without a second color conversion or pixel copy.
     /// The caller transfers immutable storage; FFmpeg retains it until packet drain.
+    /// Every plane must be contained in a reference-counted allocation; invalid
+    /// dimensions, strides or missing storage return an error before admission.
     pub fn push_prepared_video_frame_at_pts(
         &mut self,
         pts: u64,
@@ -1504,12 +1571,13 @@ impl StreamingEncoder {
             || self.output.is_none()
             || frame.width() != self.width
             || frame.height() != self.height
-            || frame.format() != self.encoder.format()
+            || frame.format() != self.input_pixel_format()
         {
             return Err(RecordingExportError::InvalidConfig(
                 "prepared frame does not match encoder".into(),
             ));
         }
+        validate_cpu_video_frame(&frame)?;
         crate::hdr::frame(&mut frame, self.cpu_hdr_input);
         self.admit_prepared_frame(pts, frame)
     }
@@ -1520,6 +1588,9 @@ impl StreamingEncoder {
         pts: u64,
         frame: &ffmpeg::frame::Video,
     ) -> Result<()> {
+        // av_frame_ref copies pixels when input storage is not reference-counted.
+        // Validate before that call can read an unchecked plane layout.
+        validate_cpu_video_frame(frame)?;
         let mut retained = ffmpeg::frame::Video::empty();
         let status = unsafe { ffmpeg::ffi::av_frame_ref(retained.as_mut_ptr(), frame.as_ptr()) };
         if status < 0 {
@@ -1575,9 +1646,6 @@ impl StreamingEncoder {
         pts: i64,
         duration: i64,
     ) -> Result<()> {
-        if frame.format() == ffmpeg::format::Pixel::PAL8 {
-            self.gif_delta.prepare(&mut self.encoder, &frame)?;
-        }
         #[cfg(any(test, feature = "bench-experiments"))]
         self.check_injected_failure(GpuFailureStage::Submission)?;
         frame.set_pts(Some(pts));
@@ -1603,11 +1671,18 @@ impl StreamingEncoder {
         let send_started = std::time::Instant::now();
         #[cfg(feature = "bench-timing")]
         self.report.timings.submissions.push((pts, send_started));
-        retry_send(
-            self,
-            |state| state.encoder.send_frame(&frame),
-            |state| state.drain_available_packets(),
-        )?;
+        if let Some(gif) = &mut self.gif {
+            let mut packet = gif.encode(&frame)?;
+            packet.set_pts(Some(pts));
+            packet.set_dts(Some(pts));
+            self.gif_packet = Some(packet);
+        } else {
+            retry_send(
+                self,
+                |state| state.encoder.send_frame(&frame),
+                |state| state.drain_available_packets(),
+            )?;
+        }
         #[cfg(feature = "bench-timing")]
         {
             #[cfg(target_os = "macos")]
@@ -1649,19 +1724,29 @@ impl StreamingEncoder {
             .as_mut()
             .ok_or_else(|| RecordingExportError::Encode("streaming output is closed".into()))?;
         loop {
-            let mut packet = ffmpeg::Packet::empty();
-            match self.encoder.receive_packet(&mut packet) {
-                Ok(()) => {}
-                Err(ffmpeg::Error::Eof) => return Ok(()),
-                Err(cause) if crate::ffmpeg_util::is_eagain(&cause) && !flushing => return Ok(()),
-                // After accepted EOF the codec must progress to EOF. Never spin
-                // indefinitely on a broken driver during asynchronous stop.
-                Err(cause) => {
-                    return Err(RecordingExportError::Encode(format!(
-                        "video packet drain: {cause}"
-                    )));
+            let mut packet = if self.gif.is_some() {
+                match self.gif_packet.take() {
+                    Some(packet) => packet,
+                    None => return Ok(()),
                 }
-            }
+            } else {
+                let mut packet = ffmpeg::Packet::empty();
+                match self.encoder.receive_packet(&mut packet) {
+                    Ok(()) => {}
+                    Err(ffmpeg::Error::Eof) => return Ok(()),
+                    Err(cause) if crate::ffmpeg_util::is_eagain(&cause) && !flushing => {
+                        return Ok(());
+                    }
+                    // After accepted EOF the codec must progress to EOF. Never spin
+                    // indefinitely on a broken driver during asynchronous stop.
+                    Err(cause) => {
+                        return Err(RecordingExportError::Encode(format!(
+                            "video packet drain: {cause}"
+                        )));
+                    }
+                }
+                packet
+            };
             if flushing && self.report.encoded_frames <= 2 && self.report.video_encoder == "libx265"
             {
                 // x265's B-pyramid delay is initialized by the third input.
@@ -2073,15 +2158,20 @@ impl StreamingEncoder {
             .push((pending.pts, std::time::Instant::now()));
         #[cfg(feature = "bench-timing")]
         let send_started = std::time::Instant::now();
-        self.gif_delta
-            .prepare(&mut self.encoder, &self.encode_frame)?;
-        self.encoder
-            .send_frame(&self.encode_frame)
-            .map_err(|error| {
-                RecordingExportError::Encode(format!(
-                    "failed to send streaming video frame: {error}"
-                ))
-            })?;
+        if let Some(gif) = &mut self.gif {
+            let mut packet = gif.encode(&self.encode_frame)?;
+            packet.set_pts(Some(pending.pts));
+            packet.set_dts(Some(pending.pts));
+            self.gif_packet = Some(packet);
+        } else {
+            self.encoder
+                .send_frame(&self.encode_frame)
+                .map_err(|error| {
+                    RecordingExportError::Encode(format!(
+                        "failed to send streaming video frame: {error}"
+                    ))
+                })?;
+        }
         #[cfg(feature = "bench-timing")]
         self.report.timings.record("encode.send", send_started);
         #[cfg(feature = "bench-timing")]
@@ -2199,6 +2289,7 @@ fn create_audio_states(
     global_header: bool,
     configs: &[StreamingAudioConfig],
     encode_threads: u8,
+    input_channels: Option<u16>,
 ) -> Result<Vec<StreamingAudioState>> {
     configs
         .iter()
@@ -2210,6 +2301,7 @@ fn create_audio_states(
                 global_header,
                 config,
                 encode_threads,
+                input_channels,
             )
         })
         .collect()
@@ -2222,7 +2314,10 @@ fn create_audio_state(
     global_header: bool,
     config: &StreamingAudioConfig,
     encode_threads: u8,
+    input_channels: Option<u16>,
 ) -> Result<StreamingAudioState> {
+    let input_rate = config.sample_rate_hz;
+    let input_channels = input_channels.unwrap_or(config.channels);
     let container_codec = output
         .format()
         .codec(output_path, ffmpeg::media::Type::Audio);
@@ -2281,9 +2376,9 @@ fn create_audio_state(
         }
         stream.index()
     };
-    let input_layout = ffmpeg::ChannelLayout::default(i32::from(config.channels));
+    let input_layout = ffmpeg::ChannelLayout::default(i32::from(input_channels));
     let input_format = ffmpeg::format::Sample::I16(ffmpeg::format::sample::Type::Packed);
-    let resampler = if encoder.rate() == config.sample_rate_hz
+    let resampler = if encoder.rate() == input_rate
         && encoder.channel_layout() == input_layout
         && encoder.format() == input_format
     {
@@ -2293,7 +2388,7 @@ fn create_audio_state(
             ffmpeg::software::resampling::Context::get(
                 input_format,
                 input_layout,
-                config.sample_rate_hz,
+                input_rate,
                 encoder.format(),
                 encoder.channel_layout(),
                 encoder.rate(),
@@ -2307,7 +2402,7 @@ fn create_audio_state(
     };
     let variable_frame_size = encoder.frame_size() == 0;
     let frame_samples = if variable_frame_size {
-        (config.sample_rate_hz as usize / 100).max(1)
+        (input_rate as usize / 100).max(1)
     } else {
         encoder.frame_size() as usize
     };
@@ -2316,13 +2411,13 @@ fn create_audio_state(
         encoder,
         stream_index,
         stream_time_base: ffmpeg::Rational(1, output_rate as i32),
-        input_rate: config.sample_rate_hz,
-        input_channels: usize::from(config.channels),
+        input_rate,
+        input_channels: usize::from(input_channels),
         input_layout,
         resampler,
         frame_samples,
         variable_frame_size,
-        pending_samples: VecDeque::with_capacity(frame_samples * usize::from(config.channels) * 2),
+        pending_samples: VecDeque::with_capacity(frame_samples * usize::from(input_channels) * 2),
         next_input_frame: 0,
         next_encoder_pts: 0,
         final_duration_us: None,
@@ -2987,7 +3082,7 @@ mod tests {
                 convert_owned_rgba(&mut scaler, black_box(&pixels), black_box(&mut output))
                     .unwrap();
             } else {
-                copy_rgba_into_frame(&mut rgba_frame, width, black_box(&pixels[..visible]));
+                copy_rgba_into_frame(&mut rgba_frame, black_box(&pixels[..visible])).unwrap();
                 scaler.run(&rgba_frame, black_box(&mut output)).unwrap();
             }
             black_box(&output);
@@ -3028,7 +3123,7 @@ mod tests {
                 .map(|index| (index % 251) as u8)
                 .collect();
             let mut source = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGBA, width, height);
-            copy_rgba_into_frame(&mut source, width, &pixels);
+            copy_rgba_into_frame(&mut source, &pixels).unwrap();
             let mut padded: RasterBuffer = pixels.clone().into();
             pad_owned_rgba(&mut padded);
             for format in [
@@ -3403,6 +3498,7 @@ mod tests {
                     .enumerate()
                     .map(|(index, id)| StreamingAudioConfig {
                         track_id: (*id).into(),
+                        bitrate_kbps: if *id == "system" { 160 } else { 96 },
                         title: if *id == "system" {
                             "Speaker audio"
                         } else {
@@ -3463,6 +3559,15 @@ mod tests {
                 assert_eq!(report.encoded_audio_frames, 48_000 * sources.len() as u64);
                 let input = ffmpeg::format::input(&path).unwrap();
                 assert_eq!(input.nb_streams(), 1 + sources.len() as u32);
+                let expected_rates = sources
+                    .iter()
+                    .map(|id| if *id == "system" { "160" } else { "96" })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                assert_eq!(
+                    input.metadata().get(crate::codec::AUDIO_BITRATES_METADATA),
+                    Some(expected_rates.as_str())
+                );
                 for (order, id) in sources.iter().enumerate() {
                     let mut input = ffmpeg::format::input(&path).unwrap();
                     let stream = input.stream(order + 1).unwrap();
@@ -3603,21 +3708,91 @@ mod tests {
     }
 
     #[test]
+    fn offline_output_rejects_live_recovery_and_preserves_software_fallback() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = encoder_config(directory.path().join("offline.mp4"), ExportFormat::Mp4);
+        let error = StreamingEncoder::builder(config.clone())
+            .offline_output()
+            .recoverable()
+            .create()
+            .err()
+            .unwrap();
+        assert!(matches!(error, RecordingExportError::InvalidConfig(_)));
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+        let mut config = config;
+        config.prefer_hardware_h264 = true;
+        config.execution_mode = ExportExecutionMode::HardwarePreferred;
+        let mut builder = StreamingEncoder::builder(config)
+            .offline_output()
+            .software_fallback_threads(2);
+        builder.force_hardware_failure = true;
+        let mut encoder = builder.create().unwrap();
+        assert_eq!(encoder.opened_video_encoder(), ("libx264", false));
+        assert_eq!(encoder.report.effective_encode_threads, 2);
+        write_test_frames(&mut encoder);
+        encoder.finish().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an available native H.264 encoder"]
+    fn offline_hardware_sparse_frames_preserve_timestamps_and_endpoint() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("offline-hardware-sparse.mp4");
+        let mut config = encoder_config(path.clone(), ExportFormat::Mp4);
+        config.width = 640;
+        config.height = 360;
+        config.fps = 30;
+        config.prefer_hardware_h264 = true;
+        config.execution_mode = ExportExecutionMode::HardwarePreferred;
+        let mut encoder = StreamingEncoder::builder(config)
+            .offline_output()
+            .create()
+            .unwrap();
+        assert!(encoder.opened_video_encoder().1, "native encoder required");
+        for (index, pts) in [0, 7, 30, 45, 90].into_iter().enumerate() {
+            encoder
+                .push_rgba_frame_at_pts(
+                    pts,
+                    &[40 + index as u8 * 40, 80, 120, 255].repeat(640 * 360),
+                )
+                .unwrap();
+        }
+        let report = encoder.finish_at_pts(120).unwrap();
+        assert_eq!(report.encoded_frames, 5);
+        assert_eq!(decoded_video_frame_count(&path), (5, 640, 360));
+        let mut input = ffmpeg::format::input(&path).unwrap();
+        let stream = input.streams().best(ffmpeg::media::Type::Video).unwrap();
+        let index = stream.index();
+        let time_base = stream.time_base();
+        assert_eq!(stream.duration().rescale(time_base, (1, 30)), 120);
+        let mut timestamps: Vec<_> = input
+            .packets()
+            .filter(|(stream, _)| stream.index() == index)
+            .map(|(_, packet)| packet.pts().unwrap().rescale(time_base, (1, 30)))
+            .collect();
+        timestamps.sort_unstable();
+        assert_eq!(timestamps, [0, 7, 30, 45, 90]);
+    }
+
+    #[test]
     fn software_presets_buffer_reorder_and_flush_variable_duration_frames() {
         use ffmpeg::Rescale;
         let directory = tempfile::tempdir().unwrap();
-        for (codec, recoverable, frame_count, initial_hold, final_hold) in [
-            (VideoCodec::H264, false),
-            (VideoCodec::H264, true),
-            (VideoCodec::H265, false),
+        for (codec, recoverable, offline, frame_count, initial_hold, final_hold) in [
+            (VideoCodec::H264, false, false),
+            (VideoCodec::H264, true, false),
+            (VideoCodec::H265, false, false),
+            (VideoCodec::H264, false, true),
+            (VideoCodec::H265, false, true),
         ]
         .into_iter()
-        .flat_map(|(codec, recoverable)| {
-            [(94, 0, 20), (96, 0, 20), (97, 0, 20), (96, 20, 0)]
-                .map(|(count, initial, end)| (codec, recoverable, count, initial, end))
+        .flat_map(|(codec, recoverable, offline)| {
+            [(94, 0, 20), (96, 0, 20), (97, 0, 20), (96, 20, 0)].map(
+                move |(count, initial, end)| (codec, recoverable, offline, count, initial, end),
+            )
         }) {
             let path = directory.path().join(format!(
-                "buffered-{codec:?}-{recoverable}-{frame_count}-{initial_hold}.mp4"
+                "buffered-{codec:?}-{recoverable}-{offline}-{frame_count}-{initial_hold}.mp4"
             ));
             let mut config = encoder_config(path.clone(), ExportFormat::Mp4);
             config.codec = codec;
@@ -3627,6 +3802,8 @@ mod tests {
             let builder = StreamingEncoder::builder(config);
             let mut encoder = if recoverable {
                 builder.recoverable()
+            } else if offline {
+                builder.offline_output()
             } else {
                 builder
             }
@@ -3770,6 +3947,75 @@ mod tests {
             .collect();
         pts.sort_unstable();
         assert_eq!(pts, [0, 7, 15]);
+    }
+
+    #[test]
+    fn prepared_frame_submission_rejects_missing_or_undersized_storage() {
+        let directory = tempfile::tempdir().unwrap();
+        for borrowed in [false, true] {
+            for allocated in [false, true] {
+                let mut config = encoder_config(
+                    directory
+                        .path()
+                        .join(format!("invalid-{borrowed}-{allocated}.avi")),
+                    ExportFormat::Avi,
+                );
+                config.height = 128;
+                let mut encoder = StreamingEncoder::create(config).unwrap();
+                let format = encoder.input_pixel_format();
+                let mut frame = if allocated {
+                    ffmpeg::frame::Video::new(format, 1, 1)
+                } else {
+                    ffmpeg::frame::Video::empty()
+                };
+                frame.set_format(format);
+                frame.set_width(16);
+                frame.set_height(128);
+                let result = if borrowed {
+                    encoder.push_prepared_video_frame_ref_at_pts(0, &frame)
+                } else {
+                    encoder.push_prepared_video_frame_at_pts(0, frame)
+                };
+                assert!(
+                    result.is_err(),
+                    "borrowed={borrowed}, allocated={allocated}"
+                );
+                assert_eq!(encoder.admitted_frames, 0);
+                assert!(encoder.pending.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn prepared_frame_submission_round_trips_packed_planar_and_palette_formats() {
+        let directory = tempfile::tempdir().unwrap();
+        for (format, extension) in [
+            (ExportFormat::Mp4, "mp4"),
+            (ExportFormat::Avi, "avi"),
+            (ExportFormat::Gif, "gif"),
+            (ExportFormat::Apng, "apng"),
+        ] {
+            let path = directory.path().join(format!("prepared.{extension}"));
+            let mut encoder =
+                StreamingEncoder::create(encoder_config(path.clone(), format)).unwrap();
+            let mut rgba = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGBA, 16, 16);
+            for pts in 0..3 {
+                let pixels = [pts as u8 * 80; 16 * 16 * 4];
+                copy_rgba_into_frame(&mut rgba, &pixels).unwrap();
+                let prepared = encoder.prepare_rgba_video_frame(&rgba).unwrap();
+                if pts % 2 == 0 {
+                    encoder
+                        .push_prepared_video_frame_ref_at_pts(pts, &prepared)
+                        .unwrap();
+                } else {
+                    encoder
+                        .push_prepared_video_frame_at_pts(pts, prepared)
+                        .unwrap();
+                }
+            }
+            assert_eq!(encoder.finish().unwrap().encoded_frames, 3);
+            assert_eq!(decoded_video_frame_count(&path), (3, 16, 16));
+        }
     }
 
     #[test]
@@ -4083,7 +4329,8 @@ mod tests {
             config,
             true,
             None,
-            false,
+            VideoEncoderPurpose::LiveOutput,
+            None,
             None,
             #[cfg(windows)]
             None,

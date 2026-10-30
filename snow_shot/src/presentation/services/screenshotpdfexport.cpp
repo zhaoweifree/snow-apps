@@ -8,6 +8,7 @@
 #include <QtEndian>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace screenshot_pdf {
 namespace {
@@ -25,7 +26,20 @@ bool isCancelled(const Cancelled& cancelled, QString* error) {
     return true;
 }
 QByteArray number(double value) {
-    return QByteArray::number(value, 'f', 8);
+    if (value == 0 || std::abs(value) >= 1e-6)
+        return QByteArray::number(value, 'f', 8);
+    // PDF real numbers cannot use exponent notation. Expand seventeen significant digits
+    // explicitly so a valid small paper dimension or image matrix never rounds down to zero.
+    const QByteArray scientific = QByteArray::number(std::abs(value), 'e', 16);
+    const qsizetype exponentStart = scientific.indexOf('e');
+    const int exponent = scientific.mid(exponentStart + 1).toInt();
+    QByteArray digits = scientific.left(exponentStart);
+    digits.remove(digits.indexOf('.'), 1);
+    QByteArray result = (value < 0 ? QByteArray("-0.") : QByteArray("0.")) +
+                        QByteArray(-exponent - 1, '0') + digits;
+    while (result.endsWith('0'))
+        result.chop(1);
+    return result;
 }
 QByteArray pdfString(const QString& value) {
     QByteArray bytes("\xfe\xff", 2);
@@ -178,6 +192,9 @@ class Writer {
     int nextId() const {
         return int(m_offsets.size());
     }
+    bool isOk() const {
+        return m_ok;
+    }
 
   private:
     QIODevice* m_device;
@@ -214,12 +231,31 @@ QString Payload::path() const {
 }
 
 std::shared_ptr<Payload> prepare(const ScreenshotImageRowSource& source, int quality,
-                                 QString* error, bool verifiedOpaque) {
-    if (!source.isValid() || source.size.width() > 1000000 || source.size.height() > 1000000 ||
+                                 QString* error, bool verifiedOpaque, const Progress& progress) {
+    if (!source.isValid() ||
+        ((source.size.width() > 1000000 || source.size.height() > 1000000) &&
+         !source.reserveResources) ||
         qint64(source.size.width()) * source.size.height() > qint64{2} * 1024 * 1024 * 1024) {
         fail(error);
         return {};
     }
+    // Account for one raster tile, RGB/alpha buffers plus their compression copies, and the
+    // bounded band cache. Compressed payloads live on disk and are not retained in memory.
+    const qint64 bandBytes = qint64(source.size.width()) * qMin(2048, source.size.height()) * 4;
+    const qint64 bandWorking = bandBytes <= 32 * 1024 * 1024
+                                   ? bandBytes
+                                   : qMax(qint64{1024 * 1024}, qint64(source.size.width()) * 4);
+    const qint64 tilePixels =
+        qint64(qMin(2048, source.size.width())) * qMin(2048, source.size.height());
+    std::shared_ptr<void> resources;
+    if (source.reserveResources) {
+        resources =
+            source.reserveResources(0, bandWorking + tilePixels * 12 + 2 * 1024 * 1024, error);
+        if (!resources)
+            return {};
+    }
+    if (progress)
+        progress(0);
     auto result = std::make_shared<Payload>();
     result->size = source.size;
     result->quality = qBound(1, quality, 100);
@@ -229,12 +265,14 @@ std::shared_ptr<Payload> prepare(const ScreenshotImageRowSource& source, int qua
             *error = file.errorString();
         return {};
     }
-    for (int y = 0; y < source.size.height(); y += 2048) {
-        RasterBand band;
-        if (!band.load(source, y, qMin(2048, source.size.height() - y), result->directory.path(),
-                       error))
+    for (int y = 0; y < source.size.height();) {
+        if (isCancelled(source.cancellationRequested, error))
             return {};
-        for (int x = 0; x < source.size.width(); x += 2048) {
+        RasterBand band;
+        const int bandRows = qMin(2048, source.size.height() - y);
+        if (!band.load(source, y, bandRows, result->directory.path(), error))
+            return {};
+        for (int x = 0; x < source.size.width();) {
             if (isCancelled(source.cancellationRequested, error))
                 return {};
             const QRect rect(x, y, qMin(2048, source.size.width() - x),
@@ -253,6 +291,8 @@ std::shared_ptr<Payload> prepare(const ScreenshotImageRowSource& source, int qua
                     alpha.resize(qsizetype(rect.width()) * rect.height());
                 bool opaque = true;
                 for (int row = 0; row < rect.height(); ++row) {
+                    if ((row & 63) == 0 && isCancelled(source.cancellationRequested, error))
+                        return {};
                     const uchar* pixels = image.constScanLine(row);
                     for (int column = 0; column < rect.width(); ++column) {
                         const qsizetype index = qsizetype(row) * rect.width() + column;
@@ -274,6 +314,8 @@ std::shared_ptr<Payload> prepare(const ScreenshotImageRowSource& source, int qua
             } else {
                 // Flatten explicitly, including hidden RGB, before the one JPEG encode.
                 for (int row = 0; !verifiedOpaque && row < rect.height(); ++row) {
+                    if ((row & 63) == 0 && isCancelled(source.cancellationRequested, error))
+                        return {};
                     uchar* pixels = image.scanLine(row);
                     for (int column = 0; column < rect.width(); ++column) {
                         uchar* pixel = pixels + column * 4;
@@ -301,7 +343,14 @@ std::shared_ptr<Payload> prepare(const ScreenshotImageRowSource& source, int qua
                 return {};
             }
             result->tiles.push_back(tile);
+            if (progress) {
+                const qint64 completed =
+                    qint64(y) * source.size.width() + qint64(x + rect.width()) * rect.height();
+                progress(qreal(completed) / (qreal(source.size.width()) * source.size.height()));
+            }
+            x += rect.width();
         }
+        y += bandRows;
     }
     if (!file.flush()) {
         if (error)
@@ -313,66 +362,119 @@ std::shared_ptr<Payload> prepare(const ScreenshotImageRowSource& source, int qua
     return result;
 }
 
-bool write(const Payload& payload, QIODevice* output, const ScreenshotPdfOptions& options,
-           QString* error, const Cancelled& cancelled) {
-    if (!output || !output->isWritable() || payload.tiles.isEmpty())
+bool writeDocument(qsizetype pageCount, const PageProducer& produce, QIODevice* output,
+                   const ScreenshotPdfOptions& options, QString* error, const Cancelled& cancelled,
+                   const DocumentProgress& progress) {
+    if (!output || !output->isWritable() || !produce || pageCount <= 0 ||
+        pageCount > (std::numeric_limits<int>::max() - 4) / 2)
         return fail(error);
-    QFile input(payload.path());
-    if (!input.open(QIODevice::ReadOnly)) {
-        if (error)
-            *error = input.errorString();
-        return false;
-    }
-    const Layout geometry = layout(payload.size, options.pageSize);
-    const double unit = qMax(
-        1.0, std::ceil(qMax(geometry.pagePoints.width(), geometry.pagePoints.height()) / 14400.0));
-    const QSizeF page = geometry.pagePoints / unit;
-    const double scale = geometry.imagePoints.width() / payload.size.width() / unit;
-    QByteArray content =
-        "1 1 1 rg\n0 0 " + number(page.width()) + ' ' + number(page.height()) + " re f\n";
-    QByteArray resources;
+    struct WrittenPage {
+        QSizeF size;
+        double unit = 1;
+        QByteArray resources;
+        int contents = 0;
+    };
+    QList<WrittenPage> written;
     Writer writer(output);
-    writer.put("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
-    for (const Tile& tile : payload.tiles) {
+    if (!writer.put("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"))
+        return fail(error);
+    for (qsizetype index = 0; index < pageCount; ++index) {
         if (isCancelled(cancelled, error))
             return false;
-        if (!input.seek(tile.offset))
+        Page prepared;
+        if (!produce(index, &prepared, error))
+            return false;
+        if (!prepared.payload || prepared.payload->size.isEmpty() ||
+            prepared.payload->tiles.isEmpty())
             return fail(error);
-        const QByteArray color = input.read(tile.colorBytes);
-        const QByteArray alpha = input.read(tile.alphaBytes);
-        if (color.size() != tile.colorBytes || alpha.size() != tile.alphaBytes)
+        const auto& payload = *prepared.payload;
+        const auto& geometry = prepared.geometry;
+        const auto positive = [](qreal value) { return std::isfinite(value) && value > 0; };
+        if (!positive(geometry.pagePoints.width()) || !positive(geometry.pagePoints.height()) ||
+            !positive(geometry.imagePoints.width()) || !positive(geometry.imagePoints.height()) ||
+            !std::isfinite(geometry.imagePoints.left()) ||
+            !std::isfinite(geometry.imagePoints.top()) || geometry.imagePoints.left() < -1e-7 ||
+            geometry.imagePoints.top() < -1e-7 ||
+            geometry.imagePoints.right() > geometry.pagePoints.width() + 1e-7 ||
+            geometry.imagePoints.bottom() > geometry.pagePoints.height() + 1e-7)
             return fail(error);
-        const QByteArray dimensions = " /Width " + QByteArray::number(tile.rect.width()) +
-                                      " /Height " + QByteArray::number(tile.rect.height()) +
-                                      " /BitsPerComponent 8";
-        int mask = 0;
-        if (!alpha.isEmpty())
-            mask = writer.stream(
-                "/Type /XObject /Subtype /Image /ColorSpace /DeviceGray /Filter /FlateDecode" +
-                    dimensions,
-                alpha);
-        const int id = writer.stream(
-            "/Type /XObject /Subtype /Image /ColorSpace /DeviceRGB /Interpolate false /Filter " +
-                QByteArray(payload.quality == 100 ? "/FlateDecode" : "/DCTDecode") + dimensions +
-                (mask ? " /SMask " + QByteArray::number(mask) + " 0 R" : QByteArray{}),
-            color);
-        const QByteArray name = "/Im" + QByteArray::number(id);
-        resources += name + ' ' + QByteArray::number(id) + " 0 R ";
-        const double left = geometry.imagePoints.left() / unit + tile.rect.x() * scale;
-        const double bottom = page.height() - geometry.imagePoints.top() / unit -
-                              (tile.rect.y() + tile.rect.height()) * scale;
-        content += "q\n" + number(tile.rect.width() * scale) + " 0 0 " +
-                   number(tile.rect.height() * scale) + ' ' + number(left) + ' ' + number(bottom) +
-                   " cm\n" + name + " Do\nQ\n";
+        QFile input(payload.path());
+        if (!input.open(QIODevice::ReadOnly)) {
+            if (error)
+                *error = input.errorString();
+            return false;
+        }
+        WrittenPage page;
+        page.unit =
+            qMax(1.0, std::ceil(qMax(geometry.pagePoints.width(), geometry.pagePoints.height()) /
+                                14400.0));
+        if (page.unit > 75000)
+            return fail(error);
+        page.size = geometry.pagePoints / page.unit;
+        const double scale = geometry.imagePoints.width() / payload.size.width() / page.unit;
+        QByteArray content = "1 1 1 rg\n0 0 " + number(page.size.width()) + ' ' +
+                             number(page.size.height()) + " re f\n";
+        qsizetype tileIndex = 0;
+        if (progress)
+            progress(index, 0);
+        for (const Tile& tile : payload.tiles) {
+            if (isCancelled(cancelled, error))
+                return false;
+            if (!input.seek(tile.offset))
+                return fail(error);
+            const QByteArray color = input.read(tile.colorBytes);
+            const QByteArray alpha = input.read(tile.alphaBytes);
+            if (color.size() != tile.colorBytes || alpha.size() != tile.alphaBytes)
+                return fail(error);
+            const QByteArray dimensions = " /Width " + QByteArray::number(tile.rect.width()) +
+                                          " /Height " + QByteArray::number(tile.rect.height()) +
+                                          " /BitsPerComponent 8";
+            int mask = 0;
+            if (!alpha.isEmpty())
+                mask = writer.stream(
+                    "/Type /XObject /Subtype /Image /ColorSpace /DeviceGray /Filter /FlateDecode" +
+                        dimensions,
+                    alpha);
+            const int id = writer.stream(
+                "/Type /XObject /Subtype /Image /ColorSpace /DeviceRGB /Interpolate false "
+                "/Filter " +
+                    QByteArray(payload.quality == 100 ? "/FlateDecode" : "/DCTDecode") +
+                    dimensions +
+                    (mask ? " /SMask " + QByteArray::number(mask) + " 0 R" : QByteArray{}),
+                color);
+            const QByteArray name = "/Im" + QByteArray::number(id);
+            page.resources += name + ' ' + QByteArray::number(id) + " 0 R ";
+            const double left = geometry.imagePoints.left() / page.unit + tile.rect.x() * scale;
+            const double bottom = page.size.height() - geometry.imagePoints.top() / page.unit -
+                                  (tile.rect.y() + tile.rect.height()) * scale;
+            content += "q\n" + number(tile.rect.width() * scale) + " 0 0 " +
+                       number(tile.rect.height() * scale) + ' ' + number(left) + ' ' +
+                       number(bottom) + " cm\n" + name + " Do\nQ\n";
+            if (!writer.isOk())
+                return fail(error);
+            if (progress)
+                progress(index, qreal(++tileIndex) / qreal(payload.tiles.size()));
+        }
+        page.contents = writer.stream({}, content);
+        written.append(std::move(page));
+        // 'prepared' owns only this page's staging files, which are retired here.
     }
-    const int contents = writer.stream({}, content);
-    const int pageId = writer.nextId();
-    writer.object("<< /Type /Page /Parent " + QByteArray::number(pageId + 1) +
-                  " 0 R /MediaBox [0 0 " + number(page.width()) + ' ' + number(page.height()) +
-                  "] /UserUnit " + number(unit) + " /Resources << /XObject << " + resources +
-                  ">> >> /Contents " + QByteArray::number(contents) + " 0 R >>");
-    const int pages =
-        writer.object("<< /Type /Pages /Count 1 /Kids [" + QByteArray::number(pageId) + " 0 R] >>");
+    if (writer.nextId() > std::numeric_limits<int>::max() - pageCount - 3)
+        return fail(error);
+    const int pagesId = writer.nextId() + static_cast<int>(pageCount);
+    QByteArray kids;
+    for (const auto& page : written) {
+        if (isCancelled(cancelled, error))
+            return false;
+        const int pageId = writer.object(
+            "<< /Type /Page /Parent " + QByteArray::number(pagesId) + " 0 R /MediaBox [0 0 " +
+            number(page.size.width()) + ' ' + number(page.size.height()) + "] /UserUnit " +
+            number(page.unit) + " /Resources << /XObject << " + page.resources +
+            ">> >> /Contents " + QByteArray::number(page.contents) + " 0 R >>");
+        kids += QByteArray::number(pageId) + " 0 R ";
+    }
+    const int pages = writer.object("<< /Type /Pages /Count " + QByteArray::number(pageCount) +
+                                    " /Kids [" + kids + "] >>");
     const int root =
         writer.object("<< /Type /Catalog /Pages " + QByteArray::number(pages) + " 0 R >>");
     const QDateTime time =
@@ -386,14 +488,28 @@ bool write(const Payload& payload, QIODevice* output, const ScreenshotPdfOptions
     return writer.finish(root, info) || fail(error);
 }
 
+bool write(const Payload& payload, QIODevice* output, const ScreenshotPdfOptions& options,
+           QString* error, const Cancelled& cancelled) {
+    return writeDocument(
+        1,
+        [&payload, &options](qsizetype, Page* page, QString*) {
+            page->payload = std::shared_ptr<const Payload>(&payload, [](const Payload*) {});
+            page->geometry = layout(payload.size, options.pageSize);
+            return true;
+        },
+        output, options, error, cancelled);
+}
+
 bool decodeTiles(const Payload& payload, const std::function<bool(QRect, const QImage&)>& consume,
-                 QString* error, const Cancelled& cancelled) {
+                 QString* error, const Cancelled& cancelled, QRect region) {
     QFile input(payload.path());
     if (!input.open(QIODevice::ReadOnly))
         return fail(error);
     for (const Tile& tile : payload.tiles) {
         if (isCancelled(cancelled, error))
             return false;
+        if (!region.isEmpty() && !tile.rect.intersects(region))
+            continue;
         if (!input.seek(tile.offset))
             return fail(error);
         QByteArray color = input.read(tile.colorBytes);

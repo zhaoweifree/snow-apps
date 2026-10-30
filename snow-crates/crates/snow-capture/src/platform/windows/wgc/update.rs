@@ -340,6 +340,7 @@ impl CanonicalSurface {
             return Ok(());
         }
 
+        crate::admit_raster(source_desc.Width, source_desc.Height)?;
         let desc = D3D11_TEXTURE2D_DESC {
             Width: source_desc.Width,
             Height: source_desc.Height,

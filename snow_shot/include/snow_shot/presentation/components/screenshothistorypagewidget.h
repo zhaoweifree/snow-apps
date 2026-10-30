@@ -100,6 +100,8 @@ class ScreenshotHistoryPageWidget final : public QWidget {
   signals:
     void editRequested(const QString& recordId);
     void pinRequested(const QString& recordId);
+    void collageRequested(const QVector<snow_shot::storage::CaptureHistoryRecord>& records);
+    void splitRequested(const snow_shot::storage::CaptureHistoryRecord& record);
 
   protected:
     void changeEvent(QEvent* event) override;
@@ -144,6 +146,7 @@ class ScreenshotHistoryPageWidget final : public QWidget {
     QBoxLayout* m_selectionBarLayout = nullptr;
     adqt::widgets::AdButton* m_deleteSelectedButton = nullptr;
     adqt::widgets::AdButton* m_selectAllButton = nullptr;
+    adqt::widgets::AdButton* m_collageButton = nullptr;
     adqt::widgets::AdButton* m_deselectAllButton = nullptr;
     adqt::widgets::AdPopconfirm* m_deleteSelectedConfirmation = nullptr;
     adqt::widgets::AdScrollArea* m_scrollArea = nullptr;

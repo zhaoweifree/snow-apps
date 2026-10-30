@@ -277,6 +277,7 @@ impl GpuComputePass {
             return Ok(());
         }
 
+        crate::admit_raster(width, height)?;
         let desc = D3D11_TEXTURE2D_DESC {
             Width: width,
             Height: height,

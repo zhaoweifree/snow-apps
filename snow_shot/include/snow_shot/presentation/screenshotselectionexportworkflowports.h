@@ -169,6 +169,8 @@ struct ScreenshotPinnedSelectionRequest {
     QRectF surfaceCanvasRect;
     QRect selection;
     ScreenshotResultStyle resultStyle;
+    ScreenshotLayoutCompaction layoutCompaction = {};
+    std::shared_ptr<const ScreenshotLayoutCompactionPlan> layoutPlan;
     ScreenshotPinnedImageGeometry geometry;
     QSize initialWindowSize;
     QPointer<QScreen> screen;
@@ -205,16 +207,17 @@ class ScreenshotSelectionImageComposerPort {
 
     virtual ~ScreenshotSelectionImageComposerPort() = default;
 
-    [[nodiscard]] virtual bool requestSelectionResult(const QRect& selection,
-                                                      const ScreenshotResultStyle& style,
-                                                      QObject* receiver,
-                                                      ImageCallback callback) = 0;
-    [[nodiscard]] virtual bool requestSelectionClipboard(const QRect& selection,
-                                                         const ScreenshotResultStyle& style,
-                                                         QObject* receiver,
-                                                         ClipboardCallback callback) = 0;
+    [[nodiscard]] virtual bool
+    requestSelectionResult(const QRect& selection, const ScreenshotResultStyle& style,
+                           QObject* receiver, ImageCallback callback,
+                           ScreenshotLayoutCompaction compaction = {}) = 0;
+    [[nodiscard]] virtual bool
+    requestSelectionClipboard(const QRect& selection, const ScreenshotResultStyle& style,
+                              QObject* receiver, ClipboardCallback callback,
+                              ScreenshotLayoutCompaction compaction = {}) = 0;
     [[nodiscard]] virtual std::optional<ScreenshotPinnedSelectionRequest>
-    preparePinnedSelection(const QRect& selection, const ScreenshotResultStyle& style) const = 0;
+    preparePinnedSelection(const QRect& selection, const ScreenshotResultStyle& style,
+                           ScreenshotLayoutCompaction compaction = {}) const = 0;
     [[nodiscard]] virtual bool schedulePinnedSelection(ScreenshotPinnedSelectionRequest request,
                                                        QObject* receiver,
                                                        PinRequestCallback callback) = 0;
@@ -242,13 +245,6 @@ class ScreenshotSelectionExportDestinationPort {
     presentPinnedSelection(const ScreenshotPinnedSelectionRequest& request,
                            ScreenshotPinnedSelectionResultHandle result,
                            PinnedCompletion completion) = 0;
-};
-
-class ScreenshotSelectionParamsStorePort {
-  public:
-    virtual ~ScreenshotSelectionParamsStorePort() = default;
-
-    virtual void setPreviousSelectionParams(const ScreenshotSelectionParams& params) = 0;
 };
 
 #endif // SNOW_SHOT_PRESENTATION_SCREENSHOTSELECTIONEXPORTWORKFLOWPORTS_H

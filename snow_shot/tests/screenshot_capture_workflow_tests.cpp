@@ -408,20 +408,79 @@ void toolbarPresentationTracksSelectionDragLifetime() {
         ScreenshotSelectionModel selection;
         interaction.beginCapture();
         selection.setSelectionRect(QRectF(40, 0, 100, 20));
+        selection.setBackgroundOpacityPercent(37);
+        require(makeScreenshotToolbarPresentationState(interaction, selection)
+                        .backgroundOpacityAvailable &&
+                    makeScreenshotToolbarPresentationState(interaction, selection)
+                            .backgroundOpacityPercent == 37,
+                "a valid single selection enables background opacity");
         require(!makeScreenshotToolbarPresentationState(interaction, selection).selectionDragging,
                 "idle capture must not disable toolbar pointer interaction");
         require(interaction.enterSelectionDrag(mode), "selection drag must begin");
         const auto state = makeScreenshotToolbarPresentationState(interaction, selection);
+        require(!state.backgroundOpacityAvailable,
+                "selection creation, movement and resize suspend background opacity editing");
         require(
             state.selectionToolbarMode && state.selectionDragging,
             "create, move and resize drags must retain the toolbar with pointer input disabled");
         interaction.finishDrag();
+        require(makeScreenshotToolbarPresentationState(interaction, selection)
+                    .backgroundOpacityAvailable,
+                "finishing a drag restores background opacity editing");
         require(!makeScreenshotToolbarPresentationState(interaction, selection).selectionDragging,
                 "release must restore toolbar pointer interaction");
         require(interaction.enterSelectionDrag(mode), "a second drag must begin");
         interaction.cancelDrag();
         require(!makeScreenshotToolbarPresentationState(interaction, selection).selectionDragging,
                 "cancel must restore toolbar pointer interaction");
+        selection.setDraftRegion(ScreenshotRegionGeometry(QRect(10, 10, 40, 40)));
+        require(!makeScreenshotToolbarPresentationState(interaction, selection)
+                     .backgroundOpacityAvailable,
+                "selection construction suspends background opacity editing");
+        selection.commitDraftRegion(QRect(0, 0, 500, 500));
+        require(makeScreenshotToolbarPresentationState(interaction, selection)
+                    .backgroundOpacityAvailable,
+                "ending selection construction restores background opacity editing");
+    }
+}
+
+void manualCustomSelectionHidesEditingToolbar() {
+    for (auto type : {ScreenshotRegionType::Rectangle, ScreenshotRegionType::Polyline,
+                      ScreenshotRegionType::Curve, ScreenshotRegionType::Freehand}) {
+        ScreenshotInteractionState interaction;
+        ScreenshotSelectionModel selection;
+        interaction.beginCapture();
+        selection.setRegionType(type);
+        selection.setSelectionRect(QRectF(10, 20, 100, 80));
+        interaction.returnToSelectionMode(true);
+        require(makeScreenshotToolbarPresentationState(interaction, selection).selectionToolbarMode,
+                "smart selection retains its size toolbar for every area tool");
+
+        interaction.returnToSelectionMode(false);
+        const bool rectangular = type == ScreenshotRegionType::Rectangle;
+        require(
+            makeScreenshotToolbarPresentationState(interaction, selection).selectionToolbarMode ==
+                rectangular,
+            "manual marquee selection only shows the editing toolbar for rectangles");
+        require(interaction.enterSelectionDrag(ScreenshotSelectionDragMode::Marquee),
+                "manual marquee drag must begin");
+        require(
+            makeScreenshotToolbarPresentationState(interaction, selection).selectionToolbarMode ==
+                rectangular,
+            "custom marquee drags keep the editing toolbar hidden");
+        interaction.finishDrag();
+        require(
+            makeScreenshotToolbarPresentationState(interaction, selection).selectionToolbarMode ==
+                rectangular,
+            "custom selection keeps the toolbar hidden between construction clicks");
+
+        interaction.confirmSelection();
+        require(makeScreenshotToolbarPresentationState(interaction, selection).selectionToolbarMode,
+                "confirming any area tool restores the editing toolbar");
+        require(interaction.enterSelectionDrag(ScreenshotSelectionDragMode::All),
+                "moving a confirmed selection must begin");
+        require(makeScreenshotToolbarPresentationState(interaction, selection).selectionToolbarMode,
+                "moving a selection retains the toolbar for every area tool");
     }
 }
 
@@ -1186,6 +1245,83 @@ void capturedImagePlacementFollowsNormalizedCanvasGeometry() {
     require(ScreenshotGeometryMapper::displayImageSourceCanvasRect(display) ==
                 ScreenshotGeometryMapper::displayCanvasRect(display),
             "captured image placement must follow normalized canvas geometry");
+}
+
+void selectorRefreshOnlyBorrowsDisplayGeometry() {
+    class Service final : public ScreenshotSelectorServicePort {
+      public:
+        QVector<CapturedDisplayModel> snapshot;
+        bool startRefreshWithDisplays(const QVector<std::uintptr_t>& excluded,
+                                      const QVector<CapturedDisplayModel>& displays) override {
+            require(excluded == QVector<std::uintptr_t>{123},
+                    "geometry refresh must preserve excluded overlays");
+            snapshot = displays;
+            return true;
+        }
+        bool ready() const override {
+            return false;
+        }
+        bool refreshInFlight() const override {
+            return false;
+        }
+        bool startRefresh(const QVector<std::uintptr_t>&) override {
+            require(false, "frozen display refresh must not enumerate displays");
+            return false;
+        }
+        bool requestHitTest(const QPoint&, ScreenshotSelectorHitTestMode) override {
+            return false;
+        }
+    } service;
+    class Exclusions final : public ScreenshotOverlayExclusionPort {
+      public:
+        QVector<std::uintptr_t> excludedHwnds(const ScreenshotDisplaySession&) const override {
+            return {123};
+        }
+    } exclusions;
+    const auto trackedImage = [](int& released) {
+        struct Storage {
+            uchar pixels[16]{};
+            int* released;
+        };
+        auto* storage = new Storage{{}, &released};
+        return QImage(
+            storage->pixels, 2, 2, 8, QImage::Format_ARGB32,
+            [](void* data) {
+                auto* image = static_cast<Storage*>(data);
+                ++*image->released;
+                delete image;
+            },
+            storage);
+    };
+    int imagesReleased = 0;
+    int cursorsReleased = 0;
+    ScreenshotCaptureState state;
+    ScreenshotDisplaySession displays;
+    CapturedDisplayModel display;
+    display.active = true;
+    display.physicalRect = QRect(-200, 40, 400, 300);
+    display.capturedLogicalRect = QRect(-100, 20, 200, 150);
+    display.nativeDisplayId = 17;
+    display.canvasUsesPoints = true;
+    display.image = trackedImage(imagesReleased);
+    display.cursorPatch = trackedImage(cursorsReleased);
+    displays.appendDisplay(std::move(display));
+    ScreenshotGeometryMapper geometry;
+    ScreenshotInteractionState interaction;
+    interaction.beginCapture();
+    ScreenshotSelectionModel selection;
+    ScreenshotIntelligentSelectionModel intelligent;
+    ScreenshotSelectorWorkflow workflow(
+        {state, service, exclusions, displays, geometry, interaction, selection, intelligent, {}});
+    workflow.startRefresh();
+    require(service.snapshot.size() == 1 && service.snapshot.first().nativeDisplayId == 17 &&
+                service.snapshot.first().canvasUsesPoints &&
+                service.snapshot.first().physicalRect == QRect(-200, 40, 400, 300) &&
+                service.snapshot.first().capturedLogicalRect == QRect(-100, 20, 200, 150),
+            "selector refresh must preserve captured display coordinate mapping");
+    displays.clear();
+    require(imagesReleased == 1 && cursorsReleased == 1,
+            "selector refresh must not retain capture or cursor pixels after display cleanup");
 }
 
 void phasedWorkflowOnlySignalsInitialReadinessOnce() {
@@ -2311,6 +2447,7 @@ int main() {
     captureCompletionReleasesHistoryBeforeExportsFinish();
     silentCaptureSuppressesAllPresentationAndRestoresVisibleMode();
     toolbarPresentationTracksSelectionDragLifetime();
+    manualCustomSelectionHidesEditingToolbar();
     confirmedSelectionPreservesRegionTypeInToolbarPresentation();
     customCaptureDoesNotWaitForSelector();
     startupDisplayIdentityMatchesByNameRectOrNativeId();
@@ -2346,6 +2483,7 @@ int main() {
     capturedImagePlacementFollowsNormalizedCanvasGeometry();
     intelligentSelectionTargetsPreserveElementPathBehavior();
     phasedSelectionPreservesUserIntent();
+    selectorRefreshOnlyBorrowsDisplayGeometry();
     phasedWorkflowOnlySignalsInitialReadinessOnce();
     captureSessionsApplyTheCurrentSmartSelectionSetting();
     return 0;

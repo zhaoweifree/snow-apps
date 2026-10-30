@@ -52,6 +52,39 @@ Installation reuses Snow Shot's local signing identity and may request Keychain
 access and macOS privacy permissions. See [Homebrew installation and migration](docs-macos-build.md#homebrew-installation)
 for existing installations, custom app directories, and recovery.
 
+## Maintain the OCR submodule
+
+[`snow-crates/crates/simd-paddle-ocr-rs/`](snow-crates/crates/simd-paddle-ocr-rs/)
+is a Git submodule with its own
+[repository](https://github.com/mg-chao/simd-paddle-ocr-rs), history, branches,
+and releases. Snow Apps records the exact OCR commit to check out.
+The submodule is excluded from the Snow Crates Cargo workspace so it retains
+its own pinned nightly toolchain and lockfile. Run its Cargo commands from
+the submodule directory.
+
+After cloning Snow Apps, initialize the submodule from the repository root:
+
+```sh
+git submodule update --init --recursive
+```
+
+For a new clone, `git clone --recurse-submodules` initializes it automatically.
+Submodule updates normally check out a detached HEAD. Before editing OCR code,
+switch to `main` or a feature branch inside the submodule:
+
+```sh
+git -C snow-crates/crates/simd-paddle-ocr-rs switch main
+```
+
+Follow the submodule's README and AGENTS.md for its build and validation commands.
+Commit and push OCR changes to its own repository first, then record the new
+revision in Snow Apps:
+
+```sh
+git add snow-crates/crates/simd-paddle-ocr-rs
+git commit -m "build(ocr): update simd paddle ocr submodule"
+```
+
 ## Open Source Licenses
 
 This is a multi-license repository. See [LICENSE.md](LICENSE.md) for the
@@ -60,9 +93,10 @@ repository-level scope rules and third-party material policy.
 | Project | License |
 | --- | --- |
 | `ant_design_qt/` | [Apache License 2.0](ant_design_qt/LICENSE) |
-| `snow-crates/` | [Apache License 2.0](snow-crates/LICENSE) |
+| `snow-crates/` | [GNU GPL v3.0 or later](snow-crates/COPYRIGHT) |
 | `snow_draw_engine_qt/` | [Apache License 2.0](snow_draw_engine_qt/LICENSE) |
-| `snow_rust_ffi/` | [Apache License 2.0](snow_rust_ffi/LICENSE) |
+| `snow_rust_ffi/` | [GNU GPL v3.0 or later](snow_rust_ffi/COPYRIGHT) |
+| `snow-crates/crates/simd-paddle-ocr-rs/` | [Apache License 2.0](snow-crates/crates/simd-paddle-ocr-rs/LICENSE) |
 | `snow_image/` | [GNU GPL v3.0 or later](snow_image/COPYRIGHT) |
 | `snow_image_viewer/` | [GNU GPL v3.0 or later](snow_image_viewer/COPYRIGHT) |
 | `snow_shot/` | [GNU GPL v3.0 or later](snow_shot/COPYRIGHT) |
@@ -70,6 +104,15 @@ repository-level scope rules and third-party material policy.
 Synchronized and bundled third-party materials retain their upstream licenses.
 See [Ant Design Qt third-party notices](ant_design_qt/THIRD_PARTY_NOTICES.md)
 and [Snow Shot third-party notices](snow_shot/THIRD_PARTY_NOTICES.md).
+
+## Contributing / 贡献指南
+
+Only fix PRs will be reviewed. Feature PRs are not accepted directly; please start
+a community discussion first if you need a specific feature.
+See the [contribution guidelines](CONTRIBUTING.md) for details.
+
+仅审查修复问题的 PR，不直接接受新增功能或功能增强的 PR。如有功能需求，请先在社区发起讨论。
+详情请阅读[贡献指南](CONTRIBUTING.md)。
 
 ## Community
 

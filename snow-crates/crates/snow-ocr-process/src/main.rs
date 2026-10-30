@@ -7,32 +7,25 @@ use worker::{Work, WorkResult, worker_loop};
 
 use memmap2::Mmap;
 use protocol::{Decoder, Kind, put_f32, put_string, put_u8, put_u32, read_frame, write_frame};
-use rapid_ocr_rs::{
-    DictionarySource, EngineConfig, LangDet, LangRec, ModelSource, ModelType, OcrCallOptions,
-    OcrInput, OcrResult, PipelineSources, ProviderPreference, RapidOcr, ResolvedExecutionProvider,
-    directml_is_available, initialize_onnx_runtime,
-};
-use serde::{Deserialize, Serialize};
+mod engine;
+use engine::{Engine, InputImage, OcrLine, make_engine, make_engine_for_models};
 use std::{
-    fs::{self, File},
-    io::{self, BufReader, BufWriter, Write},
-    path::{Path, PathBuf},
+    fs::File,
+    io::{self, BufReader, BufWriter},
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
         mpsc::{self},
     },
     thread::{self},
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::Instant,
 };
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct Config {
-    directml: bool,
     detector_resize_policy: DetectorResizePolicy,
     text_detection_processing: TextDetectionProcessing,
-    directml_enabled: Arc<AtomicBool>,
-    directml_cache: Arc<DirectMlCapabilityCache>,
     detector_model: PathBuf,
     recognizer_model: PathBuf,
     dictionary: PathBuf,
@@ -53,13 +46,6 @@ impl DetectorResizePolicy {
                 io::ErrorKind::InvalidData,
                 "invalid OCR detector resize policy",
             )),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Max => "max",
-            Self::Min => "min",
         }
     }
 }
@@ -91,262 +77,33 @@ impl TextDetectionProcessing {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DirectMlCacheRecord {
-    schema: u32,
-    key: String,
-    available: bool,
-}
-
-struct DirectMlCapabilityCache {
-    path: PathBuf,
-    key: String,
-}
-
-impl DirectMlCapabilityCache {
-    fn new(state_dir: Option<&Path>) -> Self {
-        let path = state_dir
-            .map(|dir| dir.join("directml-capability.json"))
-            .unwrap_or_else(|| std::env::temp_dir().join("snow-shot-directml-capability.json"));
-        let key = capability_key();
-        Self { path, key }
-    }
-
-    fn read(&self) -> Option<bool> {
-        let bytes = fs::read(&self.path).ok()?;
-        let record: DirectMlCacheRecord = serde_json::from_slice(&bytes).ok()?;
-        (record.schema == 1 && record.key == self.key).then_some(record.available)
-    }
-
-    fn write(&self, available: bool) {
-        let record = DirectMlCacheRecord {
-            schema: 1,
-            key: self.key.clone(),
-            available,
-        };
-        let Ok(bytes) = serde_json::to_vec(&record) else {
-            return;
-        };
-        let Some(parent) = self.path.parent() else {
-            return;
-        };
-        if fs::create_dir_all(parent).is_err() {
-            return;
-        }
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|value| value.as_nanos())
-            .unwrap_or_default();
-        let temp = self
-            .path
-            .with_extension(format!("tmp-{}-{nonce}", std::process::id()));
-        let Ok(mut file) = File::create(&temp) else {
-            return;
-        };
-        if file.write_all(&bytes).is_err() || file.sync_all().is_err() {
-            let _ = fs::remove_file(&temp);
-            return;
-        }
-        atomic_replace(&temp, &self.path);
-    }
-}
-
-fn capability_key() -> String {
-    let mut parts = vec![
-        "snow-shot-directml".to_string(),
-        env!("CARGO_PKG_VERSION").to_string(),
-        "ort-2.0.0-rc.13".to_string(),
-        std::env::consts::OS.to_string(),
-        std::env::consts::ARCH.to_string(),
-        std::env::var("PROCESSOR_IDENTIFIER").unwrap_or_default(),
-        std::env::var("DXGI_ADAPTER_LUID").unwrap_or_default(),
-    ];
-    for name in [
-        "onnxruntime.dll",
-        "DirectML.dll",
-        "libonnxruntime.so",
-        "libDirectML.so",
-    ] {
-        let candidates = [
-            std::env::current_exe()
-                .ok()
-                .and_then(|path| path.parent().map(|dir| dir.join(name))),
-            Some(PathBuf::from(name)),
-        ];
-        let fingerprint = candidates
-            .into_iter()
-            .flatten()
-            .find_map(|path| {
-                let metadata = fs::metadata(&path).ok()?;
-                let modified = metadata
-                    .modified()
-                    .ok()?
-                    .duration_since(UNIX_EPOCH)
-                    .ok()?
-                    .as_secs();
-                Some(format!(
-                    "{}:{}:{}",
-                    path.display(),
-                    metadata.len(),
-                    modified
-                ))
-            })
-            .unwrap_or_default();
-        parts.push(fingerprint);
-    }
-    parts.join("|")
-}
-
-#[cfg(not(target_os = "windows"))]
-fn atomic_replace(source: &Path, destination: &Path) {
-    let _ = fs::rename(source, destination);
-}
-
-#[cfg(target_os = "windows")]
-fn atomic_replace(source: &Path, destination: &Path) {
-    use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-    let source_w: Vec<u16> = OsStr::new(source)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let destination_w: Vec<u16> = OsStr::new(destination)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let moved = unsafe {
-        MoveFileExW(
-            source_w.as_ptr(),
-            destination_w.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } != 0;
-    if !moved {
-        let _ = fs::remove_file(source);
-    }
-}
-
-fn directml_capability(config: &Config) -> bool {
-    if !config.directml {
-        return false;
-    }
-    if let Some(value) = config.directml_cache.read() {
-        return value;
-    }
-    let value = directml_is_available();
-    config.directml_cache.write(value);
-    value
-}
-
 struct Job {
     id: u64,
     queued_at: Instant,
-    input: OcrInput,
+    input: InputImage,
     cancelled: Arc<AtomicBool>,
 }
 struct Completion {
     id: u64,
-    result: Result<OcrResult, String>,
+    result: Result<Vec<OcrLine>, String>,
     cancelled: bool,
 }
 
-fn make_engine(
-    config: &Config,
-    directml: bool,
-    thread_budget: usize,
-) -> rapid_ocr_rs::Result<RapidOcr> {
-    make_engine_for_models(
-        &config.detector_model,
-        &config.recognizer_model,
-        &config.dictionary,
-        directml,
-        thread_budget,
-        config.detector_resize_policy,
-        config.text_detection_processing,
-    )
+enum Event {
+    Command(protocol::Frame),
+    Completed(WorkResult),
+    CommandsClosed,
 }
 
-fn make_engine_for_models(
-    detector_model: &Path,
-    recognizer_model: &Path,
-    dictionary: &Path,
-    directml: bool,
-    thread_budget: usize,
-    detector_resize_policy: DetectorResizePolicy,
-    text_detection_processing: TextDetectionProcessing,
-) -> rapid_ocr_rs::Result<RapidOcr> {
-    let engine = engine_config_for_models(
-        detector_model,
-        recognizer_model,
-        dictionary,
-        directml,
-        thread_budget,
-        detector_resize_policy,
-        text_detection_processing,
-    );
-    RapidOcr::new_with_sources(
-        engine,
-        PipelineSources {
-            det: Some(ModelSource::File(detector_model)),
-            cls: None,
-            rec: Some(ModelSource::File(recognizer_model)),
-            rec_dictionary: Some(DictionarySource::File(dictionary)),
-        },
-    )
-}
-
-fn engine_config_for_models(
-    detector_model: &Path,
-    recognizer_model: &Path,
-    dictionary: &Path,
-    directml: bool,
-    thread_budget: usize,
-    detector_resize_policy: DetectorResizePolicy,
-    text_detection_processing: TextDetectionProcessing,
-) -> EngineConfig {
-    let mut engine = EngineConfig::default();
-    engine.global.use_det = true;
-    engine.global.use_cls = false;
-    engine.global.use_rec = true;
-    engine.det.limit_type = detector_resize_policy.as_str().to_string();
-    engine.det.lang = LangDet::Multi;
-    engine.det.ocr_version = rapid_ocr_rs::OcrVersion::PPocrV6;
-    engine.det.model_type = ModelType::Small;
-    engine.det.allow_download = false;
-    engine.det.model_path = Some(detector_model.to_path_buf());
-    engine.rec.model.lang = LangRec::Ch;
-    engine.rec.model.ocr_version = rapid_ocr_rs::OcrVersion::PPocrV6;
-    engine.rec.model.model_type = ModelType::Small;
-    engine.rec.model.allow_download = false;
-    engine.rec.model.model_path = Some(recognizer_model.to_path_buf());
-    engine.rec.model.rec_keys_path = Some(dictionary.to_path_buf());
-    engine.rec.rec_img_shape[2] = text_detection_processing.recognition_width();
-    let budget = thread_budget.max(1);
-    for runtime in [
-        &mut engine.det.runtime,
-        &mut engine.cls.runtime,
-        &mut engine.rec.runtime,
-    ] {
-        runtime.thread_budget = Some(budget);
-        runtime.intra_threads = Some(budget);
-        runtime.inter_threads = Some(1);
-        runtime.rayon_threads = Some(budget);
-        runtime.auto_tune_threads = false;
-        runtime.enable_cpu_mem_arena = true;
-        runtime.provider_preference = ProviderPreference::Cpu;
-    }
-    if directml {
-        for runtime in [&mut engine.det.runtime, &mut engine.rec.runtime] {
-            runtime.intra_threads = Some(1);
-            runtime.inter_threads = Some(1);
-            runtime.rayon_threads = Some(1);
-            runtime.provider_preference = ProviderPreference::DirectMl { device_id: 0 };
-            runtime.fail_if_provider_unavailable = false;
+fn read_commands(mut reader: impl io::Read, tx: mpsc::Sender<Event>) {
+    while let Ok(frame) = read_frame(&mut reader) {
+        if tx.send(Event::Command(frame)).is_err() {
+            return;
         }
     }
-    engine
+    // The worker also owns a sender, so command EOF must explicitly wake the
+    // event loop instead of waiting for every sender to disconnect.
+    let _ = tx.send(Event::CommandsClosed);
 }
 
 fn run_unless_cancelled<T>(
@@ -379,24 +136,28 @@ fn worker_event(
     );
 }
 
-fn cpu_fallback_engine(
+fn initialize_engine(
     config: &Config,
     thread_budget: usize,
-    id: u64,
-    cancelled: &AtomicBool,
-) -> Option<RapidOcr> {
+    previous: Option<Engine>,
+) -> Option<Engine> {
     let started = Instant::now();
-    let result = run_unless_cancelled(cancelled, || {
-        make_engine(config, false, thread_budget).map_err(|error| error.to_string())
-    });
+    let reused = previous.is_some();
+    let result = match previous {
+        Some(engine) => engine.recreate(),
+        None => make_engine(config, thread_budget),
+    }
+    .map_err(|e| e.to_string());
     worker_event(
-        "ocr.backend_fallback",
-        id,
-        "cpu_initialization",
-        "cpu",
-        if cancelled.load(Ordering::Acquire) {
-            "cancelled"
-        } else if result.is_ok() {
+        "ocr.engine_ready",
+        0,
+        if reused {
+            "request_reset"
+        } else {
+            "initialization"
+        },
+        "simd-paddle-ocr-rs",
+        if result.is_ok() {
             "succeeded"
         } else {
             "failed"
@@ -407,88 +168,8 @@ fn cpu_fallback_engine(
     result.ok()
 }
 
-fn initialize_engine(
-    config: &Config,
-    thread_budget: usize,
-    operation: u64,
-    cancelled: &AtomicBool,
-) -> (Option<RapidOcr>, &'static str) {
-    let mut engine_backend = "cpu";
-    let initializing = Instant::now();
-    let wants_directml = config.directml && config.directml_enabled.load(Ordering::Acquire);
-    let engine = match make_engine(config, wants_directml, thread_budget) {
-        Ok(candidate) => {
-            let provider_ok = !wants_directml
-                || candidate
-                    .provider_resolutions()
-                    .det
-                    .into_iter()
-                    .chain(candidate.provider_resolutions().rec)
-                    .any(|resolution| resolution.resolved == ResolvedExecutionProvider::DirectMl);
-            if wants_directml && !provider_ok {
-                worker_event(
-                    "ocr.backend_fallback",
-                    operation,
-                    "provider_resolution",
-                    "cpu",
-                    "started",
-                    0,
-                    "DirectML was not selected",
-                );
-                config.directml_cache.write(false);
-                config.directml_enabled.store(false, Ordering::Release);
-                cpu_fallback_engine(config, thread_budget, operation, cancelled)
-            } else {
-                engine_backend = if wants_directml { "directml" } else { "cpu" };
-                Some(candidate)
-            }
-        }
-        Err(error) if wants_directml => {
-            worker_event(
-                "ocr.backend_fallback",
-                operation,
-                "initialization",
-                "cpu",
-                "started",
-                0,
-                &error.to_string(),
-            );
-            config.directml_cache.write(false);
-            config.directml_enabled.store(false, Ordering::Release);
-            cpu_fallback_engine(config, thread_budget, operation, cancelled)
-        }
-        Err(error) => {
-            worker_event(
-                "ocr.engine_ready",
-                operation,
-                "initialization",
-                "cpu",
-                "failed",
-                initializing.elapsed().as_millis(),
-                &error.to_string(),
-            );
-            None
-        }
-    };
-    worker_event(
-        "ocr.engine_ready",
-        operation,
-        "initialization",
-        engine_backend,
-        if engine.is_some() {
-            "succeeded"
-        } else {
-            "failed"
-        },
-        initializing.elapsed().as_millis(),
-        "",
-    );
-    (engine, engine_backend)
-}
-
-fn session_config(payload: &[u8], state: &str) -> io::Result<Config> {
+fn session_config(payload: &[u8]) -> io::Result<Config> {
     let mut d = Decoder::new(payload);
-    let directml = d.u8()? != 0;
     let detector_resize_policy = DetectorResizePolicy::from_wire(d.u8()?)?;
     let text_detection_processing = TextDetectionProcessing::from_wire(d.u8()?)?;
     let detector_model = PathBuf::from(d.string()?);
@@ -497,13 +178,9 @@ fn session_config(payload: &[u8], state: &str) -> io::Result<Config> {
     if !d.done() {
         return Err(io::Error::other("invalid OCR session configuration"));
     }
-    let state_dir = (!state.is_empty()).then(|| PathBuf::from(state));
     Ok(Config {
-        directml,
         detector_resize_policy,
         text_detection_processing,
-        directml_enabled: Arc::new(AtomicBool::new(false)),
-        directml_cache: Arc::new(DirectMlCapabilityCache::new(state_dir.as_deref())),
         detector_model,
         recognizer_model,
         dictionary,
@@ -512,7 +189,6 @@ fn session_config(payload: &[u8], state: &str) -> io::Result<Config> {
 fn ready_payload() -> Vec<u8> {
     let mut p = Vec::new();
     put_u8(&mut p, 1);
-    put_u8(&mut p, 0);
     put_string(&mut p, "unloaded");
     put_string(&mut p, env!("CARGO_PKG_VERSION"));
     put_u32(&mut p, protocol::VERSION as u32);
@@ -532,17 +208,12 @@ fn completion_payload(completion: &Completion) -> Vec<u8> {
         }
         Ok(result) => {
             put_u8(&mut p, 1);
-            let (lines, boxes): (&[_], &[_]) = match result {
-                OcrResult::Full(full) => (&full.lines, &full.boxes),
-                _ => (&[], &[]),
-            };
             put_string(&mut p, "");
-            put_u32(&mut p, lines.len() as u32);
-            for (index, line) in lines.iter().enumerate() {
+            put_u32(&mut p, result.len() as u32);
+            for line in result {
                 put_string(&mut p, &line.text);
                 put_f32(&mut p, line.score);
-                let quad = boxes.get(index).copied().unwrap_or([[0.0; 2]; 4]);
-                for point in quad.iter().flatten() {
+                for point in line.points.iter().flatten() {
                     put_f32(&mut p, *point);
                 }
             }
@@ -606,25 +277,16 @@ fn main() -> io::Result<()> {
         );
         return Ok(());
     }
-    // Native ONNX Runtime diagnostics must never share stdout with the binary
-    // IPC stream. Severity 3 suppresses the cpuinfo debug chatter emitted by
-    // the Windows runtime before its custom logger is installed.
-    unsafe {
-        std::env::set_var("ORT_LOG_SEVERITY_LEVEL", "3");
-        std::env::set_var("CPUINFO_LOG_LEVEL", "error");
-    }
     if let StartupMode::ValidateModelSet {
         detector,
         recognizer,
         dictionary,
     } = startup_mode
     {
-        initialize_onnx_runtime().map_err(|error| io::Error::other(error.to_string()))?;
         make_engine_for_models(
             &detector,
             &recognizer,
             &dictionary,
-            false,
             1,
             DetectorResizePolicy::Max,
             TextDetectionProcessing::default(),
@@ -647,53 +309,45 @@ fn main() -> io::Result<()> {
             "OCR process expected Hello",
         ));
     }
-    let mut hello = Decoder::new(&startup.payload);
-    let state = hello.string()?;
-    if !hello.done() {
+    if !startup.payload.is_empty() || startup.request_id != 0 {
         return Err(io::Error::other("invalid OCR hello"));
     }
     let (work_tx, work_rx) = mpsc::channel();
-    let (result_tx, result_rx) = mpsc::channel();
+    let (event_tx, event_rx) = mpsc::channel();
+    let result_tx = event_tx.clone();
     let worker = thread::Builder::new()
         .name("snow-ocr-inference".into())
         .spawn(move || worker_loop(work_rx, result_tx))?;
     write_frame(&mut writer, Kind::Ready, 0, &ready_payload())?;
-    let (command_tx, command_rx) = mpsc::channel();
-    thread::spawn(move || {
-        while let Ok(frame) = read_frame(&mut reader) {
-            if command_tx.send(frame).is_err() {
-                break;
-            }
-        }
-    });
+    thread::spawn(move || read_commands(reader, event_tx));
     let mut shared: Option<(u64, SharedImage)> = None;
-    let mut staged: Option<(u64, OcrInput)> = None;
+    let mut staged: Option<(u64, InputImage)> = None;
     let mut active: Option<(u64, Arc<AtomicBool>)> = None;
     let mut last_sequence = 0;
     loop {
-        while let Ok(result) = result_rx.try_recv() {
-            match result {
-                WorkResult::Prepared(id, ok) => {
-                    write_frame(&mut writer, Kind::SessionReady, id, &[u8::from(ok)])?
+        let frame = match event_rx.recv() {
+            Ok(Event::Command(frame)) => frame,
+            Ok(Event::Completed(result)) => {
+                match result {
+                    WorkResult::Prepared(id, ok) => {
+                        write_frame(&mut writer, Kind::SessionReady, id, &[u8::from(ok)])?
+                    }
+                    WorkResult::Released(id) => {
+                        write_frame(&mut writer, Kind::SessionReleased, id, &[])?
+                    }
+                    WorkResult::Complete(completion) => {
+                        active = None;
+                        write_frame(
+                            &mut writer,
+                            Kind::Complete,
+                            completion.id,
+                            &completion_payload(&completion),
+                        )?;
+                    }
                 }
-                WorkResult::Released(id) => {
-                    write_frame(&mut writer, Kind::SessionReleased, id, &[])?
-                }
-                WorkResult::Complete(completion) => {
-                    active = None;
-                    write_frame(
-                        &mut writer,
-                        Kind::Complete,
-                        completion.id,
-                        &completion_payload(&completion),
-                    )?;
-                }
+                continue;
             }
-        }
-        let frame = match command_rx.recv_timeout(std::time::Duration::from_millis(5)) {
-            Ok(frame) => frame,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Ok(Event::CommandsClosed) | Err(_) => break,
         };
         match frame.kind {
             Kind::AttachBuffer => {
@@ -749,10 +403,11 @@ fn main() -> io::Result<()> {
                 last_sequence = sequence;
                 staged = Some((
                     frame.request_id,
-                    OcrInput::Image(
-                        rapid_ocr_rs::RecImage::from_bgr_buffer(width, height, data)
-                            .map_err(io::Error::other)?,
-                    ),
+                    InputImage {
+                        width,
+                        height,
+                        pixels: data,
+                    },
                 ));
                 let mut ack = Vec::new();
                 ack.extend_from_slice(&generation.to_le_bytes());
@@ -792,7 +447,7 @@ fn main() -> io::Result<()> {
                 work_tx
                     .send(Work::Prepare(
                         frame.request_id,
-                        session_config(&frame.payload, &state)?,
+                        session_config(&frame.payload)?,
                     ))
                     .map_err(io::Error::other)?;
             }
@@ -824,14 +479,44 @@ fn main() -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DetectorResizePolicy, TextDetectionProcessing, engine_config_for_models, session_config,
-    };
+    use super::{DetectorResizePolicy, TextDetectionProcessing, session_config};
     use crate::protocol::{put_string, put_u8};
+
+    #[test]
+    fn command_eof_is_an_event_even_while_the_worker_sender_is_alive() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker_sender = tx.clone();
+        let mut commands = Vec::new();
+        super::write_frame(&mut commands, super::Kind::ReleaseSession, 17, &[]).unwrap();
+        super::read_commands(std::io::Cursor::new(commands), tx);
+        assert!(matches!(rx.recv().unwrap(), super::Event::Command(frame)
+            if frame.kind == super::Kind::ReleaseSession && frame.request_id == 17));
+        assert!(matches!(rx.recv().unwrap(), super::Event::CommandsClosed));
+        drop(worker_sender);
+        assert!(rx.recv().is_err());
+    }
+
+    #[test]
+    fn worker_results_wake_the_same_channel_without_another_command() {
+        let (work_tx, work_rx) = std::sync::mpsc::channel();
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        let command_sender = event_tx.clone();
+        let worker = std::thread::spawn(move || super::worker_loop(work_rx, event_tx));
+        work_tx.send(super::Work::Release(42)).unwrap();
+        assert!(matches!(
+            event_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap(),
+            super::Event::Completed(super::WorkResult::Released(42))
+        ));
+        drop(work_tx);
+        worker.join().unwrap();
+        drop(command_sender);
+        assert!(event_rx.recv().is_err());
+    }
 
     fn session_payload(detector_resize_policy: u8, text_detection_processing: u8) -> Vec<u8> {
         let mut payload = Vec::new();
-        put_u8(&mut payload, 1);
         put_u8(&mut payload, detector_resize_policy);
         put_u8(&mut payload, text_detection_processing);
         for path in ["det.onnx", "rec.onnx", "dict.txt"] {
@@ -847,10 +532,10 @@ mod tests {
             (1, DetectorResizePolicy::Min),
         ] {
             let mut payload = session_payload(wire, 0);
-            let config = session_config(&payload, "").unwrap();
+            let config = session_config(&payload).unwrap();
             assert_eq!(config.detector_resize_policy, expected);
-            payload[1] = 2;
-            assert!(session_config(&payload, "").is_err());
+            payload[0] = 2;
+            assert!(session_config(&payload).is_err());
         }
     }
 
@@ -862,15 +547,14 @@ mod tests {
         ] {
             for detector_policy in [0, 1] {
                 let mut payload = session_payload(detector_policy, wire);
-                let config = session_config(&payload, "").unwrap();
-                assert!(config.directml);
+                let config = session_config(&payload).unwrap();
                 assert_eq!(config.text_detection_processing, expected);
                 assert_eq!(config.detector_model, PathBuf::from("det.onnx"));
                 assert_eq!(config.recognizer_model, PathBuf::from("rec.onnx"));
                 assert_eq!(config.dictionary, PathBuf::from("dict.txt"));
-                payload[2] = 2;
+                payload[1] = 2;
                 assert_eq!(
-                    session_config(&payload, "").err().unwrap().kind(),
+                    session_config(&payload).err().unwrap().kind(),
                     io::ErrorKind::InvalidData
                 );
             }
@@ -883,70 +567,11 @@ mod tests {
             let payload = session_payload(0, processing);
             for length in 0..payload.len() {
                 assert_eq!(
-                    session_config(&payload[..length], "").err().unwrap().kind(),
+                    session_config(&payload[..length]).err().unwrap().kind(),
                     io::ErrorKind::UnexpectedEof,
                     "truncated session configuration length {length}"
                 );
             }
-        }
-    }
-
-    fn engine_config(
-        directml: bool,
-        processing: TextDetectionProcessing,
-    ) -> rapid_ocr_rs::EngineConfig {
-        engine_config_for_models(
-            std::path::Path::new("det.onnx"),
-            std::path::Path::new("rec.onnx"),
-            std::path::Path::new("dict.txt"),
-            directml,
-            8,
-            DetectorResizePolicy::Max,
-            processing,
-        )
-    }
-
-    #[test]
-    fn accuracy_first_preserves_default_recognition_shape_and_batching() {
-        assert_eq!(
-            TextDetectionProcessing::default(),
-            TextDetectionProcessing::AccuracyFirst
-        );
-        let config = engine_config(false, TextDetectionProcessing::default());
-        assert_eq!(config.rec.rec_img_shape, [3, 48, 320]);
-        assert_eq!(config.rec.rec_batch_num, 6);
-        assert_eq!(config.rec.rec_width_alignment, 32);
-        assert!(config.global.use_det && config.global.use_rec);
-        assert!(!config.global.use_cls);
-        assert_eq!(config.det.limit_type, "max");
-    }
-
-    #[test]
-    fn speed_first_changes_only_recognition_width_on_cpu_and_directml() {
-        for directml in [false, true] {
-            let mut accuracy = engine_config(directml, TextDetectionProcessing::AccuracyFirst);
-            let speed = engine_config(directml, TextDetectionProcessing::SpeedFirst);
-            assert_eq!(accuracy.rec.rec_img_shape, [3, 48, 320]);
-            assert_eq!(speed.rec.rec_img_shape, [3, 48, 48]);
-            accuracy.rec.rec_img_shape[2] = 48;
-            assert_eq!(
-                serde_json::to_value(&accuracy).unwrap(),
-                serde_json::to_value(&speed).unwrap(),
-                "processing choice must preserve the detector, models, batching and runtime"
-            );
-            assert_eq!(
-                speed.cls.runtime.provider_preference,
-                rapid_ocr_rs::ProviderPreference::Cpu
-            );
-            assert_eq!(speed.cls.runtime.rayon_threads, Some(8));
-            assert_eq!(
-                speed.rec.runtime.provider_preference,
-                if directml {
-                    rapid_ocr_rs::ProviderPreference::DirectMl { device_id: 0 }
-                } else {
-                    rapid_ocr_rs::ProviderPreference::Cpu
-                }
-            );
         }
     }
 

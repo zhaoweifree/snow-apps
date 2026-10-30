@@ -37,6 +37,12 @@ bool focusedFullscreenWindowMatches(const QScreen* screen) {
         return false;
     }
 
+    DWORD processId = 0;
+    if (GetWindowThreadProcessId(window, &processId) == 0 ||
+        !isExternalFocusedWindowProcess(processId)) {
+        return false;
+    }
+
     DWORD cloaked = 0;
     if (FAILED(DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) ||
         cloaked != 0) {

@@ -13,6 +13,7 @@ struct RecordingEffectTestState {
     QByteArray keyboardCjkFontFamily;
     uint32_t keyboardFontWeight = 0;
     uint32_t highlight = 0;
+    uint32_t highlightRadius = 0;
     bool recordMouseClicks = false;
     bool showKeyboard = false;
     uint32_t trailDurationMs = 0;
@@ -60,6 +61,7 @@ class RecordingEffectTestSource final : public RecordingEffectsSource {
         state->keyboardCjkFontFamily = config.keyboard_cjk_font_family_utf8;
         state->keyboardFontWeight = config.keyboard_font_weight;
         state->highlight = config.highlight_rgba;
+        state->highlightRadius = config.highlight_radius;
         state->recordMouseClicks = config.record_mouse_clicks != 0;
         state->showKeyboard = config.show_keyboard != 0;
         state->trailDurationMs = config.trail_duration_ms;

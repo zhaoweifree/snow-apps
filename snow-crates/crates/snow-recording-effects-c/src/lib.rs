@@ -51,6 +51,7 @@ pub struct SnowRecordingEffectsConfig {
     pub keyboard_cjk_font_family_utf8: *const c_char,
     pub keyboard_font_weight: u32,
     pub canvas_scale: f64,
+    pub highlight_radius: u32,
 }
 #[repr(C)]
 pub struct SnowRecordingEffectsTile {
@@ -95,7 +96,8 @@ unsafe fn config(raw: *const SnowRecordingEffectsConfig) -> Result<PreviewConfig
         3 => std::mem::offset_of!(SnowRecordingEffectsConfig, highlight_rgba),
         4 => std::mem::offset_of!(SnowRecordingEffectsConfig, keyboard_font_family_utf8),
         5 => std::mem::offset_of!(SnowRecordingEffectsConfig, canvas_scale),
-        6 => std::mem::size_of::<SnowRecordingEffectsConfig>(),
+        6 => std::mem::offset_of!(SnowRecordingEffectsConfig, highlight_radius),
+        7 => std::mem::size_of::<SnowRecordingEffectsConfig>(),
         _ => return Err("unsupported effects configuration version".into()),
     };
     if unsafe { *header.add(1) } != size as u32 {
@@ -153,6 +155,11 @@ unsafe fn config(raw: *const SnowRecordingEffectsConfig) -> Result<PreviewConfig
             u64::from(raw.trail_duration_ms)
         },
         click: raw.click_rgba.to_be_bytes(),
+        highlight_radius: if raw.version >= 7 {
+            raw.highlight_radius
+        } else {
+            snow_recording_effects::mouse_effects::HIGHLIGHT_RADIUS as u32
+        },
         highlight: if raw.version >= 4 {
             raw.highlight_rgba.to_be_bytes()
         } else {
@@ -517,7 +524,7 @@ mod tests {
 
     fn valid() -> SnowRecordingEffectsConfig {
         SnowRecordingEffectsConfig {
-            version: 6,
+            version: 7,
             struct_size: std::mem::size_of::<SnowRecordingEffectsConfig>() as u32,
             x: -1920,
             y: -100,
@@ -543,7 +550,23 @@ mod tests {
             keyboard_cjk_font_family_utf8: std::ptr::null(),
             keyboard_font_weight: 0,
             canvas_scale: 1.0,
+            highlight_radius: 41,
         }
+    }
+    #[test]
+    fn highlight_radius_is_validated_and_legacy_configs_keep_default() {
+        let mut raw = valid();
+        for radius in [8, 41, 96, 128] {
+            raw.highlight_radius = radius;
+            assert_eq!(unsafe { config(&raw) }.unwrap().highlight_radius, radius);
+        }
+        for radius in [0, 7, 129, u32::MAX] {
+            raw.highlight_radius = radius;
+            assert!(unsafe { config(&raw) }.is_err());
+        }
+        raw.version = 6;
+        raw.struct_size = std::mem::offset_of!(SnowRecordingEffectsConfig, highlight_radius) as u32;
+        assert_eq!(unsafe { config(&raw) }.unwrap().highlight_radius, 41);
     }
     #[test]
     fn validates_headers_dimensions_and_copies_bounded_labels() {

@@ -10,8 +10,8 @@ use crate::{Engine, history::HistoryStore};
 
 // Persisted counters became authoritative for badge creation in version 9.
 const SERIAL_NUMBER_COUNTERS_SESSION_SCHEMA_VERSION: u32 = 9;
-pub const DOCUMENT_SESSION_SCHEMA_VERSION: u32 = 13;
-pub const DOCUMENT_HISTORY_SCHEMA_VERSION: u32 = 9;
+pub const DOCUMENT_SESSION_SCHEMA_VERSION: u32 = 16;
+pub const DOCUMENT_HISTORY_SCHEMA_VERSION: u32 = 12;
 pub const MAX_DOCUMENT_SESSION_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -243,6 +243,9 @@ mod tests {
         let id = engine.model.peek_next_element_id();
         let mut transaction = Transaction::new("rectangle");
         let rectangle = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: RectangleElementKind::Rectangle,
             highlight_shape: HighlightShape::Rectangle,
             center: Point::new(24.0, 32.0),
@@ -426,6 +429,9 @@ mod tests {
         let id = engine.model.peek_next_element_id();
         let mut transaction = Transaction::new("rectangle");
         let rectangle = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: RectangleElementKind::Rectangle,
             highlight_shape: HighlightShape::Rectangle,
             center: Point::new(24.0, 32.0),
@@ -702,15 +708,18 @@ mod tests {
             serde_json::from_slice(&source.serialize_document_session().unwrap()).unwrap();
         let history: serde_json::Value =
             serde_json::from_slice(&source.serialize_document_history().unwrap()).unwrap();
-        assert_eq!(session["schemaVersion"], 13);
-        assert_eq!(history["schemaVersion"], 9);
+        assert_eq!(session["schemaVersion"], DOCUMENT_SESSION_SCHEMA_VERSION);
+        assert_eq!(history["schemaVersion"], DOCUMENT_HISTORY_SCHEMA_VERSION);
 
         let restored =
             Engine::from_serialized_document_session(&serde_json::to_vec(&session).unwrap())
                 .unwrap();
         let restored_session: serde_json::Value =
             serde_json::from_slice(&restored.serialize_document_session().unwrap()).unwrap();
-        assert_eq!(restored_session["schemaVersion"], 13);
+        assert_eq!(
+            restored_session["schemaVersion"],
+            DOCUMENT_SESSION_SCHEMA_VERSION
+        );
         assert_eq!(
             restored_session["editor"]["speechBubble"],
             session["editor"]["speechBubble"]
@@ -733,7 +742,10 @@ mod tests {
                 .unwrap();
         let restored_history: serde_json::Value =
             serde_json::from_slice(&restored.serialize_document_history().unwrap()).unwrap();
-        assert_eq!(restored_history["schemaVersion"], 9);
+        assert_eq!(
+            restored_history["schemaVersion"],
+            DOCUMENT_HISTORY_SCHEMA_VERSION
+        );
         assert!(restored.model.paint_order().is_empty());
     }
 

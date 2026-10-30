@@ -86,7 +86,7 @@ class Registry final {
         options.classesRoot = QStringLiteral("Software\\SnowShotTests");
         options.executablePath =
             QStringLiteral("C:/Snow Shot/雪/") + snow_shot::app::edition::executableName();
-        options.imageExtensions = {QStringLiteral("png"), QStringLiteral("jpg")};
+        options.fileExtensions = {QStringLiteral("png"), QStringLiteral("jpg")};
         options.registry = access();
         return options;
     }

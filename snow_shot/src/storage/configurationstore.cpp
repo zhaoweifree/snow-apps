@@ -1,3 +1,4 @@
+#include "snow_shot/shortcuts/screenshotshortcutcontext.h"
 #include "snow_shot/storage/configurationstore.h"
 #include "snow_shot/clouduploadconfiguration.h"
 #include "snow_shot/app/edition.h"
@@ -100,7 +101,7 @@ void reconcileLocalShortcutDefaults(MaterializedConfiguration& result,
     if (defaultedKeys.isEmpty())
         return;
 
-    QMap<QString, shortcuts::ShortcutBindingList> assignedByScope;
+    QMap<QString, QList<std::pair<QString, shortcuts::ShortcutBinding>>> assignedByScope;
     QStringList defaultedLocalKeys;
     const auto bindingsForKey = [&result](const QString& key) {
         return shortcuts::shortcutBindingsFromJson(
@@ -116,7 +117,9 @@ void reconcileLocalShortcutDefaults(MaterializedConfiguration& result,
         if (defaultedKeys.contains(entry.key)) {
             defaultedLocalKeys.push_back(entry.key);
         } else {
-            assignedByScope[entry.key.section(u'/', 0, 0)].append(bindingsForKey(entry.key));
+            auto& assigned = assignedByScope[entry.key.section(u'/', 0, 0)];
+            for (const auto& binding : bindingsForKey(entry.key))
+                assigned.append({entry.key.section(u'/', 1), binding});
         }
     }
     for (const QString& key : defaultedLocalKeys) {
@@ -124,12 +127,16 @@ void reconcileLocalShortcutDefaults(MaterializedConfiguration& result,
         const auto defaults = bindingsForKey(key);
         shortcuts::ShortcutBindingList retained;
         for (const auto& binding : defaults) {
-            if (std::any_of(assigned.cbegin(), assigned.cend(), [&binding](const auto& existing) {
-                    return shortcuts::bindingsConflict(existing, binding);
-                }))
+            if (std::any_of(assigned.cbegin(), assigned.cend(),
+                            [&binding, &key](const auto& existing) {
+                                return (!key.startsWith(QStringLiteral("screenshot_shortcuts/")) ||
+                                        shortcuts::screenshotShortcutActionsMayConflict(
+                                            key.section(u'/', 1), existing.first)) &&
+                                       shortcuts::bindingsConflict(existing.second, binding);
+                            }))
                 continue;
             retained.push_back(binding);
-            assigned.push_back(binding);
+            assigned.push_back({key.section(u'/', 1), binding});
         }
         if (retained.size() == defaults.size())
             continue;
@@ -157,6 +164,13 @@ MaterializedConfiguration materializeConfiguration(const QMap<QString, QJsonValu
         if (screenshot.contains(QStringLiteral("auto_save_after_copy"))) {
             screenshot.remove(QStringLiteral("auto_save_after_copy"));
             result.document.insert(QStringLiteral("screenshot"), screenshot);
+            result.dirty = !replaceAll;
+        }
+        QJsonObject screenshotSelection =
+            result.document.value(QStringLiteral("screenshot_selection")).toObject();
+        if (screenshotSelection.contains(QStringLiteral("previous_selection"))) {
+            screenshotSelection.remove(QStringLiteral("previous_selection"));
+            result.document.insert(QStringLiteral("screenshot_selection"), screenshotSelection);
             result.dirty = !replaceAll;
         }
     }

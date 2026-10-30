@@ -1,6 +1,7 @@
 #include "angle_wheel_host_test_support.h"
 #include "../../test-support/canvas_quick_selection_test_support.h"
 #include "snow_shot/presentation/globalcanvascontroller.h"
+#include "snow_shot/presentation/crosshaircursor.h"
 #include "snow_shot/presentation/screenshotcanvastoolstyles.h"
 #include "eraser_toolbar_test_support.h"
 #include "../src/presentation/globalcanvas/globalcanvasplatform.h"
@@ -22,6 +23,7 @@
 #include <QFontDatabase>
 #include "physical_key_test_support.h"
 #include <QMouseEvent>
+#include <QTabletEvent>
 #include <QPainter>
 #include <QScreen>
 #include <QScopeGuard>
@@ -561,6 +563,24 @@ void canvasColorSampling(QApplication& app, QScreen* screen) {
     mouse(canvas, QEvent::MouseButtonRelease, {190, 190}, Qt::LeftButton, Qt::NoButton);
     require(picker->value().solidColor == color && !preview->isVisible(),
             "eyedropper commits the canvas color and hides its preview");
+    adqt::widgets::AdColorPicker tabletPicker;
+    tabletPicker.setValue(adqt::widgets::AdColorValue::solid(Qt::red));
+    palette->canvasColorSamplingRequested(&tabletPicker);
+    QPointingDevice pen(QStringLiteral("global canvas tablet"), 93,
+                        QInputDevice::DeviceType::Stylus, QPointingDevice::PointerType::Pen,
+                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
+                        3);
+    for (const auto type : {QEvent::TabletMove, QEvent::TabletPress, QEvent::TabletRelease}) {
+        const auto button = type == QEvent::TabletMove ? Qt::NoButton : Qt::LeftButton;
+        const auto buttons = type == QEvent::TabletPress ? Qt::LeftButton : Qt::NoButton;
+        QTabletEvent event(type, &pen, {190, 190}, canvas->mapToGlobal(QPoint(190, 190)), 0.5, 0, 0,
+                           0, 0, 0, Qt::NoModifier, button, buttons);
+        event.setAccepted(false);
+        QApplication::sendEvent(canvas, &event);
+        require(event.isAccepted(), "canvas color sampling consumes native tablet input");
+    }
+    require(tabletPicker.value().solidColor == color && !preview->isVisible(),
+            "native tablet color sampling commits and consumes its release without drawing");
     const QColor committed = picker->value().solidColor;
     palette->canvasColorSamplingRequested(picker);
     mouse(canvas, QEvent::MouseMove, {80, 80}, Qt::NoButton, Qt::NoButton);
@@ -1302,6 +1322,19 @@ int main(int argc, char** argv) {
         return 0;
     }
 #endif
+    if (app.arguments().contains(QStringLiteral("--crosshair-only"))) {
+        presentation::GlobalCanvasController controller(
+            nullptr, {[&]() { return app.primaryScreen(); }, [](QWidget*, bool) { return true; }});
+        controller.activate();
+        require(controller.active(), "global crosshair fixture must create its canvas");
+        auto* canvas = controller.canvas();
+        require(canvas->setCanvasTool(SnowCanvasTool::Shape), "activate a global crosshair tool");
+        require(canvas->cursor() == presentation::crosshairCursor(canvas->devicePixelRatioF()),
+                "global annotation tools must use Snow Shot's crosshair");
+        controller.shutdown();
+        storage.shutdown();
+        return 0;
+    }
     if (app.arguments().contains(QStringLiteral("--click-through-style-only"))) {
         canvasClickThroughButtonStyle(app);
         storage.shutdown();

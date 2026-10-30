@@ -662,6 +662,7 @@ pub(crate) fn ensure_staging_texture<'a>(
     };
 
     if needs_new_staging {
+        crate::admit_raster(src.Width, src.Height)?;
         let sample_desc = match sample_desc {
             StagingSampleDesc::SingleSample => DXGI_SAMPLE_DESC {
                 Count: 1,

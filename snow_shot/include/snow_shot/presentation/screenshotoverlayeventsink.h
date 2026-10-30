@@ -35,6 +35,8 @@ class ScreenshotOverlayEventSink {
     [[nodiscard]] virtual ScreenshotOverlayRightClickResult
     handleOverlayRightClick(ScreenshotOverlayWindow* overlay, const QPointF& localPosition) = 0;
     virtual void completeRightClickCancellation() {}
+    virtual void updateOverlayModifiers(Qt::KeyboardModifiers, bool) {}
+    virtual void clearOverlaySnapping() {}
     virtual bool effectDragActive() const {
         return false;
     }

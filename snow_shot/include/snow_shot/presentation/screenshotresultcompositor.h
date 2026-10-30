@@ -1,6 +1,8 @@
 #ifndef SNOW_SHOT_PRESENTATION_SCREENSHOTRESULTCOMPOSITOR_H
 #define SNOW_SHOT_PRESENTATION_SCREENSHOTRESULTCOMPOSITOR_H
 
+#include "snow_shot/image/screenshotlayoutcompaction.h"
+
 #include <QColor>
 #include <QDataStream>
 #include <QImage>
@@ -23,6 +25,7 @@ struct ScreenshotResultStyle {
     // Immutable geometry snapshot, relative to the content origin, in canvas units.
     std::optional<ScreenshotRegionGeometry> region = std::nullopt;
     qreal regionScale = 1.0;
+    int backgroundOpacityPercent = 0;
 };
 
 inline QByteArray encodeScreenshotResultStyle(const ScreenshotResultStyle& style) {
@@ -39,9 +42,12 @@ inline QByteArray encodeScreenshotResultStyle(const ScreenshotResultStyle& style
     // compiled with /utf-8.
     stream.setVersion(snowDataStreamVersion());
     stream << style.cornerRadius << style.shadowWidth << style.shadowColor;
-    stream << quint32(0x53535247) << quint8(1) << style.regionScale
+    stream << quint32(0x53535247) << quint8(style.backgroundOpacityPercent == 0 ? 1 : 2)
+           << style.regionScale
            << (style.region ? QJsonDocument(style.region->toJson()).toJson(QJsonDocument::Compact)
                             : QByteArray());
+    if (style.backgroundOpacityPercent != 0)
+        stream << style.backgroundOpacityPercent;
     return bytes;
 }
 
@@ -61,9 +67,12 @@ inline std::optional<ScreenshotResultStyle> decodeScreenshotResultStyle(const QB
     quint8 version = 0;
     QByteArray geometry;
     stream >> marker >> version >> style.regionScale >> geometry;
+    if (version == 2)
+        stream >> style.backgroundOpacityPercent;
     if (stream.status() != QDataStream::Ok || !stream.atEnd() || marker != 0x53535247 ||
-        version != 1 || !std::isfinite(style.regionScale) || style.regionScale <= 0 ||
-        style.regionScale > 256)
+        (version != 1 && version != 2) || style.backgroundOpacityPercent < 0 ||
+        style.backgroundOpacityPercent > 100 || !std::isfinite(style.regionScale) ||
+        style.regionScale <= 0 || style.regionScale > 256)
         return std::nullopt;
     if (!geometry.isEmpty()) {
         style.region =
@@ -96,8 +105,17 @@ class ScreenshotResultCompositor final {
                                                                  const ScreenshotResultStyle& style,
                                                                  qreal devicePixelRatio = 1.0);
     [[nodiscard]] static QImage normalizeImage(const QImage& image);
+    // Prepare an output-aligned, premultiplied background for destination-over
+    // painting. Geometric coverage keeps translucent selected pixels unchanged.
+    // Preview surfaces use the same operation as exports before adding checkerboard.
+    [[nodiscard]] static QImage maskBackgroundForSelection(QImage background, const QImage& content,
+                                                           const QPainterPath& selectionPath,
+                                                           const QPoint& contentOffset = {});
+    // Background uses output pixel coordinates, including effect padding, and contains
+    // capture pixels only. Its opacity is applied beneath the masked content and shadow.
     [[nodiscard]] static QImage compose(const QImage& content, const ScreenshotResultStyle& style,
-                                        qreal devicePixelRatio = 1.0, qreal outputOpacity = 1.0);
+                                        qreal devicePixelRatio = 1.0, qreal outputOpacity = 1.0,
+                                        const QImage& background = {});
 
     // Clear the part of the viewport outside the result shape, then place the
     // shadow behind the content. Content may cross the viewport boundary:
@@ -106,5 +124,26 @@ class ScreenshotResultCompositor final {
                                   const QRectF& contentBounds, const ScreenshotResultStyle& style,
                                   qreal devicePixelRatio, qreal canvasToViewScale = 1.0);
 };
+
+// The compaction plan operates on pixels; bake the original mask before moving
+// it so newly touching regions do not lose their individually rounded corners.
+inline ScreenshotResultStyle
+compactedScreenshotResultStyle(const ScreenshotResultStyle& style,
+                               const ScreenshotLayoutCompactionPlan& plan) {
+    if (!plan.changed || !style.region)
+        return style;
+    auto result = ScreenshotResultCompositor::normalizedStyle(style);
+    const qreal scale = result.regionScale;
+    const auto mask =
+        QTransform::fromScale(scale, scale)
+            .map(result.region->custom()
+                     ? result.region->path(scale)
+                     : screenshotRegionPath(*result.region, result.cornerRadius / scale));
+    result.region =
+        ScreenshotRegionGeometry::fromPath(plan.mapPath(mask), ScreenshotRegionType::Curve);
+    result.regionScale = 1.0;
+    result.cornerRadius = 0;
+    return result;
+}
 
 #endif // SNOW_SHOT_PRESENTATION_SCREENSHOTRESULTCOMPOSITOR_H

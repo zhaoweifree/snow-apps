@@ -58,6 +58,7 @@ PressPlan planPress(const PressRequest& request) {
         request.canvasTool == SnowCanvasTool::Text && request.button == Qt::LeftButton &&
         !(request.modifiers & Qt::ShiftModifier) && !activeSelectionInteractionPress;
     plan.shouldBeginSelectedText = (request.canvasTool == SnowCanvasTool::Select ||
+                                    request.canvasTool == SnowCanvasTool::Shape ||
                                     request.canvasTool == SnowCanvasTool::SerialNumber) &&
                                    request.button == Qt::LeftButton &&
                                    !(request.modifiers & Qt::ShiftModifier) &&

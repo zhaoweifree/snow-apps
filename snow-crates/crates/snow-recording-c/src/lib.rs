@@ -10,9 +10,13 @@ use snow_screen_recorder::DirectRecordingSession;
 #[cfg(target_os = "macos")]
 use snow_screen_recorder::macos::DirectSession as DirectRecordingSession;
 use snow_screen_recorder::{
-    DirectRecordingConfig, EditingSession, ExportFormat, ExportRequest, RecordingAudioConfig,
-    RecordingAudioTrackConfig, RecordingConfig, RecordingRegion, RecordingSession, RecordingState,
-    RecordingTarget, ScreenRecorderError, VideoCodec, VideoEncodeConfig, VideoEncodingSpeed,
+    DirectRecordingConfig, ExportFormat, RecordingRegion, RecordingState, ScreenRecorderError,
+    VideoCodec, VideoEncodeConfig, VideoEncodingSpeed,
+};
+#[cfg(feature = "legacy-capture")]
+use snow_screen_recorder::{
+    EditingSession, ExportRequest, RecordingAudioConfig, RecordingAudioTrackConfig,
+    RecordingConfig, RecordingSession, RecordingTarget,
 };
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char};
@@ -403,11 +407,13 @@ pub unsafe extern "C" fn snow_recording_audio_monitor_take_levels(
 }
 
 enum RecordingSessionKind {
+    #[cfg(feature = "legacy-capture")]
     Legacy(Box<RecordingSession>),
     Direct(Box<DirectRecordingSession>),
     Deferred(Box<snow_screen_recorder::DeferredRecordingSession>),
 }
 
+#[cfg(feature = "legacy-capture")]
 #[repr(C)]
 pub struct SnowRecordingConfig {
     x: i32,
@@ -448,6 +454,7 @@ pub enum SnowRecordingResult {
     InternalError = 255,
 }
 
+#[cfg(feature = "legacy-capture")]
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SnowRecordingExportConfig {
@@ -517,6 +524,7 @@ pub struct SnowCaptureDirectRecordingConfig {
     audio_mode: u32,
     system_audio_gain_db: i32,
     microphone_gain_db: i32,
+    mouse_highlight_radius: u32,
 }
 
 #[repr(C)]
@@ -526,7 +534,7 @@ struct SnowCaptureDirectRecordingConfigHeader {
     struct_size: u32,
 }
 
-pub const DIRECT_RECORDING_CONFIG_VERSION: u32 = 11;
+pub const DIRECT_RECORDING_CONFIG_VERSION: u32 = 12;
 // Version 8 ended with four padding bytes now occupied by quality.
 const DIRECT_RECORDING_CONFIG_V8_SIZE: u32 = 256;
 const DIRECT_RECORDING_CONFIG_V4_FIELDS_SIZE: usize =
@@ -561,6 +569,8 @@ fn direct_config_size(version: u32) -> Result<u32, String> {
         ),
         8 | 9 => Ok(DIRECT_RECORDING_CONFIG_V8_SIZE),
         10 => Ok(std::mem::offset_of!(SnowCaptureDirectRecordingConfig, microphone_gain_db) as u32),
+        // Version 12 uses the four tail-padding bytes of the version-11 structure.
+        11 => Ok(272),
         DIRECT_RECORDING_CONFIG_VERSION => Ok(DIRECT_RECORDING_CONFIG_SIZE),
         _ => Err(format!(
             "unsupported direct recording config version: {version}"
@@ -570,6 +580,7 @@ fn direct_config_size(version: u32) -> Result<u32, String> {
 const DIRECT_RECORDING_CONFIG_SIZE: u32 =
     std::mem::size_of::<SnowCaptureDirectRecordingConfig>() as u32;
 
+#[cfg(feature = "legacy-capture")]
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct SnowRecordingExportConfigHeader {
@@ -577,7 +588,9 @@ struct SnowRecordingExportConfigHeader {
     struct_size: u32,
 }
 
+#[cfg(feature = "legacy-capture")]
 pub const RECORDING_EXPORT_CONFIG_VERSION: u32 = 1;
+#[cfg(feature = "legacy-capture")]
 const RECORDING_EXPORT_CONFIG_SIZE: u32 = std::mem::size_of::<SnowRecordingExportConfig>() as u32;
 
 fn recording_session_mut<'a>(
@@ -636,6 +649,7 @@ pub extern "C" fn snow_recording_session_live_count() -> usize {
     LIVE_RECORDING_SESSIONS.load(Ordering::Relaxed)
 }
 
+#[cfg(feature = "legacy-capture")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn snow_recording_session_create(
     config: *const SnowRecordingConfig,
@@ -732,6 +746,7 @@ pub unsafe extern "C" fn snow_recording_session_destroy(session: *mut SnowRecord
     ) && let Some(recording) = session.recording.take()
     {
         match recording {
+            #[cfg(feature = "legacy-capture")]
             RecordingSessionKind::Legacy(recording) => {
                 let _ = (*recording).stop();
             }
@@ -751,6 +766,7 @@ pub extern "C" fn snow_recording_session_start(session: *mut SnowRecordingSessio
         return 0;
     };
     let result = match recording {
+        #[cfg(feature = "legacy-capture")]
         RecordingSessionKind::Legacy(recording) => recording.start(),
         RecordingSessionKind::Direct(recording) => recording.start(),
         RecordingSessionKind::Deferred(recording) => recording.start(),
@@ -778,6 +794,7 @@ pub extern "C" fn snow_recording_session_pause(session: *mut SnowRecordingSessio
         return 0;
     };
     let result = match recording {
+        #[cfg(feature = "legacy-capture")]
         RecordingSessionKind::Legacy(recording) => recording.pause(),
         RecordingSessionKind::Direct(recording) => recording.pause(),
         RecordingSessionKind::Deferred(recording) => recording.pause(),
@@ -805,6 +822,7 @@ pub extern "C" fn snow_recording_session_resume(session: *mut SnowRecordingSessi
         return 0;
     };
     let result = match recording {
+        #[cfg(feature = "legacy-capture")]
         RecordingSessionKind::Legacy(recording) => recording.resume(),
         RecordingSessionKind::Direct(recording) => recording.resume(),
         RecordingSessionKind::Deferred(recording) => recording.resume(),
@@ -837,7 +855,9 @@ pub unsafe extern "C" fn snow_recording_session_state(
     let state = match session.recording.as_ref() {
         Some(RecordingSessionKind::Direct(recording)) => recording.state(),
         Some(RecordingSessionKind::Deferred(recording)) => recording.state(),
-        Some(RecordingSessionKind::Legacy(_)) | None => session.state,
+        #[cfg(feature = "legacy-capture")]
+        Some(RecordingSessionKind::Legacy(_)) => session.state,
+        None => session.state,
     };
     unsafe { *out_state = ffi_recording_state(state) };
     clear_last_error();
@@ -1080,6 +1100,11 @@ fn parse_direct_recording_config(
             u64::from(config.mouse_trail_duration_ms)
         },
         mouse_click_rgba: packed_rgba(config.mouse_click_rgba),
+        mouse_highlight_radius: if config.version >= 12 {
+            config.mouse_highlight_radius
+        } else {
+            snow_screen_recorder::EffectsConfig::default().mouse_highlight_radius
+        },
         mouse_highlight_rgba: if config.version >= 7 {
             packed_rgba(config.mouse_highlight_rgba)
         } else {
@@ -1425,6 +1450,7 @@ pub unsafe extern "C" fn snow_recording_gpu_probe(
     }
 }
 
+#[cfg(feature = "legacy-capture")]
 #[derive(Debug)]
 struct RecordingExportOptions {
     output_path: PathBuf,
@@ -1437,6 +1463,7 @@ struct RecordingExportOptions {
     prefer_hardware_h264: bool,
 }
 
+#[cfg(feature = "legacy-capture")]
 fn parse_recording_export_config(
     config: &SnowRecordingExportConfig,
 ) -> Result<RecordingExportOptions, String> {
@@ -1495,6 +1522,7 @@ fn parse_recording_export_config(
     })
 }
 
+#[cfg(feature = "legacy-capture")]
 unsafe fn read_recording_export_config(
     config: *const SnowRecordingExportConfig,
 ) -> Result<SnowRecordingExportConfig, String> {
@@ -1520,6 +1548,7 @@ unsafe fn read_recording_export_config(
     Ok(unsafe { std::ptr::read_unaligned(config) })
 }
 
+#[cfg(feature = "legacy-capture")]
 fn configure_recording_export_request(
     mut request: ExportRequest,
     options: RecordingExportOptions,
@@ -1535,6 +1564,7 @@ fn configure_recording_export_request(
     request
 }
 
+#[cfg(feature = "legacy-capture")]
 fn stop_and_export_recording(
     session: *mut SnowRecordingSessionImpl,
     options: RecordingExportOptions,
@@ -1591,6 +1621,7 @@ fn stop_and_export_recording(
     }
 }
 
+#[cfg(feature = "legacy-capture")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn snow_recording_session_stop_and_export(
     session: *mut SnowRecordingSessionImpl,
@@ -1865,7 +1896,7 @@ mod tests {
 
     #[test]
     fn direct_recording_exclusion_abi_layout() {
-        assert_eq!(DIRECT_RECORDING_CONFIG_VERSION, 11);
+        assert_eq!(DIRECT_RECORDING_CONFIG_VERSION, 12);
         assert_eq!(
             std::mem::offset_of!(SnowCaptureDirectRecordingConfig, exclusions),
             192
@@ -2033,6 +2064,7 @@ mod tests {
             0
         );
     }
+    #[cfg(feature = "legacy-capture")]
     #[test]
     fn compatibility_export_adapter_preserves_cursor_visibility() {
         let output_path = PathBuf::from("recording.gif");
@@ -2054,6 +2086,7 @@ mod tests {
         assert_eq!(request.format, ExportFormat::Gif);
         assert!(!request.mouse.visible);
     }
+    #[cfg(feature = "legacy-capture")]
     #[test]
     fn versioned_export_config_maps_all_fields() {
         let output = CString::new("recording.webp").unwrap();
@@ -2082,6 +2115,7 @@ mod tests {
         assert_eq!(request.video.speed, VideoEncodingSpeed::Placebo);
         assert!(request.prefer_hardware_h264);
     }
+    #[cfg(feature = "legacy-capture")]
     #[test]
     fn versioned_export_config_rejects_unknown_encoder_preference() {
         let output = CString::new("recording.mp4").unwrap();
@@ -2101,6 +2135,7 @@ mod tests {
 
         assert!(parse_recording_export_config(&config).is_err());
     }
+    #[cfg(feature = "legacy-capture")]
     #[test]
     fn versioned_export_config_rejects_partial_size_caps() {
         let output = CString::new("recording.mp4").unwrap();
@@ -2120,6 +2155,7 @@ mod tests {
 
         assert!(parse_recording_export_config(&config).is_err());
     }
+    #[cfg(feature = "legacy-capture")]
     #[test]
     fn versioned_export_config_rejects_unknown_version_and_short_struct() {
         let output = CString::new("recording.mp4").unwrap();
@@ -2142,6 +2178,7 @@ mod tests {
         config.struct_size -= 1;
         assert!(parse_recording_export_config(&config).is_err());
     }
+    #[cfg(feature = "legacy-capture")]
     #[test]
     fn versioned_export_config_reads_only_the_header_before_size_validation() {
         let short = SnowRecordingExportConfigHeader {
@@ -2216,12 +2253,42 @@ mod tests {
         assert!(!parsed.record_mouse_clicks && parsed.keyboard.is_none());
         assert_eq!(parsed.mouse_highlight_rgba, [0; 4]);
     }
+    #[test]
+    fn custom_highlight_radius_and_legacy_tail_padding() {
+        let output = c"highlight.mp4";
+        let mut raw = direct_config(output);
+        for radius in [8, 41, 96, 128] {
+            raw.mouse_highlight_radius = radius;
+            assert_eq!(
+                parse_direct_recording_config(&raw)
+                    .unwrap()
+                    .mouse_highlight_radius,
+                radius
+            );
+        }
+        for radius in [0, 7, 129, u32::MAX] {
+            raw.mouse_highlight_radius = radius;
+            assert!(parse_direct_recording_config(&raw).is_err());
+        }
+        raw.version = 11;
+        raw.struct_size = direct_config_size(11).unwrap();
+        let copied = unsafe { read_direct_recording_config(&raw) }.unwrap();
+        assert_eq!(
+            parse_direct_recording_config(&copied)
+                .unwrap()
+                .mouse_highlight_radius,
+            41
+        );
+    }
+
     pub(super) fn direct_config(output: &CStr) -> SnowCaptureDirectRecordingConfig {
         SnowCaptureDirectRecordingConfig {
             exclusions: Default::default(),
             audio_mode: 0,
             system_audio_gain_db: 0,
             microphone_gain_db: 0,
+            mouse_highlight_radius: snow_screen_recorder::EffectsConfig::default()
+                .mouse_highlight_radius,
             version: DIRECT_RECORDING_CONFIG_VERSION,
             struct_size: std::mem::size_of::<SnowCaptureDirectRecordingConfig>() as u32,
             x: -100,
@@ -2484,6 +2551,7 @@ mod tests {
         unsafe { snow_recording_session_destroy(second) };
         assert_eq!(snow_recording_session_live_count(), baseline);
     }
+    #[cfg(feature = "legacy-capture")]
     #[test]
     fn odd_recording_region_is_rejected_before_session_creation() {
         let config = SnowRecordingConfig {
@@ -2510,5 +2578,5 @@ mod tests {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-capture"))]
 pub mod macos;

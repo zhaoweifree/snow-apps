@@ -2233,6 +2233,10 @@ void saveDecorationInspectionSheet() {
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", QByteArrayLiteral("offscreen"));
     QApplication application(argc, argv);
+    if (application.arguments().contains(QStringLiteral("--selection-guides-only"))) {
+        magnifierHoverAndSelectionReuseCreationGuidesAtEveryShapeZoomAndDpr();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--gradient-damage-only"))) {
         gradientIncrementalRepaintsMatchFreshFrames();
         return 0;

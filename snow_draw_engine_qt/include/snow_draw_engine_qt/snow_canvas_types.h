@@ -145,6 +145,7 @@ enum SnowCanvasSerialNumberStyleMixedFlag : quint32 {
     SnowCanvasSerialNumberStyleMixedOpacity = 1u << 8,
     SnowCanvasSerialNumberStyleMixedType = 1u << 9,
     SnowCanvasSerialNumberStyleMixedNumericType = 1u << 10,
+    SnowCanvasSerialNumberStyleMixedStrokeRenderingStyle = 1u << 11,
 };
 
 enum class SnowCanvasSerialNumberNumericType : quint32 {
@@ -163,7 +164,11 @@ enum class SnowCanvasSerialNumberType : quint32 {
     Circle = 4,
 };
 
+enum class SnowCanvasBrushMode { Regular, PressureSensitive };
+
 enum SnowCanvasShapeStyleMixedFlag : quint32 {
+    SnowCanvasShapeStyleMixedStrokeRenderingStyle = 1u << 15,
+    SnowCanvasShapeStyleMixedBrushMode = 1u << 14,
     SnowCanvasShapeStyleMixedFill = 1u << 0,
     SnowCanvasShapeStyleMixedFillStyle = 1u << 1,
     SnowCanvasShapeStyleMixedStroke = 1u << 2,
@@ -199,6 +204,8 @@ enum class SnowCanvasSelectionAlignment {
 };
 
 enum SnowCanvasShapeStyleProperty : quint32 {
+    SnowCanvasShapeStylePropertyStrokeRenderingStyle = 1u << 15,
+    SnowCanvasShapeStylePropertyBrushMode = 1u << 14,
     SnowCanvasShapeStylePropertyFillColor = 1u << 0,
     SnowCanvasShapeStylePropertyFillStyle = 1u << 1,
     SnowCanvasShapeStylePropertyStrokeColor = 1u << 2,
@@ -354,12 +361,19 @@ enum class SnowCanvasFillStyle {
     Line,
     CrossLine,
     Solid,
+    Border = 3,
 };
 
 enum class SnowCanvasStrokeStyle {
     Solid,
     Dashed,
     Dotted,
+};
+
+enum class SnowCanvasStrokeRenderingStyle {
+    Architect = 0,
+    Artist = 1,
+    Cartoonist = 2,
 };
 
 struct SnowCanvasCornerRadii {
@@ -468,6 +482,8 @@ struct SnowCanvasShapeStyle {
     double opacity = 1.0;
     SnowCanvasHighlightShape highlightShape = SnowCanvasHighlightShape::Rectangle;
     SnowCanvasRectangleShape shape = SnowCanvasRectangleShape::Rectangle;
+    SnowCanvasBrushMode brushMode = SnowCanvasBrushMode::Regular;
+    SnowCanvasStrokeRenderingStyle strokeRenderingStyle = SnowCanvasStrokeRenderingStyle::Architect;
 };
 
 struct SnowCanvasMagnifierStyle {
@@ -504,7 +520,8 @@ inline bool operator==(const SnowCanvasShapeStyle& lhs, const SnowCanvasShapeSty
            snowCanvasExactDoubleEqual(lhs.arrowRatio, rhs.arrowRatio) &&
            lhs.arrowShaftType == rhs.arrowShaftType &&
            snowCanvasExactDoubleEqual(lhs.opacity, rhs.opacity) &&
-           lhs.highlightShape == rhs.highlightShape && lhs.shape == rhs.shape;
+           lhs.highlightShape == rhs.highlightShape && lhs.shape == rhs.shape &&
+           lhs.brushMode == rhs.brushMode && lhs.strokeRenderingStyle == rhs.strokeRenderingStyle;
 }
 
 inline bool operator!=(const SnowCanvasShapeStyle& lhs, const SnowCanvasShapeStyle& rhs) {
@@ -577,13 +594,15 @@ struct SnowCanvasRectangleShapeStyle {
     double strokeWidth = 0.0;
     SnowCanvasStrokeStyle strokeStyle = SnowCanvasStrokeStyle::Solid;
     SnowCanvasCornerRadii cornerRadii{6.0, 6.0, 6.0, 6.0};
+    SnowCanvasStrokeRenderingStyle strokeRenderingStyle = SnowCanvasStrokeRenderingStyle::Architect;
 };
 
 inline bool operator==(const SnowCanvasRectangleShapeStyle& lhs,
                        const SnowCanvasRectangleShapeStyle& rhs) {
     return lhs.fill == rhs.fill && lhs.fillStyle == rhs.fillStyle && lhs.stroke == rhs.stroke &&
            snowCanvasExactDoubleEqual(lhs.strokeWidth, rhs.strokeWidth) &&
-           lhs.strokeStyle == rhs.strokeStyle && lhs.cornerRadii == rhs.cornerRadii;
+           lhs.strokeStyle == rhs.strokeStyle && lhs.cornerRadii == rhs.cornerRadii &&
+           lhs.strokeRenderingStyle == rhs.strokeRenderingStyle;
 }
 
 inline bool operator!=(const SnowCanvasRectangleShapeStyle& lhs,
@@ -600,6 +619,7 @@ struct SnowCanvasArrowStyle {
     SnowCanvasArrowType arrowType = SnowCanvasArrowType::Straight;
     SnowCanvasArrowShaftType arrowShaftType = SnowCanvasArrowShaftType::Plain;
     double arrowRatio = 1.0;
+    SnowCanvasStrokeRenderingStyle strokeRenderingStyle = SnowCanvasStrokeRenderingStyle::Architect;
 };
 
 inline bool operator==(const SnowCanvasArrowStyle& lhs, const SnowCanvasArrowStyle& rhs) {
@@ -608,7 +628,8 @@ inline bool operator==(const SnowCanvasArrowStyle& lhs, const SnowCanvasArrowSty
            lhs.startArrowhead == rhs.startArrowhead && lhs.endArrowhead == rhs.endArrowhead &&
            lhs.strokeStyle == rhs.strokeStyle && lhs.arrowType == rhs.arrowType &&
            snowCanvasExactDoubleEqual(lhs.arrowRatio, rhs.arrowRatio) &&
-           lhs.arrowShaftType == rhs.arrowShaftType;
+           lhs.arrowShaftType == rhs.arrowShaftType &&
+           lhs.strokeRenderingStyle == rhs.strokeRenderingStyle;
 }
 
 inline bool operator!=(const SnowCanvasArrowStyle& lhs, const SnowCanvasArrowStyle& rhs) {
@@ -658,6 +679,7 @@ struct SnowCanvasSerialNumberStyle {
     double strokeWidth = 2.0;
     SnowCanvasStrokeStyle strokeStyle = SnowCanvasStrokeStyle::Solid;
     double opacity = 1.0;
+    SnowCanvasStrokeRenderingStyle strokeRenderingStyle = SnowCanvasStrokeRenderingStyle::Architect;
 };
 
 inline bool operator==(const SnowCanvasSerialNumberStyle& lhs,
@@ -668,7 +690,8 @@ inline bool operator==(const SnowCanvasSerialNumberStyle& lhs,
            lhs.fontFamily == rhs.fontFamily &&
            snowCanvasExactDoubleEqual(lhs.strokeWidth, rhs.strokeWidth) &&
            lhs.strokeStyle == rhs.strokeStyle &&
-           snowCanvasExactDoubleEqual(lhs.opacity, rhs.opacity);
+           snowCanvasExactDoubleEqual(lhs.opacity, rhs.opacity) &&
+           lhs.strokeRenderingStyle == rhs.strokeRenderingStyle;
 }
 
 inline bool operator!=(const SnowCanvasSerialNumberStyle& lhs,

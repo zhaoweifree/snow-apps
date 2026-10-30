@@ -277,6 +277,59 @@ unsafe fn match_descriptors_avx2(
         .collect()
 }
 
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn nearest_two_neon(
+    query: &BinaryFeature,
+    train: &[BinaryFeature],
+) -> Option<[DescriptorMatch; 2]> {
+    use std::arch::aarch64::*;
+    unsafe {
+        let query_low = vld1q_u8(query.descriptor.as_ptr());
+        let query_high = vld1q_u8(query.descriptor.as_ptr().add(16));
+        let mut first = DescriptorMatch {
+            train_index: usize::MAX,
+            distance: u32::MAX,
+        };
+        let mut second = first;
+        for (train_index, candidate) in train.iter().enumerate() {
+            let low = vcntq_u8(veorq_u8(query_low, vld1q_u8(candidate.descriptor.as_ptr())));
+            let high = vcntq_u8(veorq_u8(
+                query_high,
+                vld1q_u8(candidate.descriptor.as_ptr().add(16)),
+            ));
+            let distance = u32::from(vaddlvq_u8(vaddq_u8(low, high)));
+            let matched = DescriptorMatch {
+                train_index,
+                distance,
+            };
+            if (distance, train_index) < (first.distance, first.train_index) {
+                second = first;
+                first = matched;
+            } else if (distance, train_index) < (second.distance, second.train_index) {
+                second = matched;
+            }
+        }
+        #[cfg(test)]
+        NEON_MATCHES.fetch_add(train.len(), std::sync::atomic::Ordering::Relaxed);
+        (second.train_index != usize::MAX).then_some([first, second])
+    }
+}
+
+#[cfg(all(test, target_arch = "aarch64"))]
+static NEON_MATCHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn match_descriptors_neon(
+    queries: &[BinaryFeature],
+    train: &[BinaryFeature],
+) -> Vec<Option<DescriptorMatch>> {
+    queries
+        .par_iter()
+        .map(|query| unsafe { nearest_two_neon(query, train).and_then(passes_ratio) })
+        .collect()
+}
+
 fn match_descriptors(
     queries: &[BinaryFeature],
     train: &[BinaryFeature],
@@ -288,6 +341,10 @@ fn match_descriptors(
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     if std::arch::is_x86_feature_detected!("popcnt") {
         return unsafe { match_descriptors_popcnt(queries, train) };
+    }
+    #[cfg(target_arch = "aarch64")]
+    if std::arch::is_aarch64_feature_detected!("neon") {
+        return unsafe { match_descriptors_neon(queries, train) };
     }
     match_descriptors_portable(queries, train)
 }
@@ -1837,6 +1894,80 @@ mod tests {
         let portable = match_descriptors_portable(&queries, &train);
         let accelerated = unsafe { match_descriptors_avx2(&queries, &train) };
         assert_eq!(accelerated, portable);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn neon_matcher_executes_and_preserves_nearest_ties_and_ratio_rejection() {
+        assert!(std::arch::is_aarch64_feature_detected!("neon"));
+        let before = NEON_MATCHES.load(std::sync::atomic::Ordering::Relaxed);
+        let feature = |seed: u8| BinaryFeature {
+            x: 0.0,
+            y: 0.0,
+            descriptor: std::array::from_fn(|i| {
+                seed.wrapping_mul(73)
+                    .wrapping_add((i as u8).wrapping_mul(7))
+            }),
+        };
+        let queries = [feature(0), feature(1), feature(127), feature(255)];
+        let mut train = vec![feature(0), feature(0), feature(1), feature(2), feature(255)];
+        train.push(BinaryFeature {
+            descriptor: [255; 32],
+            ..feature(0)
+        });
+        for len in 0..=train.len() {
+            for query in &queries {
+                assert_eq!(
+                    unsafe { nearest_two_neon(query, &train[..len]) },
+                    nearest_two(query, &train[..len])
+                );
+            }
+            assert_eq!(
+                unsafe { match_descriptors_neon(&queries, &train[..len]) },
+                match_descriptors_portable(&queries, &train[..len])
+            );
+            assert_eq!(
+                match_descriptors(&queries, &train[..len]),
+                match_descriptors_portable(&queries, &train[..len])
+            );
+        }
+        let zero = BinaryFeature {
+            descriptor: [0; 32],
+            ..feature(0)
+        };
+        let full = BinaryFeature {
+            descriptor: [255; 32],
+            ..feature(0)
+        };
+        assert_eq!(
+            unsafe { nearest_two_neon(&zero, &[full, zero]) }.unwrap()[1].distance,
+            256
+        );
+        assert!(NEON_MATCHES.load(std::sync::atomic::Ordering::Relaxed) > before);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    #[ignore = "paired Release-only ARM64 kernel measurement"]
+    fn neon_release_benchmark_matching() {
+        use std::hint::black_box;
+        let feature = |seed: u32| BinaryFeature {
+            x: 0.0,
+            y: 0.0,
+            descriptor: std::array::from_fn(|i| {
+                seed.wrapping_mul(0x9e3779b9)
+                    .wrapping_add(i as u32 * 0x10203)
+                    .rotate_left(i as u32) as u8
+            }),
+        };
+        let queries: Vec<_> = (0..128).map(feature).collect();
+        let train: Vec<_> = (0..512).map(feature).collect();
+        crate::neon_benchmark::paired(
+            "stitch_descriptor_matching",
+            8,
+            || match_descriptors_portable(black_box(&queries), black_box(&train)),
+            || unsafe { match_descriptors_neon(black_box(&queries), black_box(&train)) },
+        );
     }
 
     fn scrolling_fixture(scroll: u32, animation: u8) -> Frame {

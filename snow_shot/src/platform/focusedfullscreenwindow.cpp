@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <QCoreApplication>
 
 namespace snow_shot::platform {
 namespace {
@@ -17,10 +18,14 @@ bool coversDisplay(const QRectF& window, const QRectF& display) {
 }
 } // namespace
 
+bool isExternalFocusedWindowProcess(qint64 processId) {
+    return processId > 0 && processId != QCoreApplication::applicationPid();
+}
+
 bool focusedWindowCoversDisplay(qint64 frontmostProcessId,
                                 const QVector<FocusedWindowSnapshot>& orderedWindows,
                                 const QVector<QRectF>& displayBounds) {
-    if (frontmostProcessId <= 0 || displayBounds.isEmpty()) {
+    if (!isExternalFocusedWindowProcess(frontmostProcessId) || displayBounds.isEmpty()) {
         return false;
     }
     const auto focused = std::find_if(

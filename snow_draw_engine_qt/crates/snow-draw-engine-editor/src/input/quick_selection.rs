@@ -117,6 +117,9 @@ mod tests {
 
     fn rectangle(center: Point<f64>) -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: RectangleElementKind::Rectangle,
             highlight_shape: Default::default(),
             center,
@@ -158,6 +161,8 @@ mod tests {
         modifiers: Modifiers,
     ) -> InputEvent {
         InputEvent::Pointer(PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 1,
             event_type: kind,
             device: PointerDevice::Mouse,

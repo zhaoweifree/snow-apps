@@ -8,6 +8,7 @@
 #include "snow_shot/presentation/screenshotselectionmodel.h"
 #include "snow_shot/presentation/screenshotoverlaywindow.h"
 
+#include <algorithm>
 #include <utility>
 
 ScreenshotSelectionEditWorkflow::ScreenshotSelectionEditWorkflow(
@@ -68,7 +69,7 @@ void ScreenshotSelectionEditWorkflow::setSelectionShadowWidthFromToolbar(int sha
 }
 
 void ScreenshotSelectionEditWorkflow::toggleSelectionAspectRatioLockFromToolbar() {
-    if (!m_context.selection.rectangular() || !m_context.interaction.canResizeSelection())
+    if (!m_context.selection.resizable() || !m_context.interaction.canResizeSelection())
         return;
     m_context.selection.toggleAspectRatioLock(
         snow_shot::presentation::kScreenshotSelectionMinimumSize);
@@ -77,6 +78,30 @@ void ScreenshotSelectionEditWorkflow::toggleSelectionAspectRatioLockFromToolbar(
     if (m_context.ui.updateOverlayState) {
         m_context.ui.updateOverlayState();
     }
+}
+
+void ScreenshotSelectionEditWorkflow::adjustSelectionEffectsFromWheel(int radiusDelta,
+                                                                      int shadowDelta) {
+    using namespace snow_shot::presentation;
+    const bool cancelled = m_context.interaction.cancelEffectDrag();
+    const bool radiusChanged = radiusDelta != 0 && m_context.selection.cornerRadiusApplicable() &&
+                               m_context.selection.setCornerRadius(
+                                   m_context.selection.cornerRadius() +
+                                   std::clamp(radiusDelta, -kScreenshotSelectionCornerRadiusMax,
+                                              kScreenshotSelectionCornerRadiusMax));
+    const bool shadowChanged =
+        shadowDelta != 0 && m_context.selection.setShadowWidth(
+                                m_context.selection.shadowWidth() +
+                                std::clamp(shadowDelta, -kScreenshotSelectionShadowWidthMax,
+                                           kScreenshotSelectionShadowWidthMax));
+    if (!radiusChanged && !shadowChanged && !cancelled)
+        return;
+    if (radiusChanged || shadowChanged)
+        commitSelectionEffects();
+    if (!cancelled && m_context.ui.requestSelectionEffectPresentation)
+        m_context.ui.requestSelectionEffectPresentation();
+    else if (m_context.ui.updateOverlayState)
+        m_context.ui.updateOverlayState();
 }
 
 void ScreenshotSelectionEditWorkflow::previewSelectionEffect(ScreenshotSelectionEffectHandle handle,
@@ -97,7 +122,7 @@ void ScreenshotSelectionEditWorkflow::commitSelectionEffects() {
 
 void ScreenshotSelectionEditWorkflow::setSelectionAspectRatioPresetFromToolbar(
     ScreenshotSelectionAspectRatioPreset preset) {
-    if (!m_context.selection.rectangular() || !m_context.interaction.canResizeSelection() ||
+    if (!m_context.selection.resizable() || !m_context.interaction.canResizeSelection() ||
         (preset != ScreenshotSelectionAspectRatioPreset::Free &&
          screenshotSelectionAspectRatioHeightOverWidth(preset) <= 0.0)) {
         return;
@@ -131,8 +156,8 @@ void ScreenshotSelectionEditWorkflow::setSelectionAspectRatioPresetFromToolbar(
 void ScreenshotSelectionEditWorkflow::openSelectionResizeModalFromToolbar() {
     const QRect bounds = selectionBounds();
     const ScreenshotSelectionParams currentParams = currentSelectionParams();
-    if (bounds.isEmpty() || !m_context.selection.hasPixelSelection() ||
-        !m_context.interaction.canResizeSelection()) {
+    if (bounds.isEmpty() || m_context.selection.multiRegionEditing() ||
+        !m_context.selection.hasPixelSelection() || !m_context.interaction.canResizeSelection()) {
         return;
     }
 

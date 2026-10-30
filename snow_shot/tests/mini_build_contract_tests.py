@@ -13,7 +13,7 @@ CONTRACT = REPOSITORY / "cmake/SnowShotMiniBuildContract.cmake"
 
 
 class MiniBuildContractTests(unittest.TestCase):
-    def test_shared_rust_archive_does_not_compile_full_only_selected_text_engines(self):
+    def test_shared_rust_archive_does_not_compile_full_only_translation_dependencies(self):
         compiler = subprocess.run(["rustc", "-vV"], capture_output=True, text=True)
         self.assertEqual(compiler.returncode, 0, compiler.stderr)
         host = next(line.removeprefix("host: ") for line in compiler.stdout.splitlines()
@@ -34,7 +34,8 @@ class MiniBuildContractTests(unittest.TestCase):
             if package in visited:
                 continue
             visited.add(package)
-            self.assertNotIn(packages[package], ("snow-selected-text", "snow-selected-text-c"))
+            self.assertNotIn(packages[package], (
+                "snow-selected-text", "snow-selected-text-c", "snow-language-detection-c", "whatlang"))
             pending.extend(dependency["pkg"] for dependency in nodes[package]["deps"])
 
     def configure(self, fixture, succeeds=True):
@@ -64,12 +65,13 @@ target_sources(snow_shot_storage_mini INTERFACE screenshotocrcontroller.h)
 ''')
 
     def test_disabled_packages_cannot_enter_transitively_or_conditionally(self):
-        targets = ["snow_shot_translation", "snow_selected_text_c", "snow_shot_full_rust_ffi_bundle",
+        targets = ["snow_shot_translation", "snow_selected_text_c", "snow_language_detection_c",
+                   "snow_shot_full_rust_ffi_bundle",
                    "opencv_wechat_qrcode", "opencv_objdetect", "opencv_dnn",
                    "snow_shot_latex_renderer", "snow_shot_microtex",
                    "snow_shot_storage", "snow_shot_edition_full"]
         if sys.platform == "win32":
-            targets.extend(("snow_ocr_process", "onnxruntime::onnxruntime"))
+            targets.extend(("snow_ocr_process",))
         for target in targets:
             with self.subTest(target=target):
                 output = self.configure(f'''
@@ -83,7 +85,8 @@ target_link_libraries(shared INTERFACE "$<$<CONFIG:Release>:$<LINK_ONLY:{target}
     def test_full_only_sources_and_resources_are_rejected_in_shared_libraries(self):
         for source in ("screenshotqrcontroller.cpp", "screenshottabledocument.cpp",
                        "screenshotimageconversioncontroller.h", "texttranslationsettingswidget.cpp",
-                       "translationservice.cpp", "qrc_snow_shot_translations.cpp",
+                       "translationservice.cpp", "translationlanguagedetector.cpp",
+                       "translationlanguagedetector.h", "qrc_snow_shot_translations.cpp",
                        "snow_shot_translations.qrc",
                        "screenshotlatexrenderer.cpp", "screenshotlatexrenderer.h",
                        "qrc_snow_shot_microtex.cpp", "snow_shot_microtex.qrc",

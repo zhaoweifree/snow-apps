@@ -10,11 +10,9 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 snow-capture = { path = "../snow-capture" }
 snow-core = { path = "../snow-core" }
+snow-cursor = { path = "../snow-cursor" }
 anyhow.workspace = true
 
-
-[dev-dependencies]
-snow-cursor = { path = "../snow-cursor" }
 
 [[example]]
 name = "desktop_session_benchmark"

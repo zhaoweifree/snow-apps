@@ -1,4 +1,5 @@
 #include "screenshotselectorserviceclient.h"
+#include "screenshotselectordisplaygeometry.h"
 #include "screenshotselectorpolicy.h"
 
 #if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
@@ -98,6 +99,10 @@ bool ScreenshotSelectorServiceClient::ensureService() {
 }
 
 bool ScreenshotSelectorServiceClient::releaseCache() {
+#ifdef Q_OS_MACOS
+    m_excludedWindowIds.clear();
+    m_displays.clear();
+#endif
     if (m_service == nullptr) {
         return true;
     }
@@ -106,6 +111,10 @@ bool ScreenshotSelectorServiceClient::releaseCache() {
 }
 
 void ScreenshotSelectorServiceClient::destroyService() {
+#ifdef Q_OS_MACOS
+    m_excludedWindowIds.clear();
+    m_displays.clear();
+#endif
     SnowUiSelectorService* service = std::exchange(m_service, nullptr);
     m_serviceBackend = -1;
     if (service == nullptr) {
@@ -172,9 +181,7 @@ bool ScreenshotSelectorServiceClient::startRefreshWithDisplays(
     if (started) {
 #ifdef Q_OS_MACOS
         m_excludedWindowIds = excludedHwnds;
-        m_displays = displays;
-        for (auto& display : m_displays)
-            display.image = {};
+        m_displays = screenshotSelectorDisplayGeometry(displays);
 #endif
         SNOW_SHOT_CAPTURE_PERF_MILESTONE("selector.refresh_dispatched");
     } else

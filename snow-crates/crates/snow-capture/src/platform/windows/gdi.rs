@@ -465,6 +465,7 @@ fn scan_dirty_row_spans_parallel(
     totals
 }
 
+#[cfg(any(not(target_arch = "aarch64"), test))]
 unsafe fn row_diff_bounds_scalar(
     lhs: *const u8,
     rhs: *const u8,
@@ -722,6 +723,12 @@ fn row_compare_kernel() -> RowCompareKernel {
     *KERNEL.get_or_init(select_row_compare_kernel)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_row_compare_kernel() -> RowCompareKernel {
+    convert::simd_arm::row_equal
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_row_compare_kernel() -> RowCompareKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -760,6 +767,12 @@ fn row_diff_bounds_kernel() -> RowDiffBoundsKernel {
     *KERNEL.get_or_init(select_row_diff_bounds_kernel)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_row_diff_bounds_kernel() -> RowDiffBoundsKernel {
+    convert::simd_arm::row_diff_bounds
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_row_diff_bounds_kernel() -> RowDiffBoundsKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -932,6 +945,7 @@ unsafe fn row_diff_bounds_avx2(
     Some((start, end))
 }
 
+#[cfg(any(not(target_arch = "aarch64"), test))]
 unsafe fn row_equal_scalar(lhs: *const u8, rhs: *const u8, len: usize) -> bool {
     let mut offset = 0usize;
     while offset + size_of::<u64>() <= len {
@@ -1336,6 +1350,7 @@ impl GdiResources {
     }
 
     fn create_dib_bitmap(&self, width: i32, height: i32) -> CaptureResult<(HBITMAP, *mut u8)> {
+        crate::admit_raster(width as u32, height as u32)?;
         let mut info = BITMAPINFO::default();
         info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
         info.bmiHeader.biWidth = width;
@@ -3286,6 +3301,19 @@ mod tests {
             ),
             ParallelSpanScanMode::CompareThenDiff
         );
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn row_scan_dispatch_selects_neon() {
+        assert!(std::ptr::fn_addr_eq(
+            row_compare_kernel(),
+            convert::simd_arm::row_equal as RowCompareKernel,
+        ));
+        assert!(std::ptr::fn_addr_eq(
+            row_diff_bounds_kernel(),
+            convert::simd_arm::row_diff_bounds as RowDiffBoundsKernel,
+        ));
     }
 
     #[test]

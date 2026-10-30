@@ -231,6 +231,7 @@ fn compare_sparse(size: (u32, u32)) -> Result<(), String> {
         trail: [255, 40, 60, 180],
         trail_duration_ms: 500,
         click: [40, 180, 255, 160],
+        highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
         highlight: [0; 4],
         record_mouse_clicks: false,
         show_keyboard: true,

@@ -36,7 +36,7 @@ QImage fixture(QSize size) {
     }
     return image;
 }
-void validateStructure(const QByteArray& pdf) {
+void validateStructure(const QByteArray& pdf, int pages = 1) {
     require(pdf.startsWith("%PDF-1.7") && pdf.endsWith("%%EOF\n"), "PDF must be finalized");
     const qsizetype start = pdf.lastIndexOf("startxref\n") + 10;
     const qint64 xref = pdf.mid(start, pdf.indexOf('\n', start) - start).toLongLong();
@@ -49,8 +49,9 @@ void validateStructure(const QByteArray& pdf) {
         require(pdf.mid(offset).startsWith(QByteArray::number(id) + " 0 obj\n"),
                 "every xref entry must identify its object");
     }
-    require(pdf.count("/Type /Page ") == 1 && pdf.contains("/Count 1"),
-            "PDF must contain one page");
+    require(pdf.count("/Type /Page ") == pages &&
+                pdf.contains("/Count " + QByteArray::number(pages)),
+            "PDF must contain its expected number of pages");
     require(pdf.contains("1 1 1 rg\n0 0 "), "PDF must explicitly paint a white page");
     require(pdf.contains("/Creator <feff0053006e006f0077002000530068006f0074>"),
             "PDF creator must identify Snow Shot");
@@ -309,6 +310,104 @@ void tallPage(const QString& directory) {
             "large physical pages must retain dimensions using UserUnit");
     validateStructure(pdf);
 }
+void incrementalDocumentAndAdmission() {
+    QString error;
+    ScreenshotImageRowSource unaccountedLong;
+    unaccountedLong.size = QSize(1, 1000001);
+    unaccountedLong.readRows = [](int, int, qsizetype, uchar*, qsizetype) { return true; };
+    require(!screenshot_pdf::prepare(unaccountedLong, 100, &error),
+            "generic unaccounted PDF sources must retain the existing axis guard");
+    QByteArray bytes;
+    QBuffer output(&bytes);
+    require(output.open(QIODevice::WriteOnly), "document fixture must be writable");
+    std::weak_ptr<screenshot_pdf::Payload> previous;
+    qsizetype visited = 0;
+    require(screenshot_pdf::writeDocument(
+                3,
+                [&](qsizetype pageIndex, screenshot_pdf::Page* page, QString* pageError) {
+                    require(
+                        previous.expired(),
+                        "document writer must retire the preceding page before preparing another");
+                    const auto source = fixture({19 + int(pageIndex), 23});
+                    auto payload = screenshot_pdf::prepare(
+                        snow_shot::image_codec::srgbRowSource(source), 100, pageError);
+                    previous = payload;
+                    page->payload = std::move(payload);
+                    page->geometry = {QSizeF(200, 300), QRectF(10, 20, 100, 150)};
+                    ++visited;
+                    return bool(page->payload);
+                },
+                &output, {}, &error) &&
+                visited == 3 && previous.expired(),
+            "incremental multi-page writer must prepare and retire every payload once");
+    require(bytes.count("/Type /Page ") == 3 && bytes.contains("/Count 3 /Kids [") &&
+                bytes.count("/MediaBox [0 0 200.00000000 300.00000000]") == 3 &&
+                bytes.endsWith("%%EOF\n"),
+            "document writer must finalize a shared page tree with caller-supplied geometry");
+    validateStructure(bytes, 3);
+    auto source = snow_shot::image_codec::srgbRowSource(fixture({19, 23}));
+    bool admitted = false;
+    source.reserveResources = [&admitted](qint64 retained, qint64 scratch,
+                                          QString* admissionError) -> std::shared_ptr<void> {
+        admitted = true;
+        require(retained == 0 && scratch > 0 && scratch < 100 * 1024 * 1024,
+                "PDF preparation must admit bounded scratch rather than full-image storage");
+        *admissionError = QStringLiteral("scratch denied");
+        return {};
+    };
+    error.clear();
+    require(!screenshot_pdf::prepare(source, 100, &error) && admitted &&
+                error == QStringLiteral("scratch denied"),
+            "resource admission failure must stop PDF preparation before allocating tiles");
+    const auto payload = screenshot_pdf::prepare(
+        snow_shot::image_codec::srgbRowSource(fixture({19, 23})), 100, &error);
+    require(bool(payload), "multi-page failure fixture must prepare");
+    const screenshot_pdf::PageProducer producer = [payload](qsizetype, screenshot_pdf::Page* page,
+                                                            QString*) {
+        page->payload = payload;
+        page->geometry = screenshot_pdf::layout(payload->size, ScreenshotPdfPageSize::PortraitA4);
+        return true;
+    };
+    class FailingDevice final : public QIODevice {
+        qint64 readData(char*, qint64) override {
+            return -1;
+        }
+        qint64 writeData(const char*, qint64) override {
+            return -1;
+        }
+    } failing;
+    failing.open(QIODevice::WriteOnly);
+    error.clear();
+    require(!screenshot_pdf::writeDocument(2, producer, &failing, {}, &error) && !error.isEmpty(),
+            "multi-page write failures must propagate");
+    QByteArray incomplete;
+    QBuffer destination(&incomplete);
+    destination.open(QIODevice::WriteOnly);
+    error.clear();
+    require(!screenshot_pdf::writeDocument(
+                2,
+                [&](qsizetype index, screenshot_pdf::Page* page, QString* pageError) {
+                    if (index == 1) {
+                        *pageError = QStringLiteral("source denied");
+                        return false;
+                    }
+                    return producer(index, page, pageError);
+                },
+                &destination, {}, &error) &&
+                error == QStringLiteral("source denied") && !incomplete.contains("%%EOF"),
+            "later source failures must leave an unfinalized document for atomic cleanup");
+    incomplete.clear();
+    destination.seek(0);
+    bool stopped = false;
+    require(!screenshot_pdf::writeDocument(
+                2, producer, &destination, {}, &error, [&] { return stopped; },
+                [&](qsizetype index, qreal fraction) {
+                    if (index == 0 && fraction == 1)
+                        stopped = true;
+                }) &&
+                !incomplete.contains("%%EOF"),
+            "multi-page cancellation must stop before finalizing the page tree");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -325,6 +424,7 @@ int main(int argc, char** argv) {
         lossyAndAutomatic(directory);
         cancellationAndFailures(directory);
         tallPage(directory);
+        incrementalDocumentAndAdmission();
         std::cout << "PDF export tests passed\n";
         return 0;
     } catch (const std::exception& error) {

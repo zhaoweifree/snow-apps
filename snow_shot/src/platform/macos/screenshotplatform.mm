@@ -10,6 +10,7 @@
 #include "snow_shot/platform/macos/recapturefocus.h"
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <QuartzCore/QuartzCore.h>
 #include <dlfcn.h>
 #import <objc/runtime.h>
 #include <algorithm>
@@ -17,6 +18,7 @@
 #include <QAbstractEventDispatcher>
 #include <QSet>
 #include <QScopedValueRollback>
+#include <QThread>
 #include <QEvent>
 #include <QPointer>
 #include <QVariant>
@@ -606,6 +608,14 @@ detail::WindowTarget windowTarget(pid_t owner, const QPoint* point) {
         CFRelease(windows);
     return result;
 }
+
+void clearLayerPresentation(CALayer* layer) {
+    if (layer == nil)
+        return;
+    layer.contents = nil;
+    for (CALayer* child in layer.sublayers)
+        clearLayerPresentation(child);
+}
 } // namespace
 void detail::setPinnedWindowLayer(QWidget* widget, bool enabled) {
     if (!widget || QGuiApplication::platformName() != QStringLiteral("cocoa"))
@@ -662,6 +672,38 @@ void configureScreenshotOverlayWindow(QWidget* widget) {
     macos::configureWindowCursorUpdates(widget);
     registerScreenshotLayer(widget, kOverlayLayer);
     configureControlledWindowDragging(widget, true);
+}
+
+void retireScreenshotWindowPresentation(QWidget* widget) {
+    if (widget == nullptr || qApp == nullptr || QThread::currentThread() != qApp->thread() ||
+        QGuiApplication::platformName() != QStringLiteral("cocoa") || !widget->isWindow() ||
+        widget->internalWinId() == 0) {
+        return;
+    }
+
+    @autoreleasepool {
+        NSView* view = reinterpret_cast<NSView*>(widget->internalWinId());
+        NSWindow* window = view.window;
+        if (window == nil)
+            return;
+
+        // AppKit can retain a closed window as its previous keyboard owner. If
+        // it is ordered out while still presenting the screenshot, WindowServer
+        // retains a desktop-sized frame even after Qt destroys its backing store.
+        // Commit empty layer contents while the native window is still visible;
+        // clearing after orderOut, or deferring the commit, preserves that frame.
+        CALayer* frameLayer = window.contentView.superview.layer;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        clearLayerPresentation(view.layer);
+        if (frameLayer != view.layer)
+            clearLayerPresentation(frameLayer);
+        [CATransaction commit];
+        // Empty model-layer contents do not prove the render tree is empty:
+        // a previous clear can still be waiting in the implicit transaction.
+        // Flush even when this call did not change any layer properties.
+        [CATransaction flush];
+    }
 }
 
 void configureScreenshotColorPickerWindow(QWidget* widget) {

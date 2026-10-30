@@ -117,6 +117,18 @@ pub unsafe extern "C" fn snow_stroke_filter_append(
     })
 }
 
+/// Returns the shared conservative displacement radius in canvas pixels.
+#[unsafe(no_mangle)]
+pub extern "C" fn snow_stroke_rendering_outset(
+    style: SnowStrokeRenderingStyle,
+    primitive_scale: f64,
+) -> f64 {
+    snow_draw_engine_core::arrow::stroke_rendering_outset(
+        crate::abi::convert::snow_stroke_rendering_style_to_rust(style),
+        primitive_scale,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

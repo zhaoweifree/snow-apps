@@ -11,6 +11,7 @@
 #include <QClipboard>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QHoverEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QTextEdit>
@@ -448,11 +449,15 @@ void popoverRelayoutPreservesPendingHover() {
     Fixture f;
     f.start();
     f.complete(
-        {{QStringLiteral("first"), quad(50, 60)}, {QStringLiteral("second"), quad(150, 60)}});
+        {{QStringLiteral("first"), quad(150, 60)}, {QStringLiteral("second"), quad(50, 60)}});
     enterMarker(f.marker(0));
     until([&] { return f.popover() && f.popover()->isVisible(); });
     QEvent leave(QEvent::Leave);
     QApplication::sendEvent(f.marker(0), &leave);
+    // The first popover opens to the right; keep the next marker reachable to its left.
+    require(QApplication::widgetAt(f.marker(1)->mapToGlobal(f.marker(1)->rect().center())) ==
+                f.marker(1),
+            "the pending-hover marker must not be covered by the existing popover");
     enterMarker(f.marker(1));
     f.canvas.move(f.canvas.pos() + QPoint(12, 8));
     until(
@@ -541,6 +546,46 @@ void invalidationClearsPopoverContentAndAllowsReuse() {
     require(text->toPlainText().isEmpty(), "repeated session completion must clear QR data");
 }
 
+void hoverMovementOpensWithoutRestartingTheDelay() {
+    Fixture f;
+    f.start();
+    f.complete({{QStringLiteral("hover preview"), quad(50, 60)},
+                {QStringLiteral("clicked preview"), quad(150, 60)}});
+    auto* marker = f.marker(0);
+    const auto hover = [](QWidget* widget, QEvent::Type type) {
+        const QPoint local = widget->rect().center();
+        QHoverEvent event(type, local, widget->mapToGlobal(local), QPointF(-1, -1), Qt::NoModifier);
+        QApplication::sendEvent(widget, &event);
+    };
+    hover(marker, QEvent::HoverMove);
+    require(!f.popover(), "hover movement must preserve the QR preview opening delay");
+    advance(55);
+    hover(marker, QEvent::HoverMove);
+    advance(55);
+    hover(marker, QEvent::HoverEnter);
+    advance(65);
+    require(f.popover() && f.popover()->isVisible(),
+            "QR hover movement without Enter must open without postponing its deadline");
+    auto* copy = f.popover()->findChild<adqt::widgets::AdButton*>(
+        QStringLiteral("screenshotQrCopyTextButton"));
+    require(copy, "the hover preview must expose its copy button");
+    QEvent leave(QEvent::Leave);
+    QApplication::sendEvent(marker, &leave);
+    advance(100);
+    hover(copy, QEvent::HoverMove);
+    advance(200);
+    require(f.popover()->isVisible(),
+            "hover movement into QR preview content must cancel pending dismissal");
+    f.marker(1)->click();
+    auto* text = f.popover()->findChild<QTextEdit*>();
+    require(text->toPlainText() == QStringLiteral("clicked preview"),
+            "clicking another marker must replace the hover preview");
+    hover(marker, QEvent::HoverMove);
+    advance(175);
+    require(text->toPlainText() == QStringLiteral("hover preview"),
+            "hover movement must switch back after another marker cancels the pending timer");
+}
+
 void popoverActionsAndHover() {
     Fixture f;
     f.start();
@@ -602,7 +647,9 @@ void popoverActionsAndHover() {
     QEvent leave(QEvent::Leave);
     QApplication::sendEvent(marker, &leave);
     advance(100);
-    QApplication::sendEvent(f.popover(), &enter);
+    const QPoint popoverPoint = f.popover()->rect().center();
+    QEnterEvent popoverEnter(popoverPoint, popoverPoint, f.popover()->mapToGlobal(popoverPoint));
+    QApplication::sendEvent(f.popover(), &popoverEnter);
     advance(200);
     require(f.popover()->isVisible(), "pointer may cross the marker-popover gap");
     windowClick(marker);
@@ -774,6 +821,7 @@ int runTests(int argc, char** argv) {
     popoverRelayoutPreservesPendingHover();
     popoverRelayoutPreservesDismissal();
     invalidationClearsPopoverContentAndAllowsReuse();
+    hoverMovementOpensWithoutRestartingTheDelay();
     popoverActionsAndHover();
     return 0;
 }

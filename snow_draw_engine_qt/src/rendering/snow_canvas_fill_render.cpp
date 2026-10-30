@@ -125,7 +125,7 @@ QColor toQColor(const SnowColorRgba8& color) {
 
 void drawStyledFill(QPainter& painter, const QPainterPath& path, const SnowColorRgba8& fill,
                     SnowFillStyle style, double referenceStrokeWidth, double coordinateScale) {
-    if (fill.a == 0) {
+    if (!hasVisibleFill(fill, style)) {
         return;
     }
 

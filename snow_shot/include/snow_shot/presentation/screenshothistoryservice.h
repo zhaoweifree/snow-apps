@@ -19,6 +19,12 @@ class ScreenshotHistoryValidationQueue;
 class ScreenshotSelectionModel;
 class SnowCanvasRuntime;
 
+struct ScreenshotSelectionRestoreTarget {
+    QRect bounds;
+    QPoint canvasOrigin;
+    bool canvasUsesPoints = false;
+};
+
 struct ScreenshotHistoryServiceContext {
     ScreenshotDisplaySession& displays;
     SnowCanvasRuntime& runtime;
@@ -28,8 +34,6 @@ struct ScreenshotHistoryServiceContext {
     std::function<void()> presentationChanged = []() {};
     std::function<void(bool)> loadingStateChanged = [](bool) {};
     std::function<void()> intelligentSelectionRequested = []() {};
-    std::function<void(const ScreenshotSelectionParams&)> selectionCommitted =
-        [](const ScreenshotSelectionParams&) {};
 };
 
 class ScreenshotHistoryService final : public QObject {
@@ -54,6 +58,15 @@ class ScreenshotHistoryService final : public QObject {
     void drainPendingWrites();
     void refreshMetadata();
     [[nodiscard]] bool presentTransientEntry(const ScreenshotHistoryEntry& entry);
+    [[nodiscard]] std::optional<ScreenshotSelectionParams>
+    latestSelectionParams(const ScreenshotSelectionRestoreTarget& target);
+    [[nodiscard]] bool browsePreviousSelection(
+        const ScreenshotSelectionRestoreTarget& target,
+        const std::function<bool(const ScreenshotSelectionParams&)>& applySelection);
+    [[nodiscard]] bool browseNextSelection(
+        const ScreenshotSelectionRestoreTarget& target,
+        const std::function<bool(const ScreenshotSelectionParams&)>& applySelection);
+    void resetSelectionNavigation();
 
   private:
     friend class ScreenshotHistoryServiceTestAccess;
@@ -76,6 +89,9 @@ class ScreenshotHistoryService final : public QObject {
     void scheduleWrite(ScreenshotHistoryEntry entry);
     [[nodiscard]] std::shared_future<snow_shot::storage::CaptureHistoryPublishResult>
     pendingWriteFor(const QString& entryId) const;
+    [[nodiscard]] bool
+    browseSelection(const ScreenshotSelectionRestoreTarget& target, bool previous,
+                    const std::function<bool(const ScreenshotSelectionParams&)>& applySelection);
 
     ScreenshotHistoryServiceContext m_context;
     std::unique_ptr<snow_shot::storage::CaptureHistoryRepository> m_ownedRepository;
@@ -88,6 +104,10 @@ class ScreenshotHistoryService final : public QObject {
     int m_navigationIndex = -1;
     quint64 m_navigationGeneration = 0;
     bool m_navigationInProgress = false;
+    QString m_selectionNavigationId;
+    quint64 m_selectionNavigationGeneration = 0;
+    quint64 m_selectionNavigationRevision = 0;
+    quint64 m_selectionNavigationModeRevision = 0;
     std::vector<std::future<void>> m_pendingLoads;
     std::vector<PendingWrite> m_pendingWrites;
 };

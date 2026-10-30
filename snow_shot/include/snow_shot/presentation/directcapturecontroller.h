@@ -17,8 +17,11 @@ class DirectCaptureController final : public QObject {
     void captureCurrentMonitor();
     void shutdown();
     void cancelMcpCapture();
+    // Admission can run on native capture threads and must be thread-safe.
+    // A negative byte count reports invalid or over-limit raster geometry.
     [[nodiscard]] bool mcpCapture(const QJsonObject& options,
-                                  std::function<void(QImage, QJsonObject, QString)> completion);
+                                  std::function<void(QImage, QJsonObject, QString)> completion,
+                                  std::function<bool(qint64)> admitRasterBytes = {});
     [[nodiscard]] bool blocksApplicationUpdate() const;
 
   signals:

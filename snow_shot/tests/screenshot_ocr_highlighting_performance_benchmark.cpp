@@ -91,7 +91,8 @@ void benchmarkLabels(const QSize& size, int count) {
             timer.start();
             render();
             if (sample >= 0)
-                timings[enabled].push_back(double(timer.nsecsElapsed()) / 1'000'000.0);
+                timings[static_cast<std::size_t>(enabled)].push_back(double(timer.nsecsElapsed()) /
+                                                                     1'000'000.0);
         }
     }
     layer.synchronize(QTransform(), QRect(QPoint(), size));
@@ -100,7 +101,7 @@ void benchmarkLabels(const QSize& size, int count) {
     require(layer.scene()->items() == sceneItems,
             "highlighting toggles retain scene items and allocate no overlay items");
     for (int enabled = 0; enabled < 2; ++enabled) {
-        auto& values = timings[enabled];
+        auto& values = timings[static_cast<std::size_t>(enabled)];
         std::sort(values.begin(), values.end());
         std::cout << "ocr_highlighting width=" << size.width() << " height=" << size.height()
                   << " labels=" << count << " enabled=" << enabled

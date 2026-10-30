@@ -38,6 +38,7 @@ struct ScreenshotAutomaticSaveRequest final {
     ScreenshotPdfOptions pdf;
     QDateTime requestedAt;
     ScreenshotExportCoordinator::Completion completion;
+    snow_shot::storage::ScreenshotWindowNames windowNames{};
 };
 
 namespace snow_shot::presentation {
@@ -53,7 +54,10 @@ class ScreenshotSelectionExportUiServices final : public ScreenshotSelectionExpo
         SnowShotApiClient* tableRecognition = nullptr,
         std::function<void()> showMainWindowRequested = {},
         std::function<ScreenshotPinnedRecognitionProviders()> recognitionProvider = {},
-        snow_shot::presentation::PinnedWindowGroupManager* groupManager = nullptr);
+        snow_shot::presentation::PinnedWindowGroupManager* groupManager = nullptr,
+        std::function<void(const QVector<ScreenshotPinnedImageSnapshot>&)> imageStitchingRequested =
+            {},
+        std::function<void(const ScreenshotPinnedImageSnapshot&)> imageSplittingRequested = {});
     ~ScreenshotSelectionExportUiServices() override;
 
     [[nodiscard]] bool publishClipboard(QObject* receiver, ScreenshotClipboardPayload payload,
@@ -179,6 +183,7 @@ class ScreenshotSelectionExportUiServices final : public ScreenshotSelectionExpo
     ScreenshotQrRecognitionPort* m_qrRecognition = nullptr;
     SnowShotApiClient* m_tableRecognition = nullptr;
     std::function<void()> m_showMainWindowRequested;
+    std::function<void(const ScreenshotPinnedImageSnapshot&)> m_imageSplittingRequested;
     std::function<ScreenshotPinnedRecognitionProviders()> m_recognitionProvider;
     snow_shot::presentation::PinnedWindowGroupManager* m_groupManager = nullptr;
     std::unique_ptr<snow_shot::presentation::PinnedWindowSelectionController> m_selectionController;

@@ -78,8 +78,11 @@ pub struct SnowPointerEvent {
     pub position_y: f64,
     pub button: SnowPointerButton,
     pub buttons: u8,
-    pub reserved0: [u8; 3],
+    pub has_pressure: u8,
+    pub reserved0: [u8; 2],
     pub modifiers: SnowModifiers,
+    pub pressure: f64,
+    pub timestamp_ms: u64,
 }
 
 #[repr(C)]

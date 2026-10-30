@@ -1,9 +1,10 @@
 # snow-selected-text
 
 Selected-text acquisition for translation and other explicitly invoked desktop actions. Rust 2024;
-Apache-2.0; Windows 10/11 x64, macOS 15+ on Apple Silicon or Intel, and Linux on X11 are supported.
-A Wayland-only session, and every other platform, compiles and returns `UnsupportedPlatform`. There
-is no translation service, global hook, UI, permission prompt, or network access.
+GPL-3.0-or-later; Windows 10/11 x64, macOS 15+ on Apple Silicon or Intel, and Linux on X11 are
+supported. A Wayland-only session, and every other platform, compiles and returns
+`UnsupportedPlatform`. There is no translation service, global hook, UI, permission prompt, or
+network access.
 
 When linked as a separate application FFI archive, enable `host-application-qos`
 and provide the C ABI `int32_t snow_application_qos_apply_current_thread(void)`.

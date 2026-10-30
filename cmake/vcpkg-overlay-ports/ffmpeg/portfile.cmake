@@ -648,7 +648,17 @@ if("snow-shot-minimal" IN_LIST FEATURES)
     if(NOT VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_UWP)
         message(FATAL_ERROR "ffmpeg[snow-shot-minimal] currently supports desktop Windows only")
     endif()
-    set(SNOW_SHOT_ENCODERS "libx264,libx265,h264_mf,mpeg4,gif,apng,libwebp_anim,aac,mp3_mf")
+    set(SNOW_SHOT_ENCODERS "libx264,libx265,h264_mf,gif,apng,libwebp_anim,aac")
+    set(SNOW_SHOT_COMPAT_COMPONENTS)
+    if("snow-recording-compat" IN_LIST FEATURES)
+        # Standalone compatibility capture/export can write Matroska and AVI.
+        # The application only reads old Matroska bundles and produces four formats.
+        string(APPEND SNOW_SHOT_ENCODERS ",mpeg4,mp3_mf")
+        string(APPEND SNOW_SHOT_COMPAT_COMPONENTS
+            " --enable-muxer=matroska,avi"
+            " --enable-decoder=mp3"
+            " --enable-parser=mpegaudio")
+    endif()
     foreach(SNOW_HARDWARE_FEATURE IN ITEMS nvcodec amf qsv)
         if(SNOW_HARDWARE_FEATURE IN_LIST FEATURES)
             if(SNOW_HARDWARE_FEATURE STREQUAL "nvcodec")
@@ -660,11 +670,12 @@ if("snow-shot-minimal" IN_LIST FEATURES)
     endforeach()
     string(APPEND OPTIONS
         " --disable-network"
-        " --enable-decoder=h264,hevc,gif,png,apng,webp,webp_anim,aac,mp3,pcm_s16le,pcm_f32le"
+        " --enable-decoder=h264,hevc,gif,png,apng,webp,webp_anim,aac,pcm_s16le,pcm_f32le"
         " --enable-encoder=${SNOW_SHOT_ENCODERS}"
-        " --enable-muxer=matroska,mp4,avi,gif,apng,webp"
+        "${SNOW_SHOT_COMPAT_COMPONENTS}"
+        " --enable-muxer=mp4,gif,apng,webp"
         " --enable-demuxer=matroska,mov,gif,apng,webp,webp_anim"
-        " --enable-parser=h264,hevc,aac,mpegaudio,gif"
+        " --enable-parser=h264,hevc,aac,gif"
         " --enable-bsf=h264_mp4toannexb,aac_adtstoasc"
         " --enable-protocol=file"
         " --enable-filter=abuffer,abuffersink,atempo"

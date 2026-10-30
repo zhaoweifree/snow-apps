@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" stroke="currentColor" stroke-width="80.64" stroke-linecap="round" stroke-linejoin="round" data-adqt-slot="primary">
+  <defs>
+    <clipPath id="microphone-off-gap">
+      <path d="M0 112V1024H912ZM112 0H1024V912Z" fill="#000" stroke="none"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#microphone-off-gap)">
+    <rect x="386.56" y="81.92" width="250.88" height="537.6" rx="125.44"/>
+    <path d="M243.2 467.2v26.88a268.8 268.8 0 0 0 537.6 0v-26.88M512 762.88v152.32M332.8 915.2h358.4"/>
+  </g>
+  <path d="M243.2 243.2l537.6 537.6"/>
+</svg>

@@ -4,6 +4,12 @@ if(NOT DEFINED SNOW_SHOT_MINI_APP OR NOT IS_DIRECTORY "${SNOW_SHOT_MINI_APP}/Con
     message(FATAL_ERROR "Snow Shot Mini bundle was not found")
 endif()
 set(_mini_runtime "${SNOW_SHOT_MINI_APP}/Contents/MacOS")
+foreach(_mini_area IN ITEMS MacOS Resources)
+    set(_mini_audio "${SNOW_SHOT_MINI_APP}/Contents/${_mini_area}/audios")
+    if(EXISTS "${_mini_audio}" OR IS_SYMLINK "${_mini_audio}")
+        message(FATAL_ERROR "Mini macOS contains unused loose audio resources: ${_mini_audio}")
+    endif()
+endforeach()
 if(SNOW_SHOT_MINI_STATIC)
     set(_mini_expected_binaries snow_shot_mini snow-ocr-process crashpad_handler)
     if(SNOW_SHOT_MINI_MCP)
@@ -12,7 +18,7 @@ if(SNOW_SHOT_MINI_STATIC)
     file(GLOB _mini_runtime_entries RELATIVE "${_mini_runtime}" "${_mini_runtime}/*")
     set(_mini_binaries)
     foreach(_mini_entry IN LISTS _mini_runtime_entries)
-        if(NOT _mini_entry STREQUAL "assets" AND NOT _mini_entry STREQUAL "audios")
+        if(NOT _mini_entry STREQUAL "assets")
             list(APPEND _mini_binaries "${_mini_entry}")
         endif()
     endforeach()
@@ -38,18 +44,11 @@ list(SORT _mini_actual_assets)
 if(NOT _mini_actual_assets STREQUAL _mini_expected_assets)
     message(FATAL_ERROR "Mini macOS contains unexpected or missing assets: ${_mini_actual_assets}")
 endif()
-set(_mini_audio "${SNOW_SHOT_MINI_APP}/Contents/Resources/audios")
-file(GLOB_RECURSE _mini_audio_files LIST_DIRECTORIES FALSE RELATIVE "${_mini_audio}"
-    "${_mini_audio}/*")
-if(_mini_audio_files AND NOT _mini_audio_files STREQUAL "camera_shutter.mp3")
-    message(FATAL_ERROR "Mini macOS contains unexpected audio resources: ${_mini_audio_files}")
-endif()
-
-# Bundle metadata and license trees are the only resources outside OCR/audio.
+# Bundle metadata and license trees are the only resources outside OCR.
 # Inspect directories too, so unused model or Full resource folders cannot be
 # carried forward by a reused staging directory even when they are empty.
 set(_mini_resources "${SNOW_SHOT_MINI_APP}/Contents/Resources")
-set(_mini_allowed_resources assets audios audios/camera_shutter.mp3 snow-shot.icns
+set(_mini_allowed_resources assets snow-shot.icns
     en.lproj en.lproj/InfoPlist.strings
     zh-Hans.lproj zh-Hans.lproj/InfoPlist.strings
     zh-Hant.lproj zh-Hant.lproj/InfoPlist.strings

@@ -419,12 +419,12 @@
         <translation>渐变</translation>
     </message>
     <message>
-        <location filename="../src/widgets/color_picker.cpp" line="4340"/>
+        <location filename="../src/widgets/color_picker.cpp" line="4356"/>
         <source>No preset colors</source>
         <translation>无预设颜色</translation>
     </message>
     <message>
-        <location filename="../src/widgets/color_picker.cpp" line="5155"/>
+        <location filename="../src/widgets/color_picker.cpp" line="5171"/>
         <source>Transparent</source>
         <translation>透明</translation>
     </message>
@@ -432,48 +432,48 @@
 <context>
     <name>adqt::widgets::AdDatePicker</name>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="8594"/>
-        <location filename="../src/widgets/date_picker.cpp" line="9107"/>
+        <location filename="../src/widgets/date_picker.cpp" line="8632"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9175"/>
         <source>Open calendar</source>
         <translation>打开日历</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="9106"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9174"/>
         <source>Open time picker</source>
         <translation>打开时间选择器</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="9320"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9388"/>
         <source>Select week</source>
         <translation>选择周</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="9322"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9390"/>
         <source>Select month</source>
         <translation>选择月份</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="9324"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9392"/>
         <source>Select quarter</source>
         <translation>选择季度</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="9326"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9394"/>
         <source>Select year</source>
         <translation>选择年份</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="9328"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9396"/>
         <source>Select decade</source>
         <translation>选择十年</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="9330"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9398"/>
         <source>Select a time</source>
         <translation>选择时间</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="9333"/>
+        <location filename="../src/widgets/date_picker.cpp" line="9401"/>
         <source>Select date</source>
         <translation>选择日期</translation>
     </message>
@@ -481,41 +481,41 @@
 <context>
     <name>adqt::widgets::AdDatePickerPanel</name>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="3588"/>
+        <location filename="../src/widgets/date_picker.cpp" line="3592"/>
         <source>Week</source>
         <translation>周</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="5252"/>
-        <location filename="../src/widgets/date_picker.cpp" line="5387"/>
-        <location filename="../src/widgets/date_picker.cpp" line="5866"/>
+        <location filename="../src/widgets/date_picker.cpp" line="5256"/>
+        <location filename="../src/widgets/date_picker.cpp" line="5391"/>
+        <location filename="../src/widgets/date_picker.cpp" line="5870"/>
         <source>Today</source>
         <translation>今天</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="5255"/>
-        <location filename="../src/widgets/date_picker.cpp" line="5388"/>
+        <location filename="../src/widgets/date_picker.cpp" line="5259"/>
+        <location filename="../src/widgets/date_picker.cpp" line="5392"/>
         <source>OK</source>
         <translation>确定</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="5745"/>
-        <location filename="../src/widgets/date_picker.cpp" line="6092"/>
+        <location filename="../src/widgets/date_picker.cpp" line="5749"/>
+        <location filename="../src/widgets/date_picker.cpp" line="6096"/>
         <source>Time</source>
         <translation>时间</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="5866"/>
+        <location filename="../src/widgets/date_picker.cpp" line="5870"/>
         <source>Now</source>
         <translation>现在</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="6083"/>
+        <location filename="../src/widgets/date_picker.cpp" line="6087"/>
         <source>End</source>
         <translation>结束</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="6087"/>
+        <location filename="../src/widgets/date_picker.cpp" line="6091"/>
         <source>Start</source>
         <translation>开始</translation>
     </message>
@@ -523,99 +523,99 @@
 <context>
     <name>adqt::widgets::AdDateRangePicker</name>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="11194"/>
-        <location filename="../src/widgets/date_picker.cpp" line="12367"/>
+        <location filename="../src/widgets/date_picker.cpp" line="11294"/>
+        <location filename="../src/widgets/date_picker.cpp" line="12502"/>
         <source>Open calendar</source>
         <translation>打开日历</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="11302"/>
-        <location filename="../src/widgets/date_picker.cpp" line="12222"/>
+        <location filename="../src/widgets/date_picker.cpp" line="11418"/>
+        <location filename="../src/widgets/date_picker.cpp" line="12357"/>
         <source>Now</source>
         <translation>现在</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="11303"/>
+        <location filename="../src/widgets/date_picker.cpp" line="11419"/>
         <source>OK</source>
         <translation>确定</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="12221"/>
+        <location filename="../src/widgets/date_picker.cpp" line="12356"/>
         <source>Today</source>
         <translation>今天</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="12366"/>
+        <location filename="../src/widgets/date_picker.cpp" line="12501"/>
         <source>Open time picker</source>
         <translation>打开时间选择器</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13263"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13398"/>
         <source>Start week</source>
         <translation>开始周</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13266"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13401"/>
         <source>Start month</source>
         <translation>开始月份</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13269"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13404"/>
         <source>Start quarter</source>
         <translation>开始季度</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13272"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13407"/>
         <source>Start year</source>
         <translation>开始年份</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13275"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13410"/>
         <source>Start decade</source>
         <translation>开始十年</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13278"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13413"/>
         <source>Start time</source>
         <translation>开始时间</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13282"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13417"/>
         <source>Start date</source>
         <translation>开始日期</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13303"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13438"/>
         <source>End week</source>
         <translation>结束周</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13306"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13441"/>
         <source>End month</source>
         <translation>结束月份</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13309"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13444"/>
         <source>End quarter</source>
         <translation>结束季度</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13312"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13447"/>
         <source>End year</source>
         <translation>结束年份</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13315"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13450"/>
         <source>End decade</source>
         <translation>结束十年</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13318"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13453"/>
         <source>End time</source>
         <translation>结束时间</translation>
     </message>
     <message>
-        <location filename="../src/widgets/date_picker.cpp" line="13322"/>
+        <location filename="../src/widgets/date_picker.cpp" line="13457"/>
         <source>End date</source>
         <translation>结束日期</translation>
     </message>
@@ -623,33 +623,33 @@
 <context>
     <name>adqt::widgets::AdDescriptions</name>
     <message>
-        <location filename="../src/widgets/descriptions.cpp" line="470"/>
+        <location filename="../src/widgets/descriptions.cpp" line="482"/>
         <source>Description label</source>
         <translation>描述标签</translation>
     </message>
     <message>
-        <location filename="../src/widgets/descriptions.cpp" line="470"/>
+        <location filename="../src/widgets/descriptions.cpp" line="482"/>
         <source>Description content</source>
         <translation>描述内容</translation>
     </message>
     <message>
-        <location filename="../src/widgets/descriptions.cpp" line="503"/>
-        <location filename="../src/widgets/descriptions.cpp" line="530"/>
+        <location filename="../src/widgets/descriptions.cpp" line="517"/>
+        <location filename="../src/widgets/descriptions.cpp" line="544"/>
         <source>Label separator</source>
         <translation>标签分隔符</translation>
     </message>
     <message>
-        <location filename="../src/widgets/descriptions.cpp" line="592"/>
+        <location filename="../src/widgets/descriptions.cpp" line="605"/>
         <source>Descriptions title</source>
         <translation>描述标题</translation>
     </message>
     <message>
-        <location filename="../src/widgets/descriptions.cpp" line="602"/>
+        <location filename="../src/widgets/descriptions.cpp" line="615"/>
         <source>Descriptions extra</source>
         <translation>描述附加内容</translation>
     </message>
     <message>
-        <location filename="../src/widgets/descriptions.cpp" line="686"/>
+        <location filename="../src/widgets/descriptions.cpp" line="700"/>
         <source>Descriptions</source>
         <translation>描述列表</translation>
     </message>
@@ -657,22 +657,22 @@
 <context>
     <name>adqt::widgets::AdFormItem</name>
     <message>
-        <location filename="../src/widgets/form.cpp" line="1580"/>
+        <location filename="../src/widgets/form.cpp" line="1583"/>
         <source>This field</source>
         <translation>此字段</translation>
     </message>
     <message>
-        <location filename="../src/widgets/form.cpp" line="1585"/>
+        <location filename="../src/widgets/form.cpp" line="1588"/>
         <source>%1 is required.</source>
         <translation>%1为必填项。</translation>
     </message>
     <message>
-        <location filename="../src/widgets/form.cpp" line="1966"/>
+        <location filename="../src/widgets/form.cpp" line="1991"/>
         <source>(optional)</source>
         <translation>（可选）</translation>
     </message>
     <message>
-        <location filename="../src/widgets/form.cpp" line="2233"/>
+        <location filename="../src/widgets/form.cpp" line="2261"/>
         <source>Required</source>
         <translation>必填</translation>
     </message>
@@ -680,30 +680,30 @@
 <context>
     <name>adqt::widgets::AdFormList</name>
     <message>
-        <location filename="../src/widgets/form.cpp" line="2489"/>
-        <location filename="../src/widgets/form.cpp" line="2703"/>
+        <location filename="../src/widgets/form.cpp" line="2517"/>
+        <location filename="../src/widgets/form.cpp" line="2731"/>
         <source>Add row</source>
         <translation>添加行</translation>
     </message>
     <message>
-        <location filename="../src/widgets/form.cpp" line="2638"/>
-        <location filename="../src/widgets/form.cpp" line="2707"/>
+        <location filename="../src/widgets/form.cpp" line="2666"/>
+        <location filename="../src/widgets/form.cpp" line="2735"/>
         <source>Remove</source>
         <translation>移除</translation>
     </message>
     <message>
-        <location filename="../src/widgets/form.cpp" line="2639"/>
-        <location filename="../src/widgets/form.cpp" line="2708"/>
+        <location filename="../src/widgets/form.cpp" line="2667"/>
+        <location filename="../src/widgets/form.cpp" line="2736"/>
         <source>Remove row</source>
         <translation>移除行</translation>
     </message>
     <message>
-        <location filename="../src/widgets/form.cpp" line="2745"/>
+        <location filename="../src/widgets/form.cpp" line="2773"/>
         <source>Value</source>
         <translation>值</translation>
     </message>
     <message>
-        <location filename="../src/widgets/form.cpp" line="2787"/>
+        <location filename="../src/widgets/form.cpp" line="2815"/>
         <source>Remove row %1</source>
         <translation>移除第 %1 行</translation>
     </message>
@@ -749,39 +749,39 @@
 <context>
     <name>adqt::widgets::AdInputNumber</name>
     <message>
-        <location filename="../src/widgets/input_number.cpp" line="236"/>
-        <location filename="../src/widgets/input_number.cpp" line="239"/>
+        <location filename="../src/widgets/input_number.cpp" line="206"/>
+        <location filename="../src/widgets/input_number.cpp" line="209"/>
         <source>Input number</source>
         <translation>输入数字</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_number.cpp" line="276"/>
+        <location filename="../src/widgets/input_number.cpp" line="246"/>
         <source>Range %1 to %2</source>
         <translation>范围：%1 至 %2</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_number.cpp" line="278"/>
+        <location filename="../src/widgets/input_number.cpp" line="248"/>
         <source>Minimum %1</source>
         <translation>最小值 %1</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_number.cpp" line="280"/>
+        <location filename="../src/widgets/input_number.cpp" line="250"/>
         <source>Maximum %1</source>
         <translation>最大值 %1</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_number.cpp" line="767"/>
-        <location filename="../src/widgets/input_number.cpp" line="785"/>
-        <location filename="../src/widgets/input_number.cpp" line="2421"/>
-        <location filename="../src/widgets/input_number.cpp" line="2427"/>
+        <location filename="../src/widgets/input_number.cpp" line="737"/>
+        <location filename="../src/widgets/input_number.cpp" line="755"/>
+        <location filename="../src/widgets/input_number.cpp" line="2487"/>
+        <location filename="../src/widgets/input_number.cpp" line="2493"/>
         <source>Increase value</source>
         <translation>增加数值</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_number.cpp" line="768"/>
-        <location filename="../src/widgets/input_number.cpp" line="784"/>
-        <location filename="../src/widgets/input_number.cpp" line="2424"/>
-        <location filename="../src/widgets/input_number.cpp" line="2430"/>
+        <location filename="../src/widgets/input_number.cpp" line="738"/>
+        <location filename="../src/widgets/input_number.cpp" line="754"/>
+        <location filename="../src/widgets/input_number.cpp" line="2490"/>
+        <location filename="../src/widgets/input_number.cpp" line="2496"/>
         <source>Decrease value</source>
         <translation>减少数值</translation>
     </message>
@@ -789,12 +789,12 @@
 <context>
     <name>adqt::widgets::AdLineEdit</name>
     <message>
-        <location filename="../src/widgets/input_line_edit.cpp" line="1414"/>
+        <location filename="../src/widgets/input_line_edit.cpp" line="1473"/>
         <source>Clear input</source>
         <translation>清除输入</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_line_edit.cpp" line="1415"/>
+        <location filename="../src/widgets/input_line_edit.cpp" line="1474"/>
         <source>Clear the current text</source>
         <translation>清除当前文本</translation>
     </message>
@@ -802,100 +802,121 @@
 <context>
     <name>adqt::widgets::AdModal</name>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="861"/>
+        <location filename="../src/widgets/modal.cpp" line="933"/>
         <source>Information</source>
         <translation>信息</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="864"/>
+        <location filename="../src/widgets/modal.cpp" line="936"/>
         <source>Success</source>
         <translation>成功</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="867"/>
+        <location filename="../src/widgets/modal.cpp" line="939"/>
         <source>Error</source>
         <translation>错误</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="870"/>
+        <location filename="../src/widgets/modal.cpp" line="942"/>
         <source>Warning</source>
         <translation>警告</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="873"/>
+        <location filename="../src/widgets/modal.cpp" line="945"/>
         <source>Confirm</source>
         <translation>确认</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2079"/>
-        <location filename="../src/widgets/modal.cpp" line="2532"/>
-        <location filename="../src/widgets/modal.cpp" line="2707"/>
+        <location filename="../src/widgets/modal.cpp" line="2203"/>
+        <location filename="../src/widgets/modal.cpp" line="2684"/>
+        <location filename="../src/widgets/modal.cpp" line="2883"/>
         <source>Modal</source>
         <translation>对话框</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2217"/>
-        <location filename="../src/widgets/modal.cpp" line="2558"/>
-        <location filename="../src/widgets/modal.cpp" line="2751"/>
+        <location filename="../src/widgets/modal.cpp" line="2367"/>
+        <location filename="../src/widgets/modal.cpp" line="2710"/>
+        <location filename="../src/widgets/modal.cpp" line="2935"/>
         <source>Cancel</source>
         <translation>取消</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2223"/>
-        <location filename="../src/widgets/modal.cpp" line="2551"/>
-        <location filename="../src/widgets/modal.cpp" line="2746"/>
+        <location filename="../src/widgets/modal.cpp" line="2373"/>
+        <location filename="../src/widgets/modal.cpp" line="2703"/>
+        <location filename="../src/widgets/modal.cpp" line="2930"/>
         <source>OK</source>
         <translation>确定</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2528"/>
-        <location filename="../src/widgets/modal.cpp" line="2708"/>
+        <location filename="../src/widgets/modal.cpp" line="2680"/>
+        <location filename="../src/widgets/modal.cpp" line="2884"/>
         <source>Loading...</source>
         <translation>加载中...</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2710"/>
+        <location filename="../src/widgets/modal.cpp" line="2886"/>
         <source>Modal window</source>
         <translation>模态窗口</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2710"/>
+        <location filename="../src/widgets/modal.cpp" line="2886"/>
         <source>Modal overlay</source>
         <translation>模态遮罩</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2725"/>
-        <location filename="../src/widgets/modal.cpp" line="2729"/>
+        <location filename="../src/widgets/modal.cpp" line="2901"/>
+        <location filename="../src/widgets/modal.cpp" line="2905"/>
         <source>Modal content</source>
         <translation>模态内容</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2733"/>
+        <location filename="../src/widgets/modal.cpp" line="2909"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2734"/>
+        <location filename="../src/widgets/modal.cpp" line="2910"/>
         <source>Close modal</source>
         <translation>关闭对话框</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2737"/>
+        <location filename="../src/widgets/modal.cpp" line="2913"/>
+        <location filename="../src/widgets/modal.cpp" line="2915"/>
         <source>Minimize</source>
         <translation>最小化</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2738"/>
+        <location filename="../src/widgets/modal.cpp" line="2914"/>
         <source>Minimize modal window</source>
         <translation>最小化模态窗口</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2741"/>
+        <location filename="../src/widgets/modal.cpp" line="2919"/>
+        <source>Restore</source>
+        <translation>还原</translation>
+    </message>
+    <message>
+        <location filename="../src/widgets/modal.cpp" line="2919"/>
+        <source>Maximize</source>
+        <translation>最大化</translation>
+    </message>
+    <message>
+        <location filename="../src/widgets/modal.cpp" line="2920"/>
+        <source>Restore modal window</source>
+        <translation>还原对话框窗口</translation>
+    </message>
+    <message>
+        <location filename="../src/widgets/modal.cpp" line="2921"/>
+        <source>Maximize modal window</source>
+        <translation>最大化对话框窗口</translation>
+    </message>
+    <message>
+        <location filename="../src/widgets/modal.cpp" line="2925"/>
         <source>Always on top</source>
         <translation>窗口置顶</translation>
     </message>
     <message>
-        <location filename="../src/widgets/modal.cpp" line="2742"/>
+        <location filename="../src/widgets/modal.cpp" line="2926"/>
         <source>Keep modal window above other windows</source>
         <translation>保持模态窗口位于其他窗口上方</translation>
     </message>
@@ -903,17 +924,17 @@
 <context>
     <name>adqt::widgets::AdMultiSlider</name>
     <message>
-        <location filename="../src/widgets/slider.cpp" line="229"/>
+        <location filename="../src/widgets/slider.cpp" line="238"/>
         <source>Handle %1 of %2, Range %3 to %4</source>
         <translation>第 %1 个滑块，共 %2 个，范围 %3 至 %4</translation>
     </message>
     <message>
-        <location filename="../src/widgets/slider.cpp" line="236"/>
+        <location filename="../src/widgets/slider.cpp" line="245"/>
         <source>Range %1 to %2</source>
         <translation>范围：%1 至 %2</translation>
     </message>
     <message>
-        <location filename="../src/widgets/slider.cpp" line="339"/>
+        <location filename="../src/widgets/slider.cpp" line="348"/>
         <source>Slider</source>
         <translation>滑块</translation>
     </message>
@@ -921,12 +942,12 @@
 <context>
     <name>adqt::widgets::AdNotification</name>
     <message>
-        <location filename="../src/widgets/notification.cpp" line="289"/>
+        <location filename="../src/widgets/notification.cpp" line="291"/>
         <source>Close notification</source>
         <translation>关闭通知</translation>
     </message>
     <message>
-        <location filename="../src/widgets/notification.cpp" line="290"/>
+        <location filename="../src/widgets/notification.cpp" line="292"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
@@ -968,73 +989,73 @@
 <context>
     <name>adqt::widgets::AdPagination</name>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="287"/>
+        <location filename="../src/widgets/pagination.cpp" line="290"/>
         <source>Previous page</source>
         <translation>上一页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="289"/>
+        <location filename="../src/widgets/pagination.cpp" line="292"/>
         <source>Next page</source>
         <translation>下一页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="291"/>
-        <location filename="../src/widgets/pagination.cpp" line="886"/>
-        <location filename="../src/widgets/pagination.cpp" line="896"/>
+        <location filename="../src/widgets/pagination.cpp" line="294"/>
+        <location filename="../src/widgets/pagination.cpp" line="914"/>
+        <location filename="../src/widgets/pagination.cpp" line="924"/>
         <source>Previous %1 pages</source>
         <translation>向前 %1 页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="293"/>
-        <location filename="../src/widgets/pagination.cpp" line="887"/>
-        <location filename="../src/widgets/pagination.cpp" line="897"/>
+        <location filename="../src/widgets/pagination.cpp" line="296"/>
+        <location filename="../src/widgets/pagination.cpp" line="915"/>
+        <location filename="../src/widgets/pagination.cpp" line="925"/>
         <source>Next %1 pages</source>
         <translation>向后 %1 页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="296"/>
+        <location filename="../src/widgets/pagination.cpp" line="299"/>
         <source>Page %1</source>
         <translation>第 %1 页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="346"/>
-        <location filename="../src/widgets/pagination.cpp" line="667"/>
+        <location filename="../src/widgets/pagination.cpp" line="355"/>
+        <location filename="../src/widgets/pagination.cpp" line="662"/>
         <source>Pagination</source>
         <translation>分页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="356"/>
-        <location filename="../src/widgets/pagination.cpp" line="662"/>
+        <location filename="../src/widgets/pagination.cpp" line="365"/>
+        <location filename="../src/widgets/pagination.cpp" line="657"/>
         <source>Go to</source>
         <translation>跳转到</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="360"/>
-        <location filename="../src/widgets/pagination.cpp" line="386"/>
-        <location filename="../src/widgets/pagination.cpp" line="664"/>
-        <location filename="../src/widgets/pagination.cpp" line="665"/>
+        <location filename="../src/widgets/pagination.cpp" line="369"/>
+        <location filename="../src/widgets/pagination.cpp" line="397"/>
+        <location filename="../src/widgets/pagination.cpp" line="659"/>
+        <location filename="../src/widgets/pagination.cpp" line="660"/>
         <source>Page number</source>
         <translation>页码</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="363"/>
-        <location filename="../src/widgets/pagination.cpp" line="663"/>
+        <location filename="../src/widgets/pagination.cpp" line="372"/>
+        <location filename="../src/widgets/pagination.cpp" line="658"/>
         <source>Page</source>
         <translation>页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="374"/>
-        <location filename="../src/widgets/pagination.cpp" line="666"/>
+        <location filename="../src/widgets/pagination.cpp" line="385"/>
+        <location filename="../src/widgets/pagination.cpp" line="661"/>
         <source>Items per page</source>
         <translation>每页条数</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="891"/>
+        <location filename="../src/widgets/pagination.cpp" line="919"/>
         <source>Current page</source>
         <translation>当前页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/pagination.cpp" line="962"/>
+        <location filename="../src/widgets/pagination.cpp" line="990"/>
         <source>%1 / page</source>
         <translation>%1 条/页</translation>
     </message>
@@ -1153,24 +1174,24 @@
 <context>
     <name>adqt::widgets::AdProgress</name>
     <message>
-        <location filename="../src/widgets/progress.cpp" line="37"/>
+        <location filename="../src/widgets/progress.cpp" line="38"/>
         <source>Progress</source>
         <translation>进度</translation>
     </message>
     <message>
-        <location filename="../src/widgets/progress.cpp" line="41"/>
-        <location filename="../src/widgets/progress.cpp" line="491"/>
+        <location filename="../src/widgets/progress.cpp" line="42"/>
+        <location filename="../src/widgets/progress.cpp" line="499"/>
         <source>Failed</source>
         <translation>失败</translation>
     </message>
     <message>
-        <location filename="../src/widgets/progress.cpp" line="43"/>
-        <location filename="../src/widgets/progress.cpp" line="491"/>
+        <location filename="../src/widgets/progress.cpp" line="44"/>
+        <location filename="../src/widgets/progress.cpp" line="499"/>
         <source>Completed</source>
         <translation>已完成</translation>
     </message>
     <message>
-        <location filename="../src/widgets/progress.cpp" line="460"/>
+        <location filename="../src/widgets/progress.cpp" line="468"/>
         <source>%1%</source>
         <translation>%1%</translation>
     </message>
@@ -1216,7 +1237,7 @@
 <context>
     <name>adqt::widgets::AdSegmented</name>
     <message>
-        <location filename="../src/widgets/segmented.cpp" line="775"/>
+        <location filename="../src/widgets/segmented.cpp" line="798"/>
         <source>Segmented control</source>
         <translation>分段控制器</translation>
     </message>
@@ -1224,73 +1245,73 @@
 <context>
     <name>adqt::widgets::AdSelect</name>
     <message>
-        <location filename="../src/widgets/select.cpp" line="190"/>
-        <location filename="../src/widgets/select.cpp" line="200"/>
-        <location filename="../src/widgets/select.cpp" line="206"/>
-        <location filename="../src/widgets/select.cpp" line="4581"/>
+        <location filename="../src/widgets/select.cpp" line="191"/>
+        <location filename="../src/widgets/select.cpp" line="201"/>
+        <location filename="../src/widgets/select.cpp" line="207"/>
+        <location filename="../src/widgets/select.cpp" line="4649"/>
         <source>Select</source>
         <translation>选择</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="202"/>
-        <location filename="../src/widgets/select.cpp" line="4582"/>
+        <location filename="../src/widgets/select.cpp" line="203"/>
+        <location filename="../src/widgets/select.cpp" line="4650"/>
         <source>Multi-select</source>
         <translation>多选</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="204"/>
-        <location filename="../src/widgets/select.cpp" line="4582"/>
+        <location filename="../src/widgets/select.cpp" line="205"/>
+        <location filename="../src/widgets/select.cpp" line="4650"/>
         <source>Tag select</source>
         <translation>标签选择</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="225"/>
+        <location filename="../src/widgets/select.cpp" line="226"/>
         <source>Use arrow keys to browse options.</source>
         <translation>使用方向键浏览选项。</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="227"/>
+        <location filename="../src/widgets/select.cpp" line="228"/>
         <source>Use arrow keys to browse options and Space to toggle selection.</source>
         <translation>使用方向键浏览选项，按空格键切换选择。</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="4590"/>
+        <location filename="../src/widgets/select.cpp" line="4658"/>
         <source>Filter options</source>
         <translation>筛选选项</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="4595"/>
+        <location filename="../src/widgets/select.cpp" line="4663"/>
         <source>Clear selection</source>
         <translation>清除选择</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="4599"/>
+        <location filename="../src/widgets/select.cpp" line="4667"/>
         <source>Close options</source>
         <translation>关闭选项</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="4599"/>
+        <location filename="../src/widgets/select.cpp" line="4667"/>
         <source>Open options</source>
         <translation>打开选项</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="4600"/>
+        <location filename="../src/widgets/select.cpp" line="4668"/>
         <source>Selector icon</source>
         <translation>选择器图标</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="4604"/>
+        <location filename="../src/widgets/select.cpp" line="4672"/>
         <source>Select popup</source>
         <translation>选择弹出窗口</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="4607"/>
-        <location filename="../src/widgets/select.cpp" line="4610"/>
+        <location filename="../src/widgets/select.cpp" line="4675"/>
+        <location filename="../src/widgets/select.cpp" line="4678"/>
         <source>Options</source>
         <translation>选项</translation>
     </message>
     <message>
-        <location filename="../src/widgets/select.cpp" line="4981"/>
+        <location filename="../src/widgets/select.cpp" line="5049"/>
         <source>No data</source>
         <translation>暂无数据</translation>
     </message>
@@ -1298,14 +1319,14 @@
 <context>
     <name>adqt::widgets::AdSpin</name>
     <message>
-        <location filename="../src/widgets/spin.cpp" line="123"/>
-        <location filename="../src/widgets/spin.cpp" line="278"/>
-        <location filename="../src/widgets/spin.cpp" line="690"/>
+        <location filename="../src/widgets/spin.cpp" line="124"/>
+        <location filename="../src/widgets/spin.cpp" line="286"/>
+        <location filename="../src/widgets/spin.cpp" line="702"/>
         <source>Loading</source>
         <translation>加载中</translation>
     </message>
     <message>
-        <location filename="../src/widgets/spin.cpp" line="130"/>
+        <location filename="../src/widgets/spin.cpp" line="131"/>
         <source>%1%</source>
         <translation>%1%</translation>
     </message>
@@ -1313,17 +1334,17 @@
 <context>
     <name>adqt::widgets::AdSwitch</name>
     <message>
-        <location filename="../src/widgets/switch.cpp" line="379"/>
+        <location filename="../src/widgets/switch.cpp" line="377"/>
         <source>On</source>
         <translation>开</translation>
     </message>
     <message>
-        <location filename="../src/widgets/switch.cpp" line="379"/>
+        <location filename="../src/widgets/switch.cpp" line="377"/>
         <source>Off</source>
         <translation>关</translation>
     </message>
     <message>
-        <location filename="../src/widgets/switch.cpp" line="395"/>
+        <location filename="../src/widgets/switch.cpp" line="393"/>
         <source>Switch</source>
         <translation>开关</translation>
     </message>
@@ -1331,22 +1352,22 @@
 <context>
     <name>adqt::widgets::AdTextEdit</name>
     <message>
-        <location filename="../src/widgets/input_text_edit.cpp" line="1132"/>
+        <location filename="../src/widgets/input_text_edit.cpp" line="1301"/>
         <source>Multiline input</source>
         <translation>多行输入框</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_text_edit.cpp" line="1133"/>
+        <location filename="../src/widgets/input_text_edit.cpp" line="1304"/>
         <source>Enter multi-line text</source>
         <translation>输入多行文本</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_text_edit.cpp" line="1135"/>
+        <location filename="../src/widgets/input_text_edit.cpp" line="1306"/>
         <source>Clear input</source>
         <translation>清除输入</translation>
     </message>
     <message>
-        <location filename="../src/widgets/input_text_edit.cpp" line="1136"/>
+        <location filename="../src/widgets/input_text_edit.cpp" line="1307"/>
         <source>Clear the current text</source>
         <translation>清除当前文本</translation>
     </message>
@@ -1434,12 +1455,12 @@
 <context>
     <name>adqt::widgets::OperationButton</name>
     <message>
-        <location filename="../src/widgets/tabs.cpp" line="478"/>
+        <location filename="../src/widgets/tabs.cpp" line="799"/>
         <source>More tabs</source>
         <translation>更多标签页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/tabs.cpp" line="478"/>
+        <location filename="../src/widgets/tabs.cpp" line="799"/>
         <source>Add tab</source>
         <translation>添加标签页</translation>
     </message>
@@ -1447,12 +1468,12 @@
 <context>
     <name>adqt::widgets::SegmentButton</name>
     <message>
-        <location filename="../src/widgets/segmented.cpp" line="184"/>
+        <location filename="../src/widgets/segmented.cpp" line="181"/>
         <source>Selected option</source>
         <translation>已选选项</translation>
     </message>
     <message>
-        <location filename="../src/widgets/segmented.cpp" line="184"/>
+        <location filename="../src/widgets/segmented.cpp" line="181"/>
         <source>Option</source>
         <translation>选项</translation>
     </message>
@@ -1460,12 +1481,12 @@
 <context>
     <name>adqt::widgets::TabButton</name>
     <message>
-        <location filename="../src/widgets/tabs.cpp" line="157"/>
+        <location filename="../src/widgets/tabs.cpp" line="473"/>
         <source>Selected tab</source>
         <translation>已选标签页</translation>
     </message>
     <message>
-        <location filename="../src/widgets/tabs.cpp" line="157"/>
+        <location filename="../src/widgets/tabs.cpp" line="473"/>
         <source>Tab</source>
         <translation>标签页</translation>
     </message>

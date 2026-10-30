@@ -170,6 +170,10 @@
             <translation>取消</translation>
         </message>
         <message>
+            <source>Excel workbook (*.xlsx)</source>
+            <translation>Excel 活頁簿 (*.xlsx)</translation>
+        </message>
+        <message>
             <source>HTML document (*.html)</source>
             <translation>HTML 文件 (*.html)</translation>
         </message>
@@ -186,8 +190,8 @@
             <translation>未選取輸出檔案</translation>
         </message>
         <message>
-            <source>No recognition text is available to save</source>
-            <translation>沒有可儲存的辨識文字</translation>
+            <source>No recognition result is available to save</source>
+            <translation>沒有可儲存的辨識結果</translation>
         </message>
         <message>
             <source>Replace</source>
@@ -204,12 +208,28 @@
 %1</translation>
         </message>
         <message>
+            <source>Table</source>
+            <translation>表格</translation>
+        </message>
+        <message>
             <source>Text document (*.txt)</source>
             <translation>文字文件 (*.txt)</translation>
         </message>
         <message>
+            <source>The Excel workbook could not be created</source>
+            <translation>無法建立 Excel 活頁簿</translation>
+        </message>
+        <message>
             <source>The output directory could not be created</source>
             <translation>無法建立輸出目錄</translation>
+        </message>
+        <message>
+            <source>The result file could not be published</source>
+            <translation>無法寫入結果檔案</translation>
+        </message>
+        <message>
+            <source>The result file could not be staged</source>
+            <translation>無法暫存結果檔案</translation>
         </message>
         <message>
             <source>The save directory is not configured</source>
@@ -218,14 +238,6 @@
         <message>
             <source>The screenshot filename format is invalid</source>
             <translation>螢幕截圖檔名格式無效</translation>
-        </message>
-        <message>
-            <source>The text file could not be published</source>
-            <translation>無法完成文字檔案的儲存</translation>
-        </message>
-        <message>
-            <source>The text file could not be staged</source>
-            <translation>無法暫存文字檔案</translation>
         </message>
     </context>
     <context>
@@ -257,6 +269,10 @@
         <message>
             <source>100%</source>
             <translation>100%</translation>
+        </message>
+        <message>
+            <source>A file with this name already exists</source>
+            <translation>已存在同名檔案</translation>
         </message>
         <message>
             <source>A save path with this name already exists</source>

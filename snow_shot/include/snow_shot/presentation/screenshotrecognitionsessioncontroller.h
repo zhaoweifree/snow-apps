@@ -109,6 +109,8 @@ class ScreenshotRecognitionSessionController final : public QObject {
     ~ScreenshotRecognitionSessionController() override;
 
     void setTarget(ScreenshotRecognitionTarget target);
+    // Updates an existing formatted target's appearance without resetting session state.
+    void refreshFormattedTarget(QImage image, std::shared_ptr<QTextDocument> document);
     void setProviders(ScreenshotOcrRecognitionPort* recognition,
                       ScreenshotQrRecognitionPort* qrRecognition,
                       SnowShotApiClient* tableRecognition);
@@ -168,7 +170,8 @@ class ScreenshotRecognitionSessionController final : public QObject {
     [[nodiscard]] QString latexDraft() const;
     [[nodiscard]] std::unique_ptr<QMimeData> recognitionClipboardMimeData(
         const ScreenshotOcrPresentation* displayedPresentation = nullptr) const;
-    [[nodiscard]] std::optional<ScreenshotRecognitionFileSnapshot> fileExportSnapshot() const;
+    // Commits active table edits before copying the complete document for file saving.
+    [[nodiscard]] std::optional<ScreenshotRecognitionFileSnapshot> fileExportSnapshot();
     void setTextDraft(const QString& text);
     [[nodiscard]] QJsonObject workflowState() const;
     [[nodiscard]] QJsonObject workflowResult() const;

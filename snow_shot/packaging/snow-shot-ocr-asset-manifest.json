@@ -2,29 +2,24 @@
   "schema": 2,
   "default_model": "small",
   "runtime": {
-    "version": "1.0.10",
+    "version": "1.1.0",
     "platform": "windows-x64",
     "archive": {
-      "name": "snow-ocr-runtime-1.0.10-windows-x64.zip",
-      "size": 15988806,
-      "sha256": "429ab6e8180c2781bc863218c470c931b6016d25cac3fe3b76536a4d3d77d020",
-      "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/runtime/1.0.10/windows-x64/snow-ocr-runtime-1.0.10-windows-x64.zip"
+      "name": "snow-ocr-runtime-1.1.0-windows-x64.zip",
+      "size": 3818245,
+      "sha256": "1d33057b716bb279ff527031ce63b5ef116b4ed75d0360aa0a8789f97481e498",
+      "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/runtime/1.1.0/windows-x64/snow-ocr-runtime-1.1.0-windows-x64.zip"
     },
     "files": [
       {
-        "name": "snow-ocr-process-1.0.10-windows-x64.exe",
-        "size": 16868352,
-        "sha256": "793ad6cb3a684bcef743e88600bfca048c1b14a3f30ca1c16e6942a9205c4876"
-      },
-      {
-        "name": "DirectML.dll",
-        "size": 18527776,
-        "sha256": "9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1"
+        "name": "snow-ocr-process-1.1.0-windows-x64.exe",
+        "size": 11396096,
+        "sha256": "fde79680c8679b1842fc75b0048377ed3d60fee7f1167178482d6d53d742d6ff"
       },
       {
         "name": "runtime-manifest.json",
-        "size": 449,
-        "sha256": "556bf1d1af1953d122ded210da97eca76735d6b4a4f3aa95f1e96c22c800bfcb"
+        "size": 292,
+        "sha256": "dab7446364e84712d28f90f38636a956bc37a30b4bee1fd2473ab5c11a2ea959"
       }
     ]
   },
@@ -107,114 +102,6 @@
           "size": 74947,
           "sha256": "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
           "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv6/medium/ppocrv6_dict.txt"
-        }
-      ]
-    },
-    {
-      "type": "small_v5",
-      "id": "ppocrv5-small-7b2a75a",
-      "detector": "ch_PP-OCRv5_det_mobile.onnx",
-      "recognizer": "ch_PP-OCRv5_rec_mobile.onnx",
-      "dictionary": "ppocrv5_dict.txt",
-      "files": [
-        {
-          "name": "ch_PP-OCRv5_det_mobile.onnx",
-          "size": 4819576,
-          "sha256": "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv5/mobile/ch_PP-OCRv5_det_mobile.onnx"
-        },
-        {
-          "name": "ch_PP-OCRv5_rec_mobile.onnx",
-          "size": 16631306,
-          "sha256": "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv5/mobile/ch_PP-OCRv5_rec_mobile.onnx"
-        },
-        {
-          "name": "ppocrv5_dict.txt",
-          "size": 74012,
-          "sha256": "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv5/mobile/ppocrv5_dict.txt"
-        }
-      ]
-    },
-    {
-      "type": "medium_v5",
-      "id": "ppocrv5-medium-7b2a75a",
-      "detector": "ch_PP-OCRv5_det_server.onnx",
-      "recognizer": "ch_PP-OCRv5_rec_server.onnx",
-      "dictionary": "ppocrv5_dict.txt",
-      "files": [
-        {
-          "name": "ch_PP-OCRv5_det_server.onnx",
-          "size": 88118768,
-          "sha256": "0f8846b1d4bba223a2a2f9d9b44022fbc22cc019051a602b41a7fda9667e4cad",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv5/server/ch_PP-OCRv5_det_server.onnx"
-        },
-        {
-          "name": "ch_PP-OCRv5_rec_server.onnx",
-          "size": 84577022,
-          "sha256": "e09385400eaaaef34ceff54aeb7c4f0f1fe014c27fa8b9905d4709b65746562a",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv5/server/ch_PP-OCRv5_rec_server.onnx"
-        },
-        {
-          "name": "ppocrv5_dict.txt",
-          "size": 74012,
-          "sha256": "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv5/server/ppocrv5_dict.txt"
-        }
-      ]
-    },
-    {
-      "type": "small_v4",
-      "id": "ppocrv4-small-7b2a75a",
-      "detector": "ch_PP-OCRv4_det_mobile.onnx",
-      "recognizer": "ch_PP-OCRv4_rec_mobile.onnx",
-      "dictionary": "ppocr_keys_v1.txt",
-      "files": [
-        {
-          "name": "ch_PP-OCRv4_det_mobile.onnx",
-          "size": 4745517,
-          "sha256": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv4/mobile/ch_PP-OCRv4_det_mobile.onnx"
-        },
-        {
-          "name": "ch_PP-OCRv4_rec_mobile.onnx",
-          "size": 10857958,
-          "sha256": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv4/mobile/ch_PP-OCRv4_rec_mobile.onnx"
-        },
-        {
-          "name": "ppocr_keys_v1.txt",
-          "size": 26249,
-          "sha256": "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv4/mobile/ppocr_keys_v1.txt"
-        }
-      ]
-    },
-    {
-      "type": "medium_v4",
-      "id": "ppocrv4-medium-7b2a75a",
-      "detector": "ch_PP-OCRv4_det_server.onnx",
-      "recognizer": "ch_PP-OCRv4_rec_server.onnx",
-      "dictionary": "ppocr_keys_v1.txt",
-      "files": [
-        {
-          "name": "ch_PP-OCRv4_det_server.onnx",
-          "size": 113352104,
-          "sha256": "cfa39a3f298f6d3fc71789834d15da36d11a6c59b489fc16ea4733728012f786",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv4/server/ch_PP-OCRv4_det_server.onnx"
-        },
-        {
-          "name": "ch_PP-OCRv4_rec_server.onnx",
-          "size": 90530732,
-          "sha256": "6a2676219be9907c7fc9cf61ebaa843bf2898777def567925b78886fcd90c07a",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv4/server/ch_PP-OCRv4_rec_server.onnx"
-        },
-        {
-          "name": "ppocr_keys_v1.txt",
-          "size": 26249,
-          "sha256": "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7",
-          "url": "https://www.modelscope.cn/models/mgchao/SnowShotOCR/resolve/master/PP-OCRv4/server/ppocr_keys_v1.txt"
         }
       ]
     }

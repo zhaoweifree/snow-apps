@@ -9,6 +9,9 @@ pub(crate) fn compose_scene_items(
     frame_view: FrameView,
 ) -> Vec<SceneDisplayItem> {
     let viewport = canvas_viewport(frame_view.camera, frame_view.surface);
+    // Resolve bound text through the same committed/preview paths even when its
+    // box is offscreen: its connector can still cross the viewport.
+    let connector_text_ids: std::collections::HashSet<_> = model.connector_text_ids().collect();
     let mut ordered_ids = model.visible_element_ids(ViewportQuery {
         camera: frame_view.camera,
         surface: frame_view.surface,
@@ -56,6 +59,8 @@ pub(crate) fn compose_scene_items(
     let serial_connectors = SerialConnectorEmission {
         model,
         preview_serials: &preview_serials,
+        preview_shapes: &preview_rects,
+        shape_text_preview: presentation.shape_bound_text_preview.as_ref(),
         viewport,
     };
 
@@ -68,6 +73,7 @@ pub(crate) fn compose_scene_items(
         .chain(preview_magnifiers.keys())
         .chain(active_existing_text.iter().map(|(id, _)| id))
         .chain(presentation.free_draw_replacement.iter().map(|(id, _)| id))
+        .chain(connector_text_ids.iter())
         .copied()
         .filter(|id| {
             model.element(*id).is_ok_and(|element| element.meta.visible)
@@ -98,6 +104,14 @@ pub(crate) fn compose_scene_items(
     }
 
     for id in &ordered_ids {
+        if presentation
+            .shape_bound_text_preview
+            .as_ref()
+            .is_some_and(|preview| preview.text_id == *id)
+        {
+            emitted_preview_ids.insert(*id, true);
+            continue;
+        }
         if let Some(bubble) = preview_bubbles.get(id) {
             if bounds_visible(
                 snow_draw_engine_document::speech_bubble_bounds(bubble),
@@ -130,7 +144,8 @@ pub(crate) fn compose_scene_items(
             && id == active_id
         {
             emitted_preview_ids.insert(*id, true);
-            if bounds_visible(text_bounds(active_text), viewport) {
+            if connector_text_ids.contains(id) || bounds_visible(text_bounds(active_text), viewport)
+            {
                 items.push(scene_item_from_text(*id, active_text.clone()));
             }
             continue;
@@ -149,7 +164,7 @@ pub(crate) fn compose_scene_items(
                 *id,
                 *preview_rect,
                 preview_text_paints.get(id).copied(),
-            ) && bounds_visible(bounds, viewport)
+            ) && (connector_text_ids.contains(id) || bounds_visible(bounds, viewport))
             {
                 items.push(item);
             }
@@ -158,7 +173,10 @@ pub(crate) fn compose_scene_items(
         if let Some(preview_arrow) = preview_arrows.get(id) {
             emitted_preview_ids.insert(*id, true);
             if !arrow_is_degenerate(preview_arrow)
-                && bounds_visible(arrow_bounds(preview_arrow), viewport)
+                && bounds_visible(
+                    snow_draw_engine_document::arrow_paint_bounds(preview_arrow),
+                    viewport,
+                )
             {
                 items.push(scene_item_from_arrow(*id, preview_arrow.clone()));
             }
@@ -168,7 +186,7 @@ pub(crate) fn compose_scene_items(
         let Some(bounds) = cache.bounds(*id) else {
             continue;
         };
-        if !bounds_visible(bounds, viewport) {
+        if !connector_text_ids.contains(id) && !bounds_visible(bounds, viewport) {
             continue;
         }
         if let Some(item) = cache.entry(*id) {
@@ -203,7 +221,7 @@ pub(crate) fn compose_scene_items(
             preview.id,
             preview.rect,
             preview_text_paints.get(&preview.id).copied(),
-        ) && bounds_visible(bounds, viewport)
+        ) && (connector_text_ids.contains(&preview.id) || bounds_visible(bounds, viewport))
         {
             items.push(item);
         }
@@ -213,7 +231,10 @@ pub(crate) fn compose_scene_items(
             continue;
         }
         if !arrow_is_degenerate(&preview.arrow)
-            && bounds_visible(arrow_bounds(&preview.arrow), viewport)
+            && bounds_visible(
+                snow_draw_engine_document::arrow_paint_bounds(&preview.arrow),
+                viewport,
+            )
         {
             items.push(scene_item_from_arrow(preview.id, preview.arrow.clone()));
         }
@@ -247,7 +268,11 @@ pub(crate) fn compose_scene_items(
                 }
             }
             ElementCreationPreview::Arrow(arrow)
-                if !arrow_is_degenerate(arrow) && bounds_visible(arrow_bounds(arrow), viewport) =>
+                if !arrow_is_degenerate(arrow)
+                    && bounds_visible(
+                        snow_draw_engine_document::arrow_paint_bounds(arrow),
+                        viewport,
+                    ) =>
             {
                 items.push(scene_item_from_arrow(id, arrow.clone()));
             }
@@ -315,7 +340,45 @@ pub(crate) fn compose_scene_items(
         }
     }
     compose_arrow_text(&mut items, model, presentation, &preview_arrows, viewport);
+    if let Some(preview) = &presentation.shape_bound_text_preview {
+        for item in &mut items {
+            if let SceneDisplayItem::Rectangle(shape) = item
+                && shape.id == display_item_id(preview.owner_id)
+            {
+                shape.bound_text_id = Some(display_item_id(preview.text_id));
+            }
+        }
+        let text = scene_item_from_text(preview.text_id, preview.text.clone());
+        let position = model
+            .paint_rank(preview.text_id)
+            .map(|rank| {
+                items
+                    .iter()
+                    .position(|item| {
+                        scene_element_id(item)
+                            .and_then(|id| model.paint_rank(id))
+                            .is_none_or(|item_rank| item_rank > rank)
+                    })
+                    .unwrap_or(items.len())
+            })
+            .unwrap_or(items.len());
+        items.insert(position, text);
+    }
     serial_connectors.append_from_displayed_items(&mut items);
+    // Check the logical paint order before independently culling the label.
+    debug_assert!(
+        serial_connectors_follow_bound_text(&items, model),
+        "connectors must paint immediately above their bound text"
+    );
+    items.retain(|item| match item {
+        SceneDisplayItem::Text(text) => bounds_visible(
+            snow_draw_engine_document::text_paint_bounds(&text_paint_geometry_from_display_item(
+                text,
+            )),
+            viewport,
+        ),
+        _ => true,
+    });
     if let Some(copy) = duplicate_preview_scene(cache, presentation) {
         let mut copies = compose_scene_items(
             &copy.cache,
@@ -351,11 +414,6 @@ pub(crate) fn compose_scene_items(
             _ => (1, 0),
         });
     }
-    // Connector parts are emitted immediately after their bound text.
-    debug_assert!(
-        serial_connectors_follow_bound_text(&items, model),
-        "serial connectors must paint immediately above their bound text"
-    );
     items
 }
 
@@ -604,6 +662,9 @@ pub(crate) fn duplicate_preview_scene(
                 ElementData::SerialNumber(serial) => {
                     serial.text_element_id = serial.text_element_id.and_then(local_id);
                 }
+                ElementData::Rectangle(shape) => {
+                    shape.text_element_id = shape.text_element_id.and_then(local_id);
+                }
                 ElementData::SpeechBubble(bubble) => {
                     bubble.text_element_id = bubble.text_element_id.and_then(local_id);
                 }
@@ -675,7 +736,12 @@ fn remap_copy_display_ids(item: &mut SceneDisplayItem, ids: &[ElementId]) {
                 remap(id);
             }
         }
-        SceneDisplayItem::Rectangle(item) => remap(&mut item.id),
+        SceneDisplayItem::Rectangle(item) => {
+            remap(&mut item.id);
+            if let Some(id) = &mut item.bound_text_id {
+                remap(id);
+            }
+        }
         SceneDisplayItem::Filter(item) => remap(&mut item.id),
         SceneDisplayItem::Text(item) => remap(&mut item.id),
         SceneDisplayItem::SerialNumberConnector(item) => remap(&mut item.id),
@@ -910,11 +976,13 @@ fn preview_serial_items(
 // Serial connectors are decorations of bound text. The renderer paints scene
 // items in list order, and the underline centerline sits on the text's painted
 // bottom edge, so a text background fill occludes any connector that is emitted
-// earlier. Connectors are derived after every scene item has been emitted, from
-// those displayed items — never from a separately rebuilt document element.
+// earlier. Derive connectors from the resolved text items before culling text,
+// so committed data, selections, and drafts all use the same painted geometry.
 struct SerialConnectorEmission<'a> {
     model: &'a DocumentModel,
     preview_serials: &'a HashMap<ElementId, SerialNumberData>,
+    preview_shapes: &'a HashMap<ElementId, RectangleData>,
+    shape_text_preview: Option<&'a snow_draw_engine_editor::ShapeBoundTextPreview>,
     viewport: (f64, f64, f64, f64),
 }
 
@@ -932,7 +1000,11 @@ impl SerialConnectorEmission<'_> {
     /// committed data so a connector that spans into view is still emitted.
     fn append_from_displayed_items(&self, items: &mut Vec<SceneDisplayItem>) {
         let mut displayed_serials = HashMap::<DisplayItemId, PresentedSerial>::new();
+        let mut displayed_shapes = HashMap::<DisplayItemId, RectangleData>::new();
         for item in items.iter() {
+            if let SceneDisplayItem::Rectangle(shape) = item {
+                displayed_shapes.insert(shape.id, shape_geometry_from_display_item(shape));
+            }
             if let SceneDisplayItem::SerialNumber(serial) = item {
                 displayed_serials.insert(
                     serial.id,
@@ -959,6 +1031,12 @@ impl SerialConnectorEmission<'_> {
             expanded.push(item);
             if let Some((id, geometry)) = text {
                 self.append_connectors_for_text(&mut expanded, &displayed_serials, id, &geometry);
+                self.append_shape_connectors_for_text(
+                    &mut expanded,
+                    &displayed_shapes,
+                    id,
+                    &geometry,
+                );
             }
         }
         *items = expanded;
@@ -1011,6 +1089,56 @@ impl SerialConnectorEmission<'_> {
             }
         }
     }
+
+    fn append_shape_connectors_for_text(
+        &self,
+        items: &mut Vec<SceneDisplayItem>,
+        displayed_shapes: &HashMap<DisplayItemId, RectangleData>,
+        text_id: ElementId,
+        text: &TextPaintGeometry,
+    ) {
+        let preview_owner = self
+            .shape_text_preview
+            .filter(|preview| preview.text_id == text_id)
+            .map(|preview| preview.owner_id);
+        let owners = self
+            .model
+            .shapes_for_text(text_id)
+            .iter()
+            .copied()
+            .filter(|owner| Some(*owner) != preview_owner)
+            .chain(preview_owner);
+        for owner in owners {
+            let Ok(element) = self.model.element(owner) else {
+                continue;
+            };
+            if !element.meta.visible {
+                continue;
+            }
+            let ElementData::Rectangle(committed) = &element.data else {
+                continue;
+            };
+            let shape = displayed_shapes
+                .get(&display_item_id(owner))
+                .or_else(|| self.preview_shapes.get(&owner))
+                .unwrap_or(committed);
+            let Some(connection) =
+                snow_draw_engine_document::resolve_shape_paint_text_connection(shape, text)
+            else {
+                continue;
+            };
+            let bounds = serial_connector_bounds(&connection, shape.stroke_width);
+            if bounds_visible(bounds, self.viewport) {
+                items.push(scene_item_from_serial_connector_paint(
+                    owner,
+                    shape.stroke,
+                    shape.stroke_width,
+                    shape.opacity,
+                    connection,
+                ));
+            }
+        }
+    }
 }
 
 fn serial_bound_text_index(items: &[SceneDisplayItem]) -> HashMap<DisplayItemId, DisplayItemId> {
@@ -1019,6 +1147,9 @@ fn serial_bound_text_index(items: &[SceneDisplayItem]) -> HashMap<DisplayItemId,
         .filter_map(|item| match item {
             SceneDisplayItem::SerialNumber(serial) => {
                 serial.bound_text_id.map(|text_id| (serial.id, text_id))
+            }
+            SceneDisplayItem::Rectangle(shape) => {
+                shape.bound_text_id.map(|text_id| (shape.id, text_id))
             }
             _ => None,
         })
@@ -1034,10 +1165,12 @@ fn connector_bound_text_id(
         index: connector_id.index,
         generation: connector_id.generation,
     };
-    model
-        .bound_text_id_for_serial_number(serial_id)
-        .map(display_item_id)
-        .or_else(|| serial_bound_texts.get(&connector_id).copied())
+    serial_bound_texts.get(&connector_id).copied().or_else(|| {
+        model
+            .bound_text_id_for_serial_number(serial_id)
+            .or_else(|| model.bound_text_id_for_shape(serial_id))
+            .map(display_item_id)
+    })
 }
 
 fn serial_connectors_follow_bound_text(items: &[SceneDisplayItem], model: &DocumentModel) -> bool {
@@ -1608,6 +1741,9 @@ mod tests {
             preview_elements: vec![SelectionRectState {
                 id: text_id,
                 rect: RectangleData {
+                    text_element_id: None,
+                    stroke_rendering_style: Default::default(),
+                    stroke_rendering_seed: 0,
                     rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
                     highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
                     center: Point::new(130.0, 10.0),
@@ -1693,6 +1829,9 @@ mod tests {
             preview_elements: vec![SelectionRectState {
                 id: text_id,
                 rect: RectangleData {
+                    text_element_id: None,
+                    stroke_rendering_style: Default::default(),
+                    stroke_rendering_seed: 0,
                     rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
                     highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
                     center: Point::new(120.0, 10.0),
@@ -1805,6 +1944,9 @@ mod tests {
         cache.sync(&model, None);
 
         let preview_rect = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(180.0, 0.0),
@@ -2073,6 +2215,9 @@ mod tests {
         let mut cache = DocumentSceneCache::new();
         cache.sync(&model, None);
         let preview_rect = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(20.0, 30.0),
@@ -2205,6 +2350,9 @@ mod tests {
             preview_elements: vec![SelectionRectState {
                 id: serial_id,
                 rect: RectangleData {
+                    text_element_id: None,
+                    stroke_rendering_style: Default::default(),
+                    stroke_rendering_seed: 0,
                     rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
                     highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
                     center: Point::new(10.0, 20.0),
@@ -2416,6 +2564,9 @@ mod tests {
             generation: 1,
         };
         let committed = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(2000.0, 0.0),

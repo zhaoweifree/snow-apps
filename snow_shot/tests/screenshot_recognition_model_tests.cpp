@@ -13,6 +13,7 @@
 #include <QItemSelectionModel>
 #include <QMimeData>
 #include <QNetworkAccessManager>
+#include <QPlainTextEdit>
 #include <QRunnable>
 #include <QScrollBar>
 #include <QSemaphore>
@@ -512,6 +513,11 @@ void tableModelSwitchesReuseEditorAndRestoreIndependentViewState() {
     editor->verticalScrollBar()->setValue(64);
     const int horizontalA = editor->horizontalScrollBar()->value();
     const int verticalA = editor->verticalScrollBar()->value();
+    const auto fileA = session.fileExportSnapshot();
+    require(fileA && fileA->kind == ScreenshotRecognitionFileKind::Table && fileA->hasContent() &&
+                fileA->table->rowCount() == 16 && fileA->table->columnCount() == 6 &&
+                fileA->table->cellText(1, 2) == QStringLiteral("A edited"),
+            "table file snapshots contain the whole current draft despite a partial selection");
     session.setRecognitionModel(QStringLiteral("vision-b"));
     require(editor && window.findChild<ScreenshotTableEditor*>() == editor &&
                 editor->model()->index(0, 0).data() == QStringLiteral("B"),
@@ -540,8 +546,23 @@ void tableModelSwitchesReuseEditorAndRestoreIndependentViewState() {
                 editor->currentIndex().column() == 0 &&
                 editor->model()->index(0, 0).data() == QStringLiteral("B"),
             "model B restores its own view state without inheriting model A edits");
+    editor->edit(editor->model()->index(0, 0));
+    auto* pending = editor->findChild<QPlainTextEdit*>(QStringLiteral("snowShotTableCellEditor"));
+    require(pending, "open an active table cell editor before saving");
+    pending->setPlainText(QStringLiteral("  B pending\nline  "));
+    const auto fileB = session.fileExportSnapshot();
+    require(fileB && fileB->hasContent() && !editor->isEditingCell() &&
+                fileB->table->cellText(0, 0) == QStringLiteral("  B pending\nline  ") &&
+                fileA->table->cellText(0, 0) == QStringLiteral("A"),
+            "snapshot preparation commits active edits and retains an independent document copy");
     session.setTarget(target(QStringLiteral("table-editor-new-target")));
     require(editor.isNull(), "changing the screenshot releases the retained model editor widget");
+    session.activate(Mode::Table);
+    const auto empty = session.fileExportSnapshot();
+    require(empty && empty->kind == ScreenshotRecognitionFileKind::Table && !empty->hasContent(),
+            "an active table without a result must retain table save routing without stale cells");
+    session.deactivate();
+    require(!session.fileExportSnapshot(), "inactive table recognition must release save routing");
 }
 
 class BlockedRecognitionWorkers final {

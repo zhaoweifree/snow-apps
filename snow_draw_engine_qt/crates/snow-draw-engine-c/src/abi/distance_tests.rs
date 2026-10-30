@@ -194,6 +194,8 @@ fn distance_ffi_validates_and_supplies_complete_provisional_label() {
             .process_input(
                 id,
                 InputEvent::Pointer(PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 1,
                     event_type,
                     device: PointerDevice::Mouse,
@@ -239,6 +241,8 @@ fn distance_ffi_validates_and_supplies_complete_provisional_label() {
         .process_input(
             id,
             InputEvent::Pointer(PointerEvent {
+                pressure: None,
+                timestamp_ms: 0,
                 pointer_id: 1,
                 event_type: PointerEventType::Move,
                 device: PointerDevice::Mouse,

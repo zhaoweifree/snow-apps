@@ -4,6 +4,7 @@
 #include "snow_shot/presentation/translationpagecontroller.h"
 #include "snow_shot/storage/applicationstorage.h"
 #include "snow_shot/storage/settingsadapters.h"
+#include "snow_shot/translation/translationservice.h"
 #include "widgets/modal.h"
 #include "widgets/switch.h"
 
@@ -266,7 +267,8 @@ struct SessionProbe {
     SessionProbe(SnowShotApiClient* api, int boxes, QString key = QStringLiteral("image"),
                  bool formatted = false, ScreenshotOcrRecognitionPort* ocr = nullptr,
                  QWidget* settingsOwner = nullptr,
-                 ScreenshotRecognitionWindow* recognitionWindow = nullptr) {
+                 ScreenshotRecognitionWindow* recognitionWindow = nullptr,
+                 const QStringList& sourceTexts = {}) {
         ScreenshotRecognitionSessionActions actions;
         if (recognitionWindow != nullptr) {
             actions.ensureContent = [recognitionWindow]() { return recognitionWindow; };
@@ -312,9 +314,10 @@ struct SessionProbe {
         source->selection = QRect(0, 0, 160, 240);
         for (int index = 0; index < boxes; ++index) {
             const qreal top = index * 25.0;
-            source->lines.push_back({QStringLiteral("source %1").arg(index), 0.95,
-                                     QPolygonF{QPointF(0, top), QPointF(150, top),
-                                               QPointF(150, top + 20), QPointF(0, top + 20)}});
+            source->lines.push_back(
+                {sourceTexts.value(index, QStringLiteral("source %1").arg(index)), 0.95,
+                 QPolygonF{QPointF(0, top), QPointF(150, top), QPointF(150, top + 20),
+                           QPointF(0, top + 20)}});
         }
         source->prepareForRendering();
         ScreenshotRecognitionTarget target;
@@ -1052,9 +1055,9 @@ void quickPrimaryTargetRestartsOriginalBlocks() {
                                 .value(QStringLiteral("content"))
                                 .toString();
         require(request.text == session.source->lines[index].text &&
-                    prompt.contains(QStringLiteral("Primary target language: zh-Hant")) &&
-                    prompt.contains(QStringLiteral("Secondary target language: ja")),
-                "retranslation uses each original block and the latest shared targets");
+                    prompt.contains(QStringLiteral("Target language: zh-Hant")) &&
+                    !prompt.contains(QStringLiteral("Secondary target language")),
+                "retranslation uses each original block and the latest concrete target");
     }
     session.controller->applyTextTargetLanguage(QStringLiteral("auto"));
     require(settings.configuration().targetLanguage == QStringLiteral("zh-Hant") &&
@@ -1062,6 +1065,54 @@ void quickPrimaryTargetRestartsOriginalBlocks() {
                 server.streams.size() == 4,
             "rejected quick-target writes restore the accepted selection without restarting "
             "translation");
+}
+
+void mixedOriginalBoxesShareOneDetectedTarget() {
+    configureTranslation();
+    const snow_shot::storage::ScreenshotTranslationSettings settings;
+    auto configuration = settings.configuration();
+    configuration.sourceLanguage = QStringLiteral("zh-Hans");
+    configuration.targetLanguage = QStringLiteral("en");
+    configuration.secondaryTargetLanguage = QStringLiteral("ja");
+    require(settings.setConfiguration(configuration), "configure original-image target routing");
+    const QStringList texts{QStringLiteral("Bonjour"),
+                            QStringLiteral("The complete source contains mostly English text, "
+                                           "so both original image boxes share one target.")};
+    TranslationServer server;
+    SnowShotApiClient api(server.url());
+    int detectionCalls = 0;
+    snow_shot::translation::TranslationService::forClient(
+        api, snow_shot::storage::ApplicationStorage::instance().configuration(), QLocale::English,
+        [&](const QString& input) {
+            ++detectionCalls;
+            require(input == texts.join(u'\n'),
+                    "original image boxes are detected together using their complete source");
+            return std::optional<snow_shot::translation::DetectedTranslationLanguage>{
+                {QStringLiteral("eng"), 0.8}};
+        });
+    SessionProbe session(&api, 2, QStringLiteral("complete-input"), false, nullptr, nullptr,
+                         nullptr, texts);
+    session.controller->beginTextTranslation();
+    server.waitForStreams(2);
+    require(detectionCalls == 1, "original image translation detects all boxes in one call");
+    QStringList transmittedTexts;
+    for (const auto& stream : server.streams) {
+        const auto prompt = stream.body.value(QStringLiteral("messages"))
+                                .toArray()
+                                .first()
+                                .toObject()
+                                .value(QStringLiteral("content"))
+                                .toString();
+        require(prompt.contains(QStringLiteral("Source language: zh-Hans\nTarget language: ja\n")),
+                "all original boxes use the detected target while retaining the source hint");
+        transmittedTexts.append(stream.text);
+    }
+    transmittedTexts.sort();
+    auto originalTexts = texts;
+    originalTexts.sort();
+    require(transmittedTexts == originalTexts,
+            "original-image translation keeps each complete original block intact");
+    session.controller->endTextEditing();
 }
 
 void languageChangesRestartAndProviderDestructionCancels() {
@@ -1236,6 +1287,7 @@ void fragmentedUnicodeStreamsUpdateOnlyCompleteEvents() {
 } // namespace
 
 void runOriginalImageTranslationTests() {
+    mixedOriginalBoxesShareOneDetectedTarget();
     quickPrimaryTargetRestartsOriginalBlocks();
     customModelPageAndScreenshotParity(false);
     customModelPageAndScreenshotParity(true);

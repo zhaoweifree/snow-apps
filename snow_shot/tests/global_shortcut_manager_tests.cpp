@@ -34,6 +34,7 @@ constexpr std::array ALL_ACTIONS{
     GlobalShortcutAction::ScreenshotDelay,
     GlobalShortcutAction::ScreenshotFixed,
     GlobalShortcutAction::ScreenshotOcr,
+    GlobalShortcutAction::ScreenshotOcrCopy,
     GlobalShortcutAction::ScreenshotTranslation,
     GlobalShortcutAction::ScreenshotCopy,
     GlobalShortcutAction::ScreenshotSave,
@@ -46,6 +47,8 @@ constexpr std::array ALL_ACTIONS{
     GlobalShortcutAction::OpenCaptureHistory,
     GlobalShortcutAction::OpenPinToScreenManagement,
     GlobalShortcutAction::GlobalCanvas,
+    GlobalShortcutAction::StitchSelectedImages,
+    GlobalShortcutAction::SplitSelectedImages,
     GlobalShortcutAction::SwitchWindowGroup,
     GlobalShortcutAction::OpenSettings,
     GlobalShortcutAction::PinClipboardContent,
@@ -359,6 +362,7 @@ void hiddenFloatingToolsPreserveGlobalHotkeys() {
         GlobalShortcutAction::ScreenshotDelay,
         GlobalShortcutAction::ScreenshotFixed,
         GlobalShortcutAction::ScreenshotOcr,
+        GlobalShortcutAction::ScreenshotOcrCopy,
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION
         GlobalShortcutAction::ScreenshotTranslation,
 #endif
@@ -448,6 +452,56 @@ void globalCanvasShortcutCanBeAssignedAndRestored() {
                 restored.state(action).shortcuts == shortcuts::ShortcutBindingList{binding},
             "global canvas hotkey must survive manager recreation");
     require(restored.setShortcuts(action, {}), "clear global canvas hotkey fixture");
+}
+
+void selectedImagesShortcutsRegisterAndPersist(GlobalShortcutAction action) {
+    const shortcuts::ShortcutBindingList bindings{QStringLiteral("Ctrl+Alt+F8"),
+                                                  QStringLiteral("Ctrl+Alt+F9")};
+    {
+        auto backend = std::make_unique<FakeBackend>();
+        auto* input = backend.get();
+        GlobalShortcutManager manager(std::move(backend), nullptr, [] { return false; });
+        manager.initialize();
+        require(manager.state(action).status == GlobalShortcutStatus::Unset &&
+                    manager.state(action).shortcuts.isEmpty(),
+                "selected-image actions start without an assigned shortcut");
+        clearAll(manager);
+        require(manager.setShortcuts(action, bindings) &&
+                    manager.state(action).status == GlobalShortcutStatus::Registered &&
+                    input->registrations.size() == 2 &&
+                    (action == GlobalShortcutAction::SplitSelectedImages
+                         ? snow_shot::storage::ShortcutSettings().splitSelectedImages()
+                         : snow_shot::storage::ShortcutSettings().stitchSelectedImages()) ==
+                        bindings,
+                "both selected-image shortcuts register and persist under their own key");
+        int activations = 0;
+        QObject::connect(&manager, &GlobalShortcutManager::activated, &manager,
+                         [&](GlobalShortcutAction received) {
+                             require(received == action, "image bindings dispatch their action");
+                             ++activations;
+                         });
+        for (const auto& binding : bindings)
+            input->handler(registrationId(*input, binding.portableText));
+        require(activations == 2 &&
+                    !manager.validateShortcut(GlobalShortcutAction::Screenshot, bindings.first())
+                         .supported,
+                "both image bindings activate and participate in conflict detection");
+        manager.setGlobalHotkeysEnabled(false);
+        requireDisabled(manager, action, bindings);
+        require(input->registrations.isEmpty(), "disabling hotkeys releases image bindings");
+        manager.setGlobalHotkeysEnabled(true);
+        require(manager.state(action).status == GlobalShortcutStatus::Registered,
+                "reenabling hotkeys restores image bindings");
+    }
+    auto backend = std::make_unique<FakeBackend>();
+    GlobalShortcutManager restored(std::move(backend), nullptr, [] { return false; });
+    restored.initialize();
+    require(restored.state(action).status == GlobalShortcutStatus::Registered &&
+                restored.state(action).shortcuts == bindings,
+            "image shortcuts survive manager recreation");
+    require(restored.setShortcuts(action, {}) &&
+                restored.state(action).status == GlobalShortcutStatus::Unset,
+            "image shortcuts can be cleared");
 }
 
 void globalCanvasFullscreenGateTracksSession() {
@@ -599,6 +653,65 @@ void fullscreenClassificationUsesTheFocusedLayerZeroWindow() {
                 !focusedWindowCoversDisplay(41, {}, displays) &&
                 !focusedWindowCoversDisplay(41, {{41, 0, 1.0, displays.first()}}, {}),
             "missing process, window, or display snapshots must fail closed");
+}
+
+void fullscreenClassificationIgnoresSnowShotWindows() {
+    using snow_shot::platform::focusedWindowCoversDisplay;
+    using snow_shot::platform::FocusedWindowSnapshot;
+
+    const qint64 ownProcess = QCoreApplication::applicationPid();
+    const qint64 externalProcess = ownProcess + 1;
+    const QVector<QRectF> displays{QRectF(0.0, 0.0, 1920.0, 1080.0),
+                                   QRectF(-1920.0, 0.0, 1920.0, 1080.0)};
+    const QVector<FocusedWindowSnapshot> windows{{ownProcess, 0, 1.0, displays.first()},
+                                                 {ownProcess, 0, 1.0, displays.last()},
+                                                 {externalProcess, 0, 1.0, displays.last()}};
+    require(!focusedWindowCoversDisplay(ownProcess, windows, displays),
+            "Snow Shot fullscreen windows must not trigger fullscreen suppression");
+    for (const auto& display : displays) {
+        require(!focusedWindowCoversDisplay(ownProcess, windows, {display}),
+                "Snow Shot fullscreen windows must be ignored on every monitor");
+    }
+    require(focusedWindowCoversDisplay(externalProcess, windows, displays) &&
+                focusedWindowCoversDisplay(externalProcess, windows, {displays.last()}) &&
+                !focusedWindowCoversDisplay(externalProcess, windows, {displays.first()}),
+            "own windows must not mask the focused external fullscreen window");
+}
+
+void ownFullscreenFocusPreservesAndRestoresHotkeys() {
+    auto& store = snow_shot::storage::ApplicationStorage::instance().configuration();
+    const QString key = QStringLiteral("global_shortcuts/disable_on_focused_fullscreen_window");
+    const auto previousSuppression = store.value(key);
+    require(store.setValue(key, true), "enable fullscreen ownership fixture");
+
+    const qint64 ownProcess = QCoreApplication::applicationPid();
+    const qint64 externalProcess = ownProcess + 1;
+    qint64 frontmostProcess = ownProcess;
+    const QVector<QRectF> displays{QRectF(0.0, 0.0, 1920.0, 1080.0)};
+    const QVector<snow_shot::platform::FocusedWindowSnapshot> windows{
+        {ownProcess, 0, 1.0, displays.first()}, {externalProcess, 0, 1.0, displays.first()}};
+    auto native = std::make_unique<FakeBackend>();
+    FakeBackend* input = native.get();
+    GlobalShortcutManager manager(std::move(native), nullptr, [&] {
+        return snow_shot::platform::focusedWindowCoversDisplay(frontmostProcess, windows, displays);
+    });
+    manager.initialize();
+    clearAll(manager);
+    require(manager.setShortcuts(GlobalShortcutAction::Screenshot, {QStringLiteral("Ctrl+F10")}),
+            "configure fullscreen ownership shortcut");
+    require(!manager.focusedFullscreenSuppressionActive() && input->registrations.size() == 1,
+            "starting with an own fullscreen window must keep hotkeys registered");
+
+    frontmostProcess = externalProcess;
+    manager.refreshFocusedFullscreenState();
+    require(manager.focusedFullscreenSuppressionActive() && input->registrations.isEmpty(),
+            "focusing external fullscreen must still release regular hotkeys");
+
+    frontmostProcess = ownProcess;
+    manager.refreshFocusedFullscreenState();
+    require(!manager.focusedFullscreenSuppressionActive() && input->registrations.size() == 1,
+            "focusing own fullscreen must restore hotkeys despite external fullscreen behind it");
+    require(store.setValue(key, previousSuppression), "restore fullscreen ownership preference");
 }
 
 void deterministicOwnershipPartialFailureAndSuspension() {
@@ -1632,6 +1745,8 @@ int main(int argc, char** argv) {
     pinnedManagementShortcutCanBeAssignedAndRestored();
     hideShowAllWindowsShortcutCanBeAssignedAndRestored();
     globalCanvasShortcutCanBeAssignedAndRestored();
+    selectedImagesShortcutsRegisterAndPersist(GlobalShortcutAction::StitchSelectedImages);
+    selectedImagesShortcutsRegisterAndPersist(GlobalShortcutAction::SplitSelectedImages);
     globalCanvasFullscreenGateTracksSession();
     backendAvailabilityInvalidatesOwnershipAndRecovers();
 #ifdef Q_OS_MACOS
@@ -1640,6 +1755,8 @@ int main(int argc, char** argv) {
     macGroupInputTracksPhysicalKeys();
 #endif
     fullscreenClassificationUsesTheFocusedLayerZeroWindow();
+    fullscreenClassificationIgnoresSnowShotWindows();
+    ownFullscreenFocusPreservesAndRestoresHotkeys();
     deterministicOwnershipPartialFailureAndSuspension();
     toggleShortcutSurvivesGlobalHotkeyDisablement();
     focusedFullscreenSuppressionPublishesState();

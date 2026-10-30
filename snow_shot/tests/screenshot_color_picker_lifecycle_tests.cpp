@@ -28,6 +28,7 @@
 #include "widgets/select.h"
 #include "widgets/tooltip.h"
 #include "widgets/button.h"
+#include "widgets/color_picker.h"
 #include "widgets/popup_interaction_host.h"
 #include "widgets/detail/overlay_popup_surface.h"
 
@@ -65,6 +66,49 @@ void require(bool condition, const char* message) {
         std::cerr << message << '\n';
         std::exit(1);
     }
+}
+
+void canvasSamplingSessionReleasesTargetsAndCommitsAfterCleanup() {
+    QWidget owner;
+    ScreenshotCanvasColorSamplingSession session(owner);
+    auto first = std::make_unique<adqt::widgets::AdColorPicker>();
+    auto second = std::make_unique<adqt::widgets::AdColorPicker>();
+    int cancellations = 0;
+    const auto cancel = [&]() {
+        ++cancellations;
+        session.end();
+    };
+    session.begin(first.get(), cancel);
+    require(session.active(), "sampling begins with a live picker");
+    session.begin(second.get(), cancel);
+    first.reset();
+    require(cancellations == 0 && session.active(),
+            "replacing the picker disconnects its old destruction callback");
+    second.reset();
+    require(cancellations == 1 && !session.active(),
+            "picker destruction cancels exactly the current sampling session");
+
+    auto picker = std::make_unique<adqt::widgets::AdColorPicker>();
+    session.begin(picker.get(), cancel);
+    QImage preview(3, 3, QImage::Format_ARGB32_Premultiplied);
+    preview.fill(Qt::black);
+    const QColor color(12, 34, 56, 128);
+    preview.setPixelColor(1, 1, color);
+    bool cleaned = false;
+    require(session.commit(preview,
+                           [&]() {
+                               require(!session.active(),
+                                       "picker ownership is released before host cleanup");
+                               cleaned = true;
+                           }) &&
+                cleaned && picker->value().solidColor == preview.pixelColor(1, 1),
+            "commit applies the center pixel including alpha after host cleanup");
+    session.begin(picker.get(), cancel);
+    require(!session.commit({}, []() {}) && !session.active(),
+            "invalid samples end the session without committing a value");
+    session.begin(picker.get(), cancel);
+    require(!session.commit(preview, [&]() { picker.reset(); }) && cancellations == 1,
+            "cleanup may destroy the picker without committing or firing a stale cancellation");
 }
 
 const uchar* backingPixels(ScreenshotColorPickerWindow& picker) {
@@ -548,7 +592,67 @@ void supersededGroupActivationCannotFocusTheReopenedDisplay() {
     }
 }
 
+void terminalHideRetiresPresentationBeforeHidingAndAllowsReuse() {
+    for (const bool deferred : {false, true}) {
+        OverlayRevealFixture fixture;
+        fixture.primary.show();
+        fixture.primary.canvas()->setInteractionEnabled(true);
+        const auto generation = fixture.primary.presentationGeneration();
+        const auto nativeId = fixture.primary.internalWinId();
+        require(nativeId != 0, "a visible overlay must have a native surface");
+
+        class InspectHide final : public QObject {
+          public:
+            ScreenshotOverlayWindow* overlay = nullptr;
+            quint64 generation = 0;
+            bool inspected = false;
+
+          protected:
+            bool eventFilter(QObject*, QEvent* event) override {
+                if (event->type() == QEvent::Hide) {
+                    inspected = true;
+                    require(!overlay->isPresentationCurrent(generation) &&
+                                !overlay->updatesEnabled() &&
+                                !overlay->canvas()->updatesEnabled() &&
+                                !overlay->canvas()->interactionEnabled(),
+                            "terminal retirement must block painting and input before hide");
+                }
+                return false;
+            }
+        } inspection;
+        inspection.overlay = &fixture.primary;
+        inspection.generation = generation;
+        fixture.primary.installEventFilter(&inspection);
+
+        if (deferred) {
+            fixture.coordinator.hideOverlayWindowsImmediately(fixture.displays);
+            require(fixture.primary.internalWinId() == nativeId,
+                    "export's early hide must preserve the native surface until maintenance");
+            fixture.coordinator.hideOverlayWindowsImmediately(fixture.displays);
+            fixture.coordinator.hideOverlayWindows(fixture.displays);
+        } else {
+            fixture.primary.releaseNativeSurface();
+        }
+        require(inspection.inspected && fixture.primary.isHidden() &&
+                    fixture.primary.internalWinId() == 0,
+                "completion must hide the retired presentation and destroy its native surface");
+        fixture.primary.releaseNativeSurface();
+        require(fixture.primary.internalWinId() == 0,
+                "repeated completion must not recreate a native surface");
+        fixture.primary.removeEventFilter(&inspection);
+        fixture.primary.restoreNativeSurface();
+        require(fixture.primary.isHidden() && fixture.primary.updatesEnabled() &&
+                    fixture.primary.canvas()->updatesEnabled(),
+                "the next capture must restore painting without revealing the overlay early");
+        fixture.primary.showPreparedFrame();
+        require(fixture.primary.isVisible() &&
+                    fixture.primary.isPresentationCurrent(fixture.primary.presentationGeneration()),
+                "the next capture must own a fresh visible presentation");
+    }
+}
+
 void overlayRevealGenerationAndFocusRegressions() {
+    terminalHideRetiresPresentationBeforeHidingAndAllowsReuse();
     retiredSecondaryRevealCannotShowThePooledOverlay();
     cancellationDuringFirstShowRetiresTheWholeRevealGroup();
     reentrantPublicShowOwnsANewPresentation();
@@ -615,6 +719,7 @@ class StyleToolbarCommands final : public ScreenshotToolbarCommandSink,
     void setSelectionAspectRatioPresetFromToolbar(ScreenshotSelectionAspectRatioPreset) override {}
     void openSelectionResizeModalFromToolbar() override {}
     void adjustSelectionFromToolbar(int, int, int, int) override {}
+    void adjustSelectionEffectsFromWheel(int, int) override {}
     void setSelectionCornerRadiusFromToolbar(int) override {}
     void setSelectionShadowWidthFromToolbar(int) override {}
     void setSelectionToolbarHovered(bool) override {}
@@ -2184,6 +2289,7 @@ int main(int argc, char** argv) {
         auxiliaryWindowsPreserveOwnerStacking();
         return 0;
     }
+    canvasSamplingSessionReleasesTargetsAndCommitsAfterCleanup();
     canvasSamplerFollowsSessionOwner();
     if (application.arguments().contains(QStringLiteral("--canvas-sampler-only")))
         return 0;

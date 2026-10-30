@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" stroke="currentColor" stroke-width="72" stroke-linecap="round" stroke-linejoin="round" data-adqt-slot="primary">
+  <defs>
+    <clipPath id="speaker-off-gap">
+      <path d="M0 70V1024H954ZM154 0H1024V870Z" fill="#000" stroke="none"/>
+    </clipPath>
+  </defs>
+  <path d="M625.9 115c-5.9 0-11.9 1.6-17.4 5.3L254 352H90c-8.8 0-16 7.2-16 16v288c0 8.8 7.2 16 16 16h164l354.5 231.7c5.5 3.6 11.6 5.3 17.4 5.3 16.7 0 32.1-13.3 32.1-32.1V147.1c0-18.8-15.4-32.1-32.1-32.1zM586 803L293.4 611.7l-18-11.7H146V424h129.4l17.9-11.7L586 221v582z" fill="currentColor" stroke="none" clip-path="url(#speaker-off-gap)"/>
+  <path d="M194 152l720 720"/>
+</svg>

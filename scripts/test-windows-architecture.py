@@ -1,5 +1,6 @@
 """Focused contracts for Windows target selection and cross-build dependencies."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,43 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 CMAKE = shutil.which('cmake')
+GIT = shutil.which('git')
+
+
+@unittest.skipUnless(GIT, 'Git is required')
+class VcpkgCacheLineEndings(unittest.TestCase):
+    def test_toolchain_hashes_survive_windows_checkout(self):
+        # These shared ABI inputs were first built with LF. A Windows checkout
+        # must preserve their bytes even when core.autocrlf is enabled.
+        inputs = ('cmake/SnowBuildToolchain.cmake', 'scripts/build-toolchain.json')
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory)
+            (fixture / '.gitattributes').write_bytes((ROOT / '.gitattributes').read_bytes())
+            expected = {}
+            for name in inputs:
+                path = fixture / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                contents = (ROOT / name).read_bytes().replace(b'\r\n', b'\n')
+                path.write_bytes(contents)
+                expected[name] = hashlib.sha256(contents).hexdigest()
+
+            def git(*arguments):
+                result = subprocess.run(
+                    [GIT, '-c', 'core.autocrlf=true', '-c', 'core.eol=crlf',
+                     '-c', 'core.safecrlf=false', *arguments], cwd=fixture,
+                    capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            git('init', '--quiet')
+            git('add', '--', '.gitattributes', *inputs)
+            for name in inputs:
+                (fixture / name).unlink()
+            git('checkout-index', '--all', '--force')
+            for name in inputs:
+                with self.subTest(path=name):
+                    actual = hashlib.sha256((fixture / name).read_bytes()).hexdigest()
+                    self.assertEqual(actual, expected[name],
+                                     'Checkout changed a shared vcpkg ABI input.')
 
 
 @unittest.skipUnless(CMAKE, 'CMake is required')
@@ -41,6 +79,62 @@ include("{ROOT.as_posix()}/cmake/RustStaticLibrary.cmake")
 snow_detect_rust_target(target)
 message(STATUS "SELECTED=${{SNOW_WINDOWS_ARCHITECTURE}};${{SNOW_WINDOWS_PLATFORM}};${{target}}")
 '''
+
+    def test_compiler_minimum_accepts_newer_versions(self):
+        for version, supported in [('19.50.99999', False), ('19.51.0', True),
+                                   ('19.52.0', True), ('19.100.0', True), ('20.0.0', True)]:
+            with self.subTest(version=version):
+                output = self.run_cmake(f'''
+include("{ROOT.as_posix()}/cmake/SnowBuildToolchain.cmake")
+set(CMAKE_CXX_COMPILER_ID MSVC)
+set(CMAKE_CXX_COMPILER_VERSION {version})
+snow_require_msvc_version()
+''', supported)
+                if not supported:
+                    self.assertIn('or newer is required', output)
+
+    def test_msvc_selection_uses_minimum_and_numeric_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            versions = ('14.50.99999', '14.51.0', '14.99.0', '14.100.0', 'invalid')
+            for version in versions:
+                (root / 'VC/Tools/MSVC' / version).mkdir(parents=True)
+            fixture = f'''
+include("{ROOT.as_posix()}/cmake/SnowBuildToolchain.cmake")
+set(ENV{{VCToolsInstallDir}} "")
+set(ENV{{VSINSTALLDIR}} "{root.as_posix()}")
+'''
+            output = self.run_cmake(fixture + '''
+snow_resolve_msvc_tools_root(selected)
+message(STATUS "SELECTED=${selected}")
+''')
+            self.assertIn('/VC/Tools/MSVC/14.100.0', output)
+            output = self.run_cmake(fixture + f'''
+include("{ROOT.as_posix()}/cmake/vcpkg-windows-triplet-environment.cmake")
+message(STATUS "SELECTED=${{VCPKG_PLATFORM_TOOLSET_VERSION}}")
+''')
+            self.assertIn('SELECTED=14.100.0', output)
+            for version, supported in [('14.50.99999', False), ('14.51.0', True),
+                                       ('14.100.0', True)]:
+                with self.subTest(version=version):
+                    self.run_cmake(fixture + f'''
+set(ENV{{VCToolsInstallDir}} "{root.as_posix()}/VC/Tools/MSVC/{version}/")
+snow_resolve_msvc_tools_root(selected)
+''', supported)
+
+    def test_rust_minimum_accepts_newer_versions(self):
+        for version, supported in [('1.97.0', False), ('1.97.1', True), ('1.97.2', True),
+                                   ('1.100.0', True), ('2.0.0', True), ('invalid', False)]:
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                rustc = Path(directory) / ('rustc.cmd' if os.name == 'nt' else 'rustc')
+                rustc.write_text(f'@echo off\necho rustc {version}\n' if os.name == 'nt'
+                                 else f'#!/bin/sh\necho "rustc {version}"\n', encoding='utf-8')
+                rustc.chmod(0o755)
+                self.run_cmake(f'''
+include("{ROOT.as_posix()}/cmake/SnowBuildToolchain.cmake")
+set(RUSTC_EXECUTABLE "{rustc.as_posix()}")
+snow_require_rust_version()
+''', supported)
 
     def test_compiler_selects_target_independently_of_host(self):
         for compiler, arch, rust in [('x64', 'x64', 'x86_64'), ('ARM64', 'arm64', 'aarch64')]:
@@ -88,7 +182,7 @@ message(STATUS "RUST=${{target}}")
         self.assertIn('RUST=aarch64-apple-darwin', output)
 
     def test_arm64_static_dependencies_use_native_optimized_objects(self):
-        output = self.run_cmake(f'''
+        output = self.triplet_fixture(f'''
 include("{ROOT.as_posix()}/cmake/vcpkg-overlay-triplets/arm64-windows-static.cmake")
 message(STATUS "C_FLAGS=${{VCPKG_C_FLAGS_RELEASE}}")
 message(STATUS "CXX_FLAGS=${{VCPKG_CXX_FLAGS_RELEASE}}")
@@ -106,7 +200,7 @@ message(STATUS "LINK_FLAGS=${{VCPKG_LINKER_FLAGS_RELEASE}}")
         self.assertIn('/OPT:ICF', link_flags)
 
     def test_x64_static_dependencies_retain_ltcg(self):
-        output = self.run_cmake(f'''
+        output = self.triplet_fixture(f'''
 include("{ROOT.as_posix()}/cmake/vcpkg-overlay-triplets/x64-windows-static.cmake")
 message(STATUS "C_FLAGS=${{VCPKG_C_FLAGS_RELEASE}}")
 message(STATUS "CXX_FLAGS=${{VCPKG_CXX_FLAGS_RELEASE}}")
@@ -117,6 +211,12 @@ message(STATUS "LINK_FLAGS=${{VCPKG_LINKER_FLAGS_RELEASE}}")
             self.assertIn('/GL', flags)
             self.assertNotIn('/GL-', flags)
         self.assertIn('/LTCG', re.search(r'LINK_FLAGS=([^\n]*)', output).group(1).split())
+
+    def triplet_fixture(self, contents):
+        with tempfile.TemporaryDirectory() as directory:
+            msvc = Path(directory) / 'MSVC/14.100.0'
+            msvc.mkdir(parents=True)
+            return self.run_cmake(f'set(ENV{{VCToolsInstallDir}} "{msvc.as_posix()}")\n' + contents)
 
     def test_arm64_presets_disable_cpp_ipo_without_changing_rust_target(self):
         presets = json.loads((ROOT / 'CMakePresets.json').read_text(encoding='utf-8'))
@@ -145,8 +245,9 @@ message(STATUS "LINK_FLAGS=${{VCPKG_LINKER_FLAGS_RELEASE}}")
 
     def libclang_fixture(self, directory, host):
         rustc = directory / ('rustc.cmd' if os.name == 'nt' else 'rustc')
-        contents = (f'@echo off\necho host: {host}-pc-windows-msvc\n' if os.name == 'nt'
-                    else f'#!/bin/sh\necho "host: {host}-pc-windows-msvc"\n')
+        contents = (f'@echo off\necho rustc 1.98.0 (fixture)\necho host: {host}-pc-windows-msvc\n'
+                    if os.name == 'nt' else
+                    f'#!/bin/sh\necho "rustc 1.98.0 (fixture)"\necho "host: {host}-pc-windows-msvc"\n')
         rustc.write_text(contents, encoding='utf-8')
         rustc.chmod(0o755)
         for arch, machine in [('x64', 0x8664), ('arm64', 0xAA64)]:
@@ -160,6 +261,7 @@ message(STATUS "LINK_FLAGS=${{VCPKG_LINKER_FLAGS_RELEASE}}")
         return f'''
 set(WIN32 TRUE)
 set(ENV{{RUSTC}} "{rustc.as_posix()}")
+set(RUSTC_EXECUTABLE "{rustc.as_posix()}")
 set(ENV{{LIBCLANG_PATH}} "")
 include("{ROOT.as_posix()}/cmake/SnowRustLibclang.cmake")
 '''
@@ -237,6 +339,7 @@ snow_resolve_rust_libclang_directory(selected)
 cmake_minimum_required(VERSION 3.30)
 project(CargoLibclangContract LANGUAGES NONE)
 {fixture}
+set(APPLE FALSE)
 set(MSVC TRUE)
 set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID ARM64)
 set(CMAKE_SYSTEM_PROCESSOR AMD64)
@@ -246,8 +349,18 @@ set(CMAKE_AR "C:/VS/bin/Hostx64/arm64/lib.exe")
 set(CARGO_EXECUTABLE "{cargo.as_posix()}")
 set(SNOW_LIBCLANG_BIN_DIR "{(root / 'x64').as_posix()}")
 include("{ROOT.as_posix()}/cmake/RustStaticLibrary.cmake")
-snow_add_rust_static_library(fixture PACKAGE fixture MANIFEST_DIR "{root.as_posix()}")
-snow_add_rust_executable(fixture_executable PACKAGE fixture MANIFEST_DIR "{root.as_posix()}")
+snow_add_rust_static_library(fixture PACKAGE fixture MANIFEST_DIR "{root.as_posix()}"
+    NO_DEFAULT_FEATURES FEATURES fixture-feature)
+snow_add_rust_executable(fixture_executable PACKAGE fixture MANIFEST_DIR "{root.as_posix()}"
+    TOOLCHAIN nightly-2026-09-08)
+get_target_property(toolchain fixture_executable SNOW_RUST_TOOLCHAIN)
+if(NOT toolchain STREQUAL "nightly-2026-09-08")
+    message(FATAL_ERROR "Executable lost its toolchain contract for license collection")
+endif()
+get_target_property(no_defaults fixture SNOW_RUST_NO_DEFAULT_FEATURES)
+if(NOT no_defaults)
+    message(FATAL_ERROR "Static library lost its Cargo feature contract for license collection")
+endif()
 ''', encoding='utf-8')
             build = root / 'build'
             result = subprocess.run([CMAKE, '-G', 'Ninja', '-S', str(root), '-B', str(build)],
@@ -256,6 +369,9 @@ snow_add_rust_executable(fixture_executable PACKAGE fixture MANIFEST_DIR "{root.
             commands = (build / 'build.ninja').read_text(encoding='utf-8')
             self.assertEqual(commands.count(f'LIBCLANG_PATH={(root / "x64").as_posix()}'), 2)
             self.assertIn('--target aarch64-pc-windows-msvc', commands)
+            self.assertEqual(commands.count('--no-default-features'), 1)
+            self.assertIn('--features fixture-feature', commands)
+            self.assertEqual(commands.count('RUSTUP_TOOLCHAIN=nightly-2026-09-08'), 1)
 
     def test_ffmpeg_arm_profile_retains_supported_encoders(self):
         port = ROOT / 'cmake/vcpkg-overlay-ports/ffmpeg'
@@ -308,7 +424,43 @@ message(STATUS "OPTIONS=${{OPTIONS}}")
                 filters = re.findall(r'--enable-filter=([^\s]+)', output)
                 self.assertEqual(filters, ['abuffer,abuffersink,atempo'])
 
-    def test_crashpad_uses_runnable_host_compilers_and_pinned_toolset(self):
+    def test_recording_profile_separates_application_outputs_from_compatibility(self):
+        port = ROOT / 'cmake/vcpkg-overlay-ports/ffmpeg'
+        manifest = json.loads((port / 'vcpkg.json').read_text(encoding='utf-8'))
+        compatibility = manifest['features']['snow-recording-compat']['dependencies']
+        self.assertTrue(any(dependency.get('features') == ['snow-shot-minimal']
+                            for dependency in compatibility))
+        text = (port / 'portfile.cmake').read_text(encoding='utf-8')
+        start = text.index('if("snow-shot-minimal" IN_LIST FEATURES)',
+                           text.index('if("rubberband" IN_LIST FEATURES)'))
+        fragment = text[start:text.index('if("snow-macos-media" IN_LIST FEATURES)', start)]
+        for compatibility in (False, True):
+            with self.subTest(compatibility=compatibility):
+                features = 'snow-shot-minimal'
+                if compatibility:
+                    features += ';snow-recording-compat'
+                output = self.run_cmake(f'''
+set(VCPKG_TARGET_IS_WINDOWS TRUE)
+set(FEATURES {features})
+{fragment}
+message(STATUS "OPTIONS=${{OPTIONS}}")
+''')
+                enabled = {}
+                for kind, names in re.findall(r'--enable-(encoder|decoder|muxer|demuxer|parser)=([^\s]+)', output):
+                    enabled.setdefault(kind, set()).update(names.split(','))
+                self.assertTrue({'mp4', 'gif', 'apng', 'webp'} <= enabled['muxer'])
+                self.assertTrue({'libx264', 'libx265', 'gif', 'apng', 'libwebp_anim', 'aac'}
+                                <= enabled['encoder'])
+                # Older .snowrec sources are still readable in the application profile.
+                self.assertIn('matroska', enabled['demuxer'])
+                self.assertIn('h264', enabled['decoder'])
+                for kind, components in [('encoder', {'mpeg4', 'mp3_mf'}),
+                                         ('muxer', {'avi', 'matroska'}),
+                                         ('decoder', {'mp3'}),
+                                         ('parser', {'mpegaudio'})]:
+                    self.assertEqual(components <= enabled[kind], compatibility)
+
+    def test_crashpad_uses_runnable_host_compilers_and_selected_toolset(self):
         overlay = (ROOT / 'cmake/vcpkg-overlay-ports/crashpad/portfile.cmake').read_text(
             encoding='utf-8')
         build_tools = re.search(r'set\(_snow_build_tools \[=\[(.*?)\]=\]\)', overlay,
@@ -350,17 +502,18 @@ endfunction()
             for host, expected in [('x64', ['amd64_x86', 'amd64', 'amd64_arm64']),
                                    ('arm64', ['arm64_x86', 'arm64_x64', 'arm64'])]:
                 with self.subTest(host=host), patch.dict(
-                        os.environ, {'SNOW_MSVC_HOST_ARCHITECTURE': host}, clear=True):
+                        os.environ, {'SNOW_MSVC_HOST_ARCHITECTURE': host,
+                                     'VCToolsVersion': '14.100.99999'}, clear=True):
                     arguments = list(namespace['toolchain_arguments']('vcvarsall.bat'))
                     self.assertEqual([argument[1] for argument in arguments], expected)
-                    self.assertTrue(all(argument[2:] == ['-vcvars_ver=14.51', '&&', 'set']
+                    self.assertTrue(all(argument[2:] == ['-vcvars_ver=14.100.99999', '&&', 'set']
                                         for argument in arguments))
 
     def test_toolchain_separates_host_tools_and_target_libraries(self):
         for host in ('x64', 'arm64'):
             with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                msvc = root / 'MSVC/14.51.fixture'
+                msvc = root / 'MSVC/14.100.0'
                 sdk = root / 'Windows Kits/10'
                 version = '10.0.26100.0'
                 compiler = msvc / f'bin/Host{host}/arm64'
@@ -401,175 +554,6 @@ message(STATUS "LIBRARIES=${{paths}}")
                 self.assertIn(f'/{version}/{host}/rc.exe', result.stdout)
                 self.assertIn(f'/{version}/um/arm64', result.stdout)
                 self.assertNotIn('/lib/x64', result.stdout)
-
-
-@unittest.skipUnless(CMAKE and shutil.which('git'), 'CMake and Git are required')
-class OnnxMlasCompilerPolicy(unittest.TestCase):
-    """Execute the overlay's applied CMake block without configuring ONNX itself."""
-
-    patch_name = 'fix-arm64-msvc-mlas-stack-cookie.patch'
-    port = ROOT / 'cmake/vcpkg-overlay-ports/onnxruntime'
-    baseline_options = ['/O2', '/GS', '/sdl', '/guard:cf', '/Ob3', '/GL-']
-
-    def applied_policy(self, directory):
-        patch_text = (self.port / self.patch_name).read_text(encoding='utf-8')
-        hunks = list(re.finditer(r'^@@ -(\d+),(\d+) \+(\d+),(\d+) @@[^\n]*\n',
-                                patch_text, re.MULTILINE))
-        self.assertEqual(len(hunks), 1, 'Update the fixture if the overlay gains other changes')
-        hunk = hunks[0]
-        lines = patch_text[hunk.end():].splitlines(keepends=True)
-        self.assertTrue(all(line.startswith((' ', '+')) for line in lines),
-                        'This policy fixture expects an insertion-only patch')
-        before = [line[1:] for line in lines if line.startswith(' ')]
-        added = [line[1:] for line in lines if line.startswith('+')]
-        self.assertEqual(len(before), int(hunk.group(2)))
-        self.assertEqual(len(before) + len(added), int(hunk.group(4)))
-        # Reconstruct the hunk's upstream context, then apply the real overlay.
-        # The unrelated upstream target definitions need not run in this fixture.
-        first_line = int(hunk.group(1)) - 1
-        upstream = directory / 'cmake/onnxruntime_mlas.cmake'
-        upstream.parent.mkdir()
-        upstream.write_text('# Omitted upstream line\n' * first_line + ''.join(before),
-                            encoding='utf-8')
-        result = subprocess.run(['git', 'apply', str(self.port / self.patch_name)],
-                                cwd=directory, capture_output=True, text=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        leading_context = next(index for index, line in enumerate(lines)
-                               if line.startswith('+'))
-        applied = upstream.read_text(encoding='utf-8').splitlines(keepends=True)
-        block = ''.join(applied[first_line + leading_context:
-                                first_line + leading_context + len(added)])
-        self.assertEqual(block, ''.join(added))
-        return block
-
-    def check_policy(self, windows, compiler, architecture, enabled):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            policy = self.applied_policy(root)
-            options = ';'.join(self.baseline_options)
-            (root / 'CMakeLists.txt').write_text(f'''
-cmake_minimum_required(VERSION 3.30)
-project(OnnxMlasPolicyContract LANGUAGES NONE)
-set(WIN32 {str(windows).upper()})
-set(CMAKE_CXX_COMPILER_ID "{compiler}")
-set(onnxruntime_target_platform "{architecture}")
-set(MLAS_SRC_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}/mlas")
-set(dequant "${{MLAS_SRC_DIR}}/sqnbitgemm_kernel_neon_fp32.cpp")
-set(neighbor "${{MLAS_SRC_DIR}}/sqnbitgemm_kernel_neon_fp16.cpp")
-set_property(SOURCE "${{dequant}}" "${{neighbor}}" PROPERTY COMPILE_OPTIONS "{options}")
-add_library(onnxruntime_mlas INTERFACE)
-target_compile_options(onnxruntime_mlas INTERFACE {options})
-set(CMAKE_CXX_FLAGS "/O2 /GS /sdl /guard:cf /GL-")
-{policy}
-get_property(dequant_options SOURCE "${{dequant}}" PROPERTY COMPILE_OPTIONS)
-get_property(neighbor_options SOURCE "${{neighbor}}" PROPERTY COMPILE_OPTIONS)
-get_property(target_options TARGET onnxruntime_mlas PROPERTY INTERFACE_COMPILE_OPTIONS)
-message(STATUS "DEQUANT_OPTIONS=${{dequant_options}}")
-message(STATUS "NEIGHBOR_OPTIONS=${{neighbor_options}}")
-message(STATUS "TARGET_OPTIONS=${{target_options}}")
-message(STATUS "CXX_FLAGS=${{CMAKE_CXX_FLAGS}}")
-''', encoding='utf-8')
-            result = subprocess.run([CMAKE, '-S', str(root), '-B', str(root / 'build')],
-                                    capture_output=True, text=True, timeout=30)
-            output = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, output)
-            for name in ('DEQUANT_OPTIONS', 'NEIGHBOR_OPTIONS', 'TARGET_OPTIONS'):
-                actual = re.search(rf'{name}=([^\n]*)', output).group(1).split(';')
-                expected = self.baseline_options + (['/Ob0'] if enabled and
-                                                    name == 'DEQUANT_OPTIONS' else [])
-                self.assertEqual(actual, expected, output)
-            self.assertIn('CXX_FLAGS=/O2 /GS /sdl /guard:cf /GL-', output)
-
-    def test_windows_msvc_arm64_disables_only_dequantizer_inlining(self):
-        self.check_policy(True, 'MSVC', 'ARM64', True)
-
-    def test_other_architectures_compilers_and_platforms_are_unchanged(self):
-        for windows, compiler, architecture in [
-                (True, 'MSVC', 'x64'), (True, 'MSVC', 'ARM64EC'),
-                (True, 'Clang', 'ARM64'), (True, 'GNU', 'ARM64'),
-                (False, 'MSVC', 'ARM64'), (False, 'AppleClang', 'ARM64')]:
-            with self.subTest(windows=windows, compiler=compiler, architecture=architecture):
-                self.check_policy(windows, compiler, architecture, False)
-
-    def test_port_applies_the_compiler_policy_patch(self):
-        portfile = (self.port / 'portfile.cmake').read_text(encoding='utf-8')
-        github = re.search(r'vcpkg_from_github\((.*?)\n\)', portfile, re.DOTALL).group(1)
-        patches = github.split('PATCHES', 1)[1].split()
-        self.assertEqual(patches.count(self.patch_name), 1)
-
-
-@unittest.skipUnless(CMAKE, 'CMake is required')
-class OnnxInstallPolicy(unittest.TestCase):
-    def check_install(self, *, windows=True, mingw=False, architecture='arm64',
-                      configuration='release', linkage='static', concurrency=None,
-                      serial=False, expected_concurrency=None):
-        port = ROOT / 'cmake/vcpkg-overlay-ports/onnxruntime/portfile.cmake'
-        contents = port.read_text(encoding='utf-8')
-        start = contents.rindex('if(VCPKG_BUILD_TYPE STREQUAL "release" AND '
-                                'VCPKG_LIBRARY_LINKAGE STREQUAL "static")')
-        end = contents.index('vcpkg_cmake_config_fixup(', start)
-        policy = contents[start:end]
-        initial_concurrency = ('unset(VCPKG_CONCURRENCY)' if concurrency is None else
-                               f'set(VCPKG_CONCURRENCY {concurrency})')
-        with tempfile.TemporaryDirectory() as directory:
-            script = Path(directory) / 'install-policy.cmake'
-            script.write_text(f'''
-cmake_minimum_required(VERSION 3.30)
-set(VCPKG_TARGET_IS_WINDOWS {str(windows).upper()})
-set(VCPKG_TARGET_IS_MINGW {str(mingw).upper()})
-set(VCPKG_TARGET_ARCHITECTURE "{architecture}")
-set(VCPKG_BUILD_TYPE "{configuration}")
-set(VCPKG_LIBRARY_LINKAGE "{linkage}")
-{initial_concurrency}
-set(install_calls 0)
-function(vcpkg_cmake_install)
-    math(EXPR calls "${{install_calls}} + 1")
-    set(install_calls "${{calls}}" PARENT_SCOPE)
-    set(install_arguments "${{ARGV}}" PARENT_SCOPE)
-endfunction()
-{policy}
-if(NOT install_calls EQUAL 1)
-    message(FATAL_ERROR "The port must install exactly once")
-endif()
-message(STATUS "INSTALL_ARGUMENTS=${{install_arguments}}")
-if(DEFINED VCPKG_CONCURRENCY)
-    message(STATUS "CONCURRENCY=${{VCPKG_CONCURRENCY}}")
-else()
-    message(STATUS "CONCURRENCY=undefined")
-endif()
-''', encoding='utf-8')
-            result = subprocess.run([CMAKE, '-P', str(script)], capture_output=True,
-                                    text=True, timeout=30)
-            output = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, output)
-            arguments = re.search(r'INSTALL_ARGUMENTS=([^\n]*)', output).group(1)
-            self.assertEqual(arguments, 'DISABLE_PARALLEL' if serial else '', output)
-            actual_concurrency = re.search(r'CONCURRENCY=([^\n]*)', output).group(1)
-            self.assertEqual(actual_concurrency, 'undefined' if expected_concurrency is None
-                             else str(expected_concurrency), output)
-
-    def test_native_arm64_release_install_caps_parallelism_and_preserves_lower_limits(self):
-        for concurrency in (None, 1, 2, 3, 4, 8, 32):
-            with self.subTest(concurrency=concurrency):
-                self.check_install(concurrency=concurrency,
-                                   expected_concurrency=min(concurrency, 4)
-                                   if concurrency is not None else 4)
-
-    def test_other_release_static_targets_keep_serial_install_and_caller_limit(self):
-        for selection in [{'architecture': 'x64'}, {'architecture': 'ARM64EC'},
-                          {'mingw': True}, {'windows': False}]:
-            for concurrency in (None, 2, 12):
-                with self.subTest(selection=selection, concurrency=concurrency):
-                    self.check_install(**selection, concurrency=concurrency, serial=True,
-                                       expected_concurrency=concurrency)
-
-    def test_debug_dynamic_and_multiconfiguration_installs_keep_existing_policy(self):
-        for selection in [{'configuration': 'debug'}, {'linkage': 'dynamic'},
-                          {'configuration': ''}]:
-            for concurrency in (None, 2, 12):
-                with self.subTest(selection=selection, concurrency=concurrency):
-                    self.check_install(**selection, concurrency=concurrency,
-                                       expected_concurrency=concurrency)
 
 
 if __name__ == '__main__':

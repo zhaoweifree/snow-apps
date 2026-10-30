@@ -24,6 +24,7 @@
 #endif
 
 #include "antd_icons.h"
+#include "theme/theme_manager.h"
 #include "widgets/context_menu.h"
 
 #include <QAction>
@@ -50,6 +51,7 @@
 namespace snow_shot::presentation {
 namespace {
 constexpr auto DEFAULT_TRAY_ICON = "default";
+constexpr auto DEFAULT_DARK_TRAY_ICON = "inherit";
 constexpr auto DEFAULT_LEFT_CLICK_ACTION = "screenshot";
 constexpr auto DEFAULT_MIDDLE_CLICK_ACTION = "screenshot_fixed";
 
@@ -519,6 +521,16 @@ class SystemTrayController::Impl {
         QObject::connect(&shortcuts::ShortcutDisplayService::instance(),
                          &shortcuts::ShortcutDisplayService::displayChanged, &q,
                          [this]() { retranslateUi(); });
+        QObject::connect(&adqt::theme::ThemeManager::instance(),
+                         &adqt::theme::ThemeManager::themeChanged, &q, [this]() {
+                             const bool nextDarkTheme =
+                                 adqt::theme::ThemeManager::instance().config().scheme ==
+                                 adqt::theme::ThemeScheme::Dark;
+                             if (darkTheme != nextDarkTheme) {
+                                 darkTheme = nextDarkTheme;
+                                 updateIcon();
+                             }
+                         });
         connectGroupManagerSignals();
     }
 
@@ -922,10 +934,18 @@ class SystemTrayController::Impl {
     }
 
     void updateIcon() {
-        QIcon icon = iconCache.load(customIconPath);
-        QString resolvedSource = customIconPath;
+        const bool dedicatedDarkIcon =
+            darkTheme && darkIconSelection != QString::fromLatin1(DEFAULT_DARK_TRAY_ICON);
+        const QString selection = dedicatedDarkIcon ? darkIconSelection : iconSelection;
+        // Selecting dedicated bundled artwork also opts out of the regular custom image.
+        QString path = dedicatedDarkIcon ? QString() : customIconPath;
+        if (darkTheme && !darkCustomIconPath.trimmed().isEmpty()) {
+            path = darkCustomIconPath;
+        }
+        QIcon icon = iconCache.load(path);
+        QString resolvedSource = path;
         if (icon.isNull()) {
-            resolvedSource = bundledIconResource(iconSelection);
+            resolvedSource = bundledIconResource(selection);
             icon = QIcon(resolvedSource);
         }
         if (icon.isNull()) {
@@ -991,12 +1011,16 @@ class SystemTrayController::Impl {
     QStringList menuOptions;
     QString iconSelection = QString::fromLatin1(DEFAULT_TRAY_ICON);
     QString customIconPath;
+    QString darkIconSelection = QString::fromLatin1(DEFAULT_DARK_TRAY_ICON);
+    QString darkCustomIconPath;
     QString leftClickAction = QString::fromLatin1(DEFAULT_LEFT_CLICK_ACTION);
     QString middleClickAction = QString::fromLatin1(DEFAULT_MIDDLE_CLICK_ACTION);
     int screenshotDelaySeconds = 3;
     BalloonKind lastBalloonKind = BalloonKind::None;
     QString lastBalloonFilePath;
     bool enabled = true;
+    bool darkTheme =
+        adqt::theme::ThemeManager::instance().config().scheme == adqt::theme::ThemeScheme::Dark;
     bool globalShortcutsDisabled = false;
     bool focusedFullscreenSuppressionActive = false;
 };
@@ -1137,6 +1161,33 @@ void SystemTrayController::setCustomIconPath(const QString& path) {
 
 QString SystemTrayController::customIconPath() const {
     return m_impl->customIconPath;
+}
+
+void SystemTrayController::setDarkIconSelection(const QString& selection) {
+    const QString normalized = bundledIconResources().contains(selection)
+                                   ? selection
+                                   : QString::fromLatin1(DEFAULT_DARK_TRAY_ICON);
+    if (m_impl->darkIconSelection == normalized) {
+        return;
+    }
+    m_impl->darkIconSelection = normalized;
+    m_impl->updateIcon();
+}
+
+QString SystemTrayController::darkIconSelection() const {
+    return m_impl->darkIconSelection;
+}
+
+void SystemTrayController::setDarkCustomIconPath(const QString& path) {
+    if (m_impl->darkCustomIconPath == path) {
+        return;
+    }
+    m_impl->darkCustomIconPath = path;
+    m_impl->updateIcon();
+}
+
+QString SystemTrayController::darkCustomIconPath() const {
+    return m_impl->darkCustomIconPath;
 }
 
 void SystemTrayController::setLeftClickAction(const QString& action) {

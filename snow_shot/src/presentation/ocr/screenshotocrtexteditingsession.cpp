@@ -36,6 +36,15 @@ const QString& ScreenshotOcrTextEditingSession::originalText() const {
     return m_originalText;
 }
 
+void ScreenshotOcrTextEditingSession::refreshOriginalText(const QString& text) {
+    if (text == m_originalText)
+        return;
+    const bool unedited = !canUndo() && !canRedo() && this->text() == m_originalText;
+    m_originalText = text;
+    if (unedited)
+        establishHistory(text);
+}
+
 QString ScreenshotOcrTextEditingSession::text() const {
     return m_preserveSource ? m_preservedSource : m_document.toPlainText();
 }

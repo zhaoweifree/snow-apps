@@ -1,6 +1,6 @@
 #include "snow_draw_engine_qt/snow_canvas_image.h"
 #include "snow_canvas_filter_render.h"
-#include "snow_canvas_filter_avx2.h"
+#include "snow_canvas_filter_simd.h"
 #include "snow_canvas_render_diagnostics.h"
 
 #include <QThread>
@@ -374,8 +374,8 @@ bool brightnessRect(const QImage& source, QImage& destination, AlphaView mask,
     const std::size_t jobs = parallelRows(
         pixels.height(), pixels.width(), options.singleThreaded, [&](int begin, int end) {
             const QRect rows(pixels.left(), pixels.top() + begin, pixels.width(), end - begin);
-            if (!options.forceScalar && selectedSimdBackend() == SimdBackend::Avx2 &&
-                detail::brightnessRectAvx2(sourceView, destinationView, mask, maskOrigin, rows,
+            if (!options.forceScalar && selectedSimdBackend() != SimdBackend::Scalar &&
+                detail::brightnessRectSimd(sourceView, destinationView, mask, maskOrigin, rows,
                                            scale, coverage)) {
                 usedSimd.store(true, std::memory_order_relaxed);
                 return;
@@ -405,7 +405,7 @@ bool brightnessRect(const QImage& source, QImage& destination, AlphaView mask,
         auto& diagnostics = const_cast<KernelDiagnostics&>(workspace->diagnostics());
         diagnostics.parallelJobs += jobs;
         if (usedSimd.load(std::memory_order_relaxed)) {
-            diagnostics.backend = SimdBackend::Avx2;
+            diagnostics.backend = selectedSimdBackend();
         }
     }
     return true;
@@ -608,12 +608,12 @@ std::size_t verticalBoxBlur(const QImage& source, QImage& destination, int radiu
 }
 
 std::size_t downsample(const QImage& source, const QRect& sourcePixels, QImage& destination,
-                       int factor, bool singleThreaded, bool useAvx2, bool* avx2Executed) {
+                       int factor, bool singleThreaded, bool useSimd, bool* simdExecuted) {
     std::atomic_bool executed = false;
     if (factor <= 1) {
         const std::size_t jobs = parallelRows(
             destination.height(), destination.width(), singleThreaded, [&](int begin, int end) {
-                if (useAvx2 && sourcePixels == source.rect() &&
+                if (useSimd && sourcePixels == source.rect() &&
                     detail::copyRowsAvx2(view(source), view(destination), begin, end)) {
                     executed.store(true, std::memory_order_relaxed);
                     return;
@@ -628,15 +628,15 @@ std::size_t downsample(const QImage& source, const QRect& sourcePixels, QImage& 
                                 rowBytes);
                 }
             });
-        if (avx2Executed != nullptr) {
-            *avx2Executed = executed.load(std::memory_order_relaxed);
+        if (simdExecuted != nullptr) {
+            *simdExecuted = executed.load(std::memory_order_relaxed);
         }
         return jobs;
     }
     const std::size_t jobs = parallelRows(
         destination.height(), destination.width(), singleThreaded, [&](int begin, int end) {
-            if (useAvx2 &&
-                detail::downsampleFourTapAvx2(view(source), sourcePixels.left(), sourcePixels.top(),
+            if (useSimd &&
+                detail::downsampleFourTapSimd(view(source), sourcePixels.left(), sourcePixels.top(),
                                               sourcePixels.right() + 1, sourcePixels.bottom() + 1,
                                               view(destination), factor, begin, end)) {
                 executed.store(true, std::memory_order_relaxed);
@@ -687,16 +687,16 @@ std::size_t downsample(const QImage& source, const QRect& sourcePixels, QImage& 
                 }
             }
         });
-    if (avx2Executed != nullptr) {
-        *avx2Executed = executed.load(std::memory_order_relaxed);
+    if (simdExecuted != nullptr) {
+        *simdExecuted = executed.load(std::memory_order_relaxed);
     }
     return jobs;
 }
 
 std::size_t downsample(const QImage& source, QImage& destination, int factor, bool singleThreaded,
-                       bool useAvx2, bool* avx2Executed) {
-    return downsample(source, source.rect(), destination, factor, singleThreaded, useAvx2,
-                      avx2Executed);
+                       bool useSimd, bool* simdExecuted) {
+    return downsample(source, source.rect(), destination, factor, singleThreaded, useSimd,
+                      simdExecuted);
 }
 
 struct AxisSample {
@@ -749,7 +749,7 @@ void prepareAxisSamples(std::vector<AxisSample>& samples, int firstCoordinate, i
 
 template <int Factor>
 std::size_t upsampleBilinearImpl(const QImage& source, QImage& destination, bool singleThreaded,
-                                 bool useAvx2, bool* avx2Executed) {
+                                 bool useSimd, bool* simdExecuted) {
     std::vector<AxisSample> xSamples;
     std::vector<AxisSample> ySamples;
     prepareAxisSamples<Factor>(xSamples, 0, destination.width(), source.width());
@@ -792,7 +792,7 @@ std::size_t upsampleBilinearImpl(const QImage& source, QImage& destination, bool
                 const QRgb* const line0 = firstExpanded.data();
                 const QRgb* const line1 = vertical.second == firstSourceRow ? firstExpanded.data()
                                                                             : secondExpanded.data();
-                int x = useAvx2 ? detail::interpolateAndBlendConstantAvx2(line0, line1, output,
+                int x = useSimd ? detail::interpolateAndBlendConstantSimd(line0, line1, output,
                                                                           destination.width(),
                                                                           vertical.weight, 255)
                                 : 0;
@@ -804,14 +804,14 @@ std::size_t upsampleBilinearImpl(const QImage& source, QImage& destination, bool
                 }
             }
         });
-    if (avx2Executed != nullptr && executed.load(std::memory_order_relaxed)) {
-        *avx2Executed = true;
+    if (simdExecuted != nullptr && executed.load(std::memory_order_relaxed)) {
+        *simdExecuted = true;
     }
     return jobs;
 }
 
 std::size_t upsampleBilinear(const QImage& source, QImage& destination, int factor,
-                             bool singleThreaded, bool useAvx2, bool* avx2Executed) {
+                             bool singleThreaded, bool useSimd, bool* simdExecuted) {
     if (factor <= 1) {
         std::memcpy(destination.bits(), source.constBits(),
                     static_cast<std::size_t>(destination.sizeInBytes()));
@@ -819,17 +819,17 @@ std::size_t upsampleBilinear(const QImage& source, QImage& destination, int fact
     }
     switch (factor) {
     case 2:
-        return upsampleBilinearImpl<2>(source, destination, singleThreaded, useAvx2, avx2Executed);
+        return upsampleBilinearImpl<2>(source, destination, singleThreaded, useSimd, simdExecuted);
     case 4:
-        return upsampleBilinearImpl<4>(source, destination, singleThreaded, useAvx2, avx2Executed);
+        return upsampleBilinearImpl<4>(source, destination, singleThreaded, useSimd, simdExecuted);
     case 8:
-        return upsampleBilinearImpl<8>(source, destination, singleThreaded, useAvx2, avx2Executed);
+        return upsampleBilinearImpl<8>(source, destination, singleThreaded, useSimd, simdExecuted);
     case 16:
-        return upsampleBilinearImpl<16>(source, destination, singleThreaded, useAvx2, avx2Executed);
+        return upsampleBilinearImpl<16>(source, destination, singleThreaded, useSimd, simdExecuted);
     case 32:
-        return upsampleBilinearImpl<32>(source, destination, singleThreaded, useAvx2, avx2Executed);
+        return upsampleBilinearImpl<32>(source, destination, singleThreaded, useSimd, simdExecuted);
     default:
-        return upsampleBilinearImpl<64>(source, destination, singleThreaded, useAvx2, avx2Executed);
+        return upsampleBilinearImpl<64>(source, destination, singleThreaded, useSimd, simdExecuted);
     }
 }
 
@@ -838,7 +838,7 @@ std::size_t upsampleBilinearCompositedImpl(const QImage& source, QImage& destina
                                            AlphaView maskView, const QPoint& maskOrigin,
                                            const QRect& destinationPixels,
                                            const QRect& sourcePixels, int constantMix,
-                                           bool singleThreaded, bool useAvx2, bool* avx2Executed) {
+                                           bool singleThreaded, bool useSimd, bool* simdExecuted) {
     const ConstImageView sourceView = view(source);
     const ImageView destinationView = view(destination);
     std::vector<AxisSample> xSamples;
@@ -895,12 +895,12 @@ std::size_t upsampleBilinearCompositedImpl(const QImage& source, QImage& destina
                 const QRgb* const line1 = vertical.second == firstSourceRow ? firstExpanded.data()
                                                                             : secondExpanded.data();
                 int localX = 0;
-                if (useAvx2) {
+                if (useSimd) {
                     localX = alphaLine == nullptr
-                                 ? detail::interpolateAndBlendConstantAvx2(
+                                 ? detail::interpolateAndBlendConstantSimd(
                                        line0, line1, output + destinationPixels.left(),
                                        destinationPixels.width(), vertical.weight, constantMix)
-                                 : detail::interpolateAndBlendMaskedAvx2(
+                                 : detail::interpolateAndBlendMaskedSimd(
                                        line0, line1, output + destinationPixels.left(),
                                        alphaLine + destinationPixels.left() - maskOrigin.x(),
                                        destinationPixels.width(), vertical.weight);
@@ -921,8 +921,8 @@ std::size_t upsampleBilinearCompositedImpl(const QImage& source, QImage& destina
                 }
             }
         });
-    if (avx2Executed != nullptr && executed.load(std::memory_order_relaxed)) {
-        *avx2Executed = true;
+    if (simdExecuted != nullptr && executed.load(std::memory_order_relaxed)) {
+        *simdExecuted = true;
     }
     return jobs;
 }
@@ -930,36 +930,36 @@ std::size_t upsampleBilinearCompositedImpl(const QImage& source, QImage& destina
 std::size_t upsampleBilinearComposited(const QImage& source, QImage& destination, AlphaView mask,
                                        const QPoint& maskOrigin, const QRect& destinationPixels,
                                        const QRect& sourcePixels, int factor, int constantMix,
-                                       bool singleThreaded, bool useAvx2, bool* avx2Executed) {
+                                       bool singleThreaded, bool useSimd, bool* simdExecuted) {
     switch (factor) {
     case 1:
         return upsampleBilinearCompositedImpl<1>(source, destination, mask, maskOrigin,
                                                  destinationPixels, sourcePixels, constantMix,
-                                                 singleThreaded, useAvx2, avx2Executed);
+                                                 singleThreaded, useSimd, simdExecuted);
     case 2:
         return upsampleBilinearCompositedImpl<2>(source, destination, mask, maskOrigin,
                                                  destinationPixels, sourcePixels, constantMix,
-                                                 singleThreaded, useAvx2, avx2Executed);
+                                                 singleThreaded, useSimd, simdExecuted);
     case 4:
         return upsampleBilinearCompositedImpl<4>(source, destination, mask, maskOrigin,
                                                  destinationPixels, sourcePixels, constantMix,
-                                                 singleThreaded, useAvx2, avx2Executed);
+                                                 singleThreaded, useSimd, simdExecuted);
     case 8:
         return upsampleBilinearCompositedImpl<8>(source, destination, mask, maskOrigin,
                                                  destinationPixels, sourcePixels, constantMix,
-                                                 singleThreaded, useAvx2, avx2Executed);
+                                                 singleThreaded, useSimd, simdExecuted);
     case 16:
         return upsampleBilinearCompositedImpl<16>(source, destination, mask, maskOrigin,
                                                   destinationPixels, sourcePixels, constantMix,
-                                                  singleThreaded, useAvx2, avx2Executed);
+                                                  singleThreaded, useSimd, simdExecuted);
     case 32:
         return upsampleBilinearCompositedImpl<32>(source, destination, mask, maskOrigin,
                                                   destinationPixels, sourcePixels, constantMix,
-                                                  singleThreaded, useAvx2, avx2Executed);
+                                                  singleThreaded, useSimd, simdExecuted);
     default:
         return upsampleBilinearCompositedImpl<64>(source, destination, mask, maskOrigin,
                                                   destinationPixels, sourcePixels, constantMix,
-                                                  singleThreaded, useAvx2, avx2Executed);
+                                                  singleThreaded, useSimd, simdExecuted);
     }
 }
 
@@ -1020,7 +1020,7 @@ bool blur(QImage& image, const Parameters& parameters, RenderWorkspace& workspac
     const bool instrument = snow_canvas_render_diagnostics::isEnabled();
     KernelDiagnostics& diagnostics = const_cast<KernelDiagnostics&>(workspace.diagnostics());
     diagnostics.adaptiveBlurFactor = factor;
-    const bool useAvx2 = !options.forceScalar && selectedSimdBackend() == SimdBackend::Avx2;
+    const bool useSimd = !options.forceScalar && selectedSimdBackend() != SimdBackend::Scalar;
     if (factor == 1) {
         QImage& scratch = workspace.argbScratchB(image.size(), image.devicePixelRatio());
         if (scratch.isNull()) {
@@ -1049,11 +1049,11 @@ bool blur(QImage& image, const Parameters& parameters, RenderWorkspace& workspac
     if (a.isNull() || b.isNull()) {
         return false;
     }
-    bool downsampleAvx2Executed = false;
-    bool reconstructionAvx2Executed = false;
+    bool downsampleSimdExecuted = false;
+    bool reconstructionSimdExecuted = false;
     measureStage(instrument, diagnostics.downsampleNanoseconds, [&] {
         diagnostics.parallelJobs +=
-            downsample(image, a, factor, options.singleThreaded, useAvx2, &downsampleAvx2Executed);
+            downsample(image, a, factor, options.singleThreaded, useSimd, &downsampleSimdExecuted);
     });
     diagnostics.copiedBytes +=
         static_cast<std::size_t>(image.sizeInBytes()) + static_cast<std::size_t>(a.sizeInBytes());
@@ -1074,18 +1074,30 @@ bool blur(QImage& image, const Parameters& parameters, RenderWorkspace& workspac
     });
     measureStage(instrument, diagnostics.reconstructionNanoseconds, [&] {
         diagnostics.parallelJobs += upsampleBilinear(a, image, factor, options.singleThreaded,
-                                                     useAvx2, &reconstructionAvx2Executed);
+                                                     useSimd, &reconstructionSimdExecuted);
     });
     diagnostics.copiedBytes += static_cast<std::size_t>(image.sizeInBytes());
-    if (downsampleAvx2Executed) {
-        ++diagnostics.gaussianDownsampleAvx2Executions;
+    if (downsampleSimdExecuted) {
+        if (selectedSimdBackend() == SimdBackend::Neon) {
+            ++diagnostics.gaussianDownsampleNeonExecutions;
+        } else {
+            ++diagnostics.gaussianDownsampleAvx2Executions;
+        }
     }
-    if (reconstructionAvx2Executed) {
-        ++diagnostics.gaussianReconstructionAvx2Executions;
+    if (reconstructionSimdExecuted) {
+        if (selectedSimdBackend() == SimdBackend::Neon) {
+            ++diagnostics.gaussianReconstructionNeonExecutions;
+        } else {
+            ++diagnostics.gaussianReconstructionAvx2Executions;
+        }
     }
-    if (downsampleAvx2Executed || reconstructionAvx2Executed) {
-        ++diagnostics.gaussianAvx2Executions;
-        diagnostics.backend = SimdBackend::Avx2;
+    if (downsampleSimdExecuted || reconstructionSimdExecuted) {
+        if (selectedSimdBackend() == SimdBackend::Neon) {
+            ++diagnostics.gaussianNeonExecutions;
+        } else {
+            ++diagnostics.gaussianAvx2Executions;
+        }
+        diagnostics.backend = selectedSimdBackend();
     }
     return true;
 }
@@ -1134,13 +1146,13 @@ bool blurMasked(const QImage& source, QImage& destination, AlphaView mask, const
     KernelDiagnostics& diagnostics = const_cast<KernelDiagnostics&>(workspace.diagnostics());
     diagnostics.adaptiveBlurFactor = factor;
     const bool instrument = snow_canvas_render_diagnostics::isEnabled();
-    bool downsampleAvx2Executed = false;
-    bool reconstructionAvx2Executed = false;
-    const bool useAvx2 = !options.forceScalar && selectedSimdBackend() == SimdBackend::Avx2;
+    bool downsampleSimdExecuted = false;
+    bool reconstructionSimdExecuted = false;
+    const bool useSimd = !options.forceScalar && selectedSimdBackend() != SimdBackend::Scalar;
     measureStage(instrument, diagnostics.downsampleNanoseconds, [&] {
         diagnostics.parallelJobs +=
-            downsample(source, sourcePixels, a, factor, options.singleThreaded, useAvx2,
-                       &downsampleAvx2Executed);
+            downsample(source, sourcePixels, a, factor, options.singleThreaded, useSimd,
+                       &downsampleSimdExecuted);
     });
     diagnostics.copiedBytes += static_cast<std::size_t>(sourcePixels.width()) *
                                    static_cast<std::size_t>(sourcePixels.height()) * sizeof(QRgb) +
@@ -1164,22 +1176,34 @@ bool blurMasked(const QImage& source, QImage& destination, AlphaView mask, const
             diagnostics.parallelJobs += upsampleBilinearComposited(
                 a, destination, mask, maskOrigin, rect,
                 sourcePixels.translated(-destinationOriginInSource), factor, constantMix,
-                options.singleThreaded, useAvx2, &reconstructionAvx2Executed);
+                options.singleThreaded, useSimd, &reconstructionSimdExecuted);
         }
     });
     for (const QRect& rect : destinationRegion) {
         diagnostics.copiedBytes += static_cast<std::size_t>(rect.width()) *
                                    static_cast<std::size_t>(rect.height()) * sizeof(QRgb);
     }
-    if (downsampleAvx2Executed) {
-        ++diagnostics.gaussianDownsampleAvx2Executions;
+    if (downsampleSimdExecuted) {
+        if (selectedSimdBackend() == SimdBackend::Neon) {
+            ++diagnostics.gaussianDownsampleNeonExecutions;
+        } else {
+            ++diagnostics.gaussianDownsampleAvx2Executions;
+        }
     }
-    if (reconstructionAvx2Executed) {
-        ++diagnostics.gaussianReconstructionAvx2Executions;
+    if (reconstructionSimdExecuted) {
+        if (selectedSimdBackend() == SimdBackend::Neon) {
+            ++diagnostics.gaussianReconstructionNeonExecutions;
+        } else {
+            ++diagnostics.gaussianReconstructionAvx2Executions;
+        }
     }
-    if (downsampleAvx2Executed || reconstructionAvx2Executed) {
-        ++diagnostics.gaussianAvx2Executions;
-        diagnostics.backend = SimdBackend::Avx2;
+    if (downsampleSimdExecuted || reconstructionSimdExecuted) {
+        if (selectedSimdBackend() == SimdBackend::Neon) {
+            ++diagnostics.gaussianNeonExecutions;
+        } else {
+            ++diagnostics.gaussianAvx2Executions;
+        }
+        diagnostics.backend = selectedSimdBackend();
     }
     return true;
 }
@@ -1216,9 +1240,9 @@ std::size_t colorEffect(QImage& image, std::uint32_t type, int mix, bool singleT
     const ImageView imageView = view(image);
     const std::size_t jobs =
         parallelRows(image.height(), image.width(), singleThreaded, [&](int begin, int end) {
-            if (!forceScalar && selectedSimdBackend() == SimdBackend::Avx2) {
-                const bool executed = type == 2 ? detail::grayscaleAvx2(imageView, begin, end, mix)
-                                                : detail::invertAvx2(imageView, begin, end, mix);
+            if (!forceScalar && selectedSimdBackend() != SimdBackend::Scalar) {
+                const bool executed = type == 2 ? detail::grayscaleSimd(imageView, begin, end, mix)
+                                                : detail::invertSimd(imageView, begin, end, mix);
                 if (executed) {
                     simdExecuted.store(true, std::memory_order_relaxed);
                     return;
@@ -1252,13 +1276,13 @@ std::size_t colorEffectRect(const QImage& source, QImage& destination, const QRe
     std::atomic_bool simdExecuted{false};
     const std::size_t jobs =
         parallelRows(pixels.height(), pixels.width(), singleThreaded, [&](int begin, int end) {
-            if (!forceScalar && selectedSimdBackend() == SimdBackend::Avx2) {
+            if (!forceScalar && selectedSimdBackend() != SimdBackend::Scalar) {
                 const bool executed =
                     type == 2
-                        ? detail::grayscaleRectAvx2(sourceView, destinationView, pixels.left(),
+                        ? detail::grayscaleRectSimd(sourceView, destinationView, pixels.left(),
                                                     pixels.top() + begin, pixels.right() + 1,
                                                     pixels.top() + end, mix)
-                        : detail::invertRectAvx2(sourceView, destinationView, pixels.left(),
+                        : detail::invertRectSimd(sourceView, destinationView, pixels.left(),
                                                  pixels.top() + begin, pixels.right() + 1,
                                                  pixels.top() + end, mix);
                 if (executed) {
@@ -1333,6 +1357,7 @@ QImage& RenderWorkspace::ensureImage(QImage& image, PoolEntry*& entry, int lease
             }
             m_diagnostics.allocatedBytes += static_cast<std::size_t>(storage.sizeInBytes());
             m_pool.push_back(PoolEntry{std::move(storage), format, ++m_poolClock, lease});
+            m_diagnostics.peakPoolBytes = std::max(m_diagnostics.peakPoolBytes, retainedBytes());
             entry = &m_pool.back();
         } else {
             entry = &*found;
@@ -1384,6 +1409,7 @@ snow::memory::PixelArray<QRgb>& RenderWorkspace::mosaicSampleScratch(std::size_t
         m_mosaicSamples.reserve(count);
         m_diagnostics.allocatedBytes +=
             (m_mosaicSamples.capacity() - previousCapacity) * sizeof(QRgb);
+        m_diagnostics.peakPoolBytes = std::max(m_diagnostics.peakPoolBytes, retainedBytes());
     } else {
         ++m_diagnostics.scratchReuseCount;
     }
@@ -1455,6 +1481,7 @@ const KernelDiagnostics& RenderWorkspace::diagnostics() const {
 }
 void RenderWorkspace::resetDiagnostics() {
     m_diagnostics = {};
+    m_diagnostics.peakPoolBytes = retainedBytes();
 }
 
 std::size_t RenderWorkspace::retainedBytes() const {
@@ -1483,7 +1510,9 @@ AlphaView alphaView(const QImage& image) {
 
 SimdBackend selectedSimdBackend() {
     static const SimdBackend backend = [] {
-#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#if defined(Q_PROCESSOR_ARM_64)
+        return SimdBackend::Neon;
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
         int registers[4]{};
         __cpuid(registers, 1);
         const bool osxsave = (registers[2] & (1 << 27)) != 0;
@@ -1503,7 +1532,15 @@ SimdBackend selectedSimdBackend() {
 }
 
 const char* simdBackendName(SimdBackend backend) {
-    return backend == SimdBackend::Avx2 ? "avx2" : "scalar";
+    switch (backend) {
+    case SimdBackend::Avx2:
+        return "avx2";
+    case SimdBackend::Neon:
+        return "neon";
+    case SimdBackend::Scalar:
+        return "scalar";
+    }
+    return "scalar";
 }
 
 int samplingRadiusPixels(const Parameters& parameters) {
@@ -1563,7 +1600,7 @@ void apply(QImage& image, const Parameters& parameters, RenderWorkspace* workspa
             colorEffect(image, parameters.type, normalizedStrengthMix(parameters.strength),
                         options.singleThreaded, options.forceScalar, &usedSimd);
         if (usedSimd) {
-            diagnostics.backend = SimdBackend::Avx2;
+            diagnostics.backend = selectedSimdBackend();
         }
         break;
     }
@@ -1714,14 +1751,14 @@ bool applyMasked(const QImage& source, QImage& destination, const QImage& mask,
     const std::size_t jobs = parallelRows(
         pixels.height(), pixels.width(), options.singleThreaded, [&](int begin, int end) {
             if (colorEffectType && !options.forceScalar &&
-                selectedSimdBackend() == SimdBackend::Avx2) {
+                selectedSimdBackend() != SimdBackend::Scalar) {
                 const bool executed =
                     parameters.type == 2
-                        ? detail::grayscaleMaskedAvx2(
+                        ? detail::grayscaleMaskedSimd(
                               sourceView, destinationView, maskView, maskOriginPixels.x(),
                               maskOriginPixels.y(), pixels.left(), pixels.top() + begin,
                               pixels.right() + 1, pixels.top() + end, strengthMix)
-                        : detail::invertMaskedAvx2(
+                        : detail::invertMaskedSimd(
                               sourceView, destinationView, maskView, maskOriginPixels.x(),
                               maskOriginPixels.y(), pixels.left(), pixels.top() + begin,
                               pixels.right() + 1, pixels.top() + end, strengthMix);
@@ -1754,7 +1791,7 @@ bool applyMasked(const QImage& source, QImage& destination, const QImage& mask,
         });
     diagnostics.parallelJobs += jobs;
     if (simdExecuted.load(std::memory_order_relaxed)) {
-        diagnostics.backend = SimdBackend::Avx2;
+        diagnostics.backend = selectedSimdBackend();
     }
     if (workspace == nullptr) {
         localWorkspace.finishFrame(true);
@@ -1950,8 +1987,8 @@ bool applyMaskedSparse(const QImage& source, QImage& destination, const QImage& 
         }
 
         bool simdExecuted = false;
-        const bool useAvx2 =
-            colorEffectType && !options.forceScalar && selectedSimdBackend() == SimdBackend::Avx2;
+        const bool useSimd =
+            colorEffectType && !options.forceScalar && selectedSimdBackend() != SimdBackend::Scalar;
         for (const MaskSpan& span : spans) {
             if (span.y < pixels.top() || span.y > pixels.bottom()) {
                 continue;
@@ -1961,13 +1998,13 @@ bool applyMaskedSparse(const QImage& source, QImage& destination, const QImage& 
             if (begin >= end) {
                 continue;
             }
-            if (useAvx2) {
+            if (useSimd) {
                 const bool executed =
                     parameters.type == 2
-                        ? detail::grayscaleMaskedAvx2(sourceView, destinationView, maskView,
+                        ? detail::grayscaleMaskedSimd(sourceView, destinationView, maskView,
                                                       maskOriginPixels.x(), maskOriginPixels.y(),
                                                       begin, span.y, end, span.y + 1, strengthMix)
-                        : detail::invertMaskedAvx2(sourceView, destinationView, maskView,
+                        : detail::invertMaskedSimd(sourceView, destinationView, maskView,
                                                    maskOriginPixels.x(), maskOriginPixels.y(),
                                                    begin, span.y, end, span.y + 1, strengthMix);
                 if (executed) {
@@ -1993,7 +2030,7 @@ bool applyMaskedSparse(const QImage& source, QImage& destination, const QImage& 
             }
         }
         if (simdExecuted) {
-            diagnostics.backend = SimdBackend::Avx2;
+            diagnostics.backend = selectedSimdBackend();
         }
         if (workspace == nullptr) {
             localWorkspace.finishFrame(true);
@@ -2057,7 +2094,7 @@ bool applyRect(const QImage& source, QImage& destination, const QRect& destinati
             colorEffectRect(source, destination, pixels, parameters.type, mix,
                             options.singleThreaded, options.forceScalar, &usedSimd);
         if (usedSimd) {
-            diagnostics.backend = SimdBackend::Avx2;
+            diagnostics.backend = selectedSimdBackend();
         }
     }
     if (workspace == nullptr) {
@@ -2127,7 +2164,7 @@ bool applyRegion(const QImage& source, QImage& destination, const QRegion& desti
                                 options.singleThreaded, options.forceScalar, &usedSimd);
         }
         if (usedSimd) {
-            diagnostics.backend = SimdBackend::Avx2;
+            diagnostics.backend = selectedSimdBackend();
         }
     }
     if (workspace == nullptr) {

@@ -95,6 +95,37 @@ mod tests {
     use snow_cursor::CursorShapeState;
     use std::collections::HashSet;
 
+    #[test]
+    fn custom_crosshair_is_stored_as_alpha_pixels_and_deduplicated_across_transitions() {
+        let custom = snow_cursor::crosshair_cursor_shape(32, 32).unwrap();
+        let sample = AttachedCursorSample {
+            x: 100,
+            y: 200,
+            visible: true,
+            shape: CursorShapeState::Embedded(custom.clone()),
+        };
+        let mut processor = CursorProcessor::new();
+        processor.record_frame(0, &sample);
+        processor.record_frame(10, &sample);
+        let arrow = sample_with_shape(1);
+        processor.record_frame(20, &arrow);
+        processor.record_frame(30, &sample);
+        let store = processor.into_mouse_store();
+        assert_eq!(store.cursor_shapes.len(), 2);
+        assert_eq!(store.cursor_frames.len(), 3);
+        let stored = &store.cursor_shapes[0];
+        assert_eq!(stored.shape_id, custom.shape_id.get());
+        assert_eq!(stored.mode, CursorShapeCompositionMode::AlphaBlend);
+        assert_eq!((stored.hotspot_x, stored.hotspot_y), (16, 16));
+        assert_eq!((stored.width, stored.height), (32, 32));
+        assert_eq!(stored.shape_rgba, custom.shape_rgba.as_ref());
+        assert_eq!(store.cursor_frames[2].shape_id, Some(custom.shape_id.get()));
+        assert_eq!(
+            (store.cursor_frames[2].x, store.cursor_frames[2].y),
+            (100, 200)
+        );
+    }
+
     fn sample_with_shape(shape_id: u64) -> AttachedCursorSample {
         AttachedCursorSample {
             x: 100,

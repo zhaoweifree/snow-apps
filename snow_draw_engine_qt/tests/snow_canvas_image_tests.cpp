@@ -362,8 +362,11 @@ void requireRgbaRowsEquivalent(const QImage& source, int firstRow, int rowCount,
     const QImage reference = source.copy();
     const auto originalPalette = source.colorTable();
     const QImage expected =
-        target.isValid() ? reference.convertedToColorSpace(target, QImage::Format_RGBA8888, flags)
-                         : reference.convertToFormat(QImage::Format_RGBA8888, flags);
+        target.isValid() && reference.pixelFormat().premultiplied() == QPixelFormat::Premultiplied
+            ? reference.convertedToColorSpace(target).convertToFormat(QImage::Format_RGBA8888,
+                                                                      flags)
+        : target.isValid() ? reference.convertedToColorSpace(target, QImage::Format_RGBA8888, flags)
+                           : reference.convertToFormat(QImage::Format_RGBA8888, flags);
     require(!expected.isNull(), "row reference must convert");
     const qsizetype rowBytes = qsizetype(source.width()) * 4;
     const qsizetype stride = rowBytes + 23;
@@ -416,10 +419,49 @@ void requireRgbaRowsEquivalent(const QImage& source, int firstRow, int rowCount,
             "row conversion must accept a destination ending at the last pixel");
 }
 
+void colorConvertedPremultipliedRowsKeepStraightAlpha() {
+    for (const auto format :
+         {QImage::Format_ARGB32_Premultiplied, QImage::Format_RGBA8888_Premultiplied,
+          QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA16FPx4_Premultiplied,
+          QImage::Format_RGBA32FPx4_Premultiplied}) {
+        QImage source(257, 129, format);
+        source.fill(QColor(190, 40, 20, 110));
+        source.setColorSpace(QColorSpace::DisplayP3);
+        const auto key = source.cacheKey();
+        const auto native = source.copy().convertedToColorSpace(QColorSpace::SRgb);
+        QImage rows(source.size(), QImage::Format_RGBA8888);
+        require(snowCanvasCopyRgba8888Rows(source, 0, source.height(), rows.bits(),
+                                           rows.sizeInBytes(), rows.bytesPerLine(),
+                                           QColorSpace::SRgb),
+                "bounded ICC rows must support all premultiplied storage precisions");
+        require(rows.pixelColor(0, 0).red() > rows.pixelColor(0, 0).alpha(),
+                "converted RGBA row channels must contain straight color rather than alpha twice");
+        QImage expected(1, 1, QImage::Format_RGB32);
+        QImage actual(1, 1, QImage::Format_RGB32);
+        expected.fill(Qt::white);
+        actual.fill(Qt::white);
+        {
+            QPainter painter(&expected);
+            painter.drawImage(QPoint{}, native);
+        }
+        {
+            QPainter painter(&actual);
+            painter.drawImage(QPoint{}, rows);
+        }
+        const auto before = expected.pixelColor(0, 0);
+        const auto after = actual.pixelColor(0, 0);
+        require(std::abs(before.red() - after.red()) <= 1 &&
+                    std::abs(before.green() - after.green()) <= 1 &&
+                    std::abs(before.blue() - after.blue()) <= 1 && source.cacheKey() == key,
+                "ICC row painting must preserve native precision, alpha and immutable originals");
+        requireRgbaRowsEquivalent(source, 1, source.height() - 2, QColorSpace::SRgb);
+    }
+}
+
 void borrowedRgbaRowsMatchQt() {
-    const QImage small = alphaFixture(QSize(65, 41));
+    const QImage smallFixture = alphaFixture(QSize(65, 41));
     for (int index = 1; index < QImage::NImageFormats; ++index) {
-        const QImage source = small.convertToFormat(static_cast<QImage::Format>(index));
+        const QImage source = smallFixture.convertToFormat(static_cast<QImage::Format>(index));
         require(!source.isNull(), "row format fixture must convert");
         requireRgbaRowsEquivalent(source, 3, 31);
     }
@@ -437,20 +479,21 @@ void borrowedRgbaRowsMatchQt() {
     }
     const auto dither =
         Qt::ImageConversionFlags(Qt::PreferDither | Qt::OrderedDither | Qt::OrderedAlphaDither);
-    requireRgbaRowsEquivalent(small, 7, 23, {}, dither);
-    requireRgbaRowsEquivalent(small, 7, 23, QColorSpace::SRgb, dither);
-    const QImage indexed = small.convertToFormat(QImage::Format_Indexed8);
+    requireRgbaRowsEquivalent(smallFixture, 7, 23, {}, dither);
+    requireRgbaRowsEquivalent(smallFixture, 7, 23, QColorSpace::SRgb, dither);
+    const QImage indexed = smallFixture.convertToFormat(QImage::Format_Indexed8);
     requireRgbaRowsEquivalent(indexed, 7, 23, QColorSpace::SRgb, dither);
 
-    const qsizetype paddedStride = small.bytesPerLine() + 32;
-    std::vector<uchar> storage(static_cast<std::size_t>(paddedStride * small.height()), 0x5a);
-    for (int y = 0; y < small.height(); ++y)
-        std::memcpy(storage.data() + qsizetype(y) * paddedStride, small.constScanLine(y),
-                    static_cast<std::size_t>(small.width()) * 4);
+    const qsizetype paddedStride = smallFixture.bytesPerLine() + 32;
+    std::vector<uchar> storage(static_cast<std::size_t>(paddedStride * smallFixture.height()),
+                               0x5a);
+    for (int y = 0; y < smallFixture.height(); ++y)
+        std::memcpy(storage.data() + qsizetype(y) * paddedStride, smallFixture.constScanLine(y),
+                    static_cast<std::size_t>(smallFixture.width()) * 4);
     const auto original = storage;
-    QImage readOnly(static_cast<const uchar*>(storage.data()), small.width(), small.height(),
-                    paddedStride, small.format());
-    readOnly.setColorSpace(small.colorSpace());
+    QImage readOnly(static_cast<const uchar*>(storage.data()), smallFixture.width(),
+                    smallFixture.height(), paddedStride, smallFixture.format());
+    readOnly.setColorSpace(smallFixture.colorSpace());
     requireRgbaRowsEquivalent(readOnly, 3, 29, QColorSpace::SRgb);
     require(storage == original, "row conversion must not modify a padded read-only source");
 }
@@ -542,7 +585,7 @@ QImage nativeColorResult(const QImage& source, QImage::Format format,
 }
 
 void formatsAndAlphaBoundariesMatchQt() {
-    const QImage small = alphaFixture(QSize(257, 129));
+    const QImage smallFixture = alphaFixture(QSize(257, 129));
     const std::array formats{QImage::Format_Mono,
                              QImage::Format_MonoLSB,
                              QImage::Format_Indexed8,
@@ -571,7 +614,7 @@ void formatsAndAlphaBoundariesMatchQt() {
                              QImage::Format_RGBA32FPx4_Premultiplied,
                              QImage::Format_CMYK8888};
     for (const auto format : formats) {
-        const QImage source = small.convertToFormat(format);
+        const QImage source = smallFixture.convertToFormat(format);
         require(!source.isNull(), "format fixture must convert");
         requireEquivalent(snowCanvasCopyImage(source), source.copy(),
                           "whole-image copies must retain all pixel formats");
@@ -681,10 +724,10 @@ void arbitraryRotationsMatchQt() {
         require(source == original && source.constBits() == pixels,
                 "arbitrary rotation must leave source pixels and storage unchanged");
     }
-    const QImage small = alphaFixture(QSize(257, 129));
+    const QImage smallFixture = alphaFixture(QSize(257, 129));
     for (const auto mode : {Qt::FastTransformation, Qt::SmoothTransformation})
-        requireEquivalent(snowCanvasTransformImage(small, QTransform().rotate(-17), mode),
-                          small.transformed(QTransform().rotate(-17), mode),
+        requireEquivalent(snowCanvasTransformImage(smallFixture, QTransform().rotate(-17), mode),
+                          smallFixture.transformed(QTransform().rotate(-17), mode),
                           "small arbitrary rotations must initialize transparent corners");
 
     QImage large = snowCanvasAllocateImage(QSize(3840, 2160), QImage::Format_RGBA8888);
@@ -808,6 +851,7 @@ int main() {
     rasterOperationsPreservePixelsAndReleasePages();
     pixelArraysReleaseOriginalCapacity();
     zeroedImagesInitializePixelsAndPadding();
+    colorConvertedPremultipliedRowsKeepStraightAlpha();
     borrowedRgbaRowsMatchQt();
     borrowedRgbaRowsRejectInvalidBoundsAndAliasing();
     formatsAndAlphaBoundariesMatchQt();

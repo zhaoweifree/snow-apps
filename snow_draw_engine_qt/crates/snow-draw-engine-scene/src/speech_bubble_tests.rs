@@ -7,6 +7,9 @@ use snow_draw_engine_document::{
 
 fn bubble(shape: HighlightShape) -> SpeechBubbleData {
     let mut value = SpeechBubbleData::new(RectangleData {
+        text_element_id: None,
+        stroke_rendering_style: Default::default(),
+        stroke_rendering_seed: 0,
         rectangle_kind: RectangleElementKind::Rectangle,
         highlight_shape: shape,
         center: Point::default(),

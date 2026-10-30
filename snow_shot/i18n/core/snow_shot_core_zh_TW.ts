@@ -528,6 +528,10 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>無效的標註快速鍵</translation>
         </message>
         <message>
+            <source>Invalid context menu access key</source>
+            <translation>無效的右鍵選單存取鍵</translation>
+        </message>
+        <message>
             <source>Invalid global shortcut</source>
             <translation>無效的全域快速鍵</translation>
         </message>
@@ -586,6 +590,10 @@ so every moment on screen can be expressed clearly and shared easily.</source>
         <message>
             <source>Unsupported key</source>
             <translation>不支援的按鍵</translation>
+        </message>
+        <message>
+            <source>Use one letter (A–Z) or digit (0–9) without modifier keys</source>
+            <translation>請使用一個字母（A–Z）或數字（0–9），不要使用修飾鍵</translation>
         </message>
     </context>
     <context>
@@ -846,8 +854,8 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>取消</translation>
         </message>
         <message>
-            <source>Could not open the selected image file: %1</source>
-            <translation>無法開啟所選影像檔案：%1</translation>
+            <source>Could not open the selected file: %1</source>
+            <translation>無法開啟所選檔案：%1</translation>
         </message>
         <message>
             <source>Could not pin selected files</source>
@@ -882,8 +890,8 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>Snow Shot 將關閉並重新啟動以安裝更新。是否繼續？</translation>
         </message>
         <message>
-            <source>The selected image file path is invalid</source>
-            <translation>所選影像檔案的路徑無效</translation>
+            <source>The selected file path is invalid</source>
+            <translation>所選檔案的路徑無效</translation>
         </message>
         <message>
             <source>Your settings could not be saved. Please retry before updating.</source>

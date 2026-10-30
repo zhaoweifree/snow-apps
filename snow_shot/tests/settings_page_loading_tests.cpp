@@ -7,7 +7,10 @@
 #include "snow_shot/presentation/languagemanager.h"
 #include "snow_shot/presentation/settings/settingsbackend.h"
 #include "snow_shot/presentation/settings/settingsruntimesession.h"
+#include "snow_shot/presentation/settings/settingsformfield.h"
+#include "widgets/modal.h"
 #include "snow_shot/presentation/styles/thememanager.h"
+#include "snow_shot/presentation/screenshotclipboardcontent.h"
 #include "snow_shot/storage/applicationstorage.h"
 #include "widgets/scroll_area.h"
 #include "widgets/color_picker.h"
@@ -21,23 +24,31 @@
 #include "widgets/checkbox.h"
 #include "snow_shot/presentation/components/sectionheaderwidget.h"
 #include "snow_shot/storage/configurationschema.h"
+#include "snow_shot/storage/settingsadapters.h"
+#include "snow_shot/presentation/components/shortcutkeyrow.h"
 
 #include <QApplication>
 #include <QDir>
 #include <QEvent>
 #include <QFontDatabase>
+#include <QFileDialog>
 #include <QKeyEvent>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
+#include <QVBoxLayout>
 #include <QMap>
 #include <QProxyStyle>
 #include <QResizeEvent>
 #include <QPixmap>
+#include <QPalette>
 #include <QPointer>
 #include <QScrollBar>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QTimer>
+#include <QToolButton>
+#include <QtTest/QTest>
 #include <QTranslator>
 
 #include <cstdlib>
@@ -568,6 +579,149 @@ class TestTranslator final : public QTranslator {
     }
 };
 
+void variableDescriptionLinks(const settings::SettingsRegistry& registry,
+                              settings::SettingsRuntimeSession& session) {
+    class HelpTranslator final : public QTranslator {
+      public:
+        bool isEmpty() const override {
+            return false;
+        }
+        QString translate(const char* context, const char* source, const char*,
+                          int) const override {
+            return qstrcmp(context, "SettingsVariableHelp") == 0
+                       ? QStringLiteral("Translated: ") + QString::fromUtf8(source)
+                       : QString();
+        }
+    } translator;
+    QWidget owner;
+    auto* layout = new QVBoxLayout(&owner);
+    owner.resize(880, 760);
+    const QStringList ids{QStringLiteral("screenshot-output.image-save-directory"),
+                          QStringLiteral("screen-recording-output.video-save-directory"),
+                          QStringLiteral("screenshot-output.manual-filename-format"),
+                          QStringLiteral("screenshot-output.auto-filename-format"),
+                          QStringLiteral("screen-recording-output.video-filename-format")};
+    QVector<settings::SettingsFormField*> fields;
+    for (const QString& id : ids) {
+        const auto* descriptor = registry.field(id);
+        require(descriptor != nullptr, "variable-capable settings must be registered");
+        snow_shot::presentation::components::form_fields::Options options;
+        options.parent = &owner;
+        options.presentation =
+            snow_shot::presentation::components::form_fields::Presentation::SettingsRow;
+        auto* field = settings::SettingsFormField::create(*descriptor, session, options);
+        require(field != nullptr && field->controller()->metadata().descriptionAction.isValid(),
+                "all five supported settings must provide a description action");
+        fields.push_back(field);
+        layout->addWidget(field->viewWidget());
+    }
+    owner.show();
+    drainEvents();
+    QTemporaryDir browseDirectory;
+    const QString pathTemplate = browseDirectory.filePath(QStringLiteral("{AN}/{WN}/{'resolved'}"));
+    const QString resolved = browseDirectory.filePath(QStringLiteral("Unknown/Unknown/resolved"));
+    require(browseDirectory.isValid() && QDir().mkpath(resolved), "browse fixture must exist");
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+    for (auto* field : {fields.at(0), fields.at(1)}) {
+        auto* path = qobject_cast<DirectoryPathInput*>(field->editor());
+        require(path != nullptr, "image and recording directories must expose path editors");
+        path->setText(pathTemplate);
+        bool inspectedPicker = false;
+        QTimer::singleShot(0, &owner, [&] {
+            for (auto* widget : QApplication::topLevelWidgets()) {
+                if (auto* dialog = qobject_cast<QFileDialog*>(widget)) {
+                    require(dialog->directory().absolutePath() == resolved,
+                            "directory picker resolves window variables without recording context");
+                    inspectedPicker = true;
+                    dialog->reject();
+                }
+            }
+        });
+        path->browseButton()->click();
+        require(inspectedPicker && path->text() == pathTemplate,
+                "canceling the directory picker must preserve the stored template");
+    }
+    for (auto* field : fields) {
+        auto* description =
+            field->viewWidget()->findChild<QLabel*>(QStringLiteral("formFieldDescription"));
+        require(description && description->wordWrap() &&
+                    description->text().endsWith(QStringLiteral("Variable Description</a>")) &&
+                    description->textInteractionFlags().testFlag(Qt::LinksAccessibleByKeyboard) &&
+                    !field->editor()->accessibleDescription().contains(QStringLiteral("<a")),
+                "help must follow the description and remain accessible without exposing markup");
+        description->setFocus(Qt::TabFocusReason);
+        QTest::keyClick(description, Qt::Key_Return);
+        drainEvents();
+        auto* modal = field->viewWidget()->findChild<adqt::widgets::AdModal*>(
+            QStringLiteral("settingsVariableDescriptionModal"));
+        require(modal && modal->isOpen() && modal->centered() &&
+                    modal->standardButtons() == adqt::widgets::AdModal::StandardButton::Ok &&
+                    modal->text().startsWith(QStringLiteral("{YYYY}: Current time")),
+                "keyboard activation must open a centered modal with the variable description and "
+                "one button");
+        require(modal->text().contains(QStringLiteral("{AN}: Application Name")) &&
+                    modal->text().contains(QStringLiteral("{WN}: Window Name")) &&
+                    !modal->text().contains(QStringLiteral("Unknown")),
+                "window variable help must be available for screenshot and recording templates");
+        const QString snapshot = qEnvironmentVariable("SNOW_VARIABLE_HELP_SNAPSHOT");
+        if (field == fields.constFirst() && !snapshot.isEmpty())
+            require(owner.grab().save(snapshot), "help modal snapshot must save");
+        require(QCoreApplication::installTranslator(&translator), "help translator must install");
+        drainEvents();
+        require(
+            modal->windowTitle() == QStringLiteral("Translated: Variable Description") &&
+                modal->text().startsWith(QStringLiteral("Translated: {YYYY}: Current time")) &&
+                description->text().contains(QStringLiteral("Translated: Variable Description")),
+            "open modal and inline link must follow language changes");
+        QCoreApplication::removeTranslator(&translator);
+        drainEvents();
+        modal->acceptButton()->click();
+        drainEvents();
+        require(!field->viewWidget()->findChild<adqt::widgets::AdModal*>(
+                    QStringLiteral("settingsVariableDescriptionModal")),
+                "accepting help must release the modal");
+    }
+    auto* first = fields.constFirst();
+    auto* firstDescription =
+        first->viewWidget()->findChild<QLabel*>(QStringLiteral("formFieldDescription"));
+    firstDescription->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(firstDescription, Qt::Key_Return);
+    drainEvents();
+    auto* modal = first->viewWidget()->findChild<adqt::widgets::AdModal*>(
+        QStringLiteral("settingsVariableDescriptionModal"));
+    require(modal && modal->isOpen(), "help must reopen after dismissal");
+    owner.activateWindow();
+    require(QTest::qWaitForWindowActive(&owner),
+            "help owner must be active for keyboard shortcuts");
+    modal->acceptButton()->setFocus(Qt::TabFocusReason);
+    drainEvents();
+    require(modal->acceptButton()->hasFocus(), "help accept button must receive keyboard focus");
+    QTest::keyClick(modal->acceptButton(), Qt::Key_Escape);
+    drainEvents();
+    require(!first->viewWidget()->findChild<adqt::widgets::AdModal*>(
+                QStringLiteral("settingsVariableDescriptionModal")),
+            "Escape must dismiss help");
+    firstDescription->setFocus(Qt::TabFocusReason);
+    QTest::keyClick(firstDescription, Qt::Key_Return);
+    drainEvents();
+    modal = first->viewWidget()->findChild<adqt::widgets::AdModal*>(
+        QStringLiteral("settingsVariableDescriptionModal"));
+    require(modal && modal->isOpen(), "help must reopen after Escape");
+    modal->closeButton()->click();
+    drainEvents();
+    require(!first->viewWidget()->findChild<adqt::widgets::AdModal*>(
+                QStringLiteral("settingsVariableDescriptionModal")),
+            "close button must dismiss help");
+    owner.resize(560, 760);
+    drainEvents();
+    for (auto* field : fields) {
+        auto* description =
+            field->viewWidget()->findChild<QLabel*>(QStringLiteral("formFieldDescription"));
+        require(description->height() >= description->heightForWidth(description->width()),
+                "wrapped descriptions must receive their required height");
+    }
+}
+
 void deferredStateAndKeyboard(const settings::SettingsRegistry& registry,
                               settings::SettingsRuntimeSession& session) {
     SettingsPageWidget page(registry, QStringLiteral("desktop-tools"), session);
@@ -697,6 +851,148 @@ bool hasSelectableOption(const QAbstractItemModel* model) {
         }
     }
     return false;
+}
+
+void pinnedTextColorsFollowApplicationPalette(const settings::SettingsRegistry& registry,
+                                              settings::SettingsRuntimeSession& session) {
+    namespace storage = snow_shot::storage;
+    using snow_shot::presentation::styles::ThemeMode;
+    auto& theme = snow_shot::presentation::styles::ThemeManager::instance();
+    const auto originalMode = theme.themeMode();
+    theme.setThemeMode(ThemeMode::FollowSystem);
+    const QPalette originalPalette = QApplication::palette();
+    require(session.reset(settings::SettingsSectionReset::PinTextStyle),
+            "start with theme-derived pinned text colors");
+    drainEvents();
+
+    SettingsPageWidget page(registry, QStringLiteral("pinned-windows"), session);
+    page.resize(880, 760);
+    page.show();
+    page.reveal({page.pageId(), QStringLiteral("pin-to-screen-text-style"),
+                 QStringLiteral("pin-to-screen.text-background-color")});
+    drainEvents();
+    auto* foreground = page.findChild<adqt::widgets::AdColorPicker*>(
+        QStringLiteral("settings-control-pin-to-screen-text-color"));
+    auto* background = page.findChild<adqt::widgets::AdColorPicker*>(
+        QStringLiteral("settings-control-pin-to-screen-text-background-color"));
+    require(foreground && background, "both pinned text color controls are materialized");
+    const auto verifyColors = [&](const QColor& text, const QColor& base) {
+        require(session.colorValue(settings::SettingsColorBinding::PinTextColor) == text &&
+                    session.colorValue(settings::SettingsColorBinding::PinTextBackgroundColor) ==
+                        base &&
+                    foreground->value().solidColor == text &&
+                    background->value().solidColor == base,
+                "session, swatches and pickers resolve the same current text colors");
+        const auto captured = ScreenshotClipboardContentReader::capturePinnedTextStyle();
+        require(captured.textColor == text && captured.backgroundColor == base,
+                "new pin snapshots use the colors shown in settings");
+        for (const auto binding : {settings::SettingsColorBinding::PinTextColor,
+                                   settings::SettingsColorBinding::PinTextBackgroundColor}) {
+            const auto state = session.state(registry.fieldForColor(binding)->id);
+            require(!state.dirty && !state.busy && !state.conflicted && state.error.isEmpty() &&
+                        state.phase == settings::SettingsWritePhase::Clean,
+                    "palette changes refresh clean fields without creating pending edits");
+        }
+        require(theme.themeMode() == ThemeMode::FollowSystem &&
+                    session.selectValue(settings::SettingsSelectBinding::Theme) ==
+                        QStringLiteral("system"),
+                "palette changes refresh colors without changing the selected theme mode");
+    };
+    const auto changePalette = [&](const QColor& text, const QColor& base) {
+        QPalette palette = originalPalette;
+        palette.setColor(QPalette::Text, text);
+        palette.setColor(QPalette::Base, base);
+        QApplication::setPalette(palette);
+    };
+    const storage::PinToScreenSettings stored;
+    foreground->setPopupVisible(true);
+    drainEvents();
+    const QColor lightText(20, 30, 40), lightBase(240, 245, 250);
+    changePalette(lightText, lightBase);
+    drainEvents();
+    verifyColors(lightText, lightBase);
+    require(foreground->state()->editableColor() == lightText,
+            "an already-open color editor follows the new palette");
+    foreground->setPopupVisible(false);
+    const auto existingPinStyle = ScreenshotClipboardContentReader::capturePinnedTextStyle();
+    const QColor darkText(220, 225, 230), darkBase(10, 15, 20);
+    changePalette(QColor(Qt::red), QColor(Qt::blue));
+    changePalette(darkText, darkBase);
+    drainEvents();
+    verifyColors(darkText, darkBase);
+    require(!stored.textColor().isValid() && !stored.textBackgroundColor().isValid() &&
+                existingPinStyle.textColor == lightText &&
+                existingPinStyle.backgroundColor == lightBase,
+            "refresh keeps system defaults implicit and existing pin snapshots unchanged");
+
+    const QColor explicitText(170, 20, 80, 128), explicitBase(10, 30, 60, 64);
+    require(session.applyColorValue(settings::SettingsColorBinding::PinTextColor, explicitText),
+            "customize only the pinned text foreground");
+    drainEvents();
+    changePalette(lightText, lightBase);
+    drainEvents();
+    verifyColors(explicitText, lightBase);
+    require(session.applyColorValue(settings::SettingsColorBinding::PinTextBackgroundColor,
+                                    explicitBase),
+            "customize the pinned text background");
+    drainEvents();
+    changePalette(darkText, darkBase);
+    drainEvents();
+    verifyColors(explicitText, explicitBase);
+    require(stored.textColor() == explicitText && stored.textBackgroundColor() == explicitBase,
+            "palette changes retain both explicit RGBA preferences");
+    require(session.reset(settings::SettingsSectionReset::PinTextStyle),
+            "reset customized text colors to the current theme");
+    drainEvents();
+    verifyColors(darkText, darkBase);
+    changePalette(lightText, lightBase);
+    drainEvents();
+    verifyColors(lightText, lightBase);
+
+    theme.setThemeMode(originalMode);
+    QApplication::setPalette(originalPalette);
+    drainEvents();
+}
+
+void pinnedTextFontControl(const settings::SettingsRegistry& registry,
+                           settings::SettingsRuntimeSession& session) {
+    SettingsPageWidget page(registry, QStringLiteral("pinned-windows"), session);
+    page.resize(880, 760);
+    page.show();
+    page.reveal({page.pageId(), QStringLiteral("pin-to-screen-text-style"),
+                 QStringLiteral("pin-to-screen.text-font-family")});
+    drainEvents();
+    auto* font = page.findChild<adqt::widgets::AdSelect*>(
+        QStringLiteral("settings-control-pin-to-screen-text-font-family"));
+    require(font && font->model()->rowCount() == 1 && font->currentValue().toString().isEmpty(),
+            "pinned font selector starts lazy at System default");
+    font->showPopup();
+    drainEvents();
+    font->hidePopup();
+    require(font->model()->rowCount() > 1, "pinned font popup loads installed families");
+    const QString unavailable = QStringLiteral("Snow Shot Missing Pin Font");
+    require(session.applySelectValue(settings::SettingsSelectBinding::PinTextFont, unavailable),
+            "save unavailable pin font");
+    drainEvents();
+    require(font->currentValue().toString() == unavailable && font->currentText() == unavailable,
+            "pinned font selector displays an unavailable saved family");
+    require(session.applySelectValue(settings::SettingsSelectBinding::PinTextFont, QString()),
+            "restore System default");
+    TestTranslator translator;
+    QCoreApplication::installTranslator(&translator);
+    drainEvents();
+    require(font->currentValue().toString().isEmpty() &&
+                font->currentText().startsWith(QStringLiteral("Translated: ")),
+            "language changes preserve and retranslate pinned System default");
+    QCoreApplication::removeTranslator(&translator);
+    drainEvents();
+    const QString snapshots = qEnvironmentVariable("SNOW_PIN_TEXT_STYLE_SNAPSHOT");
+    if (!snapshots.isEmpty()) {
+        page.reveal({page.pageId(), QStringLiteral("pin-to-screen-text-style"),
+                     QStringLiteral("pin-to-screen.text-background-color")});
+        drainEvents();
+        require(page.grab().save(snapshots), "save pinned Text Style preview");
+    }
 }
 
 void fontPreviewAndFiltering(const settings::SettingsRegistry& registry,
@@ -997,6 +1293,92 @@ void unchangedPresentation(const settings::SettingsRegistry& registry,
     require(select->model() == model, "identical options must retain the selector model");
 }
 
+class SettingsTestShortcutBackend final : public snow_shot::presentation::GlobalShortcutBackend {
+  public:
+    void setActivationHandler(ActivationHandler) override {}
+    snow_shot::presentation::GlobalShortcutValidationResult
+    validateShortcut(const snow_shot::shortcuts::ShortcutBinding& binding) const override {
+        return {binding.portableText, true,
+                snow_shot::presentation::GlobalShortcutFailureReason::None, binding};
+    }
+    snow_shot::presentation::GlobalShortcutBackendResult
+    registerShortcut(int, const snow_shot::shortcuts::ShortcutBinding&) override {
+        return {true, snow_shot::presentation::GlobalShortcutFailureReason::None, 0};
+    }
+    void unregisterShortcut(int) override {}
+};
+
+void selectedImagesSettings(const settings::SettingsRegistry& registry) {
+    using namespace snow_shot::presentation;
+    constexpr auto action = GlobalShortcutAction::StitchSelectedImages;
+    GlobalShortcutManager shortcuts(std::make_unique<SettingsTestShortcutBackend>(), nullptr,
+                                    [] { return false; });
+    settings::BuiltInSettingsBackend backend(shortcuts);
+    settings::SettingsRuntimeSession session(registry, backend);
+    SettingsPageWidget page(registry, QStringLiteral("global-hotkeys"), session);
+    page.resize(880, 760);
+    page.show();
+    page.reveal({QStringLiteral("global-hotkeys"), QStringLiteral("other"),
+                 QStringLiteral("quick.stitch-selected-images")});
+    drainEvents();
+    auto* stitch = page.findChild<ShortcutKeyRow*>(
+        QStringLiteral("settings-item-quick-stitch-selected-images"));
+    auto* canvas =
+        page.findChild<ShortcutKeyRow*>(QStringLiteral("settings-item-quick-global-canvas"));
+    auto* split = page.findChild<ShortcutKeyRow*>(
+        QStringLiteral("settings-item-quick-split-selected-images"));
+    require(
+        stitch && canvas && split &&
+            stitch->mapTo(&page, QPoint()).y() > canvas->mapTo(&page, QPoint()).y() &&
+            split->mapTo(&page, QPoint()).y() > stitch->mapTo(&page, QPoint()).y() &&
+            session.shortcutState(action).shortcuts.isEmpty() &&
+            session.shortcutState(GlobalShortcutAction::SplitSelectedImages).shortcuts.isEmpty(),
+        "unassigned stitching and splitting actions materialize in order below the canvas");
+    int commands = 0;
+    auto expectedAction = action;
+    QObject::connect(&page, &SettingsPageWidget::commandRequested, &page,
+                     [&](const settings::SettingsCommand& command) {
+                         require(command.kind ==
+                                         settings::SettingsCommandKind::ExecuteQuickAction &&
+                                     command.shortcutAction == expectedAction,
+                                 "the selected-image row dispatches its own action");
+                         ++commands;
+                     });
+    require(QMetaObject::invokeMethod(stitch, "clicked", Qt::DirectConnection) && commands == 1,
+            "the stitching row runs without an assigned key");
+    expectedAction = GlobalShortcutAction::SplitSelectedImages;
+    require(QMetaObject::invokeMethod(split, "clicked", Qt::DirectConnection) && commands == 2,
+            "the splitting row runs without an assigned key");
+    const snow_shot::shortcuts::ShortcutBindingList bindings{QStringLiteral("Ctrl+Alt+F8"),
+                                                             QStringLiteral("Ctrl+Alt+F9")};
+    const snow_shot::storage::ShortcutSettings stored;
+    const auto screenshot = stored.screenshot();
+    const snow_shot::shortcuts::ShortcutBindingList splitBindings{QStringLiteral("Ctrl+Alt+F10"),
+                                                                  QStringLiteral("Ctrl+Alt+F11")};
+    require(session.applyShortcuts(action, bindings) && stored.stitchSelectedImages() == bindings &&
+                session.applyShortcuts(GlobalShortcutAction::SplitSelectedImages, splitBindings) &&
+                stored.splitSelectedImages() == splitBindings &&
+                session.reset(settings::SettingsSectionReset::OtherShortcuts) &&
+                stored.stitchSelectedImages().isEmpty() && stored.splitSelectedImages().isEmpty() &&
+                stored.screenshot() == screenshot,
+            "Other reset clears stitching and splitting keys and preserves screenshot keys");
+    auto& languages = LanguageManager::instance();
+    for (const auto* locale : {"zh_CN", "zh_TW"}) {
+        require(languages.setLanguage(QString::fromLatin1(locale)),
+                "switch stitching row language");
+        page.retranslateUi();
+        drainEvents();
+        require(stitch->accessibleName() ==
+                        QCoreApplication::translate("SettingsCatalog", "Stitch Selected Images") &&
+                    stitch->accessibleName() != QStringLiteral("Stitch Selected Images") &&
+                    split->accessibleName() ==
+                        QCoreApplication::translate("SettingsCatalog", "Split Selected Images") &&
+                    split->accessibleName() != QStringLiteral("Split Selected Images"),
+                "both selected-image actions retranslate in both Chinese catalogs");
+    }
+    require(languages.setLanguage(QStringLiteral("en_US")), "restore settings test language");
+}
+
 void skinControlsCommitAndRetranslate(const settings::SettingsRegistry& registry,
                                       settings::SettingsRuntimeSession& session) {
     SettingsPageWidget page(registry, QStringLiteral("general-appearance"), session);
@@ -1291,12 +1673,12 @@ void pinnedSettingsGroups(const settings::SettingsRegistry& registry,
         const QStringList titles =
             locale == u"en_US"
                 ? QStringList{QStringLiteral("Interaction"), QStringLiteral("Window interface"),
-                              QStringLiteral("Action Toolbar")}
+                              QStringLiteral("Text Style"), QStringLiteral("Action Toolbar")}
             : locale == u"zh_CN"
                 ? QStringList{QString::fromUtf8("操作方式"), QString::fromUtf8("窗口界面"),
-                              QString::fromUtf8("操作工具栏")}
+                              QString::fromUtf8("文本样式"), QString::fromUtf8("操作工具栏")}
                 : QStringList{QString::fromUtf8("操作方式"), QString::fromUtf8("視窗介面"),
-                              QString::fromUtf8("操作工具列")};
+                              QString::fromUtf8("文字樣式"), QString::fromUtf8("操作工具列")};
         const auto& sections = registry.catalog().page(page.pageId())->sections;
         for (qsizetype index = 0; index < sections.size(); ++index) {
             auto* header = page.findChild<SectionHeaderWidget*>(settings::generatedObjectName(
@@ -1444,6 +1826,37 @@ void featureLinksAdvancedControlsAndResets(const settings::SettingsRegistry& reg
             "advanced capture reset preserves cursor visibility");
 #endif
 }
+void catalogResetsPreserveOtherSections(settings::SettingsRuntimeSession& session) {
+    using Reset = settings::SettingsSectionReset;
+    using Schema = snow_shot::storage::ConfigurationSchema;
+    auto& configuration = snow_shot::storage::ApplicationStorage::instance().configuration();
+    const QVector<QPair<Reset, QString>> cases{
+        {Reset::ScreenshotOutput, QStringLiteral("screenshot/image_quality")},
+        {Reset::Tray, QStringLiteral("tray/enabled")},
+        {Reset::ScreenRecordingInteraction,
+         QStringLiteral("screen_recording/notify_after_export_completes")},
+        {Reset::ScreenRecordingOutput, QStringLiteral("screen_recording/video_filename_format")},
+        {Reset::Translation, QStringLiteral("screenshot_translation/original_image_translation")},
+    };
+    const QMap<QString, QJsonValue> customized{
+        {cases[0].second, 37},
+        {cases[1].second, !Schema::defaultValue(cases[1].second).toBool()},
+        {cases[2].second, !Schema::defaultValue(cases[2].second).toBool()},
+        {cases[3].second, QStringLiteral("CustomVideo_{YYYY}")},
+        {cases[4].second, !Schema::defaultValue(cases[4].second).toBool()},
+    };
+    for (const auto& [reset, key] : cases) {
+        require(configuration.setValues(customized), "customize independent settings sections");
+        require(configuration.value(key) != Schema::defaultValue(key),
+                "reset fixture must start with a nondefault setting");
+        require(session.reset(reset), "catalog-backed section reset must succeed");
+        for (const auto& [otherReset, otherKey] : cases)
+            require(configuration.value(otherKey) == (otherReset == reset
+                                                          ? Schema::defaultValue(otherKey)
+                                                          : customized.value(otherKey)),
+                    "a section reset restores its defaults and preserves neighboring sections");
+    }
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1468,6 +1881,26 @@ int main(int argc, char** argv) {
     settings::BuiltInSettingsBackend backend(shortcuts);
     const auto registry = settings::buildBuiltInSettingsRegistry();
     settings::SettingsRuntimeSession session(registry, backend);
+    if (application.arguments().contains(QStringLiteral("--variable-help-only"))) {
+        variableDescriptionLinks(registry, session);
+        storage.shutdown();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--catalog-resets-only"))) {
+        catalogResetsPreserveOtherSections(session);
+        storage.shutdown();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--pinned-text-colors-only"))) {
+        pinnedTextColorsFollowApplicationPalette(registry, session);
+        storage.shutdown();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--stitch-selected-images-only"))) {
+        selectedImagesSettings(registry);
+        storage.shutdown();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--tray-selection-only"))) {
         everyTrayOptionRemainsSelected(registry, session);
         storage.shutdown();
@@ -1500,6 +1933,7 @@ int main(int argc, char** argv) {
     if (application.arguments().contains(QStringLiteral("--selects-only"))) {
         fontPreviewAndFiltering(registry, session);
         multiSettingsSelectsSearch(registry, session);
+        pinnedTextFontControl(registry, session);
         storage.shutdown();
         return 0;
     }
@@ -1509,6 +1943,7 @@ int main(int argc, char** argv) {
     scrollingLoadsSections(registry, session);
     unchangedPresentation(registry, session);
     skinControlsCommitAndRetranslate(registry, session);
+    selectedImagesSettings(registry);
     storage.shutdown();
     return 0;
 }

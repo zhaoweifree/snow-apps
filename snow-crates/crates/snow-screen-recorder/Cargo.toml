@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 snow-recording-model = { path = "../snow-recording-model" }
-snow-recording-runtime = { path = "../snow-recording-runtime" }
+snow-recording-runtime = { path = "../snow-recording-runtime", default-features = false }
 snow-recording-export = { path = "../snow-recording-export" }
 
 [dev-dependencies]
@@ -24,3 +24,11 @@ windows = { workspace = true, features = [
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[features]
+default = ["legacy-capture"]
+legacy-capture = ["snow-recording-runtime/legacy-capture"]
+
+[[example]]
+name = "region_system_audio_mouse"
+required-features = ["legacy-capture"]

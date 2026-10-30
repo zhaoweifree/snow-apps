@@ -8,6 +8,7 @@
 #include <QRectF>
 #include <QString>
 #include "snow_shot/presentation/globalmousetypes.h"
+#include "snow_shot/presentation/screenshotpinnedimagesnapshot.h"
 
 #include <memory>
 #include <functional>
@@ -48,6 +49,7 @@ class ScreenshotController : public QObject {
         RecognizeFormula,
         ConvertMarkdown,
         ConvertHtml,
+        RecognizeTextAndCopy,
     };
     Q_ENUM(CaptureAction)
     [[nodiscard]] bool captureForAction(CaptureAction action);
@@ -55,7 +57,7 @@ class ScreenshotController : public QObject {
     [[nodiscard]] bool
     handleActiveScreenshotShortcut(snow_shot::presentation::GlobalShortcutAction action);
     void pinDroppedContent(ScreenshotClipboardContentSnapshot snapshot, QStringList paths);
-    void pinImageFilesToScreen(QStringList paths);
+    void pinFilesToScreen(QStringList paths);
     explicit ScreenshotController(
         QObject* parent = nullptr,
         snow_shot::presentation::PinnedWindowGroupManager* groupManager = nullptr,
@@ -133,6 +135,8 @@ class ScreenshotController : public QObject {
     void mcpRedoCanvasEdit();
 
   signals:
+    void imageStitchingRequested(const QVector<ScreenshotPinnedImageSnapshot>& snapshots);
+    void imageSplittingRequested(const ScreenshotPinnedImageSnapshot& snapshot);
     void recordingExportNotificationRequested(const QString& path);
     void captureActivityChanged(const QString& source, bool active);
     void selectedFilePinFailed(const QString& message);

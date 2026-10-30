@@ -54,6 +54,19 @@ fn cpu_hdr_kernels() -> Vec<(&'static str, HdrPreparedPixelKernel, bool)> {
         f16::convert_f16_rgba_to_srgb_hdr_scalar_prepared_unchecked,
         false,
     )];
+    #[cfg(target_arch = "aarch64")]
+    kernels.extend([
+        (
+            "NEON",
+            super::simd_arm::convert_hdr as HdrPreparedPixelKernel,
+            false,
+        ),
+        (
+            "NEON opaque",
+            super::simd_arm::convert_hdr_opaque as HdrPreparedPixelKernel,
+            true,
+        ),
+    ]);
     #[cfg(target_arch = "x86_64")]
     {
         use super::simd_x86::*;

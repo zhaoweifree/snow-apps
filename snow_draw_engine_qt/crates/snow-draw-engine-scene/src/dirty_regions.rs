@@ -5,6 +5,73 @@ const DIRTY_REGION_LIMIT: usize = 256;
 const DIRTY_BUCKET_AXIS: usize = 16;
 const UNION_AREA_FACTOR: f64 = 1.5;
 
+/// Pressure contours can change at several separated points of a looping stroke.
+/// Merge only rectangular unions; touching corners must not fill the untouched interior.
+pub(crate) fn finalize_sparse_dirty_regions(
+    regions: Vec<DirtyRegion>,
+    surface: SurfaceSize,
+) -> Vec<DirtyRegion> {
+    if surface.width == 0 || surface.height == 0 {
+        return Vec::new();
+    }
+    let mut clipped = regions
+        .into_iter()
+        .filter_map(|region| clip_dirty_region(region, surface))
+        .collect::<Vec<_>>();
+    if clipped.len() > DIRTY_REGION_LIMIT {
+        let cell_width = surface.width as f64 / DIRTY_BUCKET_AXIS as f64;
+        let cell_height = surface.height as f64 / DIRTY_BUCKET_AXIS as f64;
+        let mut occupied = [false; DIRTY_BUCKET_AXIS * DIRTY_BUCKET_AXIS];
+        for region in clipped {
+            let left = (region.min_x / cell_width).floor() as usize;
+            let top = (region.min_y / cell_height).floor() as usize;
+            let right = (region.max_x / cell_width).ceil() as usize;
+            let bottom = (region.max_y / cell_height).ceil() as usize;
+            for y in top..bottom.min(DIRTY_BUCKET_AXIS) {
+                for x in left..right.min(DIRTY_BUCKET_AXIS) {
+                    occupied[y * DIRTY_BUCKET_AXIS + x] = true;
+                }
+            }
+        }
+        clipped = occupied
+            .into_iter()
+            .enumerate()
+            .filter(|(_, used)| *used)
+            .map(|(index, _)| {
+                let x = index % DIRTY_BUCKET_AXIS;
+                let y = index / DIRTY_BUCKET_AXIS;
+                DirtyRegion::new(
+                    x as f64 * cell_width,
+                    y as f64 * cell_height,
+                    (x + 1) as f64 * cell_width,
+                    (y + 1) as f64 * cell_height,
+                )
+            })
+            .collect();
+    }
+    let mut merged = Vec::new();
+    for mut next in clipped {
+        let mut index = 0;
+        while index < merged.len() {
+            let existing: DirtyRegion = merged[index];
+            let overlap = (existing.max_x.min(next.max_x) - existing.min_x.max(next.min_x))
+                .max(0.0)
+                * (existing.max_y.min(next.max_y) - existing.min_y.max(next.min_y)).max(0.0);
+            let covered = dirty_region_area(existing) + dirty_region_area(next) - overlap;
+            if dirty_regions_touch(existing, next)
+                && dirty_region_area(existing.union(next)) <= covered + 1e-9
+            {
+                next = next.union(merged.swap_remove(index));
+                index = 0;
+            } else {
+                index += 1;
+            }
+        }
+        merged.push(next);
+    }
+    merged
+}
+
 pub(crate) fn finalize_dirty_regions(
     regions: Vec<DirtyRegion>,
     surface: SurfaceSize,
@@ -154,5 +221,44 @@ mod tests {
         let finalized = finalize_dirty_regions(regions, surface());
         assert!(finalized.len() <= DIRTY_REGION_LIMIT);
         assert!(finalized.len() > 1);
+    }
+
+    #[test]
+    fn pressure_sparse_edges_preserve_the_untouched_screen_interior() {
+        let regions = finalize_sparse_dirty_regions(
+            vec![
+                DirtyRegion::new(0.0, 0.0, 1000.0, 12.0),
+                DirtyRegion::new(0.0, 988.0, 1000.0, 1000.0),
+                DirtyRegion::new(0.0, 0.0, 12.0, 1000.0),
+                DirtyRegion::new(988.0, 0.0, 1000.0, 1000.0),
+            ],
+            surface(),
+        );
+        assert_eq!(regions.len(), 4);
+        assert!(regions.iter().all(|region| !(region.min_x < 500.0
+            && region.max_x > 500.0
+            && region.min_y < 500.0
+            && region.max_y > 500.0)));
+        assert!(regions.iter().copied().map(dirty_region_area).sum::<f64>() < 50_000.0);
+    }
+
+    #[test]
+    fn pressure_large_sparse_sets_are_bounded_without_joining_distant_sides() {
+        let regions = (0..400)
+            .map(|index| {
+                let y = (index % 200) as f64 * 4.0;
+                let x = if index < 200 { 5.0 } else { 990.0 };
+                DirtyRegion::new(x, y, x + 4.0, y + 4.0)
+            })
+            .collect();
+        let finalized = finalize_sparse_dirty_regions(regions, surface());
+        assert!(finalized.len() <= DIRTY_REGION_LIMIT);
+        assert!(
+            finalized
+                .iter()
+                .all(|region| region.max_x <= 62.5 || region.min_x >= 937.5)
+        );
+        assert!(finalized.iter().any(|region| region.min_x <= 5.0));
+        assert!(finalized.iter().any(|region| region.max_x >= 994.0));
     }
 }

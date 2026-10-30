@@ -1,6 +1,8 @@
 //! JSON serialization, preview rendering, and crop export.
 
-use crate::error::{Error, Result};
+#[cfg(feature = "file-io")]
+use crate::error::Error;
+use crate::error::Result;
 use crate::grid::{BgrImage, Image};
 use crate::model::Region;
 use std::collections::BTreeMap;
@@ -75,6 +77,7 @@ fn draw_rectangle(image: &mut Image, rect: crate::geometry::Rect, thickness: i32
 }
 
 /// Export exact, unresized PNG slices and an index in detection order.
+#[cfg(feature = "file-io")]
 pub fn write_crops(
     bgr: &BgrImage,
     regions: &[Region],

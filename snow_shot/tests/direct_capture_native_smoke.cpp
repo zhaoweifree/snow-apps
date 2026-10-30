@@ -51,11 +51,14 @@ int main(int argc, char** argv) {
     fixture.show();
     fixture.repaint();
     QTimer::singleShot(0, &app, [&]() {
+        const bool historyEnabled = app.arguments().contains(QStringLiteral("--with-history"));
         DirectCaptureRequest windowRequest;
+        windowRequest.historyEnabled = historyEnabled;
         windowRequest.target = DirectCaptureTarget::FocusedWindow;
         windowRequest.window = fixture.winId();
         const auto window = captureDirectTarget(windowRequest);
         DirectCaptureRequest monitorRequest;
+        monitorRequest.historyEnabled = historyEnabled;
         MONITORINFOEXW monitorInfo{};
         monitorInfo.cbSize = sizeof(monitorInfo);
         const auto nativeMonitor =
@@ -79,10 +82,11 @@ int main(int argc, char** argv) {
                                        monitor.backend == SNOW_CAPTURE_BACKEND_DXGI;
         std::cout << "fixture_pixels=" << pixelsValid << " preferred_backends=" << preferredBackends
                   << '\n';
-        const bool valid = pixelsValid && isConcreteBackend(window.backend) &&
-                           isConcreteBackend(monitor.backend) &&
-                           window.displays.size() == GetSystemMetrics(SM_CMONITORS) &&
-                           monitor.displays.size() == GetSystemMetrics(SM_CMONITORS);
+        const bool valid =
+            pixelsValid && isConcreteBackend(window.backend) &&
+            isConcreteBackend(monitor.backend) &&
+            window.displays.size() == (historyEnabled ? GetSystemMetrics(SM_CMONITORS) : 0) &&
+            monitor.displays.size() == (historyEnabled ? GetSystemMetrics(SM_CMONITORS) : 1);
         std::cout << "retained_displays: window=" << window.displays.size()
                   << " monitor=" << monitor.displays.size() << '\n';
         const bool requirePreferred =

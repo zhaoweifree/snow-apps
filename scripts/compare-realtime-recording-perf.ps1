@@ -22,23 +22,29 @@ param(
     [string]$Scenario = "all-effects",
     [string]$Workload = "continuous",
     [switch]$Audio,
-    [switch]$PreferHardware
+    [switch]$PreferHardware,
+    [ValidateSet("x64", "arm64")][string]$Architecture = "x64"
 )
 
 $ErrorActionPreference = "Stop"
 if (($BaselineAlignCapture -and $BaselineFreeRunningCapture) -or
     ($CandidateAlignCapture -and $CandidateFreeRunningCapture)) { throw 'Choose one pacing override per variant.' }
 if ($StartPair -gt $Pairs) { throw "StartPair cannot exceed Pairs." }
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-Set-SnowBuildEnvironment -Preset windows-msvc-performance | Out-Null
+. (Join-Path $PSScriptRoot "../snow_shot/scripts/performance-environment.ps1")
+$target = Get-SnowPerformanceTarget -Architecture $Architecture -RequireNative
+Set-SnowBuildEnvironment -Preset $target.Preset | Out-Null
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$env:Path = "$(Join-Path $repoRoot '.tools/vcpkg/installed/dynamic/x64-windows/bin');$env:Path"
+$env:Path = "$(Join-Path $target.InstalledRoot "$($target.Triplet)/bin");$env:Path"
 $Baseline = (Resolve-Path -LiteralPath $Baseline).Path
 $Candidate = (Resolve-Path -LiteralPath $Candidate).Path
+Assert-SnowPerformanceExecutable -Path $Baseline -Architecture $Architecture
+Assert-SnowPerformanceExecutable -Path $Candidate -Architecture $Architecture
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $manifest = [ordered]@{
     schema_version = 1
+    architecture = $target.Architecture
+    preset = $target.Preset
     baseline = $Baseline
     baseline_sha256 = (Get-FileHash -LiteralPath $Baseline -Algorithm SHA256).Hash
     candidate = $Candidate

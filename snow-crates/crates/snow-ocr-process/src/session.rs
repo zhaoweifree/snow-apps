@@ -1,5 +1,6 @@
-//! A session has no image ownership. Replacing it drops the previous engine
-//! before invoking the factory, including when creation fails.
+//! A session owns no submitted image. Preparation releases the old engine
+//! before loading; recreation consumes its request and may share immutable
+//! models. Either failure leaves the session empty.
 #[derive(Default)]
 pub struct Session<E> {
     engine: Option<E>,
@@ -17,6 +18,13 @@ impl<E> Session<E> {
     pub fn prepare(&mut self, create: impl FnOnce() -> Option<E>) -> bool {
         self.release();
         self.engine = create();
+        self.engine.is_some()
+    }
+
+    /// Consume the old request so its mutable storage can be dropped while
+    /// sharing only immutable model resources with the replacement.
+    pub fn recreate(&mut self, create: impl FnOnce(E) -> Option<E>) -> bool {
+        self.engine = self.engine.take().and_then(create);
         self.engine.is_some()
     }
 
@@ -65,5 +73,26 @@ mod tests {
         assert!(session.engine().is_none());
         assert!(session.prepare(|| Some(43)));
         assert_eq!(session.engine().as_ref(), Some(&43));
+    }
+
+    #[test]
+    fn recreation_consumes_the_old_request_and_failure_leaves_no_engine() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut session = Session::empty();
+        assert!(!session.recreate(|_: Engine| panic!("empty session cannot be recreated")));
+        assert!(session.prepare(|| Some(Engine(Rc::clone(&events)))));
+        assert!(session.recreate(|previous| {
+            drop(previous);
+            events.borrow_mut().push("recreate");
+            Some(Engine(Rc::clone(&events)))
+        }));
+        assert_eq!(*events.borrow(), ["drop", "recreate"]);
+        assert!(!session.recreate(|previous| {
+            drop(previous);
+            None
+        }));
+        assert!(session.engine().is_none());
+        session.release();
+        assert_eq!(*events.borrow(), ["drop", "recreate", "drop"]);
     }
 }

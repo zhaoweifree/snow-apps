@@ -46,11 +46,14 @@ historySelectionBorderAppearance(const snow_shot::storage::CaptureHistoryRecord&
     auto style = ScreenshotResultCompositor::normalizedStyle({record.selection.cornerRadius,
                                                               record.selection.shadowWidth,
                                                               record.selection.shadowColor,
-                                                              {}, 1.0});
+                                                              {},
+                                                              1.0});
+    style.backgroundOpacityPercent = record.selection.backgroundOpacityPercent;
     if (record.selection.region)
         style.region = record.selection.region->translated(-record.selection.rectangle.topLeft());
     if (!record.selection.rectangle.size().isEmpty() && record.scrolling != true) {
-        return screenshotSelectionBorderAppearance(record.selection.rectangle.size(), style);
+        return screenshotSelectionBorderAppearance(record.selection.rectangle.size(), style,
+                                                   record.selection.layoutCompaction);
     }
     // Scrolling changes the content height, but retains the selection width.
     const qreal scale = record.selection.rectangle.width() > 0
@@ -95,11 +98,16 @@ historySelectionPinPlacement(const snow_shot::storage::CaptureHistoryRecord& rec
     if (!selectionMeetsDesktop(displays, selection, desktop.canvasUsesPoints)) {
         return {};
     }
-    ScreenshotResultStyle style{record.selection.cornerRadius, record.selection.shadowWidth,
-                                record.selection.shadowColor, {}, 1.0};
+    ScreenshotResultStyle style{record.selection.cornerRadius,
+                                record.selection.shadowWidth,
+                                record.selection.shadowColor,
+                                {},
+                                1.0};
+    style.backgroundOpacityPercent = record.selection.backgroundOpacityPercent;
     if (record.selection.region)
         style.region = record.selection.region->translated(-record.selection.rectangle.topLeft());
-    return screenshotSelectionPinRequest(displays, geometry, selection, style);
+    return screenshotSelectionPinRequest(displays, geometry, selection, style,
+                                         record.selection.layoutCompaction);
 }
 
 ScreenshotPinnedSelectionRequest

@@ -50,6 +50,7 @@ class ScreenshotAutoFilterController final : public QObject {
   signals:
     void availabilityChanged(bool available);
     void detectionFailed(const QString& message);
+    void detectionFinished(const QString& error);
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

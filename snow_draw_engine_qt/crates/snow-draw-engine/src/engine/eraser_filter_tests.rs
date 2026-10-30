@@ -19,6 +19,8 @@ fn fixture(tool: ActiveTool) -> (Engine, ViewportId) {
 
 fn pointer(kind: PointerEventType, x: f64, y: f64) -> InputEvent {
     InputEvent::Pointer(PointerEvent {
+        pressure: None,
+        timestamp_ms: 0,
         pointer_id: 1,
         event_type: kind,
         device: PointerDevice::Mouse,

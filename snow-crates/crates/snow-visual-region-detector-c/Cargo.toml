@@ -8,4 +8,4 @@ license.workspace = true
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-visual-region-detector = { path = "../visual-region-detector" }
+visual-region-detector = { path = "../visual-region-detector", default-features = false, features = ["pure-rust"] }

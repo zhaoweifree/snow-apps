@@ -637,6 +637,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn border_fill_is_advertised_for_every_canvas_domain() {
+        let tools = SnowShotMcp::tools();
+        for name in [
+            "snow_shot_screenshot_set_tool_style",
+            "snow_shot_document_set_tool_style",
+            "snow_shot_pinned_edit",
+        ] {
+            let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+            assert_eq!(
+                tool.input_schema["$defs"]["FillStyle"]["enum"],
+                json!(["line", "cross_line", "solid", "border"]),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn eraser_discovery_exposes_tools_and_width_only_style_for_both_domains() {
         let tools = SnowShotMcp::tools();
         for (name, enumeration) in [

@@ -67,6 +67,7 @@ enum class SettingsSelectBinding {
     Theme,
     Language,
     AppFont,
+    PinTextFont,
     ApplicationPriority,
     ApplicationQoS,
     MemoryOptimizationPolicy,
@@ -80,6 +81,7 @@ enum class SettingsSelectBinding {
     ScreenRecordingApiMode,
     WindowElementApi,
     ScreenshotToolbarSize,
+    SelectionTransitionAnimation,
     OcrFillStyle,
     OcrDefaultFormatting,
     OcrDefaultPunctuation,
@@ -130,10 +132,8 @@ enum class SettingsSwitchBinding {
     HistoryKeepPermanently,
     PinnedHistoryKeepPermanently,
     SmartSelection,
-    DirectMlAcceleration,
     OcrResidentProcess,
     OcrModelHotStart,
-    SelectionTransitionAnimation,
     ScreenshotAreaTypeHint,
     ShowGuidesByDefault,
     ShowEditSelectionToolbar,
@@ -156,6 +156,7 @@ enum class SettingsSwitchBinding {
     PinShowWindowButtons,
     PinShowBorderByDefault,
     PinShowShadowByDefault,
+    PinExitAnnotationModeBeforeClosing,
     PinConfirmBeforeClosingWindow,
     PinConfirmBeforeDestroyingWindow,
     OriginalImageTranslation,
@@ -165,6 +166,7 @@ enum class SettingsSwitchBinding {
     SeparateRecordingAudioTracks,
     LoopAnimatedImages,
     ScreenRecordingCaptureToolbar,
+    ScreenRecordingAutoHideToolbar,
     ScreenRecordingAutoExitAfterRecordingEnds,
     ScreenRecordingNotifyAfterExportCompletes,
     ScreenRecordingDeleteFilesOnRecordingClose,
@@ -181,6 +183,8 @@ struct SettingsSwitchDefinition {
 };
 
 enum class SettingsIntegerBinding {
+    PinTextMaximumWidth,
+    PinTextFontSize,
     HistoryRetentionDays,
     PinnedHistoryRetentionDays,
     HistoryMaxEntries,
@@ -188,6 +192,7 @@ enum class SettingsIntegerBinding {
     HistoryMaxDiskMiB,
     PinnedHistoryMaxDiskMiB,
     ScreenshotDelaySeconds,
+    TranslationLanguageDetectionConfidenceThreshold,
 };
 
 enum class SettingsMultiSelectBinding {
@@ -217,6 +222,8 @@ enum class SettingsSliderBinding {
     SkinOpacity,
     SkinBlurLevel,
     SkinMaskOpacity,
+    PinMouseWheelOpacityStep,
+    PinMouseWheelZoomStep,
 };
 
 struct SettingsSliderDefinition {
@@ -225,6 +232,8 @@ struct SettingsSliderDefinition {
 };
 
 enum class SettingsColorBinding {
+    PinTextColor,
+    PinTextBackgroundColor,
     ThemePrimaryColor,
     SelectionBorderColor,
     SelectionMaskColor,
@@ -258,6 +267,7 @@ struct SettingsColorPaletteDefinition {
 
 enum class SettingsRadioBinding {
     TrayIcon,
+    TrayDarkIcon,
 };
 
 struct SettingsRadioOptionDefinition {
@@ -273,6 +283,7 @@ struct SettingsRadioDefinition {
 
 enum class SettingsFilePathBinding {
     TrayCustomIcon,
+    TrayDarkCustomIcon,
     SkinPath,
     ToolbarSkinPath,
     TrayMenuSkinPath,
@@ -330,12 +341,14 @@ enum class SettingsLocalShortcutScope {
     Drawing,
     PinToScreen,
     ScreenRecording,
+    WindowsContextMenu,
 };
 
 struct SettingsLocalShortcutDefinition {
     QString shortcutId;
     std::function<adqt::icons::IconRef()> iconFactory;
     SettingsLocalShortcutScope scope = SettingsLocalShortcutScope::Drawing;
+    int maximumShortcutCount = 2;
 };
 
 enum class SettingsActionBinding {
@@ -490,6 +503,7 @@ enum class SettingsSectionReset {
     ScreenRecordingShortcuts,
     PinToScreen,
     PinToScreenBehavior,
+    PinTextStyle,
     Tray,
     FloatingToolbar,
     ScreenRecording,
@@ -515,6 +529,7 @@ enum class SettingsSectionReset {
     ScreenshotActionToolbar,
     ScreenRecordingActionToolbar,
     ScreenRecordingInteraction,
+    WindowsContextMenuShortcuts,
 };
 
 enum class SettingsSectionItemLayout {

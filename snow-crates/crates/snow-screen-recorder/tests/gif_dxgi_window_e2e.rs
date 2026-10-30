@@ -1,4 +1,4 @@
-#![cfg(target_os = "windows")]
+#![cfg(all(target_os = "windows", feature = "legacy-capture"))]
 //! Bench-style capture end-to-end checks: each test spawns real windows,
 //! records the live desktop through DXGI or Windows Graphics Capture, and
 //! exports GIF/MP4 payloads. They need an interactive desktop with working

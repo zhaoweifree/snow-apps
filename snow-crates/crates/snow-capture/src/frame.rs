@@ -449,6 +449,7 @@ impl Frame {
         height: u32,
         pixel_format: CapturePixelFormat,
     ) -> CaptureResult<()> {
+        crate::admit_raster(width, height)?;
         let len = packed_8bit_len(width, height)?;
         self.data.ensure_len(len);
         self.width = width;
@@ -469,6 +470,7 @@ impl Frame {
         height: u32,
         pixel_format: CapturePixelFormat,
     ) -> CaptureResult<()> {
+        crate::admit_raster(width, height)?;
         let len = packed_8bit_len(width, height)?;
         self.data.prepare_for_overwrite(len);
         self.width = width;

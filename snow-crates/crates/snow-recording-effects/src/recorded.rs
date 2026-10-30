@@ -287,6 +287,7 @@ impl RecordedEffects {
                 scale_point(cursor.x, cursor.y, self.source_size, surface.size()),
                 effects.mouse_highlight_rgba,
                 cfg!(windows) && S::OPAQUE,
+                effects.mouse_highlight_radius,
             );
         }
         self.input_effects
@@ -438,6 +439,40 @@ mod tests {
     fn pixels() -> Vec<u8> {
         [20, 40, 60, 255].repeat(120 * 100)
     }
+    #[test]
+    fn recorded_highlight_uses_configured_output_pixel_radius() {
+        let mut policy = config(PlaybackOverlay::None);
+        policy.effects.mouse_highlight_rgba = [255, 255, 0, 255];
+        policy.effects.mouse_highlight_radius = 8;
+        let mut effects = RecordedEffects::new(policy, (240, 200), None).unwrap();
+        effects
+            .observe(&input(
+                0,
+                0,
+                RecordedInput::Cursor(CursorFrameRecord {
+                    timestamp_ms: 0,
+                    x: 120,
+                    y: 100,
+                    visible: true,
+                    shape_id: None,
+                }),
+            ))
+            .unwrap();
+        let mut output = pixels();
+        effects.apply_rgba(&mut output, frame(0, 0, 0.0)).unwrap();
+        assert_eq!(
+            &output[(50 * 120 + 66) * 4..(50 * 120 + 66) * 4 + 4],
+            &if cfg!(windows) {
+                [20, 40, 0, 255]
+            } else {
+                [255, 255, 0, 255]
+            }
+        );
+        assert_eq!(
+            &output[(50 * 120 + 68) * 4..(50 * 120 + 68) * 4 + 4],
+            &[20, 40, 60, 255]
+        );
+    }
     struct Glyph;
     impl KeycapRasterizer for Glyph {
         fn rasterize(
@@ -482,6 +517,7 @@ mod tests {
                 trail: effects.mouse_trail_rgba,
                 trail_duration_ms: effects.mouse_trail_duration_ms,
                 click: effects.mouse_click_rgba,
+                highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
                 highlight: [0; 4],
                 record_mouse_clicks: false,
                 show_keyboard: true,

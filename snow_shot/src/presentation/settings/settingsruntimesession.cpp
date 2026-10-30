@@ -1355,15 +1355,24 @@ void SettingsRuntimeSession::requestFontOptions() {
     }
     m_fontOptionsLoaded = true;
     m_fontOptions = m_backend.dynamicSelectOptions(SettingsSelectBinding::AppFont);
-    if (const auto* descriptor = descriptorForSelect(SettingsSelectBinding::AppFont)) {
-        refreshOptions(*descriptor);
+    for (const auto binding :
+         {SettingsSelectBinding::AppFont, SettingsSelectBinding::PinTextFont}) {
+        if (const auto* descriptor = descriptorForSelect(binding))
+            refreshOptions(*descriptor);
     }
 }
 
 QVector<SettingsRuntimeOption>
 SettingsRuntimeSession::dynamicSelectOptions(SettingsSelectBinding binding) const {
-    if (binding == SettingsSelectBinding::AppFont) {
-        return m_fontOptions;
+    if (binding == SettingsSelectBinding::AppFont ||
+        binding == SettingsSelectBinding::PinTextFont) {
+        auto options = m_fontOptions;
+        const QString saved = selectValue(binding).toString();
+        if (!saved.isEmpty() &&
+            std::none_of(options.cbegin(), options.cend(),
+                         [&saved](const auto& option) { return option.value == saved; }))
+            options.push_back({saved, saved});
+        return options;
     }
     return m_backend.dynamicSelectOptions(binding);
 }
@@ -1594,6 +1603,18 @@ bool SettingsRuntimeSession::applyLocalShortcuts(SettingsLocalShortcutScope scop
                                                  const QString& shortcutId,
                                                  const shortcuts::ShortcutBindingList& shortcuts) {
     const auto* descriptor = descriptorForLocal(scope, shortcutId);
+    if (descriptor != nullptr && scope == SettingsLocalShortcutScope::WindowsContextMenu) {
+        if (shortcuts.size() > 1)
+            return false;
+        shortcuts::ShortcutBindingList canonical;
+        for (const auto& shortcut : shortcuts) {
+            const auto validation = m_backend.validateLocalShortcut(scope, shortcutId, shortcut);
+            if (!validation.supported)
+                return false;
+            canonical.push_back(validation.binding);
+        }
+        return submitDraft(descriptor->id, shortcutListVariant(canonical));
+    }
     return descriptor != nullptr && submitDraft(descriptor->id, shortcutListVariant(shortcuts));
 }
 

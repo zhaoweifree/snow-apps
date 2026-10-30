@@ -1,6 +1,6 @@
-# OCR protocol 5
+# OCR protocol 6
 
-Runtime 1.0.10 uses a binary stdin/stdout command channel. Diagnostics use stderr.
+Runtime 1.1.0 uses a binary stdin/stdout command channel. Diagnostics use stderr.
 The application and runtime are released together; earlier protocols are incompatible.
 All integers and IEEE-754 floats are little-endian. A string is a `u32` byte
 length followed by UTF-8. Frames have a 20-byte header: `SOCR`, version `u16`,
@@ -8,14 +8,14 @@ kind `u16`, operation ID `u64`, payload size `u32`. Payloads are capped at 1 MiB
 
 | Kind | Name | Operation ID | Payload |
 | --- | --- | --- | --- |
-| 1 | Hello | 0 | Writable capability-cache directory string |
-| 2 | Ready | 0 | Success `u8`, capability `u8` (0), provider string (`unloaded`), runtime version string, protocol `u32` |
+| 1 | Hello | 0 | Empty |
+| 2 | Ready | 0 | Success `u8`, provider string (`unloaded`), runtime version string, protocol `u32` |
 | 3 | Submit image | Recognition token | Mapping generation `u64`, width/height/stride `u32`, transfer sequence `u64` |
 | 4 | Cancel | Recognition token | Empty |
 | 5 | Complete | Recognition token | Recognition result, described below |
 | 6 | Shutdown | 0 | Empty |
 | 7 | ShutdownAck | 0 | Empty |
-| 8 | PrepareSession | Session operation | DirectML requested `u8`, detector resize policy `u8` (0 = max, 1 = min), text detection processing `u8` (0 = accuracy first, 1 = speed first), detector/recognizer/dictionary path strings |
+| 8 | PrepareSession | Session operation | Detector resize policy `u8` (0 = max, 1 = min), text detection processing `u8` (0 = accuracy first, 1 = speed first), detector/recognizer/dictionary path strings |
 | 9 | SessionReady | Session operation | Success `u8` |
 | 10 | ReleaseSession | Session operation | Empty |
 | 11 | SessionReleased | Session operation | Empty |
@@ -34,16 +34,25 @@ can copy the next image during inference. There is at most one active inference
 and one staged, child-owned image. `Recognize` consumes that staged image using
 the currently acknowledged session. The parent decides dispatch order and when
 an idle cycle begins; an empty child command queue alone is not an idle signal.
+Commands and executor completions wake the same event channel; reporting model
+readiness and inference completion does not depend on a polling timeout.
 
-Session replacement drops the previous engine before creating the next one.
-Idle hot start is `ReleaseSession`, acknowledgement, then `PrepareSession` for
-the latest configuration. Session preparation accepts no image. DirectML
-initialization/inference retains the capability cache and CPU fallback policy.
+Session replacement drops the previous request's mutable storage before creating
+the next one. Repeating `PrepareSession` with the same configuration may share
+immutable compiled models, packed weights, dictionary and CPU context. Idle hot
+start detaches the image mapping, then sends `PrepareSession` directly when the
+configuration is unchanged. `ReleaseSession` always drops all model resources;
+configuration changes and disabling hot start still use it. The frame format is
+unchanged, and older protocol-6 workers can satisfy direct preparation by fully
+reloading. Session preparation accepts no image. CPU inference uses simd-paddle-ocr-rs with a
+bounded context and local V6 models, without orientation classification.
+On multi-core workers, detector and recognizer parsing/compilation overlap on
+two bounded tasks. Both are joined before preparation succeeds or fails.
 Text detection processing selects the recognizer input-width floor: accuracy first uses
 320, while speed first uses 48 before the existing 32-pixel width alignment.
-Accuracy first preserves previous recognition behavior and is the default.
-Protocols 4 and 5 are incompatible because PrepareSession adds one byte before
-the model path strings; runtimes must never decode the earlier payload layout.
+Accuracy first is the default. Protocol 6 removes the backend byte from
+PrepareSession, the cache path from Hello, and the capability byte from Ready.
+Older workers are rejected before decoding their incompatible payloads.
 A failed session preparation leaves no usable session and does not exit the
 process. Only real recognition requests receive user-facing errors.
 
@@ -61,7 +70,7 @@ has dropped its mapping. Only then may the parent unmap/delete the file. A new
 mapping receives a new generation, with transfer sequences increasing from 1.
 There is no mapping during warm-up or process-only startup.
 
-Cancellation sets only the corresponding active inference's flag; an ONNX call
+Cancellation sets only the corresponding active inference's flag; an inference call
 already executing may finish. `DiscardImage` removes a canceled staged image.
 The parent suppresses canceled callbacks and waits for physical inference to
 drain before releasing its session. Default-mode final-request cancellation may

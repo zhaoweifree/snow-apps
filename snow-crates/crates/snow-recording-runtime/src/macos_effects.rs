@@ -27,6 +27,7 @@ pub struct NativeEffectsConfig {
     pub keyboard: Option<KeyboardOverlayConfig>,
     pub show_keyboard: bool,
     pub record_mouse_clicks: bool,
+    pub highlight_radius: u32,
     pub highlight_rgba: [u8; 4],
 }
 impl Default for NativeEffectsConfig {
@@ -40,6 +41,7 @@ impl Default for NativeEffectsConfig {
             keyboard: None,
             show_keyboard: false,
             record_mouse_clicks: false,
+            highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
             highlight_rgba: [0; 4],
         }
     }
@@ -65,6 +67,13 @@ impl Effects {
         output: PixelSize,
         cursor_mode: snow_media::CursorMode,
     ) -> Result<Option<Self>> {
+        if !snow_recording_model::render::MOUSE_HIGHLIGHT_RADIUS_RANGE
+            .contains(&config.highlight_radius)
+        {
+            return Err(ScreenRecorderError::InvalidConfig(
+                "mouse highlight radius must be between 8 and 128 pixels".into(),
+            ));
+        }
         let separate = cursor_mode == snow_media::CursorMode::Separate;
         let observing =
             config.clicks || config.trail || config.show_keyboard || config.record_mouse_clicks;
@@ -280,6 +289,7 @@ impl Effects {
                     (x, y),
                     self.config.highlight_rgba,
                     false,
+                    self.config.highlight_radius,
                 );
                 if self.show_cursor {
                     cursor_shape = Some((x, y, shape));

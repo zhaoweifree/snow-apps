@@ -45,6 +45,7 @@ AppPermissions requiredPermissions(GlobalShortcutAction action, bool /*microphon
     case Action::ScreenshotDelay:
     case Action::ScreenshotFixed:
     case Action::ScreenshotOcr:
+    case Action::ScreenshotOcrCopy:
     case Action::ScreenshotTranslation:
     case Action::ScreenshotCopy:
     case Action::ScreenshotSave:
@@ -62,6 +63,8 @@ AppPermissions requiredPermissions(GlobalShortcutAction action, bool /*microphon
     case Action::OpenScreenRecordingFolder:
     case Action::OpenCaptureHistory:
     case Action::GlobalCanvas:
+    case Action::StitchSelectedImages:
+    case Action::SplitSelectedImages:
     case Action::SwitchWindowGroup:
     case Action::OpenPinToScreenManagement:
     case Action::OpenSettings:

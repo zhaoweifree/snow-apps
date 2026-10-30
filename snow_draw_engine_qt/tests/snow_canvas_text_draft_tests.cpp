@@ -330,12 +330,6 @@ void textLayoutMapsDocumentRectsToLocalItemRects() {
     requireNear(localRect.top(), -32.0, "document rect should map y into local item coordinates");
     requireNear(localRect.width(), 10.0, "document rect width should scale to item coordinates");
     requireNear(localRect.height(), 12.0, "document rect height should scale to item coordinates");
-
-    const QRectF contents = snow_canvas_text_layout::documentContentsRect(layout);
-    requireNear(contents.left(), 0.0, "document contents should start at document origin");
-    requireNear(contents.width(), 100.0,
-                "document contents width should be unscaled document width");
-    require(contents.height() > 0.0, "document contents should expose document height");
 }
 
 void resizedAlignedTextKeepsCaretClickAndSelectionGeometryConsistent() {
@@ -4482,9 +4476,9 @@ void drawUncachedTextPhase(QPainter& painter, const SnowSceneDisplayItem& item,
         }
     } else {
         QAbstractTextDocumentLayout::PaintContext context;
-        context.clip = snow_canvas_text_layout::documentContentsRect(layout);
         painter.save();
-        painter.setClipRect(context.clip, Qt::IntersectClip);
+        // Glyphs and outlines may extend past every document edge. Let Qt paint
+        // their complete footprint, independently of the production draw helper.
         document.documentLayout()->draw(&painter, context);
         painter.restore();
     }
@@ -4493,7 +4487,8 @@ void drawUncachedTextPhase(QPainter& painter, const SnowSceneDisplayItem& item,
 
 QImage renderTextCacheSample(const SnowSceneDisplayItem& item, const QFont& font, double zoom,
                              bool cached, bool strips, qreal dpr = 1.0,
-                             const QPointF& position = QPointF(350.0, 220.0)) {
+                             const QPointF& position = QPointF(350.0, 220.0),
+                             const QRegion& exposed = QRegion()) {
     QImage image(QSize(qRound(960 * dpr), qRound(720 * dpr)), QImage::Format_ARGB32_Premultiplied);
     image.setDevicePixelRatio(dpr);
     image.fill(QColor(63, 73, 83));
@@ -4502,6 +4497,9 @@ QImage renderTextCacheSample(const SnowSceneDisplayItem& item, const QFont& font
     painter.setFont(font);
     if (strips) {
         painter.setClipRegion(QRegion(QRect(0, 210, 960, 7)) | QRect(345, 0, 5, 720));
+    }
+    if (!exposed.isEmpty()) {
+        painter.setClipRegion(exposed, Qt::IntersectClip);
     }
     painter.translate(position);
     painter.rotate(item.rotation * 180.0 / 3.14159265358979323846);
@@ -4552,19 +4550,18 @@ void preparedTextLayoutsMatchUncachedPixelsAndTrackPaintInputs() {
         for (const bool strips : {false, true}) {
             const auto beforeReference = renderCacheDiagnosticsForCurrentThread();
             // Qt's first glyph rasterization can differ by a color level from subsequent draws.
-            // Warm it through the original implementation, independently of our retained cache.
+            // Warm it through Qt directly, independently of our retained cache.
             static_cast<void>(renderTextCacheSample(item, font, zoom, false, strips, dpr));
             const auto secondReference =
                 renderTextCacheSample(item, font, zoom, false, strips, dpr);
             const auto reference = renderTextCacheSample(item, font, zoom, false, strips, dpr);
             const auto afterReference = renderCacheDiagnosticsForCurrentThread();
-            require(
-                secondReference == reference,
-                "independent original text rendering must become pixel stable before comparison");
+            require(secondReference == reference,
+                    "independent Qt text rendering must become pixel stable before comparison");
             require(beforeReference.hits == afterReference.hits &&
                         beforeReference.builds == afterReference.builds &&
                         beforeReference.entries == afterReference.entries,
-                    "independent original renders must not access the prepared text cache");
+                    "independent Qt renders must not access the prepared text cache");
             const auto cold = renderTextCacheSample(item, font, zoom, true, strips, dpr);
             const auto beforeWarm = renderCacheDiagnosticsForCurrentThread();
             const auto warm = renderTextCacheSample(item, font, zoom, true, strips, dpr);
@@ -4580,7 +4577,7 @@ void preparedTextLayoutsMatchUncachedPixelsAndTrackPaintInputs() {
                           << ", coldWarm=" << (cold == warm) << '\n';
             }
             require(cold == reference && warm == reference,
-                    "cold and retained text layouts must match original uncached pixels exactly");
+                    "cold and retained text layouts must match unclipped Qt pixels exactly");
             require(afterWarm.builds == beforeWarm.builds && afterWarm.hits == beforeWarm.hits + 3,
                     "guide-only repaints must reuse every prepared text phase");
         }
@@ -4623,6 +4620,50 @@ void preparedTextLayoutsMatchUncachedPixelsAndTrackPaintInputs() {
     verify(changed, baseFont, 1.0);
     changed.stroke_width = 48.0;
     verify(changed, bold, 1.0);
+    changed = base;
+    snow_canvas_text::copyTextToSceneItem(changed, QStringLiteral("Wj\nMW"));
+    changed.font_size = 31.5;
+    changed.text_italic = 1;
+    const auto measured = snow_canvas_text_layout::measureNaturalTextLayout(
+        snow_canvas_text::textFromSceneItem(changed), baseFont, changed);
+    changed.width = measured.layout.width();
+    changed.height = measured.layout.height();
+    changed.content_width = measured.content.width();
+    changed.content_height = measured.content.height();
+    changed.text_ink_reserve = snow_canvas_text_layout::measureGraphemeMetrics(
+                                   snow_canvas_text::textFromSceneItem(changed), baseFont, changed)
+                                   .inkReserve;
+    for (const auto alignment : {SNOW_TEXT_HORIZONTAL_ALIGN_LEFT, SNOW_TEXT_HORIZONTAL_ALIGN_CENTER,
+                                 SNOW_TEXT_HORIZONTAL_ALIGN_RIGHT}) {
+        changed.text_horizontal_align = alignment;
+        for (double strokeWidth : {16.0, 64.0}) {
+            changed.stroke_width = strokeWidth;
+            for (double rotation : {0.0, 0.31}) {
+                changed.rotation = rotation;
+                verify(changed, baseFont, 0.75);
+                verify(changed, baseFont, 1.25, 1.5);
+                // The engine's stroke-inclusive bounds must cover the full
+                // rasterized outline when used as an actual repaint clip.
+                auto outline = changed;
+                outline.fill.a = 0;
+                outline.text_color.a = 0;
+                const QRectF bounds = textItemCanvasBounds(outline);
+                const QPointF position(350.0, 220.0);
+                const QRectF viewBounds(bounds.topLeft() * 1.25 + position, bounds.size() * 1.25);
+                const QRegion exposed(viewBounds.adjusted(-1.0, -1.0, 1.0, 1.0).toAlignedRect());
+                const auto clipped = renderTextCacheSample(outline, baseFont, 1.25, true, false,
+                                                           1.5, position, exposed);
+                const auto complete =
+                    renderTextCacheSample(outline, baseFont, 1.25, false, false, 1.5);
+                if (clipped != complete) {
+                    std::cerr << "stroke bounds mismatch: align=" << alignment
+                              << ", stroke=" << strokeWidth << ", rotation=" << rotation << '\n';
+                }
+                require(clipped == complete,
+                        "stroke-inclusive dirty bounds must preserve every outline pixel");
+            }
+        }
+    }
     changed = base;
     changed.fill_style = SNOW_FILL_STYLE_CROSS_LINE;
     changed.fill = SnowColorRgba8{50, 200, 80, 160};

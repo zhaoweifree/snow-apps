@@ -198,6 +198,8 @@ are supported. Prompts provide screenshot, background-image, and recording
 workflows, with completion for background-image output formats.
 
 The stdio bridge supports MCP 2026-07-28 per-request discovery.
+It also retains MCP 2025-11-25 for clients using the stdio `initialize` handshake;
+older handshake requests receive that supported version for fallback negotiation.
 `subscriptions/listen` receives coalesced URI invalidations for subscribed
 resources; notifications do not contain image pixels, recognition text, or
 credentials. Subscribe to a job URI to reduce polling, then read it for state.
@@ -277,7 +279,10 @@ refer to existing elements; split creation and operations on returned IDs into
 successive requests.
 
 Styles use RGBA byte arrays (`stroke`, `fill`, `color`), finite dimensions and
-opacity, `stroke_style: solid|dashed|dotted`, `arrow_type: straight|curve|elbow`,
+opacity, `stroke_style: solid|dashed|dotted`,
+`stroke_rendering_style: architect|artist|cartoonist` (rectangle, arrow, line, and
+the outer ring of outlined serial-number circles and squares),
+`arrow_type: straight|curve|elbow`,
 and `filter: mosaic|gaussian_blur|grayscale|inversion|emboss`.
 Other fields are `stroke_width`, `corner_radius`, `rotation`, `font_size`,
 `font_family`, `diameter`, `strength`, and `gap`. Consult `tools/list` for the
@@ -439,3 +444,9 @@ python snow_shot/tests/mcp_live_tests.py `
   build/windows-msvc-debug/snow_shot/Debug/snow_shot.exe `
   build/windows-msvc-debug/cargo/x86_64-pc-windows-msvc/debug/snow-shot-mcp.exe
 ```
+
+Configurable canvas fill styles accept `fill_style: "border"`, `"solid"`, `"cross_line"`,
+or `"line"` in screenshot and background-document tool-style patches and pinned-image
+`tool_style` edits. Border preserves the stored fill color and renders no fill.
+Fresh Snow Shot drawing preferences use Border with `#FFCCC7`;
+existing saved preferences are retained.

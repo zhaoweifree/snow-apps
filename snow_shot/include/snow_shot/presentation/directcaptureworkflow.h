@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QObject>
 #include <QRect>
+#include <QSize>
 #include <QStringList>
 #include <QVector>
 
@@ -53,6 +54,8 @@ struct DirectCaptureRequest {
     bool restoreOriginalScreenColors = false;
     bool shutterSoundNotification = true;
     bool captureCursor = false;
+    // Called on native capture threads with the fixed target's geometry before allocation.
+    std::function<bool(QSize)> admitRaster;
 };
 
 struct DirectCaptureFrame {

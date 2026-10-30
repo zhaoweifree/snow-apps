@@ -44,11 +44,13 @@ class ScreenshotQrRecognitionService final : public ScreenshotQrRecognitionPort 
     Q_OBJECT
 
   public:
-    // Recognition owns a short-lived worker; the service itself remains lightweight while idle.
+    // Consecutive requests share one serialized worker and its decoder sessions. The worker
+    // releases its models after a bounded idle grace period; it is created lazily on demand.
     // An empty modelsDirectory resolves to <application dir>/assets/qrcode at runtime; tests
     // inject a custom directory to exercise non-ASCII installation paths.
     explicit ScreenshotQrRecognitionService(QObject* parent = nullptr,
-                                            const QString& modelsDirectory = QString());
+                                            const QString& modelsDirectory = QString(),
+                                            int idleTimeoutMilliseconds = 30'000);
     ~ScreenshotQrRecognitionService() override;
 
     RequestToken recognize(

@@ -120,6 +120,10 @@
             <translation>阿拉伯数字</translation>
         </message>
         <message>
+            <source>Architect</source>
+            <translation>建筑师</translation>
+        </message>
+        <message>
             <source>Arrow</source>
             <translation>箭头</translation>
         </message>
@@ -144,6 +148,10 @@
             <translation>箭头描边宽度 %1</translation>
         </message>
         <message>
+            <source>Artist</source>
+            <translation>艺术家</translation>
+        </message>
+        <message>
             <source>Auto Filter</source>
             <translation>自动滤镜</translation>
         </message>
@@ -154,6 +162,10 @@
         <message>
             <source>Auto-scroll interval (scroll to adjust; click to reset to 200 ms)</source>
             <translation>自动滚动间隔（滚轮调整；单击重置为 200 ms）</translation>
+        </message>
+        <message>
+            <source>Available for multi-region selections</source>
+            <translation>仅适用于多区域选区</translation>
         </message>
         <message>
             <source>Avatar</source>
@@ -170,6 +182,10 @@
         <message>
             <source>Bold</source>
             <translation>粗体</translation>
+        </message>
+        <message>
+            <source>Border</source>
+            <translation>边框</translation>
         </message>
         <message>
             <source>Brightness</source>
@@ -204,6 +220,10 @@
             <translation>滚动截图时捕获界面</translation>
         </message>
         <message>
+            <source>Cartoonist</source>
+            <translation>漫画家</translation>
+        </message>
+        <message>
             <source>Center horizontally</source>
             <translation>水平居中</translation>
         </message>
@@ -226,6 +246,10 @@
         <message>
             <source>Close recording</source>
             <translation>关闭录制</translation>
+        </message>
+        <message>
+            <source>Compact layout</source>
+            <translation>紧凑布局</translation>
         </message>
         <message>
             <source>Confirm edit</source>
@@ -644,6 +668,10 @@
             <translation>图像</translation>
         </message>
         <message>
+            <source>Image Splitting</source>
+            <translation>图片分割</translation>
+        </message>
+        <message>
             <source>Integers</source>
             <translation>整数</translation>
         </message>
@@ -678,6 +706,18 @@
         <message>
             <source>LaTeX-Specific Model</source>
             <translation>LaTeX 专用模型</translation>
+        </message>
+        <message>
+            <source>Layout compaction disabled</source>
+            <translation>已禁用紧凑布局</translation>
+        </message>
+        <message>
+            <source>Layout compaction enabled</source>
+            <translation>已启用紧凑布局</translation>
+        </message>
+        <message>
+            <source>Layout spacing (scroll to adjust; click to reset to 0)</source>
+            <translation>布局间距（滚动调整；点击重置为 0）</translation>
         </message>
         <message>
             <source>Leader line</source>
@@ -786,6 +826,10 @@
         <message>
             <source>Mouse highlight preview</source>
             <translation>鼠标高亮预览</translation>
+        </message>
+        <message>
+            <source>Mouse highlight radius</source>
+            <translation>鼠标高亮半径</translation>
         </message>
         <message>
             <source>Mouse trail color</source>
@@ -900,6 +944,10 @@
             <translation>后处理效果</translation>
         </message>
         <message>
+            <source>Pressure-sensitive brush</source>
+            <translation>压感画笔</translation>
+        </message>
+        <message>
             <source>Print</source>
             <translation>打印</translation>
         </message>
@@ -984,6 +1032,10 @@
             <translation>重做</translation>
         </message>
         <message>
+            <source>Regular brush</source>
+            <translation>普通画笔</translation>
+        </message>
+        <message>
             <source>Reset</source>
             <translation>重置</translation>
         </message>
@@ -1022,6 +1074,14 @@
         <message>
             <source>Selected model (%1)</source>
             <translation>已选模型（%1）</translation>
+        </message>
+        <message>
+            <source>Selection background opacity</source>
+            <translation>选区背景不透明度</translation>
+        </message>
+        <message>
+            <source>Selection background opacity (scroll to adjust; click to reset to 0%)</source>
+            <translation>选区背景不透明度（滚动调整；点击重置为 0%）</translation>
         </message>
         <message>
             <source>Send backward</source>

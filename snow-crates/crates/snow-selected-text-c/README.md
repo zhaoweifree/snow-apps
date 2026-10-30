@@ -1,6 +1,6 @@
 # snow-selected-text-c
 
-Apache-2.0 C ABI for `snow-selected-text`. The authoritative declarations and pointer/lifetime
+GPL-3.0-or-later C ABI for `snow-selected-text`. The authoritative declarations and pointer/lifetime
 contracts are in `include/snow_selected_text.h`. Link the `snow_selected_text_c` CMake target to
 obtain the header and the existing Snow Shot Rust static-library bundle.
 

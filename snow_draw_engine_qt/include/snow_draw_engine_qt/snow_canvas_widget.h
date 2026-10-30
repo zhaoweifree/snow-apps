@@ -23,6 +23,7 @@ class QFocusEvent;
 class QInputMethodEvent;
 class QKeyEvent;
 class QMouseEvent;
+class QTabletEvent;
 class QPaintEvent;
 class QPointF;
 class QResizeEvent;
@@ -53,6 +54,11 @@ class SnowCanvasWidget : public QWidget {
 
     void setCursorForLayer(SnowCanvasCursorLayer layer, const QCursor& cursor);
     void clearCursorForLayer(SnowCanvasCursorLayer layer);
+
+    // Customize semantic crosshair cursors without changing the cursor layers.
+    // An empty factory preserves the platform crosshair; the result is cached per display scale.
+    using CrosshairCursorFactory = std::function<QCursor(qreal devicePixelRatio)>;
+    void setCrosshairCursorFactory(CrosshairCursorFactory factory);
 
     // Apply a property patch without recording a user preference (restoration/replication).
     bool applyStyleEdit(const SnowCanvasStyleEdit& edit);
@@ -228,6 +234,7 @@ class SnowCanvasWidget : public QWidget {
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void tabletEvent(QTabletEvent* event) override;
     void enterEvent(SnowEnterEvent* event) override;
     void leaveEvent(QEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;

@@ -288,7 +288,6 @@ class ColorPickerTrigger final : public ColorSwatchButton {
     explicit ColorPickerTrigger(Preview preview, QWidget* parent = nullptr);
 
     void setStrokeStyle(SnowCanvasStrokeStyle style);
-    void setFillStyle(SnowCanvasFillStyle style);
     void setStrokeWidth(double width);
     void setMixed(bool mixed);
 
@@ -299,7 +298,6 @@ class ColorPickerTrigger final : public ColorSwatchButton {
     void updateAccessibleValue();
     Preview m_preview;
     SnowCanvasStrokeStyle m_strokeStyle = SnowCanvasStrokeStyle::Solid;
-    SnowCanvasFillStyle m_fillStyle = SnowCanvasFillStyle::Solid;
     double m_strokeWidth = 2.0;
     bool m_mixed = false;
 };
@@ -317,6 +315,20 @@ class StrokeStylePreviewButton final : public adqt::widgets::AdButton {
 
   private:
     SnowCanvasStrokeStyle m_strokeStyle = SnowCanvasStrokeStyle::Solid;
+    qreal m_physicalScale = 1.0;
+};
+
+class StrokeRenderingStylePreviewButton final : public adqt::widgets::AdButton {
+  public:
+    explicit StrokeRenderingStylePreviewButton(SnowCanvasStrokeRenderingStyle style,
+                                               QWidget* parent = nullptr);
+    void commitControlScale(const adqt::widgets::AdControlScaleContext& context) override;
+
+  protected:
+    void paintEvent(QPaintEvent* event) override;
+
+  private:
+    SnowCanvasStrokeRenderingStyle m_style;
     qreal m_physicalScale = 1.0;
 };
 

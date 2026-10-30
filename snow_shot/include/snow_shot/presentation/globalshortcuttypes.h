@@ -36,6 +36,9 @@ enum class GlobalShortcutAction {
     ScreenshotSave,
     ScreenshotQuickSave,
     HideShowAllWindows,
+    StitchSelectedImages,
+    SplitSelectedImages,
+    ScreenshotOcrCopy,
 };
 
 // Qt6 provides a qHash overload for *every* enum in qhashfunctions.h; Qt5 does

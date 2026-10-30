@@ -191,6 +191,10 @@ fn deferred_static_holds_preserve_animation_delays_and_the_avi_frame_grid() {
         crate::ExportFormat::Webp,
         crate::ExportFormat::Avi,
     ] {
+        if format == crate::ExportFormat::Avi && !crate::has_avi_compatibility() {
+            continue;
+        }
+
         let fixture = fixture(format, crate::VideoCodec::H264, false, false, false);
         let mut metadata = fixture.metadata;
         metadata.render.playback_overlay = PlaybackOverlay::None;
@@ -296,6 +300,10 @@ fn retimed_deferred_trim_preserves_source_effects_and_duration_in_every_format()
         crate::ExportFormat::Apng,
         crate::ExportFormat::Webp,
     ] {
+        if format == crate::ExportFormat::Avi && !crate::has_avi_compatibility() {
+            continue;
+        }
+
         let fixture = fixture(format, crate::VideoCodec::H264, false, false, false);
         let original = std::fs::read(&fixture.bundle).unwrap();
         let range = snow_recording_model::TrimRange::new(300_000, 900_000, 1_001_000).unwrap();
@@ -559,6 +567,10 @@ fn retimed_exact_frame_count_does_not_round_a_third_of_a_second_twice() {
 fn retimed_fractional_deferred_frame_ranges_keep_exact_slot_counts() {
     for fps in [60, 144] {
         for format in [crate::ExportFormat::Mp4, crate::ExportFormat::Avi] {
+            if format == crate::ExportFormat::Avi && !crate::has_avi_compatibility() {
+                continue;
+            }
+
             let fixture = fixture_with_source_timing(
                 format,
                 crate::VideoCodec::H264,
@@ -622,6 +634,10 @@ fn retimed_fractional_deferred_frame_ranges_keep_exact_slot_counts() {
 fn retimed_partial_deferred_tail_keeps_its_source_duration() {
     for fps in [60, 144] {
         for format in [crate::ExportFormat::Mp4, crate::ExportFormat::Avi] {
+            if format == crate::ExportFormat::Avi && !crate::has_avi_compatibility() {
+                continue;
+            }
+
             let fixture = fixture_with_source_timing(
                 format,
                 crate::VideoCodec::H264,
@@ -1895,6 +1911,9 @@ fn source_index_cardinality_and_truncation_fail_before_publication() {
 
 #[test]
 fn avi_replay_preserves_mpeg4_canvas_frame_grid_and_packet_structure() {
+    if !crate::has_avi_compatibility() {
+        return;
+    }
     for codec in [crate::VideoCodec::H264, crate::VideoCodec::H265] {
         let fixture = fixture(crate::ExportFormat::Avi, codec, false, false, false);
         let result = render_bundle(
@@ -2069,6 +2088,10 @@ fn hdr_clean_source_replays_with_hdr_color_and_overlay_or_tone_maps_to_animation
         (crate::ExportFormat::Avi, crate::VideoCodec::H265),
         (crate::ExportFormat::Gif, crate::VideoCodec::H264),
     ] {
+        if format == crate::ExportFormat::Avi && !crate::has_avi_compatibility() {
+            continue;
+        }
+
         let fixture = fixture(format, codec, false, false, true);
         render_bundle(
             &fixture.bundle,

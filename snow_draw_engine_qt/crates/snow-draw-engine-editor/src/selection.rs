@@ -193,7 +193,9 @@ impl Editor {
             if self.state.selection.ids != next.ids {
                 self.magnifier_wheel = None;
             }
-            if !matches!(&self.state.interaction, InteractionState::Idle) {
+            if !matches!(&self.state.interaction, InteractionState::Idle)
+                || self.state.shape_text_drag.is_some()
+            {
                 self.cancel_interaction();
             }
             self.state.selection = next;
@@ -215,7 +217,8 @@ impl Editor {
         document: &DocumentModel,
         previous_selection: &SelectionState,
     ) {
-        if self.speech_bubble_has_missing_target(document)
+        if self.shape_text_has_invalid_target(document)
+            || self.speech_bubble_has_missing_target(document)
             || self
                 .state
                 .interaction

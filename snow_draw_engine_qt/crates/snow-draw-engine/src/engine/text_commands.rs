@@ -515,6 +515,27 @@ impl Engine {
         Ok(self.editor.serial_number_label_layout_request(&self.model))
     }
 
+    pub fn bound_label_layout_request(
+        &self,
+        viewport: ViewportId,
+    ) -> Result<Option<snow_draw_engine_editor::SerialNumberLabelLayoutRequest>, ErrorCode> {
+        self.ensure_viewport(viewport)?;
+        Ok(self.editor.bound_label_layout_request(&self.model))
+    }
+
+    pub fn apply_bound_label_layout(
+        &mut self,
+        viewport: ViewportId,
+        text_id: ElementId,
+        layout: TextLayoutSize,
+    ) -> Result<MutationResult, ErrorCode> {
+        self.ensure_viewport(viewport)?;
+        let before = self.editor.snapshot();
+        self.editor
+            .apply_bound_label_layout(&self.model, text_id, layout)?;
+        self.refresh_after_session_mutation(before)
+    }
+
     pub fn apply_serial_number_label_layout(
         &mut self,
         viewport: ViewportId,

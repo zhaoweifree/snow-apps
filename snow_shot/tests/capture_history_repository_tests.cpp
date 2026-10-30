@@ -868,6 +868,43 @@ void resultReadDoesNotInspectOtherPayloads() {
     require(repository->records().isEmpty(), "invalid canvas was not removed");
 }
 
+void collageResultReadsPreserveHistoryOnFailure() {
+    QTemporaryDir temporary;
+    auto repository = storage::makeCaptureHistoryRepository(temporary.path());
+    auto draft = draftAt(QDateTime::currentDateTimeUtc());
+    QImage finalImage(19, 13, QImage::Format_ARGB32_Premultiplied);
+    finalImage.fill(QColor(180, 30, 60, 128));
+    finalImage.setPixelColor(7, 5, Qt::white);
+    draft.resultImage = finalImage;
+    const auto published = repository->publish(draft).get();
+    require(published.storage.success, "publish the collage final-image fixture");
+    const auto before = repository->recordsSnapshot();
+    const QDir directory(onlyRecordDirectory(temporary.path()));
+    require(QFile::remove(directory.filePath(QStringLiteral("display_0.png"))),
+            "remove unrelated collage source payload");
+    writeBytes(directory.filePath(QStringLiteral("canvas_history.json")), QByteArrayLiteral("bad"));
+    const auto loaded = repository->loadResultImagePreservingRecord(published.record);
+    require(loaded && equalPixels(*loaded, finalImage),
+            "collage reads only the complete baked final result, preserving alpha and annotations");
+    const QString resultPath = directory.filePath(QStringLiteral("capture_result.png"));
+    writeBytes(resultPath,
+               QByteArray(static_cast<qsizetype>(published.record.result->encodedBytes), 'x'));
+    require(!repository->loadResultImagePreservingRecord(published.record),
+            "collage rejects malformed final pixels even when the encoded byte count matches");
+    repository->drain();
+    require(repository->recordsSnapshot().revision == before.revision &&
+                repository->recordsSnapshot().records == before.records &&
+                QFileInfo::exists(resultPath),
+            "a failed collage decode must preserve the history index and payload files");
+    require(QFile::remove(resultPath), "remove the collage final-result fixture");
+    require(!repository->loadResultImagePreservingRecord(published.record),
+            "missing final pixels must be reported as an unavailable collage input");
+    repository->drain();
+    require(repository->recordsSnapshot().revision == before.revision &&
+                repository->recordsSnapshot().records == before.records,
+            "a missing collage image must not delete its original history record");
+}
+
 void indexFailurePreservesFilesUntilClear() {
     QTemporaryDir temporary;
     {
@@ -1242,6 +1279,10 @@ void revisionCheckedMutations() {
 
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
+    if (application.arguments().contains(QStringLiteral("--collage-only"))) {
+        collageResultReadsPreserveHistoryOnFailure();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--worker-lifecycle-only"))) {
         idleWorkersRetireAndRestartWithoutLosingHistory();
         return 0;
@@ -1277,6 +1318,7 @@ int main(int argc, char** argv) {
     traversalManifestIsRejected();
     startupReadsOnlyIndexAndWorkersStartOnDemand();
     resultReadDoesNotInspectOtherPayloads();
+    collageResultReadsPreserveHistoryOnFailure();
     indexFailurePreservesFilesUntilClear();
     failedCommitPreservesPublishedHistory();
     pendingDeletionResumesWithoutScanningOrphans();

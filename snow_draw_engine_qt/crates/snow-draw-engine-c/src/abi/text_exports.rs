@@ -1,7 +1,8 @@
 use snow_draw_engine::{ElementId, Point, TextLayoutSize};
 use snow_draw_engine_document::{
-    SerialNumberType, SerialPaintGeometry, TextPaintGeometry, resolve_serial_paint_text_connection,
-    text_fill_outset, text_paint_bounds, text_paint_outset,
+    HighlightShape, RectangleData, SerialNumberType, SerialPaintGeometry, TextPaintGeometry,
+    resolve_serial_paint_text_connection, resolve_shape_paint_text_connection, text_fill_outset,
+    text_paint_bounds, text_paint_outset,
 };
 
 use crate::abi::convert::*;
@@ -770,13 +771,13 @@ pub unsafe extern "C" fn snow_viewport_take_new_text_draft_request(
         }))
     })
 }
-/// if any. The host measures the empty draft for the requested font and applies
-/// the result via `snow_viewport_apply_serial_label_layout_ex`.
+/// Requests measurement for an empty bound label being positioned. The host
+/// applies the result via `snow_viewport_apply_bound_label_layout_ex`.
 /// # Safety
 /// `runtime` and `viewport` must be live handles created by this library.
 /// `out_request` must be valid for writes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn snow_viewport_get_serial_label_layout_request(
+pub unsafe extern "C" fn snow_viewport_get_bound_label_layout_request(
     runtime: SnowRuntime,
     viewport: SnowViewport,
     out_request: *mut SnowSerialLabelLayoutRequest,
@@ -791,7 +792,7 @@ pub unsafe extern "C" fn snow_viewport_get_serial_label_layout_request(
             viewport,
             |engine, id| {
                 let request = engine
-                    .serial_number_label_layout_request(id)
+                    .bound_label_layout_request(id)
                     .map_err(SnowError::from)?;
                 write_out(out_has_request, u8::from(request.is_some()));
                 write_out(
@@ -819,12 +820,12 @@ pub unsafe extern "C" fn snow_viewport_get_serial_label_layout_request(
     })
 }
 
-/// Applies a host-measured layout to the drag-attached serial number label.
+/// Applies a host-measured layout to the active bound-label placement preview.
 /// # Safety
 /// `runtime` and `viewport` must be live handles created by this library.
 /// `out_changed_viewports` must be valid for writes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn snow_viewport_apply_serial_label_layout_ex(
+pub unsafe extern "C" fn snow_viewport_apply_bound_label_layout_ex(
     runtime: SnowRuntime,
     viewport: SnowViewport,
     text_id: SnowElementId,
@@ -840,17 +841,55 @@ pub unsafe extern "C" fn snow_viewport_apply_serial_label_layout_ex(
             viewport,
             |engine, id| {
                 let result = engine
-                    .apply_serial_number_label_layout(
-                        id,
-                        snow_element_id_to_rust(text_id),
-                        layout.into(),
-                    )
+                    .apply_bound_label_layout(id, snow_element_id_to_rust(text_id), layout.into())
                     .map_err(SnowError::from)?;
                 write_changed_viewports(out_changed_viewports, result.changed_viewports);
                 Ok(())
             },
         ))
     })
+}
+
+/// Compatibility entry point for serial-number label measurement.
+/// # Safety
+/// Handles must be live and both output pointers must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_viewport_get_serial_label_layout_request(
+    runtime: SnowRuntime,
+    viewport: SnowViewport,
+    out_request: *mut SnowSerialLabelLayoutRequest,
+    out_has_request: *mut u8,
+) -> SnowError {
+    unsafe {
+        snow_viewport_get_bound_label_layout_request(
+            runtime,
+            viewport,
+            out_request,
+            out_has_request,
+        )
+    }
+}
+
+/// Compatibility entry point for applying serial-number label measurement.
+/// # Safety
+/// Handles must be live and `out_changed_viewports` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_viewport_apply_serial_label_layout_ex(
+    runtime: SnowRuntime,
+    viewport: SnowViewport,
+    text_id: SnowElementId,
+    layout: SnowTextLayoutSize,
+    out_changed_viewports: *mut SnowChangedViewportList,
+) -> SnowError {
+    unsafe {
+        snow_viewport_apply_bound_label_layout_ex(
+            runtime,
+            viewport,
+            text_id,
+            layout,
+            out_changed_viewports,
+        )
+    }
 }
 
 fn text_paint_geometry_from_c(item: &SnowSceneDisplayItem) -> TextPaintGeometry {
@@ -876,6 +915,7 @@ fn text_paint_geometry_from_c(item: &SnowSceneDisplayItem) -> TextPaintGeometry 
         has_text: item.text_utf8_len != 0,
         font_size: item.font_size,
         fill: item.fill.into(),
+        fill_style: snow_fill_style_to_rust(item.fill_style),
         stroke: item.stroke.into(),
         stroke_width: item.stroke_width,
     }
@@ -1024,12 +1064,165 @@ pub unsafe extern "C" fn snow_scene_resolve_serial_text_connection(
     })
 }
 
+/// Resolve a shape label connector using the same text attachment as serial labels.
+/// # Safety
+/// Pointers may be null. Non-null input pointers must be readable and
+/// `out_connection` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snow_scene_resolve_shape_text_connection(
+    shape: *const SnowSceneDisplayItem,
+    text: *const SnowSceneDisplayItem,
+    out_connection: *mut SnowSerialTextConnection,
+) -> u8 {
+    ffi_value(0, || {
+        if out_connection.is_null() {
+            return 0;
+        }
+        let Some(shape) = (unsafe { shape.as_ref() }) else {
+            return 0;
+        };
+        let Some(text) = (unsafe { text.as_ref() }) else {
+            return 0;
+        };
+        if shape.kind != SnowSceneDisplayItemKind::DrawRect
+            || shape.blend_mode != SnowBlendMode::Normal
+            || text.kind != SnowSceneDisplayItemKind::Text
+        {
+            return 0;
+        }
+        let highlight_shape = match shape.rect_shape {
+            0 => HighlightShape::Rectangle,
+            1 => HighlightShape::Ellipse,
+            2 => HighlightShape::Diamond,
+            _ => return 0,
+        };
+        let geometry = RectangleData {
+            rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
+            text_element_id: None,
+            center: Point::new(shape.center_x, shape.center_y),
+            width: shape.width,
+            height: shape.height,
+            rotation: shape.rotation,
+            highlight_shape,
+            corner_radii: shape.corner_radii.into(),
+            fill: shape.fill.into(),
+            fill_style: snow_fill_style_to_rust(shape.fill_style),
+            stroke: shape.stroke.into(),
+            stroke_width: shape.stroke_width,
+            stroke_style: Default::default(),
+            stroke_rendering_style: snow_stroke_rendering_style_to_rust(
+                shape.stroke_rendering_style,
+            ),
+            stroke_rendering_seed: 0,
+            opacity: shape.opacity,
+        };
+        let Some(connection) =
+            resolve_shape_paint_text_connection(&geometry, &text_paint_geometry_from_c(text))
+        else {
+            return 0;
+        };
+        let has_baseline =
+            connection.text_baseline_start.is_some() && connection.text_baseline_end.is_some();
+        let baseline_start = connection.text_baseline_start.unwrap_or_default();
+        let baseline_end = connection.text_baseline_end.unwrap_or_default();
+        write_out(
+            out_connection,
+            SnowSerialTextConnection {
+                start_x: connection.start.x,
+                start_y: connection.start.y,
+                end_x: connection.end.x,
+                end_y: connection.end.y,
+                baseline_start_x: baseline_start.x,
+                baseline_start_y: baseline_start.y,
+                baseline_end_x: baseline_end.x,
+                baseline_end_y: baseline_end.y,
+                has_baseline: u8::from(has_baseline),
+                reserved: [0; 7],
+            },
+        );
+        1
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn zero_item() -> SnowSceneDisplayItem {
         unsafe { std::mem::zeroed() }
+    }
+
+    #[test]
+    fn shape_text_connection_ffi_uses_shape_outline_and_rejects_other_items() {
+        let mut shape = zero_item();
+        shape.kind = SnowSceneDisplayItemKind::DrawRect;
+        shape.width = 120.0;
+        shape.height = 60.0;
+        shape.stroke_width = 2.0;
+        let mut text = zero_item();
+        text.kind = SnowSceneDisplayItemKind::Text;
+        text.center_x = 150.0;
+        text.center_y = 100.0;
+        text.width = 80.0;
+        text.height = 30.0;
+        let mut connection = SnowSerialTextConnection::default();
+        for rect_shape in 0..=2 {
+            shape.rect_shape = rect_shape;
+            assert_eq!(
+                unsafe { snow_scene_resolve_shape_text_connection(&shape, &text, &mut connection) },
+                1
+            );
+            assert!(connection.start_x > 0.0 && connection.start_x < connection.end_x);
+            assert_eq!(connection.has_baseline, 1);
+        }
+        shape.kind = SnowSceneDisplayItemKind::SerialNumber;
+        assert_eq!(
+            unsafe { snow_scene_resolve_shape_text_connection(&shape, &text, &mut connection) },
+            0
+        );
+        assert_eq!(
+            unsafe {
+                snow_scene_resolve_shape_text_connection(std::ptr::null(), &text, &mut connection)
+            },
+            0
+        );
+    }
+
+    #[test]
+    fn shape_text_connection_ffi_preserves_stroke_join_style() {
+        let mut shape = zero_item();
+        shape.kind = SnowSceneDisplayItemKind::DrawRect;
+        shape.width = 100.0;
+        shape.height = 100.0;
+        shape.stroke_width = 72.0;
+        let mut text = zero_item();
+        text.kind = SnowSceneDisplayItemKind::Text;
+        text.center_x = 350.0;
+        text.center_y = 285.0;
+        text.width = 100.0;
+        text.height = 30.0;
+        for (style, edge) in [
+            (
+                SnowStrokeRenderingStyle::Architect,
+                86.0 * std::f64::consts::SQRT_2,
+            ),
+            (
+                SnowStrokeRenderingStyle::Artist,
+                50.0 * std::f64::consts::SQRT_2 + 36.0,
+            ),
+            (
+                SnowStrokeRenderingStyle::Cartoonist,
+                50.0 * std::f64::consts::SQRT_2 + 36.0,
+            ),
+        ] {
+            shape.stroke_rendering_style = style;
+            let mut connection = SnowSerialTextConnection::default();
+            assert_eq!(
+                unsafe { snow_scene_resolve_shape_text_connection(&shape, &text, &mut connection) },
+                1
+            );
+            assert!((connection.start_x.hypot(connection.start_y) - edge - 44.0).abs() < 1e-7);
+        }
     }
 
     #[test]

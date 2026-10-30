@@ -187,6 +187,23 @@ impl EditorSession {
         self.editor.serial_number_label_layout_request(document)
     }
 
+    pub fn bound_label_layout_request(
+        &self,
+        document: &DocumentModel,
+    ) -> Option<crate::SerialNumberLabelLayoutRequest> {
+        self.editor.bound_label_layout_request(document)
+    }
+
+    pub fn apply_bound_label_layout(
+        &mut self,
+        document: &DocumentModel,
+        text_id: ElementId,
+        layout: TextLayoutSize,
+    ) -> Result<bool, ErrorCode> {
+        self.editor
+            .apply_bound_label_layout(document, text_id, layout)
+    }
+
     pub fn apply_serial_number_label_layout(
         &mut self,
         document: &DocumentModel,
@@ -266,6 +283,7 @@ impl EditorSession {
 
     pub fn can_begin_arrow_text(&self) -> bool {
         self.editor.speech_bubble_tail_drag.is_none()
+            && self.editor.state.shape_text_drag.is_none()
             && matches!(
                 self.editor.state.interaction,
                 crate::state::InteractionState::Idle
@@ -347,6 +365,7 @@ impl EditorSession {
         state.default_magnifier_style = persisted.magnifier;
         crate::validate_angle_style(persisted.angle)?;
         state.default_line_style = ShapeStyle {
+            brush_mode: Default::default(),
             arrow_type: crate::style::normalized_line_arrow_type(persisted.line.arrow_type),
             arrow_shaft_type: Default::default(),
             arrow_ratio: 1.0,
@@ -433,6 +452,10 @@ impl EditorSession {
         self.editor.set_active_tool(active_tool)
     }
 
+    pub fn defer_free_draw_preview(&mut self, defer: bool) {
+        self.editor.defer_free_draw_preview(defer);
+    }
+
     pub fn reset_editing_state(&mut self) {
         self.editor.reset_editing_state();
     }
@@ -451,6 +474,7 @@ impl EditorSession {
     pub fn reset_pointer_capture_state(&mut self) {
         self.editor.captured_pointer = None;
         self.editor.speech_bubble_tail_drag = None;
+        self.editor.state.shape_text_drag = None;
         self.editor.pending_capture_release = false;
     }
 

@@ -51,7 +51,8 @@ class RecordingEffectPreview final : public QObject, public SnowCanvasCustomRend
                    const QColor& click, bool keyboard, int trailDurationMs = 500,
                    const QColor& keyboardBackground = QColor(0, 0, 0, 204),
                    const QColor& keyboardForeground = QColor(Qt::white), int keyboardSize = 64,
-                   const QColor& highlight = QColor(0, 0, 0, 0), bool recordMouseClicks = false);
+                   const QColor& highlight = QColor(0, 0, 0, 0), bool recordMouseClicks = false,
+                   int highlightRadius = 41);
     void setEligible(bool eligible);
     void stopAndClear(bool present = false);
     [[nodiscard]] bool active() const;
@@ -80,6 +81,7 @@ class RecordingEffectPreview final : public QObject, public SnowCanvasCustomRend
     QColor m_trail;
     QColor m_click;
     QColor m_highlight{0, 0, 0, 0};
+    int m_highlightRadius = 41;
     bool m_recordMouseClicks = false;
     int m_trailDurationMs = 500;
     QColor m_keyboardBackground{0, 0, 0, 204};

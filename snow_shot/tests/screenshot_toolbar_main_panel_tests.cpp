@@ -1,3 +1,4 @@
+#include "palette_style_edit_test_support.h"
 #include "snow_shot/presentation/screenshottoolbarmainpanel.h"
 #include "snow_shot/presentation/screenshottoolpalette.h"
 #include "snow_shot/presentation/screenshottoolbarlayoutmodel.h"
@@ -735,6 +736,134 @@ void recordingToolbarUsesTheScreenshotMainPanelContract() {
     require(qFuzzyCompare(shadow->blurRadius() + 1.0, 19.0) &&
                 shadow->offset() == QPointF(0.0, 3.0) && shadow->color() == QColor(0, 0, 0, 90),
             "recording shadow should preserve the reference visual parameters");
+}
+
+void recordingAudioIconsFollowSettings() {
+    const auto alphaBounds = [](const QImage& image) {
+        QRect bounds;
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x)
+                if (qAlpha(image.pixel(x, y)) > 0)
+                    bounds |= QRect(x, y, 1, 1);
+        return bounds;
+    };
+    auto& themeManager = snow_shot::presentation::styles::ThemeManager::instance();
+    const auto originalAppearance = themeManager.themeColorScheme().appearance;
+    ScreenshotToolPalette toolbar(recordingOptions());
+    prepare(toolbar);
+    auto* microphone =
+        toolbar.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenRecordingMicrophone"));
+    auto* speaker = buttonWithTooltip(toolbar, QStringLiteral("Record speakers"));
+    require(microphone != nullptr && speaker != nullptr, "recording audio controls exist");
+
+    QImage preview(480, 160, QImage::Format_ARGB32_Premultiplied);
+    preview.fill(Qt::transparent);
+    QPainter painter(&preview);
+    int row = 0;
+    for (const auto appearance : {snow_shot::presentation::styles::ThemeAppearance::Light,
+                                  snow_shot::presentation::styles::ThemeAppearance::Dark}) {
+        themeManager.setThemeAppearance(appearance);
+        flushEvents();
+        const auto scheme = themeManager.themeColorScheme();
+        painter.fillRect(0, row * 80, 480, 80, scheme.map.colorBgContainer);
+        int column = 0;
+        for (auto* button : {microphone, speaker}) {
+            const bool isMicrophone = button == microphone;
+            const auto setEnabled = [&](bool enabled) {
+                if (isMicrophone)
+                    toolbar.setRecordingMicrophoneEnabled(enabled);
+                else
+                    toolbar.setRecordingSystemAudioEnabled(enabled);
+            };
+            for (const int size : {16, 20, 24, 128}) {
+                for (const qreal dpr : {1.0, 2.0}) {
+                    QImage onImage;
+                    for (const bool enabled : {true, false}) {
+                        toolbar.setRecordingState(ScreenshotToolPalette::RecordingState::Idle);
+                        setEnabled(enabled);
+                        const auto* descriptor = button->iconRef().descriptor();
+                        require(descriptor != nullptr &&
+                                    descriptor->name ==
+                                        (isMicrophone
+                                             ? (enabled ? "recording-microphone"
+                                                        : "recording-microphone-off")
+                                             : (enabled ? "sound" : "recording-speaker-off")),
+                                "audio setting selects its on or off glyph");
+                        require(buttonIconContainsColor(button,
+                                                        enabled ? scheme.map.colorSuccess
+                                                                : scheme.map.colorTextQuaternary),
+                                "audio glyph retains its theme state tint");
+                        adqt::icons::IconRenderRequest request;
+                        request.logicalSize = QSize(size, size);
+                        request.devicePixelRatio = dpr;
+                        const auto pixmap = adqt::icons::renderIconPixmap(
+                            button->iconRef().withColors(
+                                adqt::icons::IconColors::primary(scheme.map.colorText)),
+                            request);
+                        require(!pixmap.isNull(), "audio glyph renders at toolbar sizes and DPI");
+                        if (enabled) {
+                            onImage = pixmap.toImage();
+                        } else {
+                            const QImage offImage = pixmap.toImage();
+                            require(onImage != offImage,
+                                    "muting changes the graphic even with identical colors");
+                            const QRect onBounds = alphaBounds(onImage);
+                            const QRect offBounds = alphaBounds(offImage);
+                            require(!offBounds.isEmpty() &&
+                                        qAbs(onBounds.left() - offBounds.left()) <= 1 &&
+                                        qAbs(onBounds.right() - offBounds.right()) <= 1 &&
+                                        qAbs(onBounds.top() - offBounds.top()) <= 1 &&
+                                        qAbs(onBounds.bottom() - offBounds.bottom()) <= 1,
+                                    "muting preserves the enabled icon's visual size and position");
+                            // Outside the slash clearance (and speaker rays), the original
+                            // silhouette must remain unchanged, including its stroke weight.
+                            if (size == 128) {
+                                for (int y = 0; y < offImage.height(); ++y) {
+                                    for (int x = 0; x < offImage.width(); ++x) {
+                                        const qreal svgX = (x + 0.5) * 1024 / offImage.width();
+                                        const qreal svgY = (y + 0.5) * 1024 / offImage.height();
+                                        if ((!isMicrophone && svgX > 700) ||
+                                            qAbs(svgY - svgX + (isMicrophone ? 0 : 42)) < 180)
+                                            continue;
+                                        require(qAbs(qAlpha(onImage.pixel(x, y)) -
+                                                     qAlpha(offImage.pixel(x, y))) <= 2,
+                                                "off icon preserves the original body geometry");
+                                    }
+                                }
+                            }
+                        }
+                        if (dpr == 2.0 && size != 128)
+                            painter.drawPixmap(column++ * 40 + (40 - size) / 2,
+                                               row * 80 + (80 - size) / 2, pixmap);
+                        toolbar.setRecordingState(ScreenshotToolPalette::RecordingState::Recording);
+                        require(button->iconRef().descriptor() == descriptor,
+                                "recording interaction restrictions preserve the audio glyph");
+                        toolbar.setRecordingState(ScreenshotToolPalette::RecordingState::Paused);
+                        require(button->iconRef().descriptor() == descriptor,
+                                "pausing preserves the audio glyph");
+                        toolbar.setRecordingSession(
+                            ScreenshotToolPalette::RecordingSessionStatus::pausedStopping());
+                        require(!button->isEnabled() &&
+                                    button->iconRef().descriptor() == descriptor,
+                                "busy controls retain the audio setting glyph");
+                    }
+                }
+            }
+            toolbar.setRecordingState(ScreenshotToolPalette::RecordingState::Idle);
+            setEnabled(false);
+            const auto* off = button->iconRef().descriptor();
+            button->click();
+            require(button->iconRef().descriptor() != off, "clicking restores the on glyph");
+            button->click();
+            require(button->iconRef().descriptor() == off, "clicking again restores the off glyph");
+        }
+        ++row;
+    }
+    painter.end();
+    if (const auto path = qEnvironmentVariable("SNOW_RECORDING_AUDIO_ICON_PREVIEW");
+        !path.isEmpty())
+        require(preview.save(path), "save recording audio icon preview");
+    themeManager.setThemeAppearance(originalAppearance);
 }
 
 void mainToolbarSpacingUsesReferenceItemMetrics() {
@@ -1842,11 +1971,11 @@ void speechBubbleReusesShapeControlsWithIndependentStyles() {
     int edits = 0;
     SnowCanvasShapeKind editedKind = SnowCanvasShapeKind::Rectangle;
     QObject::connect(&palette, &ScreenshotToolPalette::speechBubbleRequested, [&] { ++requests; });
-    QObject::connect(&palette, &ScreenshotToolPalette::shapeStyleChanged,
-                     [&](const SnowCanvasShapeStyle&, quint32, SnowCanvasShapeKind kind) {
-                         ++edits;
-                         editedKind = kind;
-                     });
+    observePaletteStyleEdit<SnowCanvasShapeEdit>(
+        palette, [&](const SnowCanvasShapeStyle&, quint32, SnowCanvasShapeKind kind) {
+            ++edits;
+            editedKind = kind;
+        });
     require(palette.activateDrawingShortcut(QStringLiteral("speech_bubble")) && requests == 1 &&
                 palette.activeTool() == Tool::SpeechBubble,
             "Speech Bubble can be activated through configured shortcut routing");
@@ -1909,6 +2038,10 @@ void speechBubbleReusesShapeControlsWithIndependentStyles() {
 
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
+    if (application.arguments().contains(QStringLiteral("--recording-audio-only"))) {
+        recordingAudioIconsFollowSettings();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--speech-bubble-only"))) {
         speechBubbleSharesSerialNumberToolbarGroup();
         speechBubbleReusesShapeControlsWithIndependentStyles();
@@ -1944,6 +2077,7 @@ int main(int argc, char** argv) {
     secondaryToolbarUsesEqualHorizontalMargins();
     cachedToolbarIconsFollowThemeColors();
     recordingToolbarUsesTheScreenshotMainPanelContract();
+    recordingAudioIconsFollowSettings();
     mainToolbarSpacingUsesReferenceItemMetrics();
     screenshotToolbarRendersShadowOutsideItsPanel();
     toolbarTooltipsUseApplicationBridge();

@@ -85,6 +85,64 @@ void compoundSelectionClipsRecognizedText() {
             "recognition shape follows image backing scale");
 }
 
+void compactionFollowsRecognitionRendering() {
+    for (int shadow : {0, 3}) {
+        for (qreal scale : {1.0, 1.5, 2.0}) {
+            auto snapshot = fixture();
+            snapshot.image = snapshot.image.scaled(qRound(320 * scale), qRound(180 * scale));
+            snapshot.resultStyle = {6, shadow, Qt::black,
+                                    ScreenshotRegionGeometry(
+                                        QRegion(0, 0, 100, 180).united(QRegion(220, 0, 100, 180)))};
+            const auto reference = renderScreenshotRecognitionImage(snapshot);
+            snapshot.layoutCompaction = {true, 4};
+            const auto originalQuad = snapshot.lines.first().quad;
+            const auto actual = renderScreenshotRecognitionImage(snapshot);
+            const int padding = qRound(shadow * scale);
+            const QSize footprint(qRound(100 * scale) + 2 * padding,
+                                  qRound(180 * scale) + 2 * padding);
+            const int spacing = qRound(4 * scale);
+            QImage expected(2 * footprint.width() + spacing, footprint.height(),
+                            QImage::Format_ARGB32_Premultiplied);
+            expected.fill(Qt::transparent);
+            QPainter painter(&expected);
+            painter.drawImage(QPoint(), reference, QRect(QPoint(), footprint));
+            painter.drawImage(QPoint(footprint.width() + spacing, 0), reference,
+                              QRect(QPoint(qRound(220 * scale), 0), footprint));
+            painter.end();
+            require(actual == expected && snapshot.lines.first().quad == originalQuad,
+                    "recognition compaction must preserve text coordinates and every shadow pixel");
+        }
+    }
+}
+
+void retainedBackgroundUsesOriginalCapture() {
+    for (bool compact : {false, true}) {
+        auto snapshot = fixture();
+        snapshot.resultStyle = {
+            12, 6, Qt::black,
+            ScreenshotRegionGeometry(QRegion(0, 0, 100, 180) + QRect(220, 0, 100, 180))};
+        snapshot.resultStyle.backgroundOpacityPercent = 50;
+        snapshot.layoutCompaction = {compact, 8};
+        QImage capture(360, 220, QImage::Format_ARGB32_Premultiplied);
+        capture.fill(QColor(80, 140, 220));
+        snapshot.backgroundSources = {{capture, snapshot.canvasRect.adjusted(-20, -20, 20, 20)}};
+        snapshot.filteredImage = snapshot.image;
+        snapshot.filteredImage.fill(Qt::green);
+        snapshot.filteredCanvasRect = snapshot.canvasRect;
+        const auto result = renderScreenshotRecognitionImage(snapshot);
+        require(!result.isNull(), "recognition result with retained background renders");
+        const int gapX = compact ? 116 : 166;
+        const auto gap = result.pixelColor(gapX, 150);
+        require(
+            gap.blue() > gap.green() && gap.alpha() > 0 && gap.alpha() < 200,
+            "recognition export gaps use capture pixels, not recognized text or filtered patches");
+        require(result.pixelColor(50, 150) == QColor(Qt::green),
+                "recognition result inside selected regions keeps full opacity");
+        require(result.pixelColor(0, 0).alpha() > 0,
+                "recognition exports retain captured pixels beyond the selection bounds");
+    }
+}
+
 void layoutModesAndTransformsRenderOnWorkers() {
     for (bool vertical : {false, true}) {
         for (bool paragraph : {false, true}) {
@@ -203,6 +261,8 @@ int main(int argc, char** argv) {
         rendersNativeCoordinatesAndPreservesSource();
         displayedBackgroundAndEffectsAreAppliedOnce();
         compoundSelectionClipsRecognizedText();
+        compactionFollowsRecognitionRendering();
+        retainedBackgroundUsesOriginalCapture();
         layoutModesAndTransformsRenderOnWorkers();
         sourceRowsSurviveImageExportOnWorkers();
         cancellationAndInvalidInputNeverPublishPartialImages();

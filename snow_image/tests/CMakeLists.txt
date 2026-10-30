@@ -21,9 +21,13 @@ else()
 endif()
 
 add_test(NAME snow_image_core_tests COMMAND snow_image_core_tests)
+add_test(NAME snow_image_raster_store_tests COMMAND snow_image_core_tests --raster-stores-only)
+add_test(NAME snow_image_alpha_tests COMMAND snow_image_core_tests --alpha-only)
+add_test(NAME snow_image_crc32c_tests COMMAND snow_image_core_tests --crc32c-only)
 add_test(NAME snow_image_pixel_ownership_tests COMMAND snow_image_core_tests --ownership-only)
 add_test(NAME snow_image_buffer_paths_tests COMMAND snow_image_core_tests --buffer-paths-only)
 add_test(NAME snow_image_processing_tests COMMAND snow_image_core_tests --processing-only)
+add_test(NAME snow_image_resize_tests COMMAND snow_image_core_tests --resize-only)
 add_test(NAME snow_image_heif_tests COMMAND snow_image_core_tests --heif-only)
 add_test(NAME snow_image_jpeg_tests COMMAND snow_image_core_tests --jpeg-only)
 add_test(NAME snow_image_jxl_tests COMMAND snow_image_core_tests --jxl-only)
@@ -78,6 +82,7 @@ else()
     target_compile_options(snow_image_raster_export_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 add_test(NAME snow_image_raster_export_tests COMMAND snow_image_raster_export_tests)
+add_test(NAME snow_image_lazy_resize_tests COMMAND snow_image_raster_export_tests --resize-only)
 
 add_executable(snow_image_resource_plan_tests resource_plan_tests.cpp)
 target_link_libraries(snow_image_resource_plan_tests PRIVATE snow_image::snow_image)
@@ -109,6 +114,32 @@ if(SNOW_IMAGE_CODEC_HEIF)
         target_compile_options(snow_image_avif_encoding_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME snow_image_avif_encoding_tests COMMAND snow_image_avif_encoding_tests)
+
+    if(APPLE)
+        find_package(AOM CONFIG QUIET)
+        if(TARGET AOM::aom)
+            get_target_property(_SNOW_IMAGE_AOM_TYPE AOM::aom TYPE)
+            if(_SNOW_IMAGE_AOM_TYPE STREQUAL "SHARED_LIBRARY")
+                # Interpose the shared dependency only in this offscreen test process.
+                # Exact native init/destroy counts detect leaks without RSS thresholds.
+                add_library(snow_image_avif_lifecycle_probe SHARED avif_lifecycle_probe.cpp)
+                target_link_libraries(snow_image_avif_lifecycle_probe PRIVATE AOM::aom)
+                target_compile_features(snow_image_avif_lifecycle_probe PRIVATE cxx_std_20)
+                target_compile_options(snow_image_avif_lifecycle_probe PRIVATE
+                    -Wall -Wextra -Wpedantic)
+                add_executable(snow_image_avif_lifecycle_tests avif_lifecycle_tests.cpp)
+                target_link_libraries(snow_image_avif_lifecycle_tests
+                    PRIVATE heif snow_image_avif_lifecycle_probe)
+                target_compile_features(snow_image_avif_lifecycle_tests PRIVATE cxx_std_20)
+                target_compile_options(snow_image_avif_lifecycle_tests PRIVATE
+                    -Wall -Wextra -Wpedantic)
+                add_test(NAME snow_image_avif_lifecycle_tests
+                    COMMAND "${CMAKE_COMMAND}" -E env
+                        "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:snow_image_avif_lifecycle_probe>"
+                        "$<TARGET_FILE:snow_image_avif_lifecycle_tests>")
+            endif()
+        endif()
+    endif()
 endif()
 
 if(MSVC)

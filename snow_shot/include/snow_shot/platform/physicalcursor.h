@@ -60,6 +60,7 @@ class PhysicalCursor final {
     [[nodiscard]] PhysicalCursorMoveResult moveOnePixel(PhysicalCursorDirection direction) const;
     [[nodiscard]] PhysicalCursorMoveResult movePixels(PhysicalCursorDirection direction,
                                                       int distance) const;
+    [[nodiscard]] PhysicalCursorMoveResult movePixels(const QPoint& direction, int distance) const;
 
   private:
     PhysicalCursorAccess m_access;

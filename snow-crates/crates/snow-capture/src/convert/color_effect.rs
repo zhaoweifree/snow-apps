@@ -102,8 +102,20 @@ unsafe fn convert_row(
     let target_bgra = output == CapturePixelFormat::Bgra8;
     #[cfg(target_arch = "x86_64")]
     let mut start = 0;
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     let start = 0;
+    #[cfg(target_arch = "aarch64")]
+    let start = unsafe {
+        super::simd_arm::convert_color_row(
+            src,
+            dst,
+            count,
+            source_bgra,
+            target_bgra,
+            opaque,
+            transform,
+        )
+    };
     #[cfg(target_arch = "x86_64")]
     if transform.inverted {
         use std::arch::x86_64::*;

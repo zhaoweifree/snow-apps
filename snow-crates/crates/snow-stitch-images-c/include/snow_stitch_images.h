@@ -228,6 +228,8 @@ uint8_t snow_stitch_owned_image_info(const SnowStitchOwnedImage* image,
 /* Invalidates the pixel pointer returned by snow_stitch_owned_image_info. */
 void snow_stitch_owned_image_destroy(SnowStitchOwnedImage* image);
 
+/* Optional native exporter, available with Cargo feature png-export (enabled by default).
+ * Minimal app builds use snapshot row access and their shared image codec instead. */
 SnowStitchExportTask* snow_stitch_snapshot_export_png(const SnowStitchSnapshot* snapshot,
                                                       const SnowStitchPngExportConfig* config);
 void snow_stitch_export_task_cancel(SnowStitchExportTask* task);

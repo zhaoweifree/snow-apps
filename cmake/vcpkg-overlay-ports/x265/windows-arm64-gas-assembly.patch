@@ -1,0 +1,383 @@
+--- a/source/CMakeLists.txt
++++ b/source/CMakeLists.txt
+@@ -527,6 +527,20 @@
+     endif()
+ endif()
+ 
++option(ENABLE_MSVC_ARM64_ASSEMBLY "Enable the experimental Windows ARM64 GAS-to-ARMASM64 backend" OFF)
++if(ENABLE_MSVC_ARM64_ASSEMBLY)
++    include(cmake/WindowsArm64Assembly.cmake)
++    x265_validate_msvc_arm64_assembly()
++    # This backend deliberately contains only mandatory Armv8-A NEON instructions.
++    set(AARCH64_NEON_FLAG "")
++    set(CPU_HAS_NEON 1)
++    set(CPU_HAS_NEON_DOTPROD 0)
++    set(CPU_HAS_NEON_I8MM 0)
++    set(CPU_HAS_SVE 0)
++    set(CPU_HAS_SVE2 0)
++    add_definitions(-DX265_ARCH_ARM64=1 -DHAVE_NEON=1 -D_ARM64_DISTINCT_NEON_TYPES)
++endif()
++
+ option(CHECKED_BUILD "Enable run-time sanity checks (debugging)" OFF)
+ if(CHECKED_BUILD)
+     add_definitions(-DCHECKED_BUILD=1)
+@@ -714,7 +728,7 @@
+ add_subdirectory(encoder)
+ add_subdirectory(common)
+ 
+-if((MSVC_IDE OR XCODE OR GCC) AND ENABLE_ASSEMBLY)
++if((MSVC_IDE OR XCODE OR GCC OR ENABLE_MSVC_ARM64_ASSEMBLY) AND ENABLE_ASSEMBLY)
+     # this is required because of this cmake bug
+     # http://www.cmake.org/Bug/print_bug_page.php?bug_id=8170
+     if(WIN32)
+@@ -738,16 +752,23 @@
+         endforeach()
+ 	elseif(ARM64 OR CROSS_COMPILE_ARM64)
+     # compile ARM64 arch asm files here
+-        enable_language(ASM)
++        if(NOT ENABLE_MSVC_ARM64_ASSEMBLY)
++            enable_language(ASM)
++        endif()
+         foreach(ASM ${ARM_ASMS})
+             set(ASM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/common/aarch64/${ASM})
+             list(APPEND ASM_SRCS ${ASM_SRC})
+-            list(APPEND ASM_OBJS ${ASM}.${SUFFIX})
+-            add_custom_command(
+-                OUTPUT ${ASM}.${SUFFIX}
+-                COMMAND ${CMAKE_CXX_COMPILER}
+-                ARGS ${ARM_ARGS} ${ASM_FLAGS} ${AARCH64_NEON_FLAG} -c ${ASM_SRC} -o ${ASM}.${SUFFIX}
+-                DEPENDS ${ASM_SRC})
++            if(ENABLE_MSVC_ARM64_ASSEMBLY)
++                x265_add_msvc_arm64_assembly(ASM_OBJECT "${ASM_SRC}")
++                list(APPEND ASM_OBJS "${ASM_OBJECT}")
++            else()
++                list(APPEND ASM_OBJS ${ASM}.${SUFFIX})
++                add_custom_command(
++                    OUTPUT ${ASM}.${SUFFIX}
++                    COMMAND ${CMAKE_CXX_COMPILER}
++                    ARGS ${ARM_ARGS} ${ASM_FLAGS} ${AARCH64_NEON_FLAG} -c ${ASM_SRC} -o ${ASM}.${SUFFIX}
++                    DEPENDS ${ASM_SRC})
++            endif()
+         endforeach()
+         if(CPU_HAS_NEON_DOTPROD)
+             foreach(ASM ${ARM_ASMS_NEON_DOTPROD})
+--- a/source/common/CMakeLists.txt
++++ b/source/common/CMakeLists.txt
+@@ -117,7 +117,9 @@
+     set(C_SRCS_NEON_I8MM filter-neon-i8mm.cpp)
+     set(C_SRCS_SVE sao-prim-sve.cpp dct-prim-sve.cpp)
+     set(C_SRCS_SVE2 sao-prim-sve2.cpp)
+-    enable_language(ASM)
++    if(NOT ENABLE_MSVC_ARM64_ASSEMBLY)
++        enable_language(ASM)
++    endif()
+ 
+     # Add Arm assembly files here.
+     set(A_SRCS asm.S mc-a.S mc-a-common.S sad-a.S pixel-util.S pixel-util-common.S p2s.S p2s-common.S blockcopy8.S blockcopy8-common.S ssd-a.S ssd-a-common.S intrapred.S dct.S)
+@@ -132,7 +134,7 @@
+     set(ARM_ASMS_NEON_DOTPROD "${A_SRCS_NEON_DOTPROD}" CACHE INTERNAL "Arm Assembly Sources that use the Neon DotProd extension")
+     foreach(SRC ${C_SRCS_NEON})
+         set(ASM_PRIMITIVES ${ASM_PRIMITIVES} aarch64/${SRC})
+-        set_source_files_properties(aarch64/${SRC} PROPERTIES COMPILE_FLAGS ${AARCH64_NEON_FLAG})
++        set_source_files_properties(aarch64/${SRC} PROPERTIES COMPILE_FLAGS "${AARCH64_NEON_FLAG}")
+     endforeach()
+ 
+     if(CPU_HAS_NEON_DOTPROD)
+--- a/source/common/aarch64/asm.S
++++ b/source/common/aarch64/asm.S
+@@ -49,6 +49,8 @@
+ 
+ #ifdef __ELF__
+ #define ELF
++#elif defined(_WIN32)
++#define ELF #
+ #else
+ #ifdef PREFIX
+ #define ELF #
+--- a/source/common/aarch64/mc-a.S
++++ b/source/common/aarch64/mc-a.S
+@@ -105,7 +105,7 @@
+ 
+ function PFX(pixel_avg_pp_16x64_neon)
+     mov             w12, #8
+-.lpavg_16x64:
++.Llpavg_16x64:
+     sub             w12, w12, #1
+ .rept 8
+     ld1             {v0.16b}, [x2], x3
+@@ -113,7 +113,7 @@
+     urhadd          v2.16b, v0.16b, v1.16b
+     st1             {v2.16b}, [x0], x1
+ .endr
+-    cbnz            w12, .lpavg_16x64
++    cbnz            w12, .Llpavg_16x64
+     ret
+ endfunc
+ 
+@@ -122,7 +122,7 @@
+     sub             x3, x3, #16
+     sub             x5, x5, #16
+     mov             w12, #4
+-.lpavg_24x32:
++.Llpavg_24x32:
+     sub             w12, w12, #1
+ .rept 8
+     ld1             {v0.16b}, [x2], #16
+@@ -134,7 +134,7 @@
+     st1             {v0.16b}, [x0], #16
+     st1             {v1.8b}, [x0], x1
+ .endr
+-    cbnz            w12, .lpavg_24x32
++    cbnz            w12, .Llpavg_24x32
+     ret
+ endfunc
+ 
+@@ -158,7 +158,7 @@
+ .macro pixel_avg_pp_32xN1_neon h
+ function PFX(pixel_avg_pp_32x\h\()_neon)
+     mov             w12, #\h / 8
+-.lpavg_32x\h\():
++.Llpavg_32x\h\():
+     sub             w12, w12, #1
+ .rept 8
+     ld1             {v0.16b-v1.16b}, [x2], x3
+@@ -167,7 +167,7 @@
+     urhadd          v1.16b, v1.16b, v3.16b
+     st1             {v0.16b-v1.16b}, [x0], x1
+ .endr
+-    cbnz            w12, .lpavg_32x\h
++    cbnz            w12, .Llpavg_32x\h
+     ret
+ endfunc
+ .endm
+@@ -177,7 +177,7 @@
+ 
+ function PFX(pixel_avg_pp_48x64_neon)
+     mov             w12, #8
+-.lpavg_48x64:
++.Llpavg_48x64:
+     sub             w12, w12, #1
+ .rept 8
+     ld1             {v0.16b-v2.16b}, [x2], x3
+@@ -187,14 +187,14 @@
+     urhadd          v2.16b, v2.16b, v5.16b
+     st1             {v0.16b-v2.16b}, [x0], x1
+ .endr
+-    cbnz            w12, .lpavg_48x64
++    cbnz            w12, .Llpavg_48x64
+     ret
+ endfunc
+ 
+ .macro pixel_avg_pp_64xN_neon h
+ function PFX(pixel_avg_pp_64x\h\()_neon)
+     mov             w12, #\h / 4
+-.lpavg_64x\h\():
++.Llpavg_64x\h\():
+     sub             w12, w12, #1
+ .rept 4
+     ld1             {v0.16b-v3.16b}, [x2], x3
+@@ -205,7 +205,7 @@
+     urhadd          v3.16b, v3.16b, v7.16b
+     st1             {v0.16b-v3.16b}, [x0], x1
+ .endr
+-    cbnz            w12, .lpavg_64x\h
++    cbnz            w12, .Llpavg_64x\h
+     ret
+ endfunc
+ .endm
+--- a/source/common/aarch64/pixel-util.S
++++ b/source/common/aarch64/pixel-util.S
+@@ -1565,7 +1565,7 @@
+     add             x5, x5, #4              // shift + 4
+     lsr             x3, x3, #3              // num / 8
+     cmp             x5, x4
+-    blt             .dequant_skip
++    blt             .Ldequant_skip
+ 
+     mov             x12, #1
+     sub             x6, x5, x4          // shift - per
+@@ -1575,7 +1575,7 @@
+     sub             x7, x4, x5          // per - shift
+     dup             v3.4s, w7
+ 
+-.dequant_loop1:
++.Ldequant_loop1:
+     ld1             {v19.8h}, [x0], #16 // quantCoef
+     ld1             {v2.4s}, [x1], #16  // deQuantCoef
+     ld1             {v20.4s}, [x1], #16
+@@ -1593,14 +1593,14 @@
+     sqxtn           v16.4h, v1.4s       // x265_clip3
+     sqxtn2          v16.8h, v19.4s
+     st1             {v16.8h}, [x2], #16
+-    cbnz            x3, .dequant_loop1
+-    ret
+-
+-.dequant_skip:
++    cbnz            x3, .Ldequant_loop1
++    ret
++
++.Ldequant_skip:
+     sub             x6, x4, x5          // per - shift
+     dup             v0.8h, w6
+ 
+-.dequant_loop2:
++.Ldequant_loop2:
+     ld1             {v19.8h}, [x0], #16 // quantCoef
+     ld1             {v2.4s}, [x1], #16  // deQuantCoef
+     ld1             {v20.4s}, [x1], #16
+@@ -1615,7 +1615,7 @@
+ 
+     sqshl           v16.8h, v16.8h, v0.8h // coefQ << per - shift
+     st1             {v16.8h}, [x2], #16
+-    cbnz            x3, .dequant_loop2
++    cbnz            x3, .Ldequant_loop2
+     ret
+ endfunc
+ 
+@@ -1626,7 +1626,7 @@
+     dup             v0.8h, w3
+     dup             v1.4s, w4
+ 
+-.dqn_loop1:
++.Ldqn_loop1:
+     ld1             {v2.8h, v3.8h}, [x0], #32
+     smull           v16.4s, v2.4h, v0.4h
+     smull2          v17.4s, v2.8h, v0.8h
+@@ -1645,7 +1645,7 @@
+ 
+     sub             w2, w2, #1
+     st1             {v2.8h, v3.8h}, [x1], #32
+-    cbnz            w2, .dqn_loop1
++    cbnz            w2, .Ldqn_loop1
+     ret
+ endfunc
+ 
+@@ -2106,7 +2106,7 @@
+     rbit            w10, w5
+     clz             w10, w10
+     cmp             w10, w7
+-    b.lt            .unfoldedShift
++    b.lt            .LunfoldedShift
+ 
+     // shift right only removes trailing zeros: hoist LSR out of the loop.
+     lsr             w10, w5, w7           // w0 << correction >> shift
+@@ -2120,7 +2120,7 @@
+     madd            w11, w11, w10, w6
+     add             w11, w11, w9
+     lsr             w11, w11, #16
+-    cbnz            w11, .widenTo32Bit
++    cbnz            w11, .LwidenTo32Bit
+ 
+     // 16-bit arithmetic is enough.
+ .LoopHpp:
+@@ -2143,7 +2143,7 @@
+     ret
+ 
+     // 32-bit arithmetic is needed.
+-.widenTo32Bit:
++.LwidenTo32Bit:
+ .LoopHpp32:
+     mov             x12, x3
+ .LoopWpp32:
+@@ -2166,7 +2166,7 @@
+     ret
+ 
+     // The shift right cannot be moved out of the loop.
+-.unfoldedShift:
++.LunfoldedShift:
+     dup             v25.8h, w5            // w0 << correction
+     dup             v26.4s, w6            // round
+     neg             w7, w7                // -shift
+@@ -2271,14 +2271,14 @@
+     and             w13, w13, w15
+     mov             x14, xzr
+ .Loop_spl_1:
+-    cbz             w15, .pext_end
++    cbz             w15, .Lpext_end
+     clz             w6, w15
+     lsl             w13, w13, w6
+     lsl             w15, w15, w6
+     extr            w14, w14, w13, #31
+     bfm             w15, wzr, #1, #0
+     b               .Loop_spl_1
+-.pext_end:
++.Lpext_end:
+     strh            w14, [x2], #2
+ 
+     // compute coeffNum = popcount(coeffFlag)
+@@ -2366,7 +2366,7 @@
+     mov             x4, #0
+     mov             x11, #0
+     movi            v31.16b, #0
+-    cbz             x2, .idx_zero
++    cbz             x2, .Lidx_zero
+ .Loop_ccnn:
+ //   {
+ //        const uint32_t cnt = tabSigCtx[blkPos] + offset + posOffset;
+@@ -2407,7 +2407,7 @@
+     csel            w10, w11, w10, eq
+     strb            w10, [x6, x14]
+     cbnz            x2, .Loop_ccnn
+-.idx_zero:
++.Lidx_zero:
+ 
+     add             x13, x3, x4, lsl #1
+     add             x4, x4, x15
+@@ -2418,7 +2418,7 @@
+     cmp             w9, #0
+     cset            x2, eq
+     add             x4, x4, x2
+-    cbz             x4, .exit_ccnn
++    cbz             x4, .Lexit_ccnn
+ 
+     sub             w2, w2, #1
+     uxtb            w2, w2
+@@ -2436,7 +2436,7 @@
+     cmp             w4, #1
+     csel            w3, w5, w3, eq
+     strb            w3, [x6, x2]
+-.exit_ccnn:
++.Lexit_ccnn:
+     ubfx            w0, w0, #0, #24
+     ret
+ endfunc
+--- /dev/null
++++ b/source/cmake/WindowsArm64Assembly.cmake
+@@ -0,0 +1,37 @@
++# The caller must opt in explicitly and supply vcpkg's existing host tools.
++# GAS-preprocessor runs cl's preprocessor before translating to ARMASM64 syntax.
++function(x265_validate_msvc_arm64_assembly)
++    if(NOT (MSVC AND ARM64 AND WIN32))
++        message(FATAL_ERROR "ENABLE_MSVC_ARM64_ASSEMBLY requires MSVC Windows ARM64")
++    endif()
++    if(NOT ENABLE_ASSEMBLY)
++        message(FATAL_ERROR "ENABLE_MSVC_ARM64_ASSEMBLY requires ENABLE_ASSEMBLY=ON")
++    endif()
++    foreach(extension IN ITEMS ENABLE_NEON_DOTPROD ENABLE_NEON_I8MM ENABLE_SVE ENABLE_SVE2)
++        if(${extension})
++            message(FATAL_ERROR "The baseline ARMASM64 backend requires ${extension}=OFF")
++        endif()
++    endforeach()
++endfunction()
++
++function(x265_add_msvc_arm64_assembly out_var source)
++    foreach(tool IN ITEMS PERL_EXECUTABLE X265_GASPREPROCESSOR X265_ARMASM64_EXECUTABLE)
++        if(NOT EXISTS "${${tool}}")
++            message(FATAL_ERROR "Windows ARM64 assembly requires ${tool}")
++        endif()
++    endforeach()
++    get_filename_component(name "${source}" NAME)
++    get_filename_component(assembly_dir "${source}" DIRECTORY)
++    set(object "${CMAKE_CURRENT_BINARY_DIR}/${name}.obj")
++    # Included macro files affect the assembled object as well as the top-level source.
++    file(GLOB assembly_includes "${assembly_dir}/*.S")
++    add_custom_command(
++        OUTPUT "${object}"
++        COMMAND "${PERL_EXECUTABLE}" "${X265_GASPREPROCESSOR}"
++            -arch aarch64 -as-type armasm -- "${X265_ARMASM64_EXECUTABLE}"
++            -nologo -DPIC=1 ${ASM_FLAGS} -c "${source}" -o "${object}"
++        DEPENDS "${source}" ${assembly_includes} "${X265_GASPREPROCESSOR}"
++        VERBATIM)
++    set_source_files_properties("${object}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
++    set(${out_var} "${object}" PARENT_SCOPE)
++endfunction()

@@ -3,6 +3,7 @@
 #include "snow_shot/presentation/screenshotgeometry.h"
 #include "snow_shot/presentation/screenshotocrpresentation.h"
 #include "snow_shot/presentation/screenshotrecognitionwindow.h"
+#include "snow_shot/presentation/crosshaircursor.h"
 #include "snow_shot/presentation/screenshotlatexrenderer.h"
 #include "snow_shot/presentation/screenshottableeditor.h"
 #include "snow_shot/presentation/windowshortcutmanager.h"
@@ -1057,6 +1058,9 @@ void ocrBoxSelectionUsesCurrentRectangleAndCommitsOnRelease() {
         require(presentation->lineBoxSelectionRect().isEmpty(),
                 "sub-threshold motion does not paint a box");
         send(QEvent::MouseMove, QPointF(240, 180));
+        require(recognition.cursor() ==
+                    snow_shot::presentation::crosshairCursor(recognition.devicePixelRatioF()),
+                "OCR box selection must use Snow Shot's crosshair");
         require(presentation->lineSelectionPreview(0) ==
                         ScreenshotOcrLineSelectionPreview::Deselect &&
                     presentation->lineSelectionPreview(1) ==

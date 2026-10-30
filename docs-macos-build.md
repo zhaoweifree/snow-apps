@@ -223,8 +223,9 @@ bash install-snow-shot-macos.sh --lang zh-TW
 
 The local publisher includes `install-snow-shot-macos.sh`, a versioned DMG,
 and its matching `.sha256` asset in the GitHub release when macOS packaging
-is configured. The Gitee release workflow mirrors these exact bytes after
-GitHub publication.
+is configured. The local Gitee publisher uploads these exact installer/download
+bytes after GitHub publication. Homebrew distribution archives remain on GitHub;
+Gitee hosts only update and installer downloads within a 1 GB attachment budget.
 
 | Architecture | Release asset |
 | --- | --- |
@@ -332,7 +333,8 @@ or privacy grants.
 - Xcode 16+ or Apple Command Line Tools (`xcode-select --install`), with a macOS 15+ SDK.
   The static Qt builder permits Command Line Tools without full Xcode and retains
   Qt's SDK version checks.
-- Rust installed through rustup. The checked-in toolchain pins Rust 1.97.1.
+- Rust 1.97.1 or newer installed through rustup. Builds use the active toolchain;
+  bootstrap adds its required components and target without selecting an older version.
 - CMake 4.2+, Ninja, pkg-config, Git and Python 3. Intel codec builds also need NASM.
 - The official **Qt 6.12.0 LTS macOS** kit, including Qt SVG and Linguist tools,
   for Debug and performance builds. Release and fast builds use the repository's
@@ -355,12 +357,15 @@ Bootstrap checks the host tools, installs the matching Rust target, bootstraps
 repository-local vcpkg at the registry baseline, and installs the selected
 manifest dependency set. `build.sh` validates that setup before configuring and
 automatically refreshes a stale CMake cache; pass `--skip-bootstrap` only after
-provisioning the selected preset. `--clean` removes that preset's build tree,
-matching the Windows wrapper, and `--parallel N` controls build concurrency.
+provisioning the selected preset. A complete active Rust toolchain meeting the
+minimum version is reused without contacting the Rust distribution server;
+only missing components or targets are downloaded into that toolchain.
+`--clean` removes that preset's build tree, matching the Windows wrapper, and
+`--parallel N` controls build concurrency.
 The run script rebuilds the `snow_shot` target before launching by default; pass
 `--no-build` to launch an existing build or `--clean` to request a clean rebuild.
 CMake installs native dependencies from the manifest. The first run builds
-FFmpeg, image codecs, OpenCV, and CPU ONNX Runtime and can take considerable time.
+FFmpeg, image codecs, and OpenCV and can take considerable time.
 Dynamic and static dependencies live in `.tools/macos/installed/{dynamic,static}`,
 isolated from Windows and the standalone macOS media harness. `LIBCLANG_PATH`
 can override Xcode's libclang.
@@ -459,6 +464,48 @@ The native deployment fixture tests the packaging rules with a small Qt executab
 and a simulated versioned OCR library; it does not validate the full app.
 It requires CMake, Ninja, pkg-config and CPack on PATH.
 
+The x264 overlay fixes pointer aliasing in the shared frame/macroblock preallocator.
+Optimized Apple Silicon builds could retain a buffer offset after allocation and
+crash in `memset` while opening the software H.264 encoder. The patch keeps offsets
+separate and writes final pointers with `memcpy`, preserving LTO and assembly.
+Reprovision the codec dependencies and rebuild the app after updating the overlay;
+an existing binary still contains the old allocator.
+
+Verify the production x264 archive without Qt or screen permissions using the
+standalone fixture below. It encodes and drains 8-bit and 10-bit frames with normal
+and zero-latency presets and multiple thread counts. Static app builds with the
+general tests enabled also register these tests.
+
+```sh
+cmake --fresh -S test-support/x264 -B build/x264-preallocation-arm64 -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+  -DSNOW_X264_ROOT="$PWD/.tools/macos/installed/static/arm64-osx-snow-shot-static"
+cmake --build build/x264-preallocation-arm64 --target snow-x264-preallocation-tests
+ctest --test-dir build/x264-preallocation-arm64 --output-on-failure \
+  -R '^snow-x264-preallocation-'
+```
+
+For Intel, use a separate build directory, `CMAKE_OSX_ARCHITECTURES=x86_64`, and the
+`x64-osx-snow-shot-static` prefix. Run the resulting fixture on native Intel hardware
+as part of release validation; Rosetta is also useful for local regression checks.
+
+The clipboard DIB byte-access fixture also runs without Qt or screen permissions.
+It checks unaligned source addresses, pixel counts around SIMD boundaries, and
+output bounds. With Clang or GCC, enable UBSan to catch alignment regressions:
+
+```sh
+cmake -S test-support/clipboard-dib -B build/clipboard-dib-ubsan -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DSNOW_DIB_ENABLE_UBSAN=ON
+cmake --build build/clipboard-dib-ubsan --target snow-shot-clipboard-dib-decoder-tests
+ctest --test-dir build/clipboard-dib-ubsan --output-on-failure \
+  -R '^snow-shot-clipboard-dib-decoder-tests$'
+```
+
+The fixture always checks scalar decoding and runs AVX2 kernels when the CPU
+supports them. Windows clipboard-content tests additionally cover borrowed DIB
+headers and mask tables; macOS does not exercise the Windows clipboard API.
+
 To validate a production static kit without QtTest or unrelated UI tests, use a
 separate tree with only the shared OCR and crash diagnostics tests enabled:
 
@@ -555,7 +602,9 @@ QR models. Executable-relative
 asset lookup paths remain under `Contents/MacOS`; deployment moves data into
 `Contents/Resources` and creates relative `assets`/`audios` directory links so
 code signing seals them as resources. Static Qt and vcpkg source-license notices
-are included under `Contents/Resources/snow-shot/licenses/third-party`. A plain
+are included under `Contents/Resources/snow-shot/licenses/third-party`. Installation
+also collects original Rust dependency notices offline from each edition's compiled
+Cargo targets and feature selections. Missing notices stop packaging. A plain
 `cmake --install build/<preset> --component SnowShot --prefix /path/to/staging`
 performs the same deployment and static-link audit without a DMG. Shared Debug
 and performance deployments continue to put libraries in `Contents/Frameworks`.
@@ -604,13 +653,13 @@ rebuild; use the run script's local signing identity for subsequent builds to
 avoid that identity change. Switching from ad-hoc to certificate signing requires
 granting permission to the new identity once; later rebuilds retain that grant.
 
-macOS OCR uses CPU inference with all seven existing V4/V5/V6 models. Full on
-both architectures and Mini on ARM64 bundle their worker and ONNX Runtime.
+macOS OCR uses CPU inference with the three existing V6 models. Full on
+both architectures and Mini on ARM64 bundle their CPU worker.
 Full also bundles Small V6; Mini bundles no model files. Missing selected models download
 on demand into application storage. No OCR runtime code
 is downloaded on macOS. An Intel package built on Apple Silicon is validated
 through Rosetta; that validation does not establish native Intel hardware qualification.
-The Windows updater/installer and DirectML remain Windows-only.
+The Windows updater/installer remain Windows-only.
 
 macOS diagnostics use the shared rotating JSON log service and a bundled Crashpad
 handler. The handler captures native faults, stack overflow, fatal Qt errors,
@@ -637,16 +686,16 @@ remain available for media harness development.
 
 ## macOS OCR validation
 
-The runtime uses protocol 5. Its generated schema-3 manifest records
+The runtime uses protocol 6. Its generated schema-3 manifest records
 `macos-arm64` or `macos-x64`, `delivery: bundled`, static linkage, the executable
-name, and the size/SHA-256 of the worker. ONNX Runtime is linked into the worker in release
-packages; shared development builds still stage `libonnxruntime.dylib`. The
+name, and the size/SHA-256 of the worker. The worker uses simd-paddle-ocr-rs CPU inference without external inference
+libraries in either development or release builds. The
 existing Windows schema-2 manifest remains the
-source of the seven pinned model contracts; its Windows runtime is never staged
+source of the three pinned model contracts; its Windows runtime is never staged
 on macOS. Runtime binaries live in `Contents/MacOS`; models and the manifest are
 accessed through `Contents/MacOS/assets/ocr` (a resource link in signed bundles).
-Development workers load their adjacent ONNX library by absolute path,
-independent of the shell environment. A damaged runtime requires reinstalling
+The worker uses the submodule-pinned nightly compiler; other Rust packages
+continue using their existing compiler. Bootstrap provisions both toolchains. A damaged runtime requires reinstalling
 the ARM64 app; verified downloaded models remain reusable.
 
 Build staging checks content on every relevant target build, including a worker-only
@@ -668,8 +717,7 @@ Focused deterministic checks (the asset executable needs no worker or real model
 scripts/build.sh snow-shot-macos-arm64-performance --target snow-shot-ocr-assets-tests
 ctest --preset test-snow-shot-macos-arm64-performance -R '^snow-shot-ocr-assets-tests$'
 python3 scripts/test-snow-shot-macos-ocr.py
-scripts/check-rust.sh snow-ocr-process -- --no-default-features --features dynamic-onnx-runtime
-scripts/check-rust.sh rapid-ocr-rs -- --no-default-features --features dynamic-onnx-runtime
+scripts/check-rust.sh snow-ocr-process
 ```
 
 Build the recognition test target and fetch all verified models for the opt-in
@@ -688,7 +736,7 @@ OCR_TEST="$PWD/build/snow-shot-macos-arm64-performance/snow_shot/test-bin/snow-s
 "$OCR_TEST" --model-root="$PWD/build/ocr-versioned-models" --resident-models
 ```
 
-The seven-model run checks bilingual text, geometry, FIFO callbacks and repeated
+The three-model run checks bilingual text, geometry, FIFO callbacks and repeated
 inference. Measurements report the first cold request, the following request using
 the same session, and the worker's resident bytes sampled after each result (not
 peak RSS). Cold means a new worker/model session, without flushing the operating

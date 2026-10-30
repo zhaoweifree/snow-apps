@@ -308,21 +308,27 @@ bool SnowCanvasDisplayCache::sync(SnowRuntime runtime, SnowViewport viewport) {
             reset(patchInfo.clear_color);
             return false;
         }
-        if (op.element_removed != 0) {
-            continue;
-        }
         const auto found = std::find_if(
             m_sceneStorage.begin(), m_sceneStorage.end(), [&op](const SnowCanvasSceneItem& item) {
                 return item.element_id.index == op.element_id.index &&
                        item.element_id.generation == op.element_id.generation;
             });
+        if (op.element_removed != 0) {
+            // Removing the pressure channel during a mode change retains the scene item.
+            // Release its derived paths rather than retaining stale contours in Regular mode.
+            if (found != m_sceneStorage.end()) {
+                found->applyPathGeometryPatch(0, 0, nullptr, 0, nullptr, 0, nullptr, 0, false, true,
+                                              op.role);
+            }
+            continue;
+        }
         if (found == m_sceneStorage.end() ||
             !found->applyPathGeometryPatch(
                 op.expected_geometry_revision, op.resulting_geometry_revision,
                 op.range_count == 0 ? nullptr : payload.pathGeometryRanges + op.range_offset,
                 op.range_count, payload.pathGeometryChunks, payload.pathGeometryChunkCount,
                 payload.pathGeometryCommands, payload.pathGeometryCommandCount, op.closed != 0,
-                op.full_reset != 0)) {
+                op.full_reset != 0, op.role)) {
             reset(patchInfo.clear_color);
             return false;
         }

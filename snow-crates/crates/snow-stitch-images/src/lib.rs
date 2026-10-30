@@ -26,3 +26,6 @@ pub use types::{
     CandidateDiagnostics, MotionDiagnostics, MotionEstimate, MotionEstimatorOptions, MotionOutcome,
     MotionStage, ReferenceMode, RegionDiagnostics, StitchAxis, StitchBranch, StitchOptions,
 };
+
+#[cfg(all(test, target_arch = "aarch64"))]
+mod neon_benchmark;

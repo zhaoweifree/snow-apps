@@ -296,6 +296,11 @@ class SegmentButton final : public QRadioButton {
     return QRadioButton::event(event);
   }
 
+  bool hitButton(const QPoint& position) const override {
+    // The custom segment fills the widget, including space beyond the radio label.
+    return rect().contains(position);
+  }
+
   void enterEvent(SnowEnterEvent* event) override {
     update();
     if (stateChanged) {

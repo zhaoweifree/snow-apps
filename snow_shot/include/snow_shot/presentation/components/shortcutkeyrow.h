@@ -35,6 +35,7 @@ struct ShortcutKeyRowConfig {
         DrawingShortcut,
         PinnedWindowShortcut,
         RecordingShortcut,
+        WindowsContextMenu,
     };
 
     QString title;

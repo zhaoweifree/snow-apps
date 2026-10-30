@@ -26,6 +26,9 @@ class ToolbarCommands final : public ScreenshotSelectionToolbarCommandSink {
     void openSelectionResizeModalFromToolbar() override {}
     void hideColorPickersForScreenshotUi() override {}
     void adjustSelectionFromToolbar(int, int, int, int) override {}
+#ifndef SNOW_SELECTION_TOOLBAR_BASELINE
+    void adjustSelectionEffectsFromWheel(int, int) override {}
+#endif
     void setSelectionCornerRadiusFromToolbar(int) override {}
     void setSelectionShadowWidthFromToolbar(int) override {}
     void setSelectionToolbarHovered(bool) override {}

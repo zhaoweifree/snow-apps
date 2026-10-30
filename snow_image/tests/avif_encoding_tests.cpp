@@ -105,14 +105,21 @@ class RowSource final : public RasterSource {
                            std::span<std::byte> destination, std::stop_token stop) const override {
         if (stop.stop_requested())
             return Status::error(ErrorCode::cancelled, "cancelled row source");
-        require(frame == 0 && plane == 0 && count == 1 && first == rows_read_,
-                "AVIF must read the source once, one row at a time");
+        require(frame == 0 && plane == 0 && count != 0 && first == rows_read_ &&
+                    first <= document_.canvas_height && count <= document_.canvas_height - first,
+                "AVIF must read each source row once in forward order");
         const Image& image = document_.frames.front().image;
         const std::size_t row_bytes = static_cast<std::size_t>(image.width()) * 4U;
-        require(stride >= row_bytes && destination.size() >= row_bytes, "invalid row destination");
-        std::memcpy(destination.data(), image.pixels().data() + first * image.row_stride(),
-                    row_bytes);
-        ++rows_read_;
+        require(stride >= row_bytes &&
+                    destination.size() >= static_cast<std::size_t>(count - 1U) * stride + row_bytes,
+                "invalid row destination");
+        for (std::uint32_t row = 0; row < count; ++row) {
+            std::memcpy(destination.data() + static_cast<std::size_t>(row) * stride,
+                        image.pixels().data() +
+                            static_cast<std::size_t>(first + row) * image.row_stride(),
+                        row_bytes);
+        }
+        rows_read_ += count;
         if (cancel_after_row_)
             cancel_after_row_->request_stop();
         return {};
@@ -362,6 +369,8 @@ void lossless_encoding(Service& service) {
         RowSource source(document);
         bytes = std::make_shared<std::vector<std::byte>>();
         take(service.encode(source, memory_output(bytes), options), "encode lossless row AVIF");
+        require(source.rows_read() == document.canvas_height,
+                "read every lossless source row once");
         verify_configuration(bytes, 8, alpha);
         verify_fidelity(document, decode_rgba8(service, bytes), 0);
     }

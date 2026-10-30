@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QLineEdit>
 #include <QPointer>
 #include <QToolButton>
@@ -58,6 +59,51 @@ class Translator final : public QTranslator {
                    : QString();
     }
 };
+
+void inlineDescriptionAction() {
+    QWidget owner;
+    auto* layout = new QVBoxLayout(&owner);
+    auto copy = metadata("description-action");
+    copy.description = {"FormFieldsTests", "Text <tag> & details"};
+    copy.descriptionAction = {"FormFieldsTests", "Help"};
+    fields::Options options;
+    options.parent = &owner;
+    options.presentation = fields::Presentation::SettingsRow;
+    const auto field = fields::text(copy, options);
+    layout->addWidget(field.viewWidget());
+    owner.resize(880, 180);
+    owner.show();
+    flushEvents();
+    auto* description =
+        field.viewWidget()->findChild<QLabel*>(QStringLiteral("formFieldDescription"));
+    require(description &&
+                description->text().contains(QStringLiteral("Text &lt;tag&gt; &amp; details")),
+            "inline actions must escape description markup");
+    int activations = 0;
+    QObject::connect(field.field, &fields::FormField::descriptionActionRequested, &owner,
+                     [&] { ++activations; });
+    const QFontMetrics metrics(description->font());
+    const QPointF point(metrics.horizontalAdvance(QStringLiteral("Text <tag> & details ")) +
+                            metrics.horizontalAdvance(QStringLiteral("Help")) / 2.0,
+                        description->height() / 2.0);
+    const QPointF global = description->mapToGlobal(point.toPoint());
+    QMouseEvent press(QEvent::MouseButtonPress, point, global, Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, point, global, Qt::LeftButton, Qt::NoButton,
+                        Qt::NoModifier);
+    QCoreApplication::sendEvent(description, &press);
+    QCoreApplication::sendEvent(description, &release);
+    require(activations == 1, "clicking the inline description action must emit its signal");
+    description->setFocus(Qt::TabFocusReason);
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(description, &enter);
+    require(activations == 2, "keyboard activation must emit the same description action");
+    field.field->setDescriptionOverride(QStringLiteral("Runtime status"));
+    require(description->text().contains(QStringLiteral("Runtime status")) &&
+                description->text().endsWith(QStringLiteral("Help</a>")) &&
+                field.editor->accessibleDescription() == QStringLiteral("Runtime status"),
+            "description overrides must retain the help action and plain accessibility text");
+}
 
 void optionalMetadataAndChoiceLabels() {
     QWidget owner;
@@ -1012,6 +1058,7 @@ void customEditorBridgeAndOwnership() {
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
     styles::ThemeManager::instance().initialize(application);
+    inlineDescriptionAction();
     optionalMetadataAndChoiceLabels();
     typingPreservesInputAccessories();
     formValueSignalsRemainAvailable();

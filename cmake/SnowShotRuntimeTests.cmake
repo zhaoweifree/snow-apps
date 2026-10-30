@@ -46,12 +46,6 @@ function(snow_shot_add_ocr_runtime_tests)
     )
     target_compile_definitions(snow-shot-ocr-recognition-service-tests PRIVATE
         SNOW_TEST_OCR_EXECUTABLE="$<TARGET_FILE:snow_ocr_process>")
-    if(APPLE AND SNOW_SHOT_OCR_STATIC_ONNXRUNTIME)
-        # The test host compiles the same asset parser and consumes the worker's
-        # generated manifest, so its runtime linkage contract must match the app.
-        target_compile_definitions(snow-shot-ocr-recognition-service-tests PRIVATE
-            SNOW_SHOT_OCR_STATIC_ONNXRUNTIME=1)
-    endif()
     if(SNOW_SHOT_BUILD_BENCHMARKS AND CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_definitions(snow-shot-ocr-recognition-service-tests PRIVATE SNOW_TEST_OCR_PERFORMANCE=1)
     endif()
@@ -77,16 +71,7 @@ function(snow_shot_add_ocr_runtime_tests)
         NAME snow-shot-ocr-cpu-recognition-service-tests
         COMMAND snow-shot-ocr-recognition-service-tests
     )
-    add_test(
-        NAME snow-shot-ocr-directml-recognition-service-tests
-        COMMAND snow-shot-ocr-recognition-service-tests --directml
-    )
     set_tests_properties(snow-shot-ocr-cpu-recognition-service-tests PROPERTIES
-        TIMEOUT 120
-        ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
-    )
-    set_tests_properties(snow-shot-ocr-directml-recognition-service-tests PROPERTIES
         TIMEOUT 120
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
@@ -126,15 +111,12 @@ function(snow_shot_add_ocr_runtime_tests)
     endif()
     add_test(NAME snow-shot-ocr-managed-runtime-tests
         COMMAND snow-shot-ocr-recognition-service-tests --managed-runtime-only)
-    add_test(NAME snow-shot-ocr-managed-directml-runtime-tests
-        COMMAND snow-shot-ocr-recognition-service-tests --managed-runtime-only --directml)
     set_tests_properties(snow-shot-ocr-managed-runtime-tests
-        snow-shot-ocr-managed-directml-runtime-tests PROPERTIES
+        PROPERTIES
         TIMEOUT 60 LABELS "unit;windows"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(APPLE)
         set_tests_properties(snow-shot-ocr-managed-runtime-tests PROPERTIES LABELS "unit")
-        set_tests_properties(snow-shot-ocr-directml-recognition-service-tests PROPERTIES LABELS "unit;windows")
     endif()
     set_tests_properties(snow-shot-ocr-process-lifecycle-tests PROPERTIES TIMEOUT 30
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")

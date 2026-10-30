@@ -238,16 +238,21 @@ impl WindowsGraphicsCaptureCapturer {
     fn spawn(target: WorkerTarget, startup_timeout: Duration) -> CaptureResult<Self> {
         let (command_tx, command_rx) = crossbeam_channel::bounded(WGC_COMMAND_CAPACITY);
         let (startup_tx, startup_rx) = crossbeam_channel::bounded(1);
+        let admission = snow_core::raster_admission::current();
         let join = thread::Builder::new()
             .name("snow-wgc".into())
-            .spawn(move || match WgcWorker::new(target) {
-                Ok(mut worker) => {
-                    let _ = startup_tx.send(Ok(()));
-                    worker.run(command_rx);
-                }
-                Err(error) => {
-                    let _ = startup_tx.send(Err(error));
-                }
+            .spawn(move || {
+                snow_core::raster_admission::with_policy(admission, || {
+                    match WgcWorker::new(target) {
+                        Ok(mut worker) => {
+                            let _ = startup_tx.send(Ok(()));
+                            worker.run(command_rx);
+                        }
+                        Err(error) => {
+                            let _ = startup_tx.send(Err(error));
+                        }
+                    }
+                })
             })
             .context("failed to spawn WGC worker thread")
             .map_err(CaptureError::platform)?;
@@ -616,6 +621,7 @@ impl WgcWorker {
             ));
         }
 
+        crate::admit_raster(pool_size.Width as u32, pool_size.Height as u32)?;
         let pixel_format = if hdr_to_sdr.is_some() {
             DirectXPixelFormat::R16G16B16A16Float
         } else {
@@ -1063,6 +1069,7 @@ impl WgcWorker {
     }
 
     fn recreate_frame_pool(&mut self, content_size: SizeInt32) -> CaptureResult<()> {
+        crate::admit_raster(content_size.Width as u32, content_size.Height as u32)?;
         self.transport.pause_and_clear()?;
         self.pending_complete_snapshot = None;
         let recreate_result = self.set_complete_contract().and_then(|()| {

@@ -39,10 +39,12 @@ void copyRecording(const QString& path) {
     data->setUrls({QUrl::fromLocalFile(path)});
     QApplication::clipboard()->setMimeData(data);
 }
-QString nextOutput(const QString& original) {
+QString nextOutput(const QString& original,
+                   const snow_shot::storage::ScreenshotWindowNames& windowNames) {
     const QFileInfo file(original);
-    const QString baseName = ScreenshotImageFileService::suggestedBaseName(
-        snow_shot::storage::RecordingSettings().videoFilenameFormat());
+    const QString baseName = snow_shot::storage::expandScreenshotExportVariables(
+        snow_shot::storage::RecordingSettings().videoFilenameFormat(), QDateTime::currentDateTime(),
+        windowNames);
     return snow_shot::presentation::recording::screenRecordingOutputPath({file.absolutePath()},
                                                                          baseName, file.suffix());
 }
@@ -94,10 +96,12 @@ RecordingTrimSession::~RecordingTrimSession() {
 
 void RecordingTrimSession::open(const QString& sourcePath, const QString& outputPath,
                                 const SnowRecordingClipOptions& options, bool deferred,
-                                bool saveWhenReady) {
+                                bool saveWhenReady,
+                                snow_shot::storage::ScreenshotWindowNames windowNames) {
     m_mediaActivity = snow_shot::runtime::RuntimeActivityTracker::shared().acquire();
     m_sourcePath = sourcePath;
     m_outputPath = outputPath;
+    m_windowNames = std::move(windowNames);
     m_saveWhenReady = saveWhenReady;
     m_deferred = deferred;
     m_openFuture = std::async(
@@ -263,7 +267,7 @@ void RecordingTrimSession::exportClip(bool save) {
         const QString filter = QStringLiteral("%1 (*.%2)").arg(suffix.toUpper(), suffix);
         QFileDialog dialog(m_area,
                            trimText(QT_TRANSLATE_NOOP("RecordingTrimSession", "Save to File")),
-                           nextOutput(m_outputPath), filter);
+                           nextOutput(m_outputPath, m_windowNames), filter);
         dialog.setAcceptMode(QFileDialog::AcceptSave);
         dialog.setDefaultSuffix(suffix);
         // The dialog resolves the default suffix before confirming replacement.
@@ -294,7 +298,7 @@ void RecordingTrimSession::exportClip(bool save) {
         publish();
         return;
     }
-    m_pendingPath = nextOutput(m_outputPath);
+    m_pendingPath = nextOutput(m_outputPath, m_windowNames);
     m_export = snow_recording_clip_export_start_with_speed(
         m_clip, m_pendingSelection.first, m_pendingSelection.end,
         m_pendingPath.toUtf8().constData(), m_pendingSelection.speedPercent);

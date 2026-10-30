@@ -43,7 +43,6 @@ constexpr int kDragHandleTrailingSpacing = 4;
 constexpr int kSeparatorHeight = 16;
 constexpr int kSeparatorWidth = 1;
 constexpr int kSeparatorSideSpacing = 12;
-constexpr int kPanelRadius = 8;
 #if !defined(Q_OS_MACOS)
 constexpr qreal kShadowBlurRadius = 18.0;
 constexpr qreal kShadowOffsetX = 0.0;
@@ -260,7 +259,7 @@ void ScreenshotToolbarPanel::setPanelScale(qreal scale) {
         return;
     }
     m_panelScale = scale;
-    m_panelRadius = scaledMetric(kPanelRadius, scale);
+    m_panelRadius = scaledMetric(screenshot_action_toolbar::PanelRadius, scale);
 #if !defined(Q_OS_MACOS)
     auto* shadow = qobject_cast<QGraphicsDropShadowEffect*>(graphicsEffect());
     if (shadow == nullptr) {

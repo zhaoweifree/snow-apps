@@ -93,6 +93,14 @@ impl DocumentModel {
         self.queries.relations().serials_for_text(text)
     }
 
+    pub fn shapes_for_text(&self, text: ElementId) -> &[ElementId] {
+        self.queries.relations().shapes_for_text(text)
+    }
+
+    pub fn connector_text_ids(&self) -> impl Iterator<Item = ElementId> + '_ {
+        self.queries.relations().connector_text_ids()
+    }
+
     pub fn document(&self) -> &Document {
         &self.document
     }
@@ -280,6 +288,9 @@ mod tests {
 
     fn rect(center_x: f64) -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(center_x, 0.0),
@@ -408,6 +419,41 @@ mod tests {
         assert_eq!(model.paint_rank(ids[0]), None);
         assert_states_match(&model);
         assert_states_match(&model.clone());
+    }
+
+    #[test]
+    fn shape_text_relations_refresh_and_undo_without_internal_label_ownership() {
+        use snow_draw_engine_document::TextData;
+        let mut model = DocumentModel::new();
+        let owner = model.allocate_element_id();
+        let label = model.allocate_element_id();
+        let mut shape = rect(100.0);
+        shape.text_element_id = Some(label);
+        let mut insert = Transaction::new("shape binding");
+        insert.insert_rectangle(owner, ElementMeta::default(), shape);
+        insert.insert_text(label, ElementMeta::default(), TextData::default());
+        model.apply_transaction(insert).unwrap();
+        assert_eq!(model.shapes_for_text(label), &[owner]);
+        assert_eq!(model.connector_text_ids().collect::<Vec<_>>(), vec![label]);
+        assert_eq!(model.text_owner_id(label), None);
+        let builds = model.relation_index_build_count();
+        shape.center.x += 20.0;
+        let mut move_shape = Transaction::new("move shape");
+        move_shape.update_rectangle(owner, shape);
+        model.apply_transaction(move_shape).unwrap();
+        assert_eq!(
+            model.text(label).unwrap().center,
+            TextData::default().center
+        );
+        assert_eq!(model.relation_index_build_count(), builds);
+        shape.text_element_id = None;
+        let mut unlink = Transaction::new("unlink shape text");
+        unlink.update_rectangle(owner, shape);
+        let removed = model.apply_transaction(unlink).unwrap();
+        assert!(model.shapes_for_text(label).is_empty());
+        assert!(model.connector_text_ids().next().is_none());
+        model.apply_history_transaction(&removed.inverse).unwrap();
+        assert_eq!(model.shapes_for_text(label), &[owner]);
     }
 
     #[test]

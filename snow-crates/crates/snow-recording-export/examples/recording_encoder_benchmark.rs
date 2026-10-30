@@ -1,5 +1,5 @@
 //! Deterministic encoder capacity and decoded-quality experiment.
-//! Arguments: output.mp4 clip-seconds threads hardware(0/1) codec(h264/h265) quality(0..100) scene(ui/gradient).
+//! Arguments: output.mp4 clip-seconds threads hardware(0/1) codec(h264/h265) quality(0..100) scene(ui/gradient) profile(live/offline).
 //! Release only.
 //! Encodes a fixed frame count so file size and quality are comparable across runs.
 use ffmpeg_next as ffmpeg;
@@ -132,7 +132,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("scene must be ui or gradient".into()),
     };
     let setup = Instant::now();
-    let mut encoder = StreamingEncoder::create(StreamingEncoderConfig {
+    let offline = match args.get(8).map(String::as_str).unwrap_or("live") {
+        "live" => false,
+        "offline" => true,
+        _ => return Err("profile must be live or offline".into()),
+    };
+    let builder = StreamingEncoder::builder(StreamingEncoderConfig {
         loop_animated_images: true,
         output_path: path.clone(),
         format: ExportFormat::Mp4,
@@ -153,7 +158,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         encode_threads: threads,
         audio: Vec::new(),
-    })?;
+    });
+    let mut encoder = if offline {
+        builder.offline_output()
+    } else {
+        builder
+    }
+    .create()?;
     let setup_ms = setup.elapsed().as_secs_f64() * 1000.0;
     let mut pixels = vec![0; 1920 * 1080 * 4];
     let mut samples = Vec::new();
@@ -193,7 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| ("unavailable".into(), "unavailable".into()));
     let bytes = std::fs::metadata(&path)?.len();
     let csv = format!(
-        "scene,codec,quality,threads,hardware_requested,hardware_used,encoder,frames,decoded,seconds,fps,setup_ms,finish_ms,p50_ms,p95_ms,psnr_db,bytes\n{scene:?},{codec:?},{requested_quality},{threads},{hardware},{},{},{index},{decoded},{measured},{},{setup_ms},{finish_ms},{},{},{psnr},{bytes}\n",
+        "scene,codec,quality,threads,hardware_requested,hardware_used,encoder,frames,decoded,seconds,fps,setup_ms,finish_ms,p50_ms,p95_ms,psnr_db,bytes,offline\n{scene:?},{codec:?},{requested_quality},{threads},{hardware},{},{},{index},{decoded},{measured},{},{setup_ms},{finish_ms},{},{},{psnr},{bytes},{offline}\n",
         report.used_hardware_video_encoder,
         report.video_encoder,
         index as f64 / measured,

@@ -4,6 +4,7 @@
 #include "snow_shot/presentation/components/formfields.h"
 #include "snow_shot/presentation/windowshortcutmanager.h"
 #include "snow_shot/shortcuts/shortcutdisplayservice.h"
+#include "snow_shot/shortcuts/menuaccesskey.h"
 
 #include "snow_shot/presentation/components/infotooltipicon.h"
 #include "snow_shot/presentation/styles/mainwindowcomponenttoken.h"
@@ -1452,6 +1453,102 @@ void recordingShortcutRecorderAcceptsControlKeysAndEscape() {
     }
 }
 
+void contextMenuRecorderAcceptsOnlyOneLogicalCharacter() {
+    const auto scheme = styles::ThemeManager::instance().themeColorScheme();
+    ShortcutKeyRowConfig config;
+    config.title = QStringLiteral("Edit with Snow Shot");
+    config.maxShortcutCount = 1;
+    config.showRegistrationStatus = false;
+    config.validationScope = ShortcutKeyRowConfig::ValidationScope::WindowsContextMenu;
+    config.shortcutValidator = [](const shortcut_domain::ShortcutBinding& attempted) {
+        const shortcut_domain::ShortcutBinding canonical{
+            shortcut_domain::canonicalMenuAccessKey(attempted.portableText)};
+        const bool supported = !canonical.portableText.isEmpty();
+        return shortcuts::GlobalShortcutValidationResult{
+            attempted.portableText, supported,
+            supported ? shortcuts::GlobalShortcutFailureReason::None
+                      : shortcuts::GlobalShortcutFailureReason::InvalidShortcut,
+            canonical};
+    };
+    ShortcutKeyRow row(config, scheme.metricAlias,
+                       styles::buildMainWindowComponentMetricToken(scheme));
+    shortcut_domain::ShortcutBindingList saved;
+    int commits = 0;
+    QObject::connect(&row, &ShortcutKeyRow::shortcutsChanged, &row, [&](const auto& selected) {
+        saved = selected;
+        ++commits;
+        shortcuts::GlobalShortcutRegistrationState state;
+        state.shortcuts = saved;
+        row.setRegistrationState(state);
+    });
+    row.show();
+    const auto open = [&] {
+        row.findChild<adqt::widgets::AdButton*>(QStringLiteral("shortcutKeyButton"))->click();
+        PrintScreenRecordingSession::flush();
+        require(!row.findChild<adqt::widgets::AdButton*>(QStringLiteral("shortcutConfigAddButton"))
+                     ->isVisible(),
+                "single-key menu recorders hide the add-binding control");
+    };
+    const auto key = [&](Qt::Key code, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        auto* content = row.findChild<QWidget*>(QStringLiteral("shortcutConfigContent"));
+        PhysicalKeyEvent press(QEvent::KeyPress, code, modifiers);
+        QCoreApplication::sendEvent(content, &press);
+        PhysicalKeyEvent release(QEvent::KeyRelease, code, Qt::NoModifier);
+        QCoreApplication::sendEvent(content, &release);
+        PrintScreenRecordingSession::flush();
+    };
+    open();
+    auto* modal = row.findChild<adqt::widgets::AdModal*>();
+    const std::array invalidKeys{
+        QKeyCombination(Qt::ControlModifier, Qt::Key_E),
+        QKeyCombination(Qt::ShiftModifier, Qt::Key_E),
+        QKeyCombination(Qt::AltModifier, Qt::Key_E),
+        QKeyCombination(Qt::MetaModifier, Qt::Key_E),
+        QKeyCombination(Qt::NoModifier, Qt::Key_Semicolon),
+        QKeyCombination(Qt::NoModifier, Qt::Key_F1),
+        QKeyCombination(Qt::NoModifier, Qt::Key_Escape),
+    };
+    for (const auto combination : invalidKeys) {
+        key(combination.key(), combination.keyboardModifiers());
+        auto* feedback = row.findChild<InfoTooltipIcon*>(
+            QStringLiteral("shortcutConfigValidationTooltipTrigger"));
+        require(!modal->acceptButton()->isEnabled() && feedback &&
+                    feedback->accessibleName() ==
+                        QStringLiteral("Invalid context menu access key") &&
+                    feedback->tooltipText().contains(QStringLiteral("without modifier keys")),
+                "invalid menu keys keep the dialog open with specific accessible feedback");
+    }
+    key(Qt::Key_E);
+    require(modal->acceptButton()->isEnabled(), "a bare letter is accepted after invalid input");
+    modal->rejectButton()->click();
+    PrintScreenRecordingSession::flush();
+    require(commits == 0 && saved.isEmpty() && QWidget::keyboardGrabber() == nullptr,
+            "cancelling the recorder discards the letter and releases the keyboard");
+    for (const auto code : {Qt::Key_E, Qt::Key_7}) {
+        open();
+        modal = row.findChild<adqt::widgets::AdModal*>();
+        if (!saved.isEmpty())
+            row.findChild<adqt::widgets::AdButton*>(QStringLiteral("shortcutConfigKeyButton"))
+                ->click();
+        key(code);
+        require(modal->acceptButton()->isEnabled(), "a bare letter or digit can be confirmed");
+        modal->acceptButton()->click();
+        PrintScreenRecordingSession::flush();
+        require(saved.size() == 1 && saved.first().physicalKeys.isEmpty() &&
+                    saved.first().portableText ==
+                        QKeySequence(code).toString(QKeySequence::PortableText),
+                "the recorder saves exactly one logical character without physical metadata");
+    }
+    open();
+    modal = row.findChild<adqt::widgets::AdModal*>();
+    row.findChild<adqt::widgets::AdButton*>(QStringLiteral("shortcutConfigActionButton"))->click();
+    PrintScreenRecordingSession::flush();
+    require(modal->acceptButton()->isEnabled(), "a cleared access key can be confirmed");
+    modal->acceptButton()->click();
+    PrintScreenRecordingSession::flush();
+    require(saved.isEmpty(), "clearing the recorder commits an empty assignment");
+}
+
 void shortcutRecordersOwnFocusNavigationKeysWhileRecording() {
     using Scope = ShortcutKeyRowConfig::ValidationScope;
     enum class Entry { Empty, Existing, Added };
@@ -2106,6 +2203,7 @@ int main(int argc, char** argv) {
     printScreenRecordingPreservesEventOrderAndLifecycle();
     localShortcutRecordersUseOnlyNormalKeyEvents();
     recordingShortcutRecorderAcceptsControlKeysAndEscape();
+    contextMenuRecorderAcceptsOnlyOneLogicalCharacter();
     shortcutRecordersOwnFocusNavigationKeysWhileRecording();
     nativePrintScreenRecordingPreservesModifiers();
     drawingRecorderUsesLocalValidationLanguage();

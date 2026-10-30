@@ -399,8 +399,6 @@ DocumentLayout createDocumentLayout(const SnowSceneDisplayItem& item, const QFon
     layout.itemWidth = qMax(1.0, item.width * layout.safeZoom);
     layout.itemHeight = qMax(1.0, item.height * layout.safeZoom);
     layout.resolution = resolveFont(baseFont, item, layout.safeZoom);
-    layout.inkReserve =
-        qMax(0.0, item.text_ink_reserve) * layout.safeZoom / layout.resolution.scale;
     layout.document = std::make_unique<QTextDocument>();
     configureTextDocument(*layout.document, item, layout.resolution.font,
                           layout.itemWidth / layout.resolution.scale, text, substituteEmptyText);
@@ -420,22 +418,16 @@ QTransform documentToViewTransform(const SnowSceneDisplayItem& item, const QPoin
     return transform;
 }
 
-QRectF documentContentsRect(const DocumentLayout& layout) {
-    return QRectF(0.0, 0.0, layout.itemWidth / layout.resolution.scale,
-                  layout.textDocument().size().height())
-        .adjusted(-layout.inkReserve, -layout.inkReserve, layout.inkReserve, layout.inkReserve);
-}
-
 void drawDocument(QPainter& painter, const DocumentLayout& layout, const QColor& textColor) {
-    // QTextDocument::drawContents(rect) replaces the painter clip. Preserve both
-    // the exposed repaint region and any editor selection clip in document space.
+    // The layout rectangle controls wrapping, not paint coverage: glyph overhang,
+    // outlines, and antialiasing may extend beyond it. Draw directly so Qt preserves
+    // the painter's exposed repaint region and editor selection clips, without
+    // imposing a second document-frame clip inside the engine's paint bounds.
     QAbstractTextDocumentLayout::PaintContext context;
     if (textColor.isValid()) {
         context.palette.setColor(QPalette::Text, textColor);
     }
-    context.clip = documentContentsRect(layout);
     painter.save();
-    painter.setClipRect(context.clip, Qt::IntersectClip);
     layout.textDocument().documentLayout()->draw(&painter, context);
     painter.restore();
 }

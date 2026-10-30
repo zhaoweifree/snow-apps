@@ -143,6 +143,119 @@ QJsonObject distribution(std::vector<double> values) {
 }
 
 #if !defined(SNOW_SHOT_SELECTION_PRESENTATION_BASELINE)
+QJsonObject runIndependentRegionCase(QSize size, int count, bool curves, bool duplicate,
+                                     int iterations, int warmup, FrameBackend backend) {
+    Fixture fixture(size, false, true, backend);
+    auto& model = fixture.selection;
+    const auto bounds = fixture.geometry.canvasBounds().toAlignedRect();
+    const auto region = [curves](int index) {
+        const QRect rect(20 + (index % 8) * 55, 20 + (index / 8) * 45, 40, 30);
+        if (!curves)
+            return ScreenshotRegionGeometry(rect);
+        QPainterPath path;
+        path.addEllipse(QRectF(rect));
+        return ScreenshotRegionGeometry::fromPath(path, ScreenshotRegionType::Curve);
+    };
+    model.setSelectionRegion(region(0));
+    for (int index = 1; index < count; ++index) {
+        model.beginRegionOperation(ScreenshotSelectionModel::RegionOperation::Add);
+        model.setDraftRegion(region(index));
+        model.commitDraftRegion(bounds);
+    }
+    if (count == 1) {
+        model.beginRegionOperation(ScreenshotSelectionModel::RegionOperation::Add);
+        model.commitRegionOperation();
+    }
+    fixture.interaction.confirmSelection();
+    ScreenshotOverlayInputActions actions;
+    actions.updateOverlayState = [&] { fixture.services->updateOverlayState(); };
+    actions.requestSelectionDragPresentation = [&] {
+        fixture.services->requestSelectionDragPresentation();
+    };
+    ScreenshotOverlayInputHandler input({fixture.captureState, fixture.interaction, model,
+                                         fixture.intelligentSelection, fixture.geometry,
+                                         fixture.displays, actions});
+    fixture.services->updateOverlayState();
+    fixture.processEvents();
+    const auto original = model;
+    const QPointF press(40, 35);
+    QElapsedTimer setup;
+    setup.start();
+    if (!duplicate)
+        input.handleMousePress(nullptr, press);
+    const double setupMs = static_cast<double>(setup.nsecsElapsed()) / 1000000.0;
+    const auto stationaryCompositions =
+        model.regionEditCompositionsForTesting() - original.regionEditCompositionsForTesting();
+    quint64 compositions = 0;
+    qsizetype retainedBytes = 0;
+    qint64 paints = 0;
+    qint64 paintedPixels = 0;
+    qint64 requestedPixels = 0;
+    std::vector<double> submission, frames;
+    for (int frame = -warmup; frame < iterations; ++frame) {
+        if (duplicate) {
+            model = original;
+            fixture.interaction.confirmSelection();
+            fixture.services->updateOverlayState();
+            fixture.processEvents();
+        }
+        fixture.paintObserver.reset();
+        resetSelectionRenderDiagnosticsForCurrentThread();
+        const auto before = model.regionEditCompositionsForTesting();
+        QElapsedTimer timer;
+        timer.start();
+        if (duplicate) {
+            static_cast<void>(input.duplicateLatestRegionAt(
+                QPointF(bounds.width() * 0.75, bounds.height() * 0.75)));
+        } else {
+            const QPointF pointer =
+                press + QPointF(200 + (frame + warmup) % 80, 400 + (frame + warmup) % 40);
+            for (int request = 0; request < 16; ++request)
+                input.handleMouseMove(nullptr, pointer);
+        }
+        const double submitted = static_cast<double>(timer.nsecsElapsed()) / 1000000.0;
+        fixture.advanceClock(17);
+        fixture.flushFrame();
+        fixture.processEvents();
+        const double elapsed = static_cast<double>(timer.nsecsElapsed()) / 1000000.0;
+        const auto performed = model.regionEditCompositionsForTesting() - before;
+        if (performed != 1)
+            throw std::runtime_error("each changed region frame must compose exactly once");
+        if (frame >= 0) {
+            submission.push_back(submitted);
+            frames.push_back(elapsed);
+            compositions += performed;
+            paints += fixture.paintObserver.canvasPaints;
+            paintedPixels += fixture.paintObserver.canvasDamagePixels;
+            requestedPixels += static_cast<qint64>(
+                selectionRenderDiagnosticsForCurrentThread().requestedDamagePixels);
+            retainedBytes =
+                std::max(retainedBytes, model.regionStorageBytesForTesting() +
+                                            model.selectionRegion().retainedBytesEstimate());
+        }
+    }
+    if (!duplicate)
+        input.handleMouseRelease(nullptr, press + QPointF(220, 420));
+    return {{"scenario", QStringLiteral("independent_%1_%2_%3")
+                             .arg(duplicate ? QStringLiteral("duplicate") : QStringLiteral("drag"))
+                             .arg(curves ? QStringLiteral("curves") : QStringLiteral("rectangles"))
+                             .arg(count)},
+            {"region_count", count},
+            {"iterations", iterations},
+            {"requests_per_frame", duplicate ? 1 : 16},
+            {"drag_setup_ms", setupMs},
+            {"stationary_compositions", qint64(stationaryCompositions)},
+            {"compositions", qint64(compositions)},
+            {"canvas_paints", paints},
+            {"canvas_painted_pixels", paintedPixels},
+            {"requested_damage_pixels", requestedPixels},
+            {"retained_geometry_bytes_upper_bound", qint64(retainedBytes)},
+            {"submission_ms", distribution(submission)},
+            {"frame_total_ms", distribution(frames)}};
+}
+#endif
+
+#if !defined(SNOW_SHOT_SELECTION_PRESENTATION_BASELINE)
 struct ExternalInitializationSamples {
     std::vector<double> initializationUs;
     std::vector<double> pendingFrameFlushUs;
@@ -465,9 +578,9 @@ QJsonObject runCase(const Case& benchmarkCase, const QSize& logicalSize, int ite
     qint64 colorPickerPositionMoves = 0;
     qint64 colorPickerOwnerChanges = 0;
 #endif
-    const int framesPerTarget =
-        (ScreenshotSmartSelectionTransition::kDurationMs + frameIntervalMs - 1) / frameIntervalMs +
-        2;
+    // Preserve the input cadence across animation models, including archived baselines.
+    constexpr int targetHoldMs = 101;
+    const int framesPerTarget = (targetHoldMs + frameIntervalMs - 1) / frameIntervalMs + 2;
     QRectF previousDisplayed = fixture.displayedSelection();
     QElapsedTimer cadence;
     cadence.start();
@@ -671,6 +784,77 @@ QJsonObject runCase(const Case& benchmarkCase, const QSize& logicalSize, int ite
              static_cast<double>(canvasDamagePixels) / (viewportPixels * iterations)}};
 }
 
+#if !defined(SNOW_SHOT_SELECTION_PRESENTATION_BASELINE)
+QJsonObject runEffectWheelComparison(const QSize& size, int iterations, int warmup,
+                                     FrameBackend backend) {
+    Fixture fixture(size, false, true, backend);
+    fixture.interaction.confirmSelection();
+    fixture.interaction.setSelectionBackgroundPreviewVisible(true);
+    fixture.services->updateOverlayState();
+    constexpr int requests = 16;
+    std::array<std::vector<double>, 2> submissions, frames;
+    std::array<qint64, 2> notifications{};
+    for (int frame = -warmup; frame < iterations; ++frame) {
+        // Alternate the order so neither arm consistently gets colder caches.
+        for (int order = 0; order < 2; ++order) {
+            const auto arm = static_cast<std::size_t>((frame + warmup + order) % 2);
+            static_cast<void>(fixture.selection.setCornerRadius(20));
+            static_cast<void>(fixture.selection.setShadowWidth(16));
+            static_cast<void>(fixture.selection.setBackgroundOpacityPercent(40));
+            fixture.services->updateOverlayState();
+            fixture.processEvents();
+            fixture.resetCounters();
+            QElapsedTimer timer;
+            timer.start();
+            for (int request = 0; request < requests; ++request) {
+                if (request % 3 == 0)
+                    static_cast<void>(
+                        fixture.selection.setCornerRadius(fixture.selection.cornerRadius() + 1));
+                else if (request % 3 == 1)
+                    static_cast<void>(
+                        fixture.selection.setShadowWidth(fixture.selection.shadowWidth() + 1));
+                else
+                    static_cast<void>(fixture.selection.setBackgroundOpacityPercent(
+                        fixture.selection.backgroundOpacityPercent() + 1));
+                if (arm == 0)
+                    fixture.services->updateOverlayState();
+                else
+                    fixture.services->requestSelectionEffectPresentation();
+            }
+            const double submitted = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+            if (fixture.stateNotifications != (arm == 0 ? requests : 0))
+                throw std::runtime_error("wheel submission must preserve its presentation policy");
+            fixture.flushFrame();
+            fixture.processEvents();
+            const double total = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+            if (fixture.selection.cornerRadius() != 26 || fixture.selection.shadowWidth() != 21 ||
+                fixture.selection.backgroundOpacityPercent() != 45 ||
+                fixture.stateNotifications != (arm == 0 ? requests : 1))
+                throw std::runtime_error("wheel frame must retain every delta and latest state");
+            if (frame >= 0) {
+                submissions[arm].push_back(submitted);
+                frames[arm].push_back(total);
+                notifications[arm] += fixture.stateNotifications;
+            }
+        }
+    }
+    QJsonArray arms;
+    for (std::size_t arm = 0; arm < 2; ++arm)
+        arms.append(QJsonObject{{"policy", arm == 0 ? "immediate" : "coalesced"},
+                                {"submission_ms", distribution(submissions[arm])},
+                                {"frame_total_ms", distribution(frames[arm])},
+                                {"semantic_notifications", notifications[arm]}});
+    return {{"scenario", "effect-wheel"},
+            {"requests_per_frame", requests},
+            {"measurement",
+             "Alternating same-process comparison of identical model deltas through immediate "
+             "and frame-coalesced presentation, using the same renderer. Submission excludes "
+             "frame commit; total includes commit and Qt paint/event processing. Excludes native "
+             "wheel delivery, settings persistence and compositor/input-to-photon latency."},
+            {"arms", arms}};
+}
+#endif
+
 int positiveInteger(const QCommandLineParser& parser, const QString& name) {
     bool valid = false;
     const int value = parser.value(name).toInt(&valid);
@@ -743,6 +927,18 @@ int main(int argc, char* argv[]) {
             results.append(runExternalInitializationCase(logicalSize, iterations, warmup,
                                                          pickerEnabled, frameBackend));
 #endif
+    } else if (selected == QStringLiteral("effect-wheel")) {
+#if !defined(SNOW_SHOT_SELECTION_PRESENTATION_BASELINE)
+        results.append(runEffectWheelComparison(logicalSize, iterations, warmup, frameBackend));
+#endif
+    } else if (selected == QStringLiteral("independent-regions")) {
+#if !defined(SNOW_SHOT_SELECTION_PRESENTATION_BASELINE)
+        for (const int count : {1, 16, 64})
+            for (const bool curves : {false, true})
+                for (const bool duplicate : {false, true})
+                    results.append(runIndependentRegionCase(logicalSize, count, curves, duplicate,
+                                                            iterations, warmup, frameBackend));
+#endif
     } else {
         for (const Case& benchmarkCase : kCases) {
             const bool optimizationCase =
@@ -778,7 +974,17 @@ int main(int argc, char* argv[]) {
         {"screen_refresh_hz", QGuiApplication::primaryScreen()->refreshRate()},
         {"animation_sample_interval_ms", frameIntervalMs > 0 ? frameIntervalMs : 17},
         {"measurement",
-         externalInitialization
+         selected == QStringLiteral("independent-regions")
+             ? "Real input-handler and presentation-service work for independent region dragging "
+               "and duplication. Each drag frame includes sixteen identical pointer events and "
+               "asserts exactly one composition; stationary geometry is composed once at press. "
+               "Duplication resets the baseline outside the measured interval. Submission excludes "
+               "frame delivery; frame_total includes submission, explicit frame delivery, and Qt "
+               "event processing/painting. Retained geometry is a conservative upper estimate of "
+               "region, drag, and combined-mask storage, counting shared operands more than once; "
+               "it excludes image surfaces and process memory. Native mouse delivery, selector "
+               "workers, idle waits, and input-to-photon latency are excluded."
+         : externalInitialization
              ? "Same-process alternating A/B comparison of the real external drag "
                "input handler and presentation services on a captured hidden "
                "overlay. Both paths start in the workflow's committed empty "

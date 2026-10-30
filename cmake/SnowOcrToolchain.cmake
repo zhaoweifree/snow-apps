@@ -1,0 +1,12 @@
+include_guard(GLOBAL)
+set(_snow_ocr_toolchain_file
+    "${CMAKE_CURRENT_LIST_DIR}/../snow-crates/crates/simd-paddle-ocr-rs/rust-toolchain.toml")
+if(NOT EXISTS "${_snow_ocr_toolchain_file}")
+    message(FATAL_ERROR "Initialize the OCR submodule with git submodule update --init --recursive")
+endif()
+file(STRINGS "${_snow_ocr_toolchain_file}" _snow_ocr_channel REGEX "^channel = ")
+string(REGEX MATCH "nightly-[0-9]+-[0-9]+-[0-9]+" SNOW_SHOT_OCR_TOOLCHAIN "${_snow_ocr_channel}")
+if(NOT SNOW_SHOT_OCR_TOOLCHAIN)
+    message(FATAL_ERROR "The OCR submodule must pin a dated nightly Rust toolchain")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_snow_ocr_toolchain_file}")

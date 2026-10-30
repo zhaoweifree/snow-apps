@@ -66,9 +66,9 @@ if(NOT _schema EQUAL 2 OR NOT _default_model STREQUAL "small")
 endif()
 
 string(JSON _model_count LENGTH "${_manifest}" models)
-if(NOT _model_count EQUAL 7)
+if(NOT _model_count EQUAL 3)
     message(FATAL_ERROR
-        "The checked-in OCR asset manifest must describe exactly 7 models.")
+        "The checked-in OCR asset manifest must describe exactly 3 V6 models.")
 endif()
 set(_small_model_index "")
 math(EXPR _last_model_index "${_model_count} - 1")
@@ -88,9 +88,9 @@ _snow_ocr_manifest_field(_model_id models ${_small_model_index} id)
 
 string(JSON _runtime_file_count LENGTH "${_manifest}" runtime files)
 string(JSON _model_file_count LENGTH "${_manifest}" models ${_small_model_index} files)
-if(NOT _runtime_file_count EQUAL 3 OR NOT _model_file_count EQUAL 3)
+if(NOT _runtime_file_count EQUAL 2 OR NOT _model_file_count EQUAL 3)
     message(FATAL_ERROR
-        "The checked-in OCR asset manifest must describe 3 runtime files and 3 "
+        "The checked-in OCR asset manifest must describe 2 runtime files and 3 "
         "model files: ${SNOW_OCR_ASSET_MANIFEST}")
 endif()
 
@@ -229,7 +229,8 @@ endif()
 
 # Restage the runtime only when a staged file fails verification.
 set(_runtime_staged TRUE)
-foreach(_index RANGE 0 2)
+math(EXPR _last_runtime_file "${_runtime_file_count} - 1")
+foreach(_index RANGE 0 ${_last_runtime_file})
     list(GET _runtime_file_NAMES ${_index} _name)
     list(GET _runtime_file_SIZES ${_index} _size)
     list(GET _runtime_file_HASHES ${_index} _sha256)
@@ -274,7 +275,7 @@ endif()
 # Completion markers are written only after a fully verified payload so the
 # client never treats a partially staged component as complete.
 set(_runtime_ok TRUE)
-foreach(_index RANGE 0 2)
+foreach(_index RANGE 0 ${_last_runtime_file})
     list(GET _runtime_file_NAMES ${_index} _name)
     list(GET _runtime_file_SIZES ${_index} _size)
     list(GET _runtime_file_HASHES ${_index} _sha256)

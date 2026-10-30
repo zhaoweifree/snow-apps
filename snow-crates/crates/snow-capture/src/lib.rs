@@ -68,6 +68,16 @@ pub fn capture_once(target: &CaptureTarget) -> CaptureResult<Frame> {
 #[cfg(feature = "stage-timing")]
 pub mod pixel_counters;
 
+pub(crate) fn admit_raster(width: u32, height: u32) -> CaptureResult<()> {
+    if snow_core::raster_admission::allows(width, height) {
+        Ok(())
+    } else {
+        Err(error::CaptureError::InvalidConfig(
+            "raster admission rejected".into(),
+        ))
+    }
+}
+
 pub mod capabilities;
 #[cfg(target_os = "macos")]
 pub mod native;

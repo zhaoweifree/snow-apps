@@ -123,6 +123,9 @@ shortcutValidationMessage(const snow_shot::presentation::GlobalShortcutValidatio
                           ShortcutKeyRowConfig::ValidationScope validationScope) {
     const QString displayShortcut =
         snow_shot::shortcuts::formatShortcutDisplayText(attemptedShortcut);
+    if (validationScope == ShortcutKeyRowConfig::ValidationScope::WindowsContextMenu) {
+        return QObject::tr("Use one letter (A–Z) or digit (0–9) without modifier keys");
+    }
     if (validationScope == ShortcutKeyRowConfig::ValidationScope::ScreenshotShortcut) {
         if (validation.failureReason ==
             snow_shot::presentation::GlobalShortcutFailureReason::AlreadyInUse) {
@@ -215,6 +218,8 @@ class ShortcutConfigInfoButton final : public adqt::widgets::AdButton {
             m_info->setAccessibleName(QObject::tr("Invalid pinned window shortcut"));
         } else if (validationScope == ShortcutKeyRowConfig::ValidationScope::RecordingShortcut) {
             m_info->setAccessibleName(QObject::tr("Invalid recording shortcut"));
+        } else if (validationScope == ShortcutKeyRowConfig::ValidationScope::WindowsContextMenu) {
+            m_info->setAccessibleName(QObject::tr("Invalid context menu access key"));
         } else {
             m_info->setAccessibleName(QObject::tr("Invalid global shortcut"));
         }
@@ -865,7 +870,7 @@ class ShortcutKeyConfigContent final : public QWidget {
             return;
         }
 
-        const bool canAddMore = m_maxShortcutCount > 1 && m_keyConfigs.size() < m_maxShortcutCount;
+        const bool canAddMore = m_keyConfigs.size() < m_maxShortcutCount;
         m_addButton->setVisible(canAddMore);
         m_addButton->setEnabled(canAddMore && m_recordingConfigIndex < 0);
     }

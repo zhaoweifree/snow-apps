@@ -1169,8 +1169,8 @@
             <translation>Active window</translation>
         </message>
         <message>
-            <source>Add Edit with Snow Shot to the classic Windows context menu to pin an image file to the screen.</source>
-            <translation>Add Edit with Snow Shot to the classic Windows context menu to pin an image file to the screen.</translation>
+            <source>Add Edit with Snow Shot to the classic Windows context menu to pin a supported image or document file to the screen.</source>
+            <translation>Add Edit with Snow Shot to the classic Windows context menu to pin a supported image or document file to the screen.</translation>
         </message>
         <message>
             <source>Add a mask to highlight text recognition results</source>
@@ -1361,6 +1361,10 @@
             <translation>Auto start at boot</translation>
         </message>
         <message>
+            <source>Auto-hide toolbar</source>
+            <translation>Auto-hide toolbar</translation>
+        </message>
+        <message>
             <source>Auto-recognize QR Code</source>
             <translation>Auto-recognize QR Code</translation>
         </message>
@@ -1407,6 +1411,10 @@
         <message>
             <source>Background Fill</source>
             <translation>Background Fill</translation>
+        </message>
+        <message>
+            <source>Background color</source>
+            <translation>Background color</translation>
         </message>
         <message>
             <source>Background image</source>
@@ -1601,6 +1609,10 @@
             <translation>Choose the action for middle-clicking while moving or annotating in a screenshot</translation>
         </message>
         <message>
+            <source>Choose the bundled icon used in dark theme, or reuse the regular icon settings</source>
+            <translation>Choose the bundled icon used in dark theme, or reuse the regular icon settings</translation>
+        </message>
+        <message>
             <source>Choose the bundled icon used in the system tray</source>
             <translation>Choose the bundled icon used in the system tray</translation>
         </message>
@@ -1615,6 +1627,14 @@
         <message>
             <source>Choose the compression effort used for image output and history results</source>
             <translation>Choose the compression effort used for image output and history results</translation>
+        </message>
+        <message>
+            <source>Choose the default font for newly pinned text</source>
+            <translation>Choose the default font for newly pinned text</translation>
+        </message>
+        <message>
+            <source>Choose the default font size for newly pinned text</source>
+            <translation>Choose the default font size for newly pinned text</translation>
         </message>
         <message>
             <source>Choose the dialog used for manual image saves</source>
@@ -1825,8 +1845,8 @@
             <translation>Configure proxy use for network requests</translation>
         </message>
         <message>
-            <source>Configure text recognition models and acceleration</source>
-            <translation>Configure text recognition models and acceleration</translation>
+            <source>Configure text recognition models and processing</source>
+            <translation>Configure text recognition models and processing</translation>
         </message>
         <message>
             <source>Configure the screenshot, pinned, and recording toolbars</source>
@@ -1855,6 +1875,10 @@
         <message>
             <source>Control when the screenshot color picker is visible</source>
             <translation>Control when the screenshot color picker is visible</translation>
+        </message>
+        <message>
+            <source>Copy after text recognition</source>
+            <translation>Copy after text recognition</translation>
         </message>
         <message>
             <source>Copy application settings as a zip archive to the clipboard</source>
@@ -2009,6 +2033,14 @@
             <translation>Dark</translation>
         </message>
         <message>
+            <source>Dark theme custom icon</source>
+            <translation>Dark theme custom icon</translation>
+        </message>
+        <message>
+            <source>Dark theme icon</source>
+            <translation>Dark theme icon</translation>
+        </message>
+        <message>
             <source>Data storage</source>
             <translation>Data storage</translation>
         </message>
@@ -2035,6 +2067,22 @@
         <message>
             <source>Default Punctuation</source>
             <translation>Default Punctuation</translation>
+        </message>
+        <message>
+            <source>Default text color</source>
+            <translation>Default text color</translation>
+        </message>
+        <message>
+            <source>Default text font</source>
+            <translation>Default text font</translation>
+        </message>
+        <message>
+            <source>Default text font size</source>
+            <translation>Default text font size</translation>
+        </message>
+        <message>
+            <source>Defaults for newly pinned text; source formatting is preserved</source>
+            <translation>Defaults for newly pinned text; source formatting is preserved</translation>
         </message>
         <message>
             <source>Delay %1s to execute</source>
@@ -2095,14 +2143,6 @@
         <message>
             <source>Destroy</source>
             <translation>Destroy</translation>
-        </message>
-        <message>
-            <source>DirectML</source>
-            <translation>DirectML</translation>
-        </message>
-        <message>
-            <source>DirectML acceleration</source>
-            <translation>DirectML acceleration</translation>
         </message>
         <message>
             <source>Disable global hotkeys</source>
@@ -2189,8 +2229,20 @@
             <translation>Draw four guide segments around the sampled center pixel</translation>
         </message>
         <message>
+            <source>Duplicate latest region</source>
+            <translation>Duplicate latest region</translation>
+        </message>
+        <message>
             <source>Edit selection</source>
             <translation>Edit selection</translation>
+        </message>
+        <message>
+            <source>Edit with Snow Shot</source>
+            <translation>Edit with Snow Shot</translation>
+        </message>
+        <message>
+            <source>Edit with Snow Shot Mini</source>
+            <translation>Edit with Snow Shot Mini</translation>
         </message>
         <message>
             <source>Enable MCP integration</source>
@@ -2233,6 +2285,10 @@
             <translation>Enter an HTTP or HTTPS address. Changes apply immediately. Clear to use the default server.</translation>
         </message>
         <message>
+            <source>Enter or browse to a PNG or ICO file for dark theme; invalid files use the selected bundled icon</source>
+            <translation>Enter or browse to a PNG or ICO file for dark theme; invalid files use the selected bundled icon</translation>
+        </message>
+        <message>
             <source>Enter or browse to a PNG or ICO file; invalid files use the selected bundled icon</source>
             <translation>Enter or browse to a PNG or ICO file; invalid files use the selected bundled icon</translation>
         </message>
@@ -2251,6 +2307,14 @@
         <message>
             <source>Exit</source>
             <translation>Exit</translation>
+        </message>
+        <message>
+            <source>Exit annotation mode and keep the pinned window open when closing.</source>
+            <translation>Exit annotation mode and keep the pinned window open when closing.</translation>
+        </message>
+        <message>
+            <source>Exit annotation mode before closing</source>
+            <translation>Exit annotation mode before closing</translation>
         </message>
         <message>
             <source>Export</source>
@@ -2275,6 +2339,10 @@
         <message>
             <source>Extended Features Settings</source>
             <translation>Extended Features Settings</translation>
+        </message>
+        <message>
+            <source>Fast</source>
+            <translation>Fast</translation>
         </message>
         <message>
             <source>Fill Style</source>
@@ -2389,10 +2457,6 @@
             <translation>GIF, APNG and WebP resolution, frame rate and looping</translation>
         </message>
         <message>
-            <source>GPU acceleration</source>
-            <translation>GPU acceleration</translation>
-        </message>
-        <message>
             <source>General</source>
             <translation>General</translation>
         </message>
@@ -2449,6 +2513,10 @@
             <translation>Hide or show all windows in the current group</translation>
         </message>
         <message>
+            <source>Hide the toolbar near the left or right screen edge. Hover over the edge control to show it again.</source>
+            <translation>Hide the toolbar near the left or right screen edge. Hover over the edge control to show it again.</translation>
+        </message>
+        <message>
             <source>Hide to Top</source>
             <translation>Hide to Top</translation>
         </message>
@@ -2485,12 +2553,12 @@
             <translation>Image Recognition</translation>
         </message>
         <message>
-            <source>Image export</source>
-            <translation>Image export</translation>
+            <source>Image and document files</source>
+            <translation>Image and document files</translation>
         </message>
         <message>
-            <source>Image files</source>
-            <translation>Image files</translation>
+            <source>Image export</source>
+            <translation>Image export</translation>
         </message>
         <message>
             <source>Image files (*.png *.ico);;PNG images (*.png);;Icon files (*.ico)</source>
@@ -2633,6 +2701,10 @@
             <translation>Language</translation>
         </message>
         <message>
+            <source>Language Detection Confidence Threshold</source>
+            <translation>Language Detection Confidence Threshold</translation>
+        </message>
+        <message>
             <source>Language, startup and updates</source>
             <translation>Language, startup and updates</translation>
         </message>
@@ -2675,6 +2747,10 @@
         <message>
             <source>Limit long side (faster)</source>
             <translation>Limit long side (faster)</translation>
+        </message>
+        <message>
+            <source>Limit the width of pinned text, including padding</source>
+            <translation>Limit the width of pinned text, including padding</translation>
         </message>
         <message>
             <source>Line</source>
@@ -2769,16 +2845,12 @@
             <translation>Maximum entries</translation>
         </message>
         <message>
+            <source>Maximum text width</source>
+            <translation>Maximum text width</translation>
+        </message>
+        <message>
             <source>Medium</source>
             <translation>Medium</translation>
-        </message>
-        <message>
-            <source>Medium V4</source>
-            <translation>Medium V4</translation>
-        </message>
-        <message>
-            <source>Medium V5</source>
-            <translation>Medium V5</translation>
         </message>
         <message>
             <source>Medium V6</source>
@@ -2805,6 +2877,10 @@
             <translation>Middle mouse button action</translation>
         </message>
         <message>
+            <source>Minimum confidence required to switch to the secondary target language</source>
+            <translation>Minimum confidence required to switch to the secondary target language</translation>
+        </message>
+        <message>
             <source>Model Hot Start</source>
             <translation>Model Hot Start</translation>
         </message>
@@ -2829,8 +2905,16 @@
             <translation>Mouse pointer</translation>
         </message>
         <message>
+            <source>Mouse wheel opacity step</source>
+            <translation>Mouse wheel opacity step</translation>
+        </message>
+        <message>
             <source>Mouse wheel zoom mode</source>
             <translation>Mouse wheel zoom mode</translation>
+        </message>
+        <message>
+            <source>Mouse wheel zoom step</source>
+            <translation>Mouse wheel zoom step</translation>
         </message>
         <message>
             <source>Move cursor down</source>
@@ -2877,6 +2961,10 @@
             <translation>Next screenshot history</translation>
         </message>
         <message>
+            <source>Next selection area</source>
+            <translation>Next selection area</translation>
+        </message>
+        <message>
             <source>Next selection type</source>
             <translation>Next selection type</translation>
         </message>
@@ -2917,12 +3005,24 @@
             <translation>OCR models &amp; performance</translation>
         </message>
         <message>
+            <source>Off</source>
+            <translation>Off</translation>
+        </message>
+        <message>
             <source>Only when displayed</source>
             <translation>Only when displayed</translation>
         </message>
         <message>
             <source>Open</source>
             <translation>Open</translation>
+        </message>
+        <message>
+            <source>Open Image Splitting for each selected image file, or an empty window if no images are selected</source>
+            <translation>Open Image Splitting for each selected image file, or an empty window if no images are selected</translation>
+        </message>
+        <message>
+            <source>Open Image Stitching with selected image files, or an empty window if no images are selected</source>
+            <translation>Open Image Stitching with selected image files, or an empty window if no images are selected</translation>
         </message>
         <message>
             <source>Open Login Items Settings</source>
@@ -3037,20 +3137,20 @@
             <translation>Pin clipboard content to screen</translation>
         </message>
         <message>
-            <source>Pin images, image files, formatted text, or HTML from the clipboard to the screen</source>
-            <translation>Pin images, image files, formatted text, or HTML from the clipboard to the screen</translation>
+            <source>Pin images, supported files, formatted text, or HTML from the clipboard to the screen</source>
+            <translation>Pin images, supported files, formatted text, or HTML from the clipboard to the screen</translation>
         </message>
         <message>
             <source>Pin screenshot to screen</source>
             <translation>Pin screenshot to screen</translation>
         </message>
         <message>
-            <source>Pin selected image files from File Explorer or the desktop to the screen</source>
-            <translation>Pin selected image files from File Explorer or the desktop to the screen</translation>
+            <source>Pin selected image or document files from File Explorer or the desktop to the screen</source>
+            <translation>Pin selected image or document files from File Explorer or the desktop to the screen</translation>
         </message>
         <message>
-            <source>Pin selected image files from Finder or the desktop to the screen</source>
-            <translation>Pin selected image files from Finder or the desktop to the screen</translation>
+            <source>Pin selected image or document files from Finder or the desktop to the screen</source>
+            <translation>Pin selected image or document files from Finder or the desktop to the screen</translation>
         </message>
         <message>
             <source>Pin selection</source>
@@ -3173,6 +3273,10 @@
             <translation>Previous screenshot history</translation>
         </message>
         <message>
+            <source>Previous selection area</source>
+            <translation>Previous selection area</translation>
+        </message>
+        <message>
             <source>Previous selection type</source>
             <translation>Previous selection type</translation>
         </message>
@@ -3187,10 +3291,6 @@
         <message>
             <source>Process priority</source>
             <translation>Process priority</translation>
-        </message>
-        <message>
-            <source>Prompt-capable models use this language when the input matches the primary target language</source>
-            <translation>Prompt-capable models use this language when the input matches the primary target language</translation>
         </message>
         <message>
             <source>Proxy</source>
@@ -3247,6 +3347,10 @@
         <message>
             <source>Recognize text in the confirmed screenshot selection</source>
             <translation>Recognize text in the confirmed screenshot selection</translation>
+        </message>
+        <message>
+            <source>Recognize text, copy it to the clipboard, and end the screenshot session</source>
+            <translation>Recognize text, copy it to the clipboard, and end the screenshot session</translation>
         </message>
         <message>
             <source>Recognized text and language tools</source>
@@ -3621,12 +3725,12 @@
             <translation>Select child elements within a window while taking a screenshot</translation>
         </message>
         <message>
-            <source>Select image save directory</source>
-            <translation>Select image save directory</translation>
+            <source>Select dark theme tray icon</source>
+            <translation>Select dark theme tray icon</translation>
         </message>
         <message>
-            <source>Select previously selected area</source>
-            <translation>Select previously selected area</translation>
+            <source>Select image save directory</source>
+            <translation>Select image save directory</translation>
         </message>
         <message>
             <source>Select scenarios</source>
@@ -3691,6 +3795,10 @@
         <message>
             <source>Server address</source>
             <translation>Server address</translation>
+        </message>
+        <message>
+            <source>Set how much Ctrl+mouse wheel changes pinned window opacity</source>
+            <translation>Set how much Ctrl+mouse wheel changes pinned window opacity</translation>
         </message>
         <message>
             <source>Set quality for image files saved outside the Snow Shot dialog</source>
@@ -3759,6 +3867,10 @@
         <message>
             <source>Set the shadow color of pinned screenshots while they have focus</source>
             <translation>Set the shadow color of pinned screenshots while they have focus</translation>
+        </message>
+        <message>
+            <source>Set the zoom percentage levels used by the mouse wheel</source>
+            <translation>Set the zoom percentage levels used by the mouse wheel</translation>
         </message>
         <message>
             <source>Set up to two keys for this pinned window action</source>
@@ -3949,14 +4061,6 @@
             <translation>Small</translation>
         </message>
         <message>
-            <source>Small V4</source>
-            <translation>Small V4</translation>
-        </message>
-        <message>
-            <source>Small V5</source>
-            <translation>Small V5</translation>
-        </message>
-        <message>
             <source>Small V6</source>
             <translation>Small V6</translation>
         </message>
@@ -4001,6 +4105,10 @@
             <translation>Snowflake light</translation>
         </message>
         <message>
+            <source>Soft</source>
+            <translation>Soft</translation>
+        </message>
+        <message>
             <source>Soften all three skin images with blur.</source>
             <translation>Soften all three skin images with blur.</translation>
         </message>
@@ -4027,6 +4135,10 @@
         <message>
             <source>Speed First reduces computation on short text and may change recognition results.</source>
             <translation>Speed First reduces computation on short text and may change recognition results.</translation>
+        </message>
+        <message>
+            <source>Split Selected Images</source>
+            <translation>Split Selected Images</translation>
         </message>
         <message>
             <source>Spotlight</source>
@@ -4075,6 +4187,10 @@
         <message>
             <source>Startup &amp; updates</source>
             <translation>Startup &amp; updates</translation>
+        </message>
+        <message>
+            <source>Stitch Selected Images</source>
+            <translation>Stitch Selected Images</translation>
         </message>
         <message>
             <source>Storage and privacy</source>
@@ -4143,6 +4259,10 @@
         <message>
             <source>Text Detection Processing</source>
             <translation>Text Detection Processing</translation>
+        </message>
+        <message>
+            <source>Text Style</source>
+            <translation>Text Style</translation>
         </message>
         <message>
             <source>Text background</source>
@@ -4373,16 +4493,32 @@
             <translation>Upload to Cloud</translation>
         </message>
         <message>
-            <source>Use DirectML for GPU-accelerated text recognition when available</source>
-            <translation>Use DirectML for GPU-accelerated text recognition when available</translation>
-        </message>
-        <message>
             <source>Use global mouse gestures, select individual window elements, and translate selected text.</source>
             <translation>Use global mouse gestures, select individual window elements, and translate selected text.</translation>
         </message>
         <message>
+            <source>Use one letter (A–Z) or digit (0–9) when the classic Windows context menu is open</source>
+            <translation>Use one letter (A–Z) or digit (0–9) when the classic Windows context menu is open</translation>
+        </message>
+        <message>
+            <source>Use regular icon settings</source>
+            <translation>Use regular icon settings</translation>
+        </message>
+        <message>
             <source>Use system proxy</source>
             <translation>Use system proxy</translation>
+        </message>
+        <message>
+            <source>Use the theme background until customized. Reset Text Style to restore it.</source>
+            <translation>Use the theme background until customized. Reset Text Style to restore it.</translation>
+        </message>
+        <message>
+            <source>Use the theme text color until customized. Reset Text Style to restore it.</source>
+            <translation>Use the theme text color until customized. Reset Text Style to restore it.</translation>
+        </message>
+        <message>
+            <source>Use this language when local language detection matches the primary target language at the configured confidence</source>
+            <translation>Use this language when local language detection matches the primary target language at the configured confidence</translation>
         </message>
         <message>
             <source>User initiated</source>
@@ -4484,6 +4620,10 @@
             <source>Zip archives (*.zip);;All files (*.*)</source>
             <translation>Zip archives (*.zip);;All files (*.*)</translation>
         </message>
+        <message>
+            <source>px</source>
+            <translation>px</translation>
+        </message>
     </context>
     <context>
         <name>SettingsPageWidget</name>
@@ -4541,6 +4681,29 @@
         </message>
     </context>
     <context>
+        <name>SettingsVariableHelp</name>
+        <message>
+            <source>%1: Application Name</source>
+            <translation>%1: Application Name</translation>
+        </message>
+        <message>
+            <source>%1: Current time</source>
+            <translation>%1: Current time</translation>
+        </message>
+        <message>
+            <source>%1: Window Name</source>
+            <translation>%1: Window Name</translation>
+        </message>
+        <message>
+            <source>OK</source>
+            <translation>OK</translation>
+        </message>
+        <message>
+            <source>Variable Description</source>
+            <translation>Variable Description</translation>
+        </message>
+    </context>
+    <context>
         <name>ShellContextMenuRegistration</name>
         <message>
             <source>Could not access the Windows context menu registry. Windows error %1.</source>
@@ -4573,6 +4736,10 @@
         <message>
             <source>The Windows context menu is only supported on Windows.</source>
             <translation>The Windows context menu is only supported on Windows.</translation>
+        </message>
+        <message>
+            <source>The context menu access key must be one letter (A–Z) or digit (0–9).</source>
+            <translation>The context menu access key must be one letter (A–Z) or digit (0–9).</translation>
         </message>
     </context>
     <context>

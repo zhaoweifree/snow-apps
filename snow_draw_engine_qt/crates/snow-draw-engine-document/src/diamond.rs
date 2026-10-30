@@ -459,6 +459,9 @@ mod tests {
                 .contains(Point::new(0.0, -50.0))
         );
         let rect = crate::RectangleData {
+            text_element_id: None,
+            stroke_rendering_seed: 0,
+            stroke_rendering_style: Default::default(),
             rectangle_kind: crate::RectangleElementKind::Rectangle,
             highlight_shape: HighlightShape::Diamond,
             width: 100.0,

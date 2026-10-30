@@ -7,13 +7,12 @@ use crate::{
     Operation, Transaction, arrow_bounds, arrow_hit_test, arrow_is_degenerate,
     document_geometry::{
         element_visible_bounds, filter_bounds, filter_rect_proxy, pen_filter_bounds,
-        pen_filter_rect_proxy, rect_bounds, rectangle_hit_test, serial_number_bounds,
-        serial_number_hit_test, serial_number_rect_proxy, text_bounds, text_hit_test,
-        validate_element_data,
+        pen_filter_rect_proxy, rectangle_hit_test, serial_number_hit_test,
+        serial_number_rect_proxy, text_bounds, text_hit_test, validate_element_data,
     },
     free_draw_bounds, free_draw_hit_test,
 };
-pub use snow_draw_engine_core::arrow::StrokeStyle;
+pub use snow_draw_engine_core::arrow::{StrokeRenderingStyle, StrokeStyle};
 use snow_draw_engine_core::{ColorRgba8, CornerRadii, DrawRect, ErrorCode, Point};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -489,6 +488,8 @@ impl Default for ElementMeta {
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RectangleData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_element_id: Option<ElementId>,
     pub rectangle_kind: RectangleElementKind,
     pub highlight_shape: HighlightShape,
     pub center: Point<f64>,
@@ -500,6 +501,10 @@ pub struct RectangleData {
     pub stroke: ColorRgba8,
     pub stroke_width: f64,
     pub stroke_style: StrokeStyle,
+    #[serde(default)]
+    pub stroke_rendering_style: snow_draw_engine_core::arrow::StrokeRenderingStyle,
+    #[serde(default)]
+    pub stroke_rendering_seed: u32,
     pub corner_radii: CornerRadii,
     pub opacity: f64,
 }
@@ -738,12 +743,14 @@ pub enum HighlightShape {
 
 impl RectangleData {
     pub fn into_highlight(mut self, shape: HighlightShape) -> Self {
+        self.text_element_id = None;
         debug_assert!(shape != HighlightShape::Diamond);
         self.rectangle_kind = RectangleElementKind::RectangleHighlight;
         self.highlight_shape = shape;
         self.corner_radii = CornerRadii::default();
         self.fill_style = FillStyle::Solid;
         self.stroke_style = StrokeStyle::Solid;
+        self.stroke_rendering_style = Default::default();
         self
     }
 
@@ -752,12 +759,14 @@ impl RectangleData {
     }
 
     pub fn into_spotlight(mut self) -> Self {
+        self.text_element_id = None;
         self.rectangle_kind = RectangleElementKind::Spotlight;
         self.fill = ColorRgba8::default();
         self.stroke = ColorRgba8::default();
         self.stroke_width = 0.0;
         self.fill_style = FillStyle::Solid;
         self.stroke_style = StrokeStyle::Solid;
+        self.stroke_rendering_style = Default::default();
         self.opacity = 1.0;
         self
     }
@@ -803,6 +812,13 @@ pub enum FillStyle {
     CrossLine,
     #[default]
     Solid,
+    Border = 3,
+}
+
+impl FillStyle {
+    pub fn is_visible(self, color: ColorRgba8) -> bool {
+        self != Self::Border && color.a != 0
+    }
 }
 
 #[repr(u32)]
@@ -890,6 +906,10 @@ pub struct SerialNumberData {
     pub font_family: Option<String>,
     pub stroke_width: f64,
     pub stroke_style: StrokeStyle,
+    #[serde(default)]
+    pub stroke_rendering_style: snow_draw_engine_core::arrow::StrokeRenderingStyle,
+    #[serde(default)]
+    pub stroke_rendering_seed: u32,
     pub opacity: f64,
     pub text_element_id: Option<ElementId>,
 }
@@ -959,15 +979,15 @@ impl ElementData {
 
     pub(crate) fn bounds(&self) -> DrawRect {
         match self {
-            Self::Rectangle(rect) => rect_bounds(rect),
+            Self::Rectangle(rect) => crate::rect_paint_bounds(rect),
             Self::SpeechBubble(value) => crate::speech_bubble_bounds(value),
             Self::Magnifier(value) => crate::magnifier_interaction_bounds(value),
             Self::Filter(filter) => filter_bounds(filter),
             Self::PenFilter(filter) => pen_filter_bounds(filter),
-            Self::Arrow(arrow) => arrow_bounds(arrow),
+            Self::Arrow(arrow) => crate::arrow_paint_bounds(arrow),
             Self::FreeDraw(free_draw) => free_draw_bounds(free_draw),
             Self::Text(text) => text_bounds(text),
-            Self::SerialNumber(serial) => serial_number_bounds(serial),
+            Self::SerialNumber(serial) => crate::serial_number_paint_bounds(serial),
         }
     }
 
@@ -1315,6 +1335,21 @@ impl Document {
                 return Err(ErrorCode::InvalidArgument);
             }
         }
+        for id in &self.paint_order {
+            let Ok(shape) = self.rectangle(*id) else {
+                continue;
+            };
+            let Some(text_id) = shape.text_element_id else {
+                continue;
+            };
+            if shape.rectangle_kind != RectangleElementKind::Rectangle
+                || self.text(text_id).is_err()
+                || !owned.insert(text_id)
+                || serial_labels.contains(&text_id)
+            {
+                return Err(ErrorCode::InvalidArgument);
+            }
+        }
         Ok(())
     }
 
@@ -1323,6 +1358,35 @@ impl Document {
         inverse: &mut Vec<Operation>,
         changes: &mut DocumentDelta,
     ) -> Result<(), ErrorCode> {
+        // Direct document deletion (including annotation batches) may remove a
+        // label without going through the editor's dependency expansion. Detach
+        // only links removed by this transaction; malformed new links and
+        // imported documents still fail ownership validation below.
+        if !changes.removed.is_empty() {
+            let removed: HashSet<_> = changes.removed.iter().copied().collect();
+            let detached: Vec<_> = self
+                .paint_order
+                .iter()
+                .filter_map(|id| {
+                    let mut shape = *self.rectangle(*id).ok()?;
+                    let label = shape.text_element_id?;
+                    if !removed.contains(&label) || self.text(label).is_ok() {
+                        return None;
+                    }
+                    shape.text_element_id = None;
+                    Some((*id, shape))
+                })
+                .collect();
+            for (id, shape) in detached {
+                inverse.push(self.apply_operation(
+                    &Operation::UpdateElementData {
+                        id,
+                        data: ElementData::Rectangle(shape),
+                    },
+                    changes,
+                )?);
+            }
+        }
         self.validate_arrow_text_bindings()?;
         let bindings = self.arrow_text_bindings();
         self.synchronize_arrow_text_pairs(&bindings, inverse, changes)?;
@@ -1692,6 +1756,9 @@ impl Document {
         }
         if let Ok(free_draw) = self.free_draw(id) {
             return Some(RectangleData {
+                text_element_id: None,
+                stroke_rendering_seed: 0,
+                stroke_rendering_style: Default::default(),
                 rectangle_kind: RectangleElementKind::Rectangle,
                 highlight_shape: HighlightShape::Rectangle,
                 center: Point::new(
@@ -1712,6 +1779,9 @@ impl Document {
         }
         if let Ok(text) = self.text(id) {
             return Some(RectangleData {
+                text_element_id: None,
+                stroke_rendering_seed: 0,
+                stroke_rendering_style: Default::default(),
                 rectangle_kind: RectangleElementKind::Rectangle,
                 highlight_shape: HighlightShape::Rectangle,
                 center: text.center,
@@ -1878,6 +1948,23 @@ impl Document {
     pub fn bound_text_id_for_serial_number(&self, serial_id: ElementId) -> Option<ElementId> {
         let text_id = self.serial_number(serial_id).ok()?.text_element_id?;
         self.text(text_id).ok().map(|_| text_id)
+    }
+
+    pub fn bound_text_id_for_shape(&self, shape_id: ElementId) -> Option<ElementId> {
+        let shape = self.rectangle(shape_id).ok()?;
+        if shape.rectangle_kind != RectangleElementKind::Rectangle {
+            return None;
+        }
+        let text_id = shape.text_element_id?;
+        self.text(text_id).ok().map(|_| text_id)
+    }
+
+    pub fn shape_ids_with_text(&self, text_id: ElementId) -> Vec<ElementId> {
+        self.paint_order
+            .iter()
+            .copied()
+            .filter(|id| self.bound_text_id_for_shape(*id) == Some(text_id))
+            .collect()
     }
 
     pub fn serial_number_ids_with_text(&self, text_id: ElementId) -> Vec<ElementId> {
@@ -2252,6 +2339,7 @@ impl Document {
 
 fn element_data_has_relations(data: &ElementData) -> bool {
     match data {
+        ElementData::Rectangle(shape) => shape.text_element_id.is_some(),
         ElementData::Arrow(arrow) => {
             arrow.text_element_id.is_some() || !arrow.bound_element_ids().is_empty()
         }
@@ -2262,6 +2350,9 @@ fn element_data_has_relations(data: &ElementData) -> bool {
 }
 
 fn element_data_relation_targets_changed(previous: &ElementData, next: &ElementData) -> bool {
+    if let (ElementData::Rectangle(previous), ElementData::Rectangle(next)) = (previous, next) {
+        return previous.text_element_id != next.text_element_id;
+    }
     if let (ElementData::SpeechBubble(previous), ElementData::SpeechBubble(next)) = (previous, next)
     {
         return previous.text_element_id != next.text_element_id;
@@ -2278,6 +2369,106 @@ fn element_data_relation_targets_changed(previous: &ElementData, next: &ElementD
     previous.text_element_id != next.text_element_id
         || previous_ids.len() != next_ids.len()
         || previous_ids.iter().any(|id| !next_ids.contains(id))
+}
+
+#[cfg(test)]
+mod shape_text_binding_tests {
+    use super::*;
+
+    #[test]
+    fn shape_text_binding_round_trips_and_legacy_payload_defaults_to_none() {
+        let mut shape = crate::MagnifierData::default().magnified_rect();
+        let legacy = serde_json::to_value(shape).unwrap();
+        assert!(legacy.get("text_element_id").is_none());
+        assert_eq!(
+            serde_json::from_value::<RectangleData>(legacy).unwrap(),
+            shape
+        );
+        let mut document = Document::new();
+        let owner = document.allocate_element_id();
+        let label = document.allocate_element_id();
+        shape.text_element_id = Some(label);
+        let mut insert = Transaction::new("shape text");
+        insert.insert_rectangle(owner, ElementMeta::default(), shape);
+        insert.insert_text(label, ElementMeta::default(), TextData::default());
+        document.apply(&insert).unwrap();
+        assert_eq!(document.bound_text_id_for_shape(owner), Some(label));
+        assert_eq!(document.shape_ids_with_text(label), vec![owner]);
+        let restored: Document =
+            serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
+        restored.validate_session().unwrap();
+        assert_eq!(restored.bound_text_id_for_shape(owner), Some(label));
+        assert!(
+            shape
+                .into_highlight(HighlightShape::Rectangle)
+                .text_element_id
+                .is_none()
+        );
+        assert!(shape.into_spotlight().text_element_id.is_none());
+        assert!(
+            crate::SpeechBubbleData::new(shape)
+                .body
+                .text_element_id
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn shape_text_binding_rejects_missing_nontext_and_shared_labels() {
+        let mut document = Document::new();
+        let owner = document.allocate_element_id();
+        let label = document.allocate_element_id();
+        let mut shape = crate::MagnifierData::default().magnified_rect();
+        shape.text_element_id = Some(label);
+        let mut missing = Transaction::new("missing label");
+        missing.insert_rectangle(owner, ElementMeta::default(), shape);
+        assert_eq!(
+            document.apply(&missing).unwrap_err(),
+            ErrorCode::InvalidArgument
+        );
+        let mut self_bound = shape;
+        self_bound.text_element_id = Some(owner);
+        let mut invalid = Transaction::new("nontext label");
+        invalid.insert_rectangle(owner, ElementMeta::default(), self_bound);
+        assert_eq!(
+            document.apply(&invalid).unwrap_err(),
+            ErrorCode::InvalidArgument
+        );
+        missing.insert_text(label, ElementMeta::default(), TextData::default());
+        document.apply(&missing).unwrap();
+        let mut shared = Transaction::new("shared label");
+        shared.insert_rectangle(
+            document.allocate_element_id(),
+            ElementMeta::default(),
+            shape,
+        );
+        assert_eq!(
+            document.apply(&shared).unwrap_err(),
+            ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn shape_text_binding_direct_label_removal_detaches_and_undo_restores() {
+        let mut document = Document::new();
+        let owner = document.allocate_element_id();
+        let label = document.allocate_element_id();
+        let mut shape = crate::MagnifierData::default().magnified_rect();
+        shape.text_element_id = Some(label);
+        let mut insert = Transaction::new("shape and text");
+        insert.insert_rectangle(owner, ElementMeta::default(), shape);
+        insert.insert_text(label, ElementMeta::default(), TextData::default());
+        document.apply(&insert).unwrap();
+        let mut remove = Transaction::new("direct label removal");
+        remove.remove_element(label);
+        let removed = document.apply(&remove).unwrap();
+        assert!(document.rectangle(owner).unwrap().text_element_id.is_none());
+        assert!(removed.changes.relations_changed);
+        let restored = document.apply(&removed.inverse).unwrap();
+        assert_eq!(document.bound_text_id_for_shape(owner), Some(label));
+        document.apply(&restored.inverse).unwrap();
+        assert!(document.rectangle(owner).unwrap().text_element_id.is_none());
+    }
 }
 
 #[cfg(test)]
@@ -2531,6 +2722,36 @@ mod annotation_sync_tests {
 #[cfg(test)]
 mod tests {
 
+    #[test]
+    fn border_fill_serialization_preserves_color_and_legacy_styles() {
+        let color = ColorRgba8 {
+            r: 255,
+            g: 204,
+            b: 199,
+            a: 255,
+        };
+        for (style, name) in [
+            (FillStyle::Line, "Line"),
+            (FillStyle::CrossLine, "CrossLine"),
+            (FillStyle::Solid, "Solid"),
+            (FillStyle::Border, "Border"),
+        ] {
+            let text = TextData {
+                fill: color,
+                fill_style: style,
+                ..TextData::default()
+            };
+            let saved = serde_json::to_value(&text).unwrap();
+            assert_eq!(saved["fill_style"], name);
+            let restored: TextData = serde_json::from_value(saved).unwrap();
+            assert_eq!(restored.fill, color);
+            assert_eq!(restored.fill_style, style);
+            assert_eq!(style.is_visible(color), style != FillStyle::Border);
+            assert!(!style.is_visible(ColorRgba8::default()));
+        }
+        assert_eq!(FillStyle::default(), FillStyle::Solid);
+    }
+
     use super::*;
 
     #[test]
@@ -2695,6 +2916,9 @@ mod tests {
     #[test]
     fn common_element_state_has_one_geometry_opacity_and_z_order_definition() {
         let rectangle = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: RectangleElementKind::Rectangle,
             highlight_shape: HighlightShape::Rectangle,
             center: Point::new(10.0, 20.0),
@@ -2884,6 +3108,9 @@ mod tests {
         );
 
         let spotlight = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: RectangleElementKind::Rectangle,
             highlight_shape: HighlightShape::Rectangle,
             center: Point::new(10.0, 20.0),

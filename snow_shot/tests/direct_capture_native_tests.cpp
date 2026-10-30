@@ -17,17 +17,24 @@ struct SnowCaptureFrameLeaseImpl {
 };
 struct SnowCaptureScreenshotResultImpl {
     std::array<SnowCaptureFrameLease, 3> frames;
+    std::array<size_t, 2> displayIndices{0, 1};
+    size_t displayCount = 2;
 };
 
 namespace {
 int leases = 0;
 int sessions = 0;
+int sessionCreations = 0;
 int snapshots = 0;
+int desktopCaptures = 0;
+int targetCaptures = 0;
 intptr_t capturedWindow = 0;
 uint32_t capturedFlags = 0;
 bool failCapture = false;
 bool failSecondDisplay = false;
 bool failWindow = false;
+bool growTarget = false;
+bool fallbackAfterDenial = false;
 
 void require(bool condition, const char* message) {
     if (!condition) {
@@ -55,6 +62,7 @@ snow_capture_desktop_session_create(const SnowCaptureDesktopSessionConfig* confi
     require(config->pixel_format == SNOW_CAPTURE_PIXEL_FORMAT_BGRA8,
             "direct desktop capture did not request BGRA pixels");
     ++sessions;
+    ++sessionCreations;
     return new SnowCaptureDesktopSession;
 }
 void snow_capture_desktop_session_destroy(SnowCaptureDesktopSession* session) {
@@ -67,6 +75,7 @@ snow_capture_desktop_session_capture(SnowCaptureDesktopSession*,
     require(request->version == SNOW_CAPTURE_SCREENSHOT_REQUEST_VERSION &&
                 request->struct_size == sizeof(*request),
             "invalid desktop capture transaction request");
+    ++desktopCaptures;
     capturedWindow = request->focused_window;
     capturedFlags = request->flags;
     if (failCapture)
@@ -79,15 +88,53 @@ snow_capture_desktop_session_capture(SnowCaptureDesktopSession*,
                                  70, 80, 90, 128, 100, 110, 120, 255};
     return result;
 }
+SnowCaptureScreenshotResult*
+snow_capture_target_screenshot(const SnowCaptureTargetScreenshotRequest* request) {
+    require(request->version == SNOW_CAPTURE_TARGET_SCREENSHOT_REQUEST_VERSION &&
+                request->struct_size == sizeof(*request) &&
+                request->pixel_format == SNOW_CAPTURE_PIXEL_FORMAT_BGRA8,
+            "invalid targeted capture contract");
+    ++targetCaptures;
+    if (request->admit_raster) {
+        if (!request->admit_raster(request->admission_context, 2, 2))
+            return nullptr;
+        if (growTarget && !request->admit_raster(request->admission_context, 3, 2)) {
+            if (fallbackAfterDenial)
+                require(!request->admit_raster(request->admission_context, 1, 1),
+                        "admission denial must remain sticky for smaller fallback");
+            return nullptr;
+        }
+    }
+    const int previousDesktopCaptures = desktopCaptures;
+    auto* result = snow_capture_desktop_session_capture(nullptr, &request->screenshot);
+    desktopCaptures = previousDesktopCaptures;
+    if (!result)
+        return nullptr;
+    if (request->screenshot.focused_window) {
+        require(request->monitor_utf8 == nullptr, "window capture must not open a monitor");
+        result->displayCount = 0;
+    } else {
+        require(request->monitor_utf8 != nullptr, "monitor capture must select an identity");
+        const QByteArray identity(request->monitor_utf8);
+        if (identity != "device-B" && identity != "stable-B" && identity != "display:2") {
+            snow_capture_screenshot_result_destroy(result);
+            return nullptr;
+        }
+        result->displayCount = 1;
+        result->displayIndices[0] = 1;
+    }
+    return result;
+}
 void snow_capture_screenshot_result_destroy(SnowCaptureScreenshotResult* result) {
     --snapshots;
     delete result;
 }
-size_t snow_capture_screenshot_result_display_count(const SnowCaptureScreenshotResult*) {
-    return 2;
+size_t snow_capture_screenshot_result_display_count(const SnowCaptureScreenshotResult* result) {
+    return result->displayCount;
 }
 uint8_t snow_capture_screenshot_result_display_info(const SnowCaptureScreenshotResult* result,
                                                     size_t index, SnowCaptureFrameInfo* info) {
+    index = result->displayIndices[index];
     if (failSecondDisplay && index == 1)
         return 0;
     fillInfo(info, result->frames[index]);
@@ -98,9 +145,11 @@ uint8_t snow_capture_screenshot_result_display_info(const SnowCaptureScreenshotR
     info->backend_kind = SNOW_CAPTURE_BACKEND_DXGI;
     return 1;
 }
-uint8_t snow_capture_screenshot_result_display_geometry(const SnowCaptureScreenshotResult*,
+uint8_t snow_capture_screenshot_result_display_geometry(const SnowCaptureScreenshotResult* result,
                                                         size_t index,
                                                         SnowCaptureFrameGeometry* geometry) {
+    if (result)
+        index = result->displayIndices[index];
     geometry->coordinate_space = 1;
     geometry->display_id = static_cast<uint32_t>(index + 1);
     geometry->x = 0;
@@ -119,7 +168,7 @@ SnowCaptureFrameLease*
 snow_capture_screenshot_result_display_retain(const SnowCaptureScreenshotResult* result,
                                               size_t index) {
     ++leases;
-    return new SnowCaptureFrameLease(result->frames[index]);
+    return new SnowCaptureFrameLease(result->frames[result->displayIndices[index]]);
 }
 uint8_t
 snow_capture_screenshot_result_focused_window_info(const SnowCaptureScreenshotResult* result,
@@ -164,6 +213,7 @@ int main() {
          {DirectCaptureTarget::FocusedWindow, DirectCaptureTarget::CurrentMonitor}) {
         DirectCaptureRequest request;
         request.target = target;
+        request.historyEnabled = true;
         request.window = 123;
         request.monitorName = QStringLiteral("device-B");
         {
@@ -237,6 +287,71 @@ int main() {
                     "failed direct capture leaked native resources");
         }
     }
+    for (const auto target :
+         {DirectCaptureTarget::FocusedWindow, DirectCaptureTarget::CurrentMonitor}) {
+        DirectCaptureRequest request;
+        request.target = target;
+        request.window = 123;
+        request.monitorName = QStringLiteral("device-B");
+        request.historyEnabled = false;
+        request.captureCursor = true;
+        request.restoreOriginalScreenColors = true;
+        const int beforeDesktop = desktopCaptures;
+        const int beforeSessionCreations = sessionCreations;
+        const int beforeTarget = targetCaptures;
+        {
+            const auto frame = captureDirectTarget(request);
+            require(frame.isValid() && sessions == 0 && snapshots == 0 &&
+                        desktopCaptures == beforeDesktop && targetCaptures == beforeTarget + 1 &&
+                        sessionCreations == beforeSessionCreations,
+                    "history-disabled direct capture must acquire only the explicit native target");
+            require((capturedFlags & SNOW_CAPTURE_SCREENSHOT_REQUEST_INCLUDE_CURSOR) &&
+                        (capturedFlags & SNOW_CAPTURE_SCREENSHOT_REQUEST_RESTORE_ORIGINAL_COLORS),
+                    "target-only capture retains cursor and color policies");
+            require(frame.displays.size() == (target == DirectCaptureTarget::FocusedWindow ? 0 : 1),
+                    "target-only capture must not retain unrelated display images");
+            if (target == DirectCaptureTarget::FocusedWindow)
+                require(frame.image.pixelColor(1, 0).alpha() == 64,
+                        "target-only window capture preserves native alpha");
+            else
+                require(frame.displays[0].stableId == QStringLiteral("stable-B") &&
+                            frame.image.cacheKey() == frame.displays[0].image.cacheKey(),
+                        "target-only monitor result retains its exact identity and pixel lease");
+        }
+        require(leases == 0, "targeted capture leaked frame leases");
+        if (target == DirectCaptureTarget::FocusedWindow) {
+            failSecondDisplay = true;
+            require(captureDirectTarget(request).isValid(),
+                    "an unrelated display failure must not fail targeted window capture");
+            failSecondDisplay = false;
+        }
+    }
+    DirectCaptureRequest budgeted;
+    budgeted.target = DirectCaptureTarget::FocusedWindow;
+    budgeted.window = 123;
+    int admissionCalls = 0;
+    budgeted.admitRaster = [&](QSize size) {
+        require(snapshots == 0 && leases == 0, "raster budget must precede pixel allocation");
+        ++admissionCalls;
+        return size == QSize(2, 2);
+    };
+    require(captureDirectTarget(budgeted).isValid() && admissionCalls == 1,
+            "exact native target dimensions must be admitted before capture");
+    growTarget = fallbackAfterDenial = true;
+    admissionCalls = 0;
+    const auto rejected = captureDirectTarget(budgeted);
+    require(!rejected.isValid() && rejected.error == QStringLiteral("resource_limit") &&
+                admissionCalls == 2 && leases == 0 && snapshots == 0,
+            "native size drift must reject before allocation and remain sticky for fallback");
+    growTarget = fallbackAfterDenial = false;
+    budgeted.admitRaster = [](QSize) -> bool { throw 1; };
+    const auto exception = captureDirectTarget(budgeted);
+    require(!exception.isValid() && exception.error == QStringLiteral("resource_limit"),
+            "admission exceptions must reject capture without crossing the C ABI");
+    budgeted.admitRaster = [](QSize) { return false; };
+    require(captureDirectTarget(budgeted).error == QStringLiteral("resource_limit") &&
+                leases == 0 && sessions == 0 && snapshots == 0,
+            "initial admission rejection must release all native resources");
     DirectCaptureRequest missingMonitor;
     missingMonitor.monitorName = QStringLiteral("disconnected-device");
     require(!captureDirectTarget(missingMonitor).isValid(),

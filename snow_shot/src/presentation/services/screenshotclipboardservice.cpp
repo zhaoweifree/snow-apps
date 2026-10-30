@@ -20,7 +20,6 @@
 #include <QPointer>
 #include <QThread>
 #include <QTimer>
-#include <QTemporaryDir>
 #include <QUrl>
 
 #include <algorithm>
@@ -42,30 +41,6 @@ struct ScreenshotClipboardCommitScopeState {
 };
 
 namespace {
-class TemporaryFileClipboardMimeData final : public QMimeData {
-  public:
-    explicit TemporaryFileClipboardMimeData(std::shared_ptr<QTemporaryDir> directory)
-        : m_directory(std::move(directory)) {
-        if (qobject_cast<QGuiApplication*>(QCoreApplication::instance())) {
-            connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this] {
-                const auto* clipboard = QGuiApplication::clipboard();
-                if (m_directory && clipboard && clipboard->mimeData() == this) {
-                    // Native clipboards outlive the app. Leave the current file in system
-                    // temporary storage so shutdown does not invalidate an unpasted URL.
-                    m_directory->setAutoRemove(false);
-                }
-            });
-        }
-    }
-
-    [[nodiscard]] std::shared_ptr<QTemporaryDir> directory() const {
-        return m_directory;
-    }
-
-  private:
-    std::shared_ptr<QTemporaryDir> m_directory;
-};
-
 #if !defined(Q_OS_WIN)
 // Keep canonical PNG bytes for native consumers and lazily provide Qt's image
 // representation when a reader requests it. Decoded pixels belong to that reader.
@@ -290,83 +265,142 @@ HGLOBAL copyToGlobal(const QByteArray& bytes) {
     return handle;
 }
 
+HGLOBAL cloneGlobal(HGLOBAL source) {
+    const SIZE_T bytes = GlobalSize(source);
+    const void* input = bytes ? GlobalLock(source) : nullptr;
+    if (!input)
+        return nullptr;
+    HGLOBAL result = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    void* output = result ? GlobalLock(result) : nullptr;
+    if (output) {
+        std::memcpy(output, input, bytes);
+        GlobalUnlock(result);
+    } else if (result) {
+        GlobalFree(result);
+        result = nullptr;
+    }
+    GlobalUnlock(source);
+    return result;
+}
+
+class DibWriter final {
+  public:
+    explicit DibWriter(QSize size) : m_size(size) {
+        if (size.isEmpty())
+            return;
+        m_stride = (quint64(size.width()) * 3 + 3) & ~quint64{3};
+        const quint64 pixelBytes = m_stride * quint64(size.height());
+        const quint64 totalBytes = sizeof(BITMAPINFOHEADER) + pixelBytes;
+        if (pixelBytes > std::numeric_limits<DWORD>::max() ||
+            totalBytes > std::numeric_limits<SIZE_T>::max())
+            return;
+        m_handle = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(totalBytes));
+        if (!m_handle)
+            return;
+        auto* header = static_cast<BITMAPINFOHEADER*>(GlobalLock(m_handle));
+        if (!header) {
+            GlobalFree(m_handle);
+            m_handle = nullptr;
+            return;
+        }
+        *header = {};
+        clearGlobalPadding(m_handle, header, static_cast<SIZE_T>(totalBytes));
+        header->biSize = sizeof(*header);
+        header->biWidth = size.width();
+        header->biHeight = size.height();
+        header->biPlanes = 1;
+        header->biBitCount = 24;
+        header->biCompression = BI_RGB;
+        header->biSizeImage = static_cast<DWORD>(pixelBytes);
+        m_pixels = reinterpret_cast<uchar*>(header + 1);
+    }
+    ~DibWriter() {
+        if (m_handle) {
+            GlobalUnlock(m_handle);
+            GlobalFree(m_handle);
+        }
+    }
+    DibWriter(const DibWriter&) = delete;
+    DibWriter& operator=(const DibWriter&) = delete;
+    bool isValid() const {
+        return m_pixels != nullptr;
+    }
+    bool write(int first, int count, qsizetype stride, const uchar* input, qsizetype capacity) {
+        const qsizetype rowBytes = qsizetype(m_size.width()) * 4;
+        if (!isValid() || !input || first < 0 || count <= 0 || count > m_size.height() ||
+            first > m_size.height() - count || stride < rowBytes || capacity < rowBytes ||
+            qsizetype(count - 1) > (capacity - rowBytes) / stride)
+            return false;
+        for (int row = 0; row < count; ++row) {
+            const auto* source = input + qsizetype(row) * stride;
+            auto* output = m_pixels + quint64(m_size.height() - 1 - first - row) * m_stride;
+            for (int x = 0; x < m_size.width(); ++x) {
+                const auto* rgba = source + qsizetype(x) * 4;
+                const unsigned alpha = rgba[3];
+                if (alpha == 255) {
+                    output[qsizetype(x) * 3] = rgba[2];
+                    output[qsizetype(x) * 3 + 1] = rgba[1];
+                    output[qsizetype(x) * 3 + 2] = rgba[0];
+                } else {
+                    for (int channel = 0; channel < 3; ++channel)
+                        output[qsizetype(x) * 3 + channel] = static_cast<uchar>(
+                            (rgba[2 - channel] * alpha + 255U * (255U - alpha) + 127U) / 255U);
+                }
+            }
+            std::memset(output + qsizetype(m_size.width()) * 3, 0,
+                        size_t(m_stride - quint64(m_size.width()) * 3));
+        }
+        return true;
+    }
+    HGLOBAL finish() {
+        if (!m_handle)
+            return nullptr;
+        GlobalUnlock(m_handle);
+        m_pixels = nullptr;
+        SNOW_SHOT_CLIPBOARD_PERF_COUNTER("clipboard.pixel_bytes",
+                                         qint64(m_stride) * m_size.height());
+        SNOW_SHOT_CLIPBOARD_PERF_COUNTER("clipboard.dib_bytes",
+                                         qint64(sizeof(BITMAPINFOHEADER)) +
+                                             qint64(m_stride) * m_size.height());
+        SNOW_SHOT_CLIPBOARD_PERF_COUNTER("clipboard.dib_prepared", 1);
+        return std::exchange(m_handle, nullptr);
+    }
+
+  private:
+    QSize m_size;
+    quint64 m_stride = 0;
+    HGLOBAL m_handle = nullptr;
+    uchar* m_pixels = nullptr;
+};
+
 HGLOBAL prepareDib(const ScreenshotImageRowSource& source) {
     SNOW_SHOT_CLIPBOARD_PERF_SCOPE("clipboard.prepare_dib");
-    const quint64 stride = (static_cast<quint64>(source.size.width()) * 3 + 3) & ~quint64(3);
-    const quint64 pixelBytes = stride * static_cast<quint64>(source.size.height());
-    const quint64 totalBytes = sizeof(BITMAPINFOHEADER) + pixelBytes;
-    if (!source.isValid() || pixelBytes > std::numeric_limits<DWORD>::max() ||
-        totalBytes > std::numeric_limits<SIZE_T>::max()) {
+    if (!source.isValid())
         return nullptr;
-    }
+    DibWriter dib(source.size);
+    if (!dib.isValid())
+        return nullptr;
     constexpr int batchRows = 64;
     const qsizetype rgbaStride = static_cast<qsizetype>(source.size.width()) * 4;
     QByteArray rows(rgbaStride * std::min(batchRows, source.size.height()), Qt::Uninitialized);
-    HGLOBAL handle = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(totalBytes));
-    if (handle == nullptr)
-        return nullptr;
-    auto* header = static_cast<BITMAPINFOHEADER*>(GlobalLock(handle));
-    if (header == nullptr) {
-        GlobalFree(handle);
-        return nullptr;
-    }
-    const auto release = [](void* memory) {
-        GlobalUnlock(static_cast<HGLOBAL>(memory));
-        GlobalFree(static_cast<HGLOBAL>(memory));
-    };
-    std::unique_ptr<void, decltype(release)> allocation(handle, release);
-    *header = {};
-    clearGlobalPadding(handle, header, static_cast<SIZE_T>(totalBytes));
-    header->biSize = sizeof(*header);
-    header->biWidth = source.size.width();
-    header->biHeight = source.size.height();
-    header->biPlanes = 1;
-    header->biBitCount = 24;
-    header->biCompression = BI_RGB;
-    header->biSizeImage = static_cast<DWORD>(pixelBytes);
-    auto* pixels = reinterpret_cast<uchar*>(header + 1);
     // Bounded scratch space also supports scrolling sources without materializing a QImage.
     bool succeeded = true;
     for (int first = 0; first < source.size.height();) {
         const int count = std::min(batchRows, source.size.height() - first);
         if ((source.cancellationRequested && source.cancellationRequested()) ||
             !source.readRows(first, count, rgbaStride, reinterpret_cast<uchar*>(rows.data()),
-                             rows.size())) {
+                             rows.size()) ||
+            !dib.write(first, count, rgbaStride, reinterpret_cast<const uchar*>(rows.constData()),
+                       rows.size())) {
             succeeded = false;
             break;
-        }
-        for (int row = 0; row < count; ++row) {
-            const auto* input = reinterpret_cast<const uchar*>(rows.constData()) + row * rgbaStride;
-            auto* output =
-                pixels + static_cast<quint64>(source.size.height() - 1 - first - row) * stride;
-            for (int x = 0; x < source.size.width(); ++x) {
-                const auto* rgba = input + static_cast<qsizetype>(x) * 4;
-                const unsigned alpha = rgba[3];
-                if (alpha == 255) {
-                    output[static_cast<qsizetype>(x) * 3] = rgba[2];
-                    output[static_cast<qsizetype>(x) * 3 + 1] = rgba[1];
-                    output[static_cast<qsizetype>(x) * 3 + 2] = rgba[0];
-                    continue;
-                }
-                for (int channel = 0; channel < 3; ++channel) {
-                    output[static_cast<qsizetype>(x) * 3 + channel] = static_cast<uchar>(
-                        (rgba[2 - channel] * alpha + 255U * (255U - alpha) + 127U) / 255U);
-                }
-            }
-            // Every pixel is written above; only DWORD alignment padding needs clearing.
-            std::memset(output + static_cast<qsizetype>(source.size.width()) * 3, 0,
-                        static_cast<std::size_t>(stride - source.size.width() * 3ULL));
         }
         first += count;
     }
     if (!succeeded || (source.cancellationRequested && source.cancellationRequested())) {
         return nullptr;
     }
-    GlobalUnlock(handle);
-    SNOW_SHOT_CLIPBOARD_PERF_COUNTER("clipboard.pixel_bytes", static_cast<qint64>(pixelBytes));
-    SNOW_SHOT_CLIPBOARD_PERF_COUNTER("clipboard.dib_bytes", static_cast<qint64>(totalBytes));
-    SNOW_SHOT_CLIPBOARD_PERF_COUNTER("clipboard.dib_prepared", 1);
-    return static_cast<HGLOBAL>(allocation.release());
+    return dib.finish();
 }
 
 ClipboardPublishAttempt publishClipboardPayload(void** pngHandle, void** dibHandle,
@@ -599,20 +633,76 @@ ScreenshotClipboardService::prepare(const ScreenshotImageRowSource& source,
                                     std::optional<ScreenshotClipboardPlacement> placement,
                                     std::optional<ScreenshotClipboardAppearance> appearance) {
     SNOW_SHOT_CLIPBOARD_PERF_SCOPE("clipboard.prepare_total");
+    if (!source.isValid() || (source.cancellationRequested && source.cancellationRequested()))
+        return {};
+    ScreenshotImageRowSource input = source;
+#if defined(Q_OS_WIN) || defined(_WIN32)
+    DibWriter dib(source.size);
+    if (dib.isValid()) {
+        input.readRows = [&source, &dib](int first, int count, qsizetype stride, uchar* destination,
+                                         qsizetype capacity) {
+            return source.readRows(first, count, stride, destination, capacity) &&
+                   dib.write(first, count, stride, destination, capacity);
+        };
+    }
+#endif
     QByteArray png;
     {
         SNOW_SHOT_CLIPBOARD_PERF_SCOPE("clipboard.encode_png");
         QBuffer buffer(&png);
         if (!buffer.open(QIODevice::WriteOnly) ||
             !snow_shot::image_codec::encodeToDevice(
-                source, &buffer, snow::image::Format::png,
+                input, &buffer, snow::image::Format::png,
                 ScreenshotImageFileService::encodeOptions(ScreenshotImageFileFormat::Png,
                                                           encoding))) {
             return {};
         }
     }
     SNOW_SHOT_CLIPBOARD_PERF_COUNTER("clipboard.png_encoded", 1);
-    return prepareEncoded(source, png, std::move(placement), std::move(appearance));
+    ScreenshotClipboardPayload payload;
+    payload.m_pngBytes = std::move(png);
+    if (placement) {
+        placement->rasterSize = source.size;
+        payload.m_placementBytes = encodeScreenshotClipboardPlacement(*placement);
+    }
+    if (appearance) {
+        appearance->rasterSize = source.size;
+        payload.m_appearanceBytes = encodeScreenshotClipboardAppearance(*appearance);
+    }
+#if defined(Q_OS_WIN) || defined(_WIN32)
+    payload.m_dibHandle = dib.finish();
+    // Retain successfully encoded bytes even if native allocation fails. Concurrent PNG
+    // consumers can still use their encoding; the clipboard payload reports invalid ownership.
+    if (payload.m_dibHandle) {
+        payload.m_pngHandle = copyToGlobal(payload.m_pngBytes);
+        if (!payload.m_placementBytes.isEmpty())
+            payload.m_placementHandle = copyToGlobal(payload.m_placementBytes);
+        if (!payload.m_appearanceBytes.isEmpty())
+            payload.m_appearanceHandle = copyToGlobal(payload.m_appearanceBytes);
+    }
+#endif
+    if (source.cancellationRequested && source.cancellationRequested())
+        return {};
+    return payload;
+}
+
+ScreenshotClipboardPayload
+ScreenshotClipboardService::clonePrepared(const ScreenshotClipboardPayload& source) {
+    if (!source.isValid())
+        return {};
+    ScreenshotClipboardPayload result;
+    result.m_pngBytes = source.m_pngBytes;
+    result.m_placementBytes = source.m_placementBytes;
+    result.m_appearanceBytes = source.m_appearanceBytes;
+#if defined(Q_OS_WIN) || defined(_WIN32)
+    result.m_dibHandle = cloneGlobal(static_cast<HGLOBAL>(source.m_dibHandle));
+    result.m_pngHandle = copyToGlobal(result.m_pngBytes);
+    if (!result.m_placementBytes.isEmpty())
+        result.m_placementHandle = copyToGlobal(result.m_placementBytes);
+    if (!result.m_appearanceBytes.isEmpty())
+        result.m_appearanceHandle = copyToGlobal(result.m_appearanceBytes);
+#endif
+    return result;
 }
 
 ScreenshotClipboardPayload ScreenshotClipboardService::prepareEncoded(
@@ -755,11 +845,9 @@ ScreenshotClipboardService::commitMimeData(QClipboard* clipboard, QObject* recei
     const QList<QUrl> fileUrls = fileOnly ? mimeData->urls() : QList<QUrl>{};
     const QByteArray placementBytes = fileOnly ? mimeData->data(placementFormat) : QByteArray{};
     const QByteArray appearanceBytes = fileOnly ? mimeData->data(appearanceFormat) : QByteArray{};
-    const auto* temporaryMime = dynamic_cast<TemporaryFileClipboardMimeData*>(mimeData);
-    const auto directory = temporaryMime ? temporaryMime->directory() : nullptr;
     const QPointer<QClipboard> guardedClipboard(clipboard);
     auto attempt = [guardedClipboard, holder, publicationId, fileUrls, placementFormat,
-                    placementBytes, appearanceFormat, appearanceBytes, directory]() {
+                    placementBytes, appearanceFormat, appearanceBytes]() {
         if (publicationId != g_latestPublicationId.load(std::memory_order_acquire)) {
             return ClipboardPublishAttempt{};
         }
@@ -772,8 +860,7 @@ ScreenshotClipboardService::commitMimeData(QClipboard* clipboard, QObject* recei
         }
         if (!fileUrls.isEmpty()) {
             // Qt owns each attempted MIME object, including failed native publications.
-            auto* attemptMime =
-                directory ? new TemporaryFileClipboardMimeData(directory) : new QMimeData();
+            auto* attemptMime = new QMimeData();
             attemptMime->setUrls(fileUrls);
             if (!placementBytes.isEmpty())
                 attemptMime->setData(placementFormat, placementBytes);
@@ -792,14 +879,6 @@ ScreenshotClipboardService::commitMimeData(QClipboard* clipboard, QObject* recei
         new ClipboardCommitOperation(receiver, state, std::move(attempt), std::move(completion));
     operation->start();
     return ScreenshotClipboardCommitHandle(std::move(state));
-}
-
-std::unique_ptr<QMimeData>
-ScreenshotClipboardService::temporaryFileMimeData(const QString& path,
-                                                  std::shared_ptr<QTemporaryDir> directory) {
-    auto mime = std::make_unique<TemporaryFileClipboardMimeData>(std::move(directory));
-    mime->setUrls({QUrl::fromLocalFile(path)});
-    return mime;
 }
 
 bool ScreenshotClipboardService::publish(QClipboard* clipboard,

@@ -11,11 +11,13 @@
       "hidden": true,
       "generator": "Visual Studio 18 2026",
       "architecture": "x64",
-      "toolset": "host=x64,version=14.51",
+      "toolset": "host=x64",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "toolchainFile": "${sourceDir}/.tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "environment": {
-        "VCPKG_ROOT": "${sourceDir}/.tools/vcpkg"
+        "VCPKG_ROOT": "${sourceDir}/.tools/vcpkg",
+        "VCPKG_FORCE_DOWNLOADED_BINARIES": null,
+        "VCPKG_FORCE_SYSTEM_BINARIES": null
       },
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
@@ -24,7 +26,7 @@
         "SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION": "OFF",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/.tools/vcpkg/installed/dynamic",
-        "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/vcpkg-overlay-ports/crashpad;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg-bin2c;${sourceDir}/cmake/vcpkg-overlay-ports/libde265;${sourceDir}/cmake/vcpkg-overlay-ports/libheif;${sourceDir}/cmake/vcpkg-overlay-ports/libjxl;${sourceDir}/cmake/vcpkg-overlay-ports/libvpl;${sourceDir}/cmake/vcpkg-overlay-ports/amd-amf;${sourceDir}/cmake/vcpkg-overlay-ports/minizip-ng;${sourceDir}/cmake/vcpkg-overlay-ports/onnx;${sourceDir}/cmake/vcpkg-overlay-ports/onnxruntime;${sourceDir}/cmake/vcpkg-overlay-ports/opencv4;${sourceDir}/cmake/vcpkg-overlay-ports/x264;${sourceDir}/cmake/vcpkg-overlay-ports/x265;${sourceDir}/cmake/vcpkg-overlay-ports/zlib",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/vcpkg-overlay-ports/crashpad;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg-bin2c;${sourceDir}/cmake/vcpkg-overlay-ports/libde265;${sourceDir}/cmake/vcpkg-overlay-ports/libheif;${sourceDir}/cmake/vcpkg-overlay-ports/libjxl;${sourceDir}/cmake/vcpkg-overlay-ports/libvpl;${sourceDir}/cmake/vcpkg-overlay-ports/amd-amf;${sourceDir}/cmake/vcpkg-overlay-ports/minizip-ng;${sourceDir}/cmake/vcpkg-overlay-ports/opencv4;${sourceDir}/cmake/vcpkg-overlay-ports/x264;${sourceDir}/cmake/vcpkg-overlay-ports/x265;${sourceDir}/cmake/vcpkg-overlay-ports/zlib",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg-overlay-triplets",
         "VCPKG_MANIFEST_INSTALL": "ON",
         "VCPKG_MANIFEST_FEATURES": "snow-shot;full-codecs;image-viewer",
@@ -86,7 +88,7 @@
         "strategy": "external"
       },
       "toolset": {
-        "value": "host=x64,version=14.51",
+        "value": "host=x64",
         "strategy": "external"
       },
       "cacheVariables": {
@@ -329,11 +331,12 @@
       "hidden": true,
       "generator": "Visual Studio 18 2026",
       "architecture": "ARM64",
-      "toolset": "version=14.51",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "toolchainFile": "${sourceDir}/.tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "environment": {
-        "VCPKG_ROOT": "${sourceDir}/.tools/vcpkg"
+        "VCPKG_ROOT": "${sourceDir}/.tools/vcpkg",
+        "VCPKG_FORCE_DOWNLOADED_BINARIES": null,
+        "VCPKG_FORCE_SYSTEM_BINARIES": null
       },
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
@@ -342,7 +345,7 @@
         "SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION": "OFF",
         "VCPKG_TARGET_TRIPLET": "arm64-windows",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/.tools/vcpkg/installed/arm64/dynamic",
-        "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/vcpkg-overlay-ports/crashpad;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg-bin2c;${sourceDir}/cmake/vcpkg-overlay-ports/libde265;${sourceDir}/cmake/vcpkg-overlay-ports/libheif;${sourceDir}/cmake/vcpkg-overlay-ports/libjxl;${sourceDir}/cmake/vcpkg-overlay-ports/libvpl;${sourceDir}/cmake/vcpkg-overlay-ports/amd-amf;${sourceDir}/cmake/vcpkg-overlay-ports/minizip-ng;${sourceDir}/cmake/vcpkg-overlay-ports/onnx;${sourceDir}/cmake/vcpkg-overlay-ports/onnxruntime;${sourceDir}/cmake/vcpkg-overlay-ports/opencv4;${sourceDir}/cmake/vcpkg-overlay-ports/x264;${sourceDir}/cmake/vcpkg-overlay-ports/x265;${sourceDir}/cmake/vcpkg-overlay-ports/zlib",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/vcpkg-overlay-ports/crashpad;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg-bin2c;${sourceDir}/cmake/vcpkg-overlay-ports/libde265;${sourceDir}/cmake/vcpkg-overlay-ports/libheif;${sourceDir}/cmake/vcpkg-overlay-ports/libjxl;${sourceDir}/cmake/vcpkg-overlay-ports/libvpl;${sourceDir}/cmake/vcpkg-overlay-ports/amd-amf;${sourceDir}/cmake/vcpkg-overlay-ports/minizip-ng;${sourceDir}/cmake/vcpkg-overlay-ports/opencv4;${sourceDir}/cmake/vcpkg-overlay-ports/x264;${sourceDir}/cmake/vcpkg-overlay-ports/x265;${sourceDir}/cmake/vcpkg-overlay-ports/zlib",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg-overlay-triplets",
         "VCPKG_MANIFEST_INSTALL": "ON",
         "VCPKG_MANIFEST_FEATURES": "snow-shot",

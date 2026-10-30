@@ -1582,6 +1582,7 @@ fn serial_connector_tracks_ink_committed_with_edited_label() {
         has_text: true,
         font_size: committed.font_size,
         fill: committed.fill,
+        fill_style: committed.fill_style,
         stroke: committed.stroke,
         stroke_width: committed.stroke_width,
     };
@@ -1769,6 +1770,8 @@ fn serial_number_drag_ignores_other_pointer_and_secondary_release() {
                 viewport,
                 InputEvent::Pointer(PointerEvent {
                     pointer_id,
+                    pressure: None,
+                    timestamp_ms: 0,
                     event_type,
                     device: PointerDevice::Mouse,
                     position: Point::new(600.0, 450.0),

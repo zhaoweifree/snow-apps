@@ -29,6 +29,9 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include "snow_shot/compat/qt_compat.h"
+
+#include <QEnterEvent>
+#include <QHoverEvent>
 #include <QJsonDocument>
 #include <QMenu>
 #include <QPointer>
@@ -166,6 +169,46 @@ void verifySettings() {
                     QStringLiteral("floating-toolbar.enabled"),
             "the unified floating toolbar section follows the unified tray section");
 }
+void verifyHoverMovementWithoutEnter() {
+    const storage::FloatingToolbarSettings stored;
+    stored.setHideInFullscreen(false);
+    stored.setToolbarMode(false);
+    stored.setOpacity(50);
+    for (const bool overHandle : {false, true}) {
+        stored.setEnabled(false);
+        FloatingToolbarController controller(nullptr, [](QScreen*) { return false; });
+        stored.setEnabled(true);
+        pump();
+        auto* icon = window("floatingToolbarIconWindow");
+        require(icon && icon->isVisible(), "icon mode must expose its hover surface");
+        QEvent leave(QEvent::Leave);
+        QApplication::sendEvent(icon, &leave);
+        auto* reveal = controller.findChild<QTimer*>(QStringLiteral("floatingToolbarRevealTimer"));
+        require(reveal && !reveal->isActive(), "leaving the icon must cancel pending reveal");
+        QWidget* target =
+            overHandle
+                ? icon->findChild<QAbstractButton*>(QStringLiteral("floatingToolbarSnowflake"))
+                : icon;
+        require(target, "the hover target must exist");
+        const QPoint local = target->rect().center();
+        QHoverEvent move(QEvent::HoverMove, local, target->mapToGlobal(local), QPointF(-1, -1),
+                         Qt::NoModifier);
+        QApplication::sendEvent(target, &move);
+        require(reveal->isActive(), "hover movement without Enter must schedule toolbar reveal");
+        const auto deadline = reveal->id();
+        QApplication::sendEvent(target, &move);
+        require(reveal->id() == deadline,
+                "continued hover movement must preserve the toolbar reveal deadline");
+        require(qAbs(icon->windowOpacity() - 1.0) < 0.005,
+                "hover movement over the surface or handle must restore full opacity");
+        timer(controller, "floatingToolbarRevealTimer");
+        auto* toolbar = window("floatingToolbarWindow");
+        require(toolbar && toolbar->isVisible(), "the hover deadline must reveal the toolbar");
+        stored.setEnabled(false);
+        pump();
+    }
+}
+
 void verifyOpacity() {
     const storage::FloatingToolbarSettings stored;
     stored.setHideInFullscreen(false);
@@ -635,34 +678,27 @@ void nativeProbe() {
     const auto style = GetWindowLongPtrW(reinterpret_cast<HWND>(iconWindow->winId()), GWL_EXSTYLE);
     require((style & WS_EX_TOOLWINDOW) && (style & WS_EX_TOPMOST) && !(style & WS_EX_APPWINDOW),
             "native toolbar stays above ordinary windows without a taskbar entry");
+    RECT frame{};
+    MONITORINFOEXW monitor{};
+    monitor.cbSize = sizeof(monitor);
+    require(SUCCEEDED(DwmGetWindowAttribute(backdropHandle, DWMWA_EXTENDED_FRAME_BOUNDS, &frame,
+                                            sizeof(frame))) &&
+                GetMonitorInfoW(MonitorFromWindow(backdropHandle, MONITOR_DEFAULTTONULL),
+                                reinterpret_cast<MONITORINFO*>(&monitor)) != 0 &&
+                qAbs(frame.left - monitor.rcMonitor.left) <= 1 &&
+                qAbs(frame.top - monitor.rcMonitor.top) <= 1 &&
+                qAbs(frame.right - monitor.rcMonitor.right) <= 1 &&
+                qAbs(frame.bottom - monitor.rcMonitor.bottom) <= 1,
+            "own native fullscreen fixture fills the entire monitor");
 #endif
-    if (!snow_shot::platform::focusedFullscreenWindowOnScreen(screen)) {
-#ifdef Q_OS_WIN
-        const auto foreground = GetForegroundWindow();
-        RECT rect{};
-        DwmGetWindowAttribute(foreground, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(rect));
-        MONITORINFOEXW monitor{};
-        monitor.cbSize = sizeof(monitor);
-        GetMonitorInfoW(MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST),
-                        reinterpret_cast<MONITORINFO*>(&monitor));
-        std::cerr << "Fullscreen probe: foreground backdrop="
-                  << (foreground == reinterpret_cast<HWND>(backdrop.winId()))
-                  << " frame=" << rect.left << ',' << rect.top << ',' << rect.right << ','
-                  << rect.bottom << " monitor=" << monitor.rcMonitor.left << ','
-                  << monitor.rcMonitor.top << ',' << monitor.rcMonitor.right << ','
-                  << monitor.rcMonitor.bottom << " qt=" << screen->name().toStdString()
-                  << " win=" << QString::fromWCharArray(monitor.szDevice).toStdString() << '\n';
-#endif
-    }
-    require(snow_shot::platform::focusedFullscreenWindowOnScreen(screen),
-            "native detector recognizes fullscreen on the toolbar monitor");
+    require(!snow_shot::platform::focusedFullscreenWindowExists(),
+            "native detector ignores own focused fullscreen windows");
     for (auto* other : QGuiApplication::screens())
-        if (other != screen)
-            require(!snow_shot::platform::focusedFullscreenWindowOnScreen(other),
-                    "native fullscreen does not suppress another monitor");
+        require(!snow_shot::platform::focusedFullscreenWindowOnScreen(other),
+                "own native fullscreen does not suppress any monitor");
     stored.setHideInFullscreen(true);
     pump();
-    require(!iconWindow->isVisible(), "fullscreen preference hides the native surface");
+    require(iconWindow->isVisible(), "own fullscreen does not hide the native toolbar surface");
     std::cout << "Native floating toolbar probe passed on " << QGuiApplication::screens().size()
               << " monitor(s).\n";
     stored.setEnabled(false);
@@ -1565,6 +1601,7 @@ int main(int argc, char** argv) {
         verifySettings();
         verifyFeedbackOwnership();
         verifyOpacity();
+        verifyHoverMovementWithoutEnter();
         verifyPlacement();
         verifyDropIdentity();
         verifyContentDrops();

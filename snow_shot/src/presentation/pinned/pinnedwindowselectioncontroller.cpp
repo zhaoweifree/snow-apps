@@ -21,6 +21,8 @@ namespace customIcons = snow_shot::presentation::icons::custom::outlined;
 namespace {
 [[maybe_unused]] constexpr const char* translationSources[] = {
     QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController",
+                      "Image Stitching"),
+    QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController",
                       "Close Other Windows"),
     QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController", "Align Position"),
     QT_TRANSLATE_NOOP("snow_shot::presentation::PinnedWindowSelectionController", "Group"),
@@ -212,11 +214,18 @@ void PinnedWindowSelectionController::buildContextMenu(ScreenshotPinnedWindow* o
         translateAction(action, source);
         return action;
     };
-    auto* count =
-        menu->addItem(tr("%n selected window(s)", nullptr, static_cast<int>(targets.size())));
-    count->setObjectName(QStringLiteral("screenshotPinnedSelectionCount"));
-    count->setEnabled(false);
-    count->setProperty("pinnedSelectionCount", targets.size());
+    auto* stitching =
+        add("Image Stitching", QStringLiteral("screenshotPinnedSelectionImageStitching"),
+            customIcons::ImageStitching());
+    connect(stitching, &QAction::triggered, this, [this, targets, valid] {
+        if (!valid())
+            return;
+        QVector<ScreenshotPinnedImageSnapshot> snapshots;
+        snapshots.reserve(targets.size());
+        for (const auto& window : targets)
+            snapshots.append(window->stitchingSnapshot());
+        emit imageStitchingRequested(snapshots);
+    });
     menu->addSeparator();
     auto* closeOthers =
         add("Close Other Windows", QStringLiteral("screenshotPinnedSelectionCloseOthers"),
@@ -355,6 +364,12 @@ void PinnedWindowSelectionController::buildContextMenu(ScreenshotPinnedWindow* o
         if (valid() && owner)
             confirmDestroy(owner, targets);
     });
+    menu->addSeparator();
+    auto* count =
+        menu->addItem(tr("%n selected window(s)", nullptr, static_cast<int>(targets.size())));
+    count->setObjectName(QStringLiteral("screenshotPinnedSelectionCount"));
+    count->setEnabled(false);
+    count->setProperty("pinnedSelectionCount", targets.size());
 }
 
 void PinnedWindowSelectionController::confirmDestroy(

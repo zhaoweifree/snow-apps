@@ -1169,8 +1169,8 @@
             <translation>作用中視窗</translation>
         </message>
         <message>
-            <source>Add Edit with Snow Shot to the classic Windows context menu to pin an image file to the screen.</source>
-            <translation>在傳統 Windows 右鍵選單中新增「使用 Snow Shot 編輯」，將影像檔案固定到螢幕。</translation>
+            <source>Add Edit with Snow Shot to the classic Windows context menu to pin a supported image or document file to the screen.</source>
+            <translation>將「使用 Snow Shot 編輯」新增至傳統 Windows 右鍵選單，以將支援的影像或文件檔案貼到螢幕。</translation>
         </message>
         <message>
             <source>Add a mask to highlight text recognition results</source>
@@ -1361,6 +1361,10 @@
             <translation>開機時自動啟動</translation>
         </message>
         <message>
+            <source>Auto-hide toolbar</source>
+            <translation>自動隱藏工具列</translation>
+        </message>
+        <message>
             <source>Auto-recognize QR Code</source>
             <translation>自動辨識 QR Code</translation>
         </message>
@@ -1407,6 +1411,10 @@
         <message>
             <source>Background Fill</source>
             <translation>背景填充</translation>
+        </message>
+        <message>
+            <source>Background color</source>
+            <translation>背景顏色</translation>
         </message>
         <message>
             <source>Background image</source>
@@ -1601,6 +1609,10 @@
             <translation>選擇在截圖中移動或標註時按一下滑鼠中鍵所執行的動作</translation>
         </message>
         <message>
+            <source>Choose the bundled icon used in dark theme, or reuse the regular icon settings</source>
+            <translation>選擇深色主題使用的內建圖示，或沿用一般圖示設定</translation>
+        </message>
+        <message>
             <source>Choose the bundled icon used in the system tray</source>
             <translation>選擇系統匣使用的內建圖示</translation>
         </message>
@@ -1615,6 +1627,14 @@
         <message>
             <source>Choose the compression effort used for image output and history results</source>
             <translation>選擇影像輸出和歷史記錄結果影像的壓縮等級</translation>
+        </message>
+        <message>
+            <source>Choose the default font for newly pinned text</source>
+            <translation>選擇新貼圖文字的預設字型</translation>
+        </message>
+        <message>
+            <source>Choose the default font size for newly pinned text</source>
+            <translation>選擇新貼圖文字的預設字型大小</translation>
         </message>
         <message>
             <source>Choose the dialog used for manual image saves</source>
@@ -1825,8 +1845,8 @@
             <translation>設定網路請求的代理使用方式</translation>
         </message>
         <message>
-            <source>Configure text recognition models and acceleration</source>
-            <translation>設定文字辨識模型與加速</translation>
+            <source>Configure text recognition models and processing</source>
+            <translation>設定文字辨識模型與處理方式</translation>
         </message>
         <message>
             <source>Configure the screenshot, pinned, and recording toolbars</source>
@@ -1855,6 +1875,10 @@
         <message>
             <source>Control when the screenshot color picker is visible</source>
             <translation>控制截圖色彩選擇器的顯示時機</translation>
+        </message>
+        <message>
+            <source>Copy after text recognition</source>
+            <translation>文字辨識後複製</translation>
         </message>
         <message>
             <source>Copy application settings as a zip archive to the clipboard</source>
@@ -2009,6 +2033,14 @@
             <translation>深色</translation>
         </message>
         <message>
+            <source>Dark theme custom icon</source>
+            <translation>深色主題自訂圖示</translation>
+        </message>
+        <message>
+            <source>Dark theme icon</source>
+            <translation>深色主題圖示</translation>
+        </message>
+        <message>
             <source>Data storage</source>
             <translation>資料儲存</translation>
         </message>
@@ -2035,6 +2067,22 @@
         <message>
             <source>Default Punctuation</source>
             <translation>預設標點</translation>
+        </message>
+        <message>
+            <source>Default text color</source>
+            <translation>預設文字顏色</translation>
+        </message>
+        <message>
+            <source>Default text font</source>
+            <translation>預設文字字型</translation>
+        </message>
+        <message>
+            <source>Default text font size</source>
+            <translation>預設文字字型大小</translation>
+        </message>
+        <message>
+            <source>Defaults for newly pinned text; source formatting is preserved</source>
+            <translation>設定新貼圖文字的預設樣式，並保留來源格式</translation>
         </message>
         <message>
             <source>Delay %1s to execute</source>
@@ -2095,14 +2143,6 @@
         <message>
             <source>Destroy</source>
             <translation>銷毀</translation>
-        </message>
-        <message>
-            <source>DirectML</source>
-            <translation>DirectML</translation>
-        </message>
-        <message>
-            <source>DirectML acceleration</source>
-            <translation>DirectML 加速</translation>
         </message>
         <message>
             <source>Disable global hotkeys</source>
@@ -2189,8 +2229,20 @@
             <translation>在取樣的中央像素周圍繪製四段輔助線</translation>
         </message>
         <message>
+            <source>Duplicate latest region</source>
+            <translation>複製最新選取區域</translation>
+        </message>
+        <message>
             <source>Edit selection</source>
             <translation>編輯選取範圍</translation>
+        </message>
+        <message>
+            <source>Edit with Snow Shot</source>
+            <translation>使用 Snow Shot 編輯</translation>
+        </message>
+        <message>
+            <source>Edit with Snow Shot Mini</source>
+            <translation>使用 Snow Shot Mini 編輯</translation>
         </message>
         <message>
             <source>Enable MCP integration</source>
@@ -2233,6 +2285,10 @@
             <translation>輸入 HTTP 或 HTTPS 位址。變更立即生效。清空可使用預設伺服器。</translation>
         </message>
         <message>
+            <source>Enter or browse to a PNG or ICO file for dark theme; invalid files use the selected bundled icon</source>
+            <translation>輸入或瀏覽選擇深色主題使用的 PNG 或 ICO 檔案；無效檔案將使用所選內建圖示</translation>
+        </message>
+        <message>
             <source>Enter or browse to a PNG or ICO file; invalid files use the selected bundled icon</source>
             <translation>輸入或瀏覽選取 PNG 或 ICO 檔案；無效檔案將使用所選的內建圖示</translation>
         </message>
@@ -2251,6 +2307,14 @@
         <message>
             <source>Exit</source>
             <translation>結束</translation>
+        </message>
+        <message>
+            <source>Exit annotation mode and keep the pinned window open when closing.</source>
+            <translation>關閉時退出標註模式，並保持貼圖視窗開啟。</translation>
+        </message>
+        <message>
+            <source>Exit annotation mode before closing</source>
+            <translation>關閉前退出標註模式</translation>
         </message>
         <message>
             <source>Export</source>
@@ -2275,6 +2339,10 @@
         <message>
             <source>Extended Features Settings</source>
             <translation>擴充功能設定</translation>
+        </message>
+        <message>
+            <source>Fast</source>
+            <translation>快速</translation>
         </message>
         <message>
             <source>Fill Style</source>
@@ -2389,10 +2457,6 @@
             <translation>GIF、APNG 和 WebP 的解析度、影格率與循環播放</translation>
         </message>
         <message>
-            <source>GPU acceleration</source>
-            <translation>GPU 加速</translation>
-        </message>
-        <message>
             <source>General</source>
             <translation>一般</translation>
         </message>
@@ -2449,6 +2513,10 @@
             <translation>隱藏或顯示目前群組中的所有視窗</translation>
         </message>
         <message>
+            <source>Hide the toolbar near the left or right screen edge. Hover over the edge control to show it again.</source>
+            <translation>工具列靠近螢幕左邊緣或右邊緣時自動隱藏。將滑鼠停留在邊緣控制項上可再次顯示工具列。</translation>
+        </message>
+        <message>
             <source>Hide to Top</source>
             <translation>頂部隱藏</translation>
         </message>
@@ -2485,12 +2553,12 @@
             <translation>影像辨識</translation>
         </message>
         <message>
-            <source>Image export</source>
-            <translation>影像匯出</translation>
+            <source>Image and document files</source>
+            <translation>影像與文件檔案</translation>
         </message>
         <message>
-            <source>Image files</source>
-            <translation>影像檔案</translation>
+            <source>Image export</source>
+            <translation>影像匯出</translation>
         </message>
         <message>
             <source>Image files (*.png *.ico);;PNG images (*.png);;Icon files (*.ico)</source>
@@ -2633,6 +2701,10 @@
             <translation>語言</translation>
         </message>
         <message>
+            <source>Language Detection Confidence Threshold</source>
+            <translation>語言偵測信心度門檻</translation>
+        </message>
+        <message>
             <source>Language, startup and updates</source>
             <translation>語言、啟動與更新</translation>
         </message>
@@ -2675,6 +2747,10 @@
         <message>
             <source>Limit long side (faster)</source>
             <translation>限制長邊（更快）</translation>
+        </message>
+        <message>
+            <source>Limit the width of pinned text, including padding</source>
+            <translation>限制貼圖文字的寬度，包括內距</translation>
         </message>
         <message>
             <source>Line</source>
@@ -2769,16 +2845,12 @@
             <translation>最大項目數</translation>
         </message>
         <message>
+            <source>Maximum text width</source>
+            <translation>最大文字寬度</translation>
+        </message>
+        <message>
             <source>Medium</source>
             <translation>中等</translation>
-        </message>
-        <message>
-            <source>Medium V4</source>
-            <translation>中型 V4</translation>
-        </message>
-        <message>
-            <source>Medium V5</source>
-            <translation>中型 V5</translation>
         </message>
         <message>
             <source>Medium V6</source>
@@ -2805,6 +2877,10 @@
             <translation>滑鼠中鍵動作</translation>
         </message>
         <message>
+            <source>Minimum confidence required to switch to the secondary target language</source>
+            <translation>切換至次目標語言所需的最低信心度</translation>
+        </message>
+        <message>
             <source>Model Hot Start</source>
             <translation>模型熱啟動</translation>
         </message>
@@ -2829,8 +2905,16 @@
             <translation>滑鼠指標</translation>
         </message>
         <message>
+            <source>Mouse wheel opacity step</source>
+            <translation>滑鼠滾輪不透明度步長</translation>
+        </message>
+        <message>
             <source>Mouse wheel zoom mode</source>
             <translation>滑鼠滾輪縮放模式</translation>
+        </message>
+        <message>
+            <source>Mouse wheel zoom step</source>
+            <translation>滑鼠滾輪縮放步長</translation>
         </message>
         <message>
             <source>Move cursor down</source>
@@ -2877,6 +2961,10 @@
             <translation>下一筆截圖歷史</translation>
         </message>
         <message>
+            <source>Next selection area</source>
+            <translation>下一個選取區域</translation>
+        </message>
+        <message>
             <source>Next selection type</source>
             <translation>下一種選取區域類型</translation>
         </message>
@@ -2917,12 +3005,24 @@
             <translation>OCR 模型與效能</translation>
         </message>
         <message>
+            <source>Off</source>
+            <translation>關閉</translation>
+        </message>
+        <message>
             <source>Only when displayed</source>
             <translation>僅在顯示時</translation>
         </message>
         <message>
             <source>Open</source>
             <translation>開啟</translation>
+        </message>
+        <message>
+            <source>Open Image Splitting for each selected image file, or an empty window if no images are selected</source>
+            <translation>為每個選取的圖片檔案開啟圖片分割；未選取圖片時開啟空白視窗</translation>
+        </message>
+        <message>
+            <source>Open Image Stitching with selected image files, or an empty window if no images are selected</source>
+            <translation>使用選取的圖片檔案開啟圖片拼接；未選取圖片時開啟空白視窗</translation>
         </message>
         <message>
             <source>Open Login Items Settings</source>
@@ -3037,20 +3137,20 @@
             <translation>將剪貼簿內容固定到螢幕</translation>
         </message>
         <message>
-            <source>Pin images, image files, formatted text, or HTML from the clipboard to the screen</source>
-            <translation>將剪貼簿中的影像、影像檔案、格式化文字或 HTML 固定到螢幕</translation>
+            <source>Pin images, supported files, formatted text, or HTML from the clipboard to the screen</source>
+            <translation>將剪貼簿中的影像、支援的檔案、格式化文字或 HTML 貼到螢幕</translation>
         </message>
         <message>
             <source>Pin screenshot to screen</source>
             <translation>將截圖固定到螢幕</translation>
         </message>
         <message>
-            <source>Pin selected image files from File Explorer or the desktop to the screen</source>
-            <translation>將檔案總管或桌面中選取的影像檔案固定到螢幕</translation>
+            <source>Pin selected image or document files from File Explorer or the desktop to the screen</source>
+            <translation>將檔案總管或桌面中選取的影像或文件檔案貼到螢幕</translation>
         </message>
         <message>
-            <source>Pin selected image files from Finder or the desktop to the screen</source>
-            <translation>將 Finder 或桌面中所選的圖片檔案固定到螢幕</translation>
+            <source>Pin selected image or document files from Finder or the desktop to the screen</source>
+            <translation>將 Finder 或桌面中選取的影像或文件檔案貼到螢幕</translation>
         </message>
         <message>
             <source>Pin selection</source>
@@ -3173,6 +3273,10 @@
             <translation>上一筆截圖歷史</translation>
         </message>
         <message>
+            <source>Previous selection area</source>
+            <translation>上一個選取區域</translation>
+        </message>
+        <message>
             <source>Previous selection type</source>
             <translation>上一種選取區域類型</translation>
         </message>
@@ -3187,10 +3291,6 @@
         <message>
             <source>Process priority</source>
             <translation>處理程序優先順序</translation>
-        </message>
-        <message>
-            <source>Prompt-capable models use this language when the input matches the primary target language</source>
-            <translation>支援提示詞的模型會在輸入語言與主要目標語言相同時使用此語言</translation>
         </message>
         <message>
             <source>Proxy</source>
@@ -3247,6 +3347,10 @@
         <message>
             <source>Recognize text in the confirmed screenshot selection</source>
             <translation>辨識確認的截圖選取範圍中的文字</translation>
+        </message>
+        <message>
+            <source>Recognize text, copy it to the clipboard, and end the screenshot session</source>
+            <translation>辨識文字，將辨識結果複製到剪貼簿並結束截圖</translation>
         </message>
         <message>
             <source>Recognized text and language tools</source>
@@ -3621,12 +3725,12 @@
             <translation>擷取螢幕畫面時選取視窗中的子元素</translation>
         </message>
         <message>
-            <source>Select image save directory</source>
-            <translation>選擇影像儲存目錄</translation>
+            <source>Select dark theme tray icon</source>
+            <translation>選擇深色主題系統匣圖示</translation>
         </message>
         <message>
-            <source>Select previously selected area</source>
-            <translation>選取先前選取的區域</translation>
+            <source>Select image save directory</source>
+            <translation>選擇影像儲存目錄</translation>
         </message>
         <message>
             <source>Select scenarios</source>
@@ -3691,6 +3795,10 @@
         <message>
             <source>Server address</source>
             <translation>伺服器位址</translation>
+        </message>
+        <message>
+            <source>Set how much Ctrl+mouse wheel changes pinned window opacity</source>
+            <translation>設定 Ctrl+滑鼠滾輪調整固定視窗不透明度的步長</translation>
         </message>
         <message>
             <source>Set quality for image files saved outside the Snow Shot dialog</source>
@@ -3759,6 +3867,10 @@
         <message>
             <source>Set the shadow color of pinned screenshots while they have focus</source>
             <translation>設定固定到螢幕的截圖取得焦點時的陰影色彩</translation>
+        </message>
+        <message>
+            <source>Set the zoom percentage levels used by the mouse wheel</source>
+            <translation>設定滑鼠滾輪使用的縮放百分比級距</translation>
         </message>
         <message>
             <source>Set up to two keys for this pinned window action</source>
@@ -3949,14 +4061,6 @@
             <translation>小</translation>
         </message>
         <message>
-            <source>Small V4</source>
-            <translation>小型 V4</translation>
-        </message>
-        <message>
-            <source>Small V5</source>
-            <translation>小型 V5</translation>
-        </message>
-        <message>
             <source>Small V6</source>
             <translation>小型 V6</translation>
         </message>
@@ -4001,6 +4105,10 @@
             <translation>雪花淺色</translation>
         </message>
         <message>
+            <source>Soft</source>
+            <translation>柔和</translation>
+        </message>
+        <message>
             <source>Soften all three skin images with blur.</source>
             <translation>透過模糊柔化三種皮膚影像。</translation>
         </message>
@@ -4027,6 +4135,10 @@
         <message>
             <source>Speed First reduces computation on short text and may change recognition results.</source>
             <translation>速度優先會減少短文字的計算量，並可能改變辨識結果。</translation>
+        </message>
+        <message>
+            <source>Split Selected Images</source>
+            <translation>分割選取影像</translation>
         </message>
         <message>
             <source>Spotlight</source>
@@ -4075,6 +4187,10 @@
         <message>
             <source>Startup &amp; updates</source>
             <translation>啟動與更新</translation>
+        </message>
+        <message>
+            <source>Stitch Selected Images</source>
+            <translation>拼接選取的圖片</translation>
         </message>
         <message>
             <source>Storage and privacy</source>
@@ -4143,6 +4259,10 @@
         <message>
             <source>Text Detection Processing</source>
             <translation>文字偵測處理</translation>
+        </message>
+        <message>
+            <source>Text Style</source>
+            <translation>文字樣式</translation>
         </message>
         <message>
             <source>Text background</source>
@@ -4373,16 +4493,32 @@
             <translation>上傳至雲端</translation>
         </message>
         <message>
-            <source>Use DirectML for GPU-accelerated text recognition when available</source>
-            <translation>可用時使用 DirectML 透過 GPU 加速文字辨識</translation>
-        </message>
-        <message>
             <source>Use global mouse gestures, select individual window elements, and translate selected text.</source>
             <translation>使用全域滑鼠手勢、選取視窗內的個別元素，以及翻譯選取的文字。</translation>
         </message>
         <message>
+            <source>Use one letter (A–Z) or digit (0–9) when the classic Windows context menu is open</source>
+            <translation>在傳統 Windows 右鍵選單開啟時，使用一個字母（A–Z）或數字（0–9）</translation>
+        </message>
+        <message>
+            <source>Use regular icon settings</source>
+            <translation>沿用一般圖示設定</translation>
+        </message>
+        <message>
             <source>Use system proxy</source>
             <translation>使用系統代理</translation>
+        </message>
+        <message>
+            <source>Use the theme background until customized. Reset Text Style to restore it.</source>
+            <translation>未自訂時使用佈景主題背景顏色。重設文字樣式可還原佈景主題顏色。</translation>
+        </message>
+        <message>
+            <source>Use the theme text color until customized. Reset Text Style to restore it.</source>
+            <translation>未自訂時使用佈景主題文字顏色。重設文字樣式可還原佈景主題顏色。</translation>
+        </message>
+        <message>
+            <source>Use this language when local language detection matches the primary target language at the configured confidence</source>
+            <translation>當本機語言偵測結果與主目標語言相符且達到設定的信心度時，使用此語言</translation>
         </message>
         <message>
             <source>User initiated</source>
@@ -4484,6 +4620,10 @@
             <source>Zip archives (*.zip);;All files (*.*)</source>
             <translation>Zip 壓縮檔 (*.zip);;所有檔案 (*.*)</translation>
         </message>
+        <message>
+            <source>px</source>
+            <translation>像素</translation>
+        </message>
     </context>
     <context>
         <name>SettingsPageWidget</name>
@@ -4541,6 +4681,29 @@
         </message>
     </context>
     <context>
+        <name>SettingsVariableHelp</name>
+        <message>
+            <source>%1: Application Name</source>
+            <translation>%1：應用程式名稱</translation>
+        </message>
+        <message>
+            <source>%1: Current time</source>
+            <translation>%1: 目前時間</translation>
+        </message>
+        <message>
+            <source>%1: Window Name</source>
+            <translation>%1：視窗名稱</translation>
+        </message>
+        <message>
+            <source>OK</source>
+            <translation>確定</translation>
+        </message>
+        <message>
+            <source>Variable Description</source>
+            <translation>變數說明</translation>
+        </message>
+    </context>
+    <context>
         <name>ShellContextMenuRegistration</name>
         <message>
             <source>Could not access the Windows context menu registry. Windows error %1.</source>
@@ -4573,6 +4736,10 @@
         <message>
             <source>The Windows context menu is only supported on Windows.</source>
             <translation>Windows 右鍵選單僅在 Windows 上受支援。</translation>
+        </message>
+        <message>
+            <source>The context menu access key must be one letter (A–Z) or digit (0–9).</source>
+            <translation>右鍵選單存取鍵必須為一個字母（A–Z）或數字（0–9）。</translation>
         </message>
     </context>
     <context>

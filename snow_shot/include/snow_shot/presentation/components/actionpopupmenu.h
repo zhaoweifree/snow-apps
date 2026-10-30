@@ -1,5 +1,6 @@
 #pragma once
 #include "snow_shot/shortcuts/shortcutbinding.h"
+#include "snow_shot/presentation/components/pointerhoverevents.h"
 
 #include "theme/theme_manager.h"
 #include "widgets/context_menu.h"
@@ -9,7 +10,6 @@
 #include <QCursor>
 #include <QContextMenuEvent>
 #include <QKeyEvent>
-#include <QMouseEvent>
 #include <QPointer>
 #include <QTimer>
 #include <functional>
@@ -36,6 +36,8 @@ class ActionPopupMenu final : public QObject {
 #else
         (void)surface;
 #endif
+        if (!m_nativeMenu)
+            trigger->setAttribute(Qt::WA_Hover);
         m_closeTimer.setSingleShot(true);
         m_closeTimer.setInterval(150);
         connect(&m_closeTimer, &QTimer::timeout, this, [this] {
@@ -107,9 +109,28 @@ class ActionPopupMenu final : public QObject {
             context->accept();
             return true;
         }
-        if (!m_nativeMenu && watched == m_trigger && event->type() == QEvent::Enter &&
-            pointerOverMenuOrTrigger(QCursor::pos())) {
-            open();
+        const bool pointerMoved =
+            event->type() == QEvent::HoverMove || event->type() == QEvent::MouseMove;
+        if (!m_nativeMenu) {
+            const auto* widget = qobject_cast<QWidget*>(watched);
+            const bool insideReceiver = pointerHoverPositionWithin(widget, event).has_value();
+            // Popup grabs also deliver moves outside the receiver. Resolve those
+            // against the actual target, using the same event-coordinate mapping.
+            const auto grabbedPosition =
+                pointerMoved && !insideReceiver
+                    ? adqt::widgets::detail::pointerEventGlobalPosition(widget, event)
+                    : std::nullopt;
+            if (pointerMoved)
+                m_keyboard = false;
+            if (insideReceiver || (grabbedPosition && pointerOverMenuOrTrigger(*grabbedPosition))) {
+                m_closeTimer.stop();
+                if (watched == m_trigger && insideReceiver &&
+                    (!m_menu || !m_menu->isPopupVisible()))
+                    open();
+            } else if (pointerMoved && m_menu && m_menu->isPopupVisible() &&
+                       !m_closeTimer.isActive()) {
+                m_closeTimer.start();
+            }
         }
         if (watched == m_trigger && event->type() == QEvent::Hide && m_menu)
             dismissMenu();
@@ -134,19 +155,9 @@ class ActionPopupMenu final : public QObject {
             }
         }
         if (!m_nativeMenu && m_menu && m_menu->isPopupVisible()) {
-            if (event->type() == QEvent::Enter) {
-                if (pointerOverMenuOrTrigger(QCursor::pos()))
-                    m_closeTimer.stop();
-            } else if (event->type() == QEvent::Leave && !m_keyboard) {
+            if ((event->type() == QEvent::Leave || event->type() == QEvent::HoverLeave) &&
+                !m_keyboard) {
                 m_closeTimer.start();
-            } else if (event->type() == QEvent::MouseMove) {
-                m_keyboard = false;
-                const auto* mouse = static_cast<QMouseEvent*>(event);
-                // Native menus also grab mouse moves outside their popup window.
-                if (pointerOverMenuOrTrigger(snowGlobalPos(mouse).toPoint()))
-                    m_closeTimer.stop();
-                else if (!m_closeTimer.isActive())
-                    m_closeTimer.start();
             }
         }
         return QObject::eventFilter(watched, event);

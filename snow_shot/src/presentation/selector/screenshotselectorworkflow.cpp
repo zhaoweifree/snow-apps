@@ -1,6 +1,7 @@
 #include "snow_shot/presentation/screenshotselectorworkflow.h"
 
 #include "../capture/screenshotcaptureperfinstrumentation.h"
+#include "screenshotselectordisplaygeometry.h"
 #include "snow_shot/presentation/screenshotcapturestate.h"
 #include "snow_shot/presentation/screenshotdisplaysession.h"
 #include "snow_shot/presentation/screenshotgeometry.h"
@@ -23,9 +24,7 @@ void ScreenshotSelectorWorkflow::startRefresh() {
 
     QVector<CapturedDisplayModel> displays;
     m_context.displaySession.forEachActiveDisplay([&](qsizetype, const CapturedDisplayModel& d) {
-        auto geometry = d;
-        geometry.image = {};
-        displays.push_back(std::move(geometry));
+        displays.push_back(screenshotSelectorDisplayGeometry(d));
     });
     if (!m_context.selectorService.startRefreshWithDisplays(excludedHwnds(), displays)) {
         return;

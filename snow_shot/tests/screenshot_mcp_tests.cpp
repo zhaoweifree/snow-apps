@@ -940,6 +940,44 @@ void completeToolStyleContract() {
         return mcpStylePatch(
             styles, styles, {{QStringLiteral("target"), target}, {QStringLiteral("style"), patch}});
     };
+    for (const auto& target :
+         {QStringLiteral("rectangle"), QStringLiteral("arrow"), QStringLiteral("line")}) {
+        const QStringList values{QStringLiteral("architect"), QStringLiteral("artist"),
+                                 QStringLiteral("cartoonist")};
+        for (int index = 0; index < values.size(); ++index) {
+            require(apply(target, {{QStringLiteral("stroke_rendering_style"), values.at(index)}}) &&
+                        styles.state.shapeStyle.strokeRenderingStyle ==
+                            static_cast<SnowCanvasStrokeRenderingStyle>(index) &&
+                        styles.properties == SnowCanvasShapeStylePropertyStrokeRenderingStyle,
+                    "rendering MCP styles should map names to exact rendering property patches");
+        }
+    }
+    for (const auto& value :
+         {QStringLiteral("architect"), QStringLiteral("artist"), QStringLiteral("cartoonist")}) {
+        const auto number = styles.state.serialNumberStyle.number;
+        require(apply(QStringLiteral("serial_number"),
+                      {{QStringLiteral("stroke_rendering_style"), value}}) &&
+                    styles.properties == SnowCanvasSerialNumberStyleMixedStrokeRenderingStyle &&
+                    styles.state.serialNumberStyle.number == number &&
+                    styles.state.serialNumberStyle.strokeRenderingStyle ==
+                        (value == QStringLiteral("artist") ? SnowCanvasStrokeRenderingStyle::Artist
+                         : value == QStringLiteral("cartoonist")
+                             ? SnowCanvasStrokeRenderingStyle::Cartoonist
+                             : SnowCanvasStrokeRenderingStyle::Architect),
+                "sequence MCP stroke types must dispatch only the stroke rendering property");
+    }
+    const int renderingUpdates = styles.updates;
+    for (const auto& target : {QStringLiteral("freehand"), QStringLiteral("speech_bubble"),
+                               QStringLiteral("text"), QStringLiteral("rectangle_highlight")}) {
+        require(
+            !apply(target, {{QStringLiteral("stroke_rendering_style"), QStringLiteral("artist")}}),
+            "rendering MCP styles should reject unsupported tool targets");
+    }
+    require(!apply(QStringLiteral("rectangle"),
+                   {{QStringLiteral("stroke_rendering_style"), QStringLiteral("rough")}}) &&
+                !apply(QStringLiteral("arrow"), {{QStringLiteral("stroke_rendering_style"), 1}}) &&
+                styles.updates == renderingUpdates,
+            "invalid rendering MCP patches should reject atomically before command dispatch");
     require(apply(QStringLiteral("arrow"),
                   {{QStringLiteral("arrow_shaft_type"), QStringLiteral("tapered")},
                    {QStringLiteral("arrow_ratio"), 2.5}}) &&
@@ -975,6 +1013,17 @@ void completeToolStyleContract() {
                     (SnowCanvasSerialNumberStyleMixedNumber | SnowCanvasSerialNumberStyleMixedType |
                      SnowCanvasSerialNumberStyleMixedNumericType),
             "serial-number patches must carry exactly the requested property flags");
+    for (const auto& target : {QStringLiteral("rectangle"), QStringLiteral("line"),
+                               QStringLiteral("freehand"), QStringLiteral("text"),
+                               QStringLiteral("serial_number"), QStringLiteral("speech_bubble")}) {
+        require(apply(target, {{QStringLiteral("fill_style"), QStringLiteral("border")}}),
+                "MCP accepts Border for configurable fills");
+        const auto mode = target == QStringLiteral("text") ? styles.state.textStyle.fillStyle
+                          : target == QStringLiteral("serial_number")
+                              ? styles.state.serialNumberStyle.fillStyle
+                              : styles.state.shapeStyle.fillStyle;
+        require(mode == SnowCanvasFillStyle::Border, "Border reaches the style command sink");
+    }
     for (int connection = 0; connection < 3; ++connection) {
         const QString types[] = {QStringLiteral("none"), QStringLiteral("leader_line"),
                                  QStringLiteral("gradient")};
@@ -1071,7 +1120,9 @@ void completeToolStyleContract() {
 } // namespace
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    if (app.arguments().contains(QStringLiteral("--magnifier-only"))) {
+    if (app.arguments().contains(QStringLiteral("--magnifier-only")) ||
+        app.arguments().contains(QStringLiteral("--stroke-rendering-only")) ||
+        app.arguments().contains(QStringLiteral("--border-fill-only"))) {
         completeToolStyleContract();
         return 0;
     }

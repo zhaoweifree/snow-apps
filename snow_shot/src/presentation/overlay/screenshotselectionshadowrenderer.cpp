@@ -72,6 +72,7 @@ struct ShadowCache {
 
 thread_local ShadowCache g_cache;
 thread_local ScreenshotSelectionShadowDiagnostics g_diagnostics;
+thread_local std::size_t g_liveRegionCacheBytes = 0;
 
 struct RegionPathCache {
     QRegion region;
@@ -452,7 +453,7 @@ QImage regionMask(const QSize& size, const QPainterPath& path) {
     return mask;
 }
 
-QImage regionShadow(const QImage& mask, int width, const QColor& color) {
+snow::memory::PixelArray<float> regionBlur(const QImage& mask, int width) {
     // Finite-support separable blur, O(pixel count) regardless of shadow width.
     const int w = mask.width(), h = mask.height();
     const auto rowWidth = static_cast<std::size_t>(w);
@@ -515,21 +516,35 @@ QImage regionShadow(const QImage& mask, int width, const QColor& color) {
                                 static_cast<std::size_t>(x)];
         }
     }
+    return alpha;
+}
+
+QRgb regionShadowPixel(float alpha, uchar mask, const QColor& color) {
+    const int a = std::clamp(qRound(static_cast<qreal>(alpha) * static_cast<qreal>(color.alphaF()) *
+                                    peakAlphaScale * (255 - mask) / 255.0),
+                             0, 255);
+    return qPremultiply(qRgba(color.red(), color.green(), color.blue(), a));
+}
+
+QImage tintRegionShadow(const QImage& mask, const snow::memory::PixelArray<float>& alpha,
+                        const QColor& color) {
+    const int w = mask.width(), h = mask.height();
+    const auto rowWidth = static_cast<std::size_t>(w);
     QImage shadow = snowCanvasAllocateImage(mask.size(), QImage::Format_ARGB32_Premultiplied);
     for (int y = 0; y < h; ++y) {
         auto* row = reinterpret_cast<QRgb*>(shadow.scanLine(y));
         const auto* maskRow = mask.constScanLine(y);
         for (int x = 0; x < w; ++x) {
-            const int a =
-                std::clamp(qRound(static_cast<qreal>(alpha[static_cast<std::size_t>(y) * rowWidth +
-                                                           static_cast<std::size_t>(x)]) *
-                                  static_cast<qreal>(color.alphaF()) * peakAlphaScale *
-                                  (255 - maskRow[x]) / 255.0),
-                           0, 255);
-            row[x] = qPremultiply(qRgba(color.red(), color.green(), color.blue(), a));
+            row[x] = regionShadowPixel(
+                alpha[static_cast<std::size_t>(y) * rowWidth + static_cast<std::size_t>(x)],
+                maskRow[x], color);
         }
     }
     return shadow;
+}
+
+QImage regionShadow(const QImage& mask, int width, const QColor& color) {
+    return tintRegionShadow(mask, regionBlur(mask, width), color);
 }
 
 struct RegionTile {
@@ -600,6 +615,7 @@ void paintTiledRegion(QPainter& painter, const QImage& content,
 QImage composeSparseRegion(const QImage& content, const ScreenshotResultLayout& layout,
                            const ScreenshotResultStyle& style, const std::vector<RegionTile>& tiles,
                            qreal opacity) {
+    ++g_diagnostics.selectionSizedTransientAllocations;
     QImage output = snowCanvasAllocateZeroedImage(layout.outputRect.size(),
                                                   QImage::Format_ARGB32_Premultiplied);
     output.setColorSpace(content.colorSpace());
@@ -669,6 +685,7 @@ void paintTiledRegion(QPainter& painter, const QImage& content,
 QImage composeTiledRegion(const QImage& content, const ScreenshotResultLayout& layout,
                           const ScreenshotResultStyle& style, const QPainterPath& path,
                           qreal opacity) {
+    ++g_diagnostics.selectionSizedTransientAllocations;
     QImage output = snowCanvasAllocateZeroedImage(layout.outputRect.size(),
                                                   QImage::Format_ARGB32_Premultiplied);
     output.setColorSpace(content.colorSpace());
@@ -724,6 +741,7 @@ QImage composeRegion(const QImage& content, const ScreenshotResultStyle& style,
         if (cache.mask.sizeInBytes() + shadow.sizeInBytes() <= qsizetype(kCacheByteLimit))
             cache.shadow = shadow;
     }
+    ++g_diagnostics.selectionSizedTransientAllocations;
     QImage output = snowCanvasAllocateZeroedImage(layout.outputRect.size(),
                                                   QImage::Format_ARGB32_Premultiplied);
     output.setColorSpace(content.colorSpace());
@@ -738,11 +756,513 @@ QImage composeRegion(const QImage& content, const ScreenshotResultStyle& style,
     painter.end();
     return applyOutputOpacity(std::move(output), opacity);
 }
+
+// Destination-over naturally fills the uncovered part of an opaque selection.
+// For translucent source pixels it would also fill *inside* the selection. Reduce
+// the background there by geometric coverage, keeping antialiased edges intact.
+// The usual opaque-capture path neither copies the background nor builds a mask.
+QImage backgroundOutsideSelection(QImage background, const QImage& content,
+                                  const QPainterPath& path, const QPoint& contentOffset) {
+    constexpr int side = 512;
+    bool detached = false;
+    for (int top = 0; top < content.height(); top += side) {
+        for (int left = 0; left < content.width(); left += side) {
+            const QRect tile = QRect(left, top, side, side).intersected(content.rect());
+            const QRect outputTile = tile.translated(contentOffset);
+            if (!path.intersects(QRectF(outputTile)))
+                continue;
+            const bool interior = path.contains(QRectF(outputTile));
+            QImage mask;
+            QPoint maskOffset;
+            for (int y = tile.top(); y <= tile.bottom(); ++y) {
+                const auto* source = reinterpret_cast<const QRgb*>(content.constScanLine(y));
+                const int outputY = y + contentOffset.y();
+                auto* row = const_cast<QRgb*>(
+                    reinterpret_cast<const QRgb*>(background.constScanLine(outputY)));
+                for (int x = tile.left(); x <= tile.right(); ++x) {
+                    const int alpha = qAlpha(source[x]);
+                    const int outputX = x + contentOffset.x();
+                    if (alpha == 255 || qAlpha(row[outputX]) == 0)
+                        continue;
+                    int coverage = 255;
+                    if (!interior) {
+                        if (mask.isNull()) {
+                            const auto& cache = g_regionCompositionCache;
+                            if (cache.path == path && cache.size == background.size() &&
+                                !cache.mask.isNull()) {
+                                mask = cache.mask;
+                            } else {
+                                mask = regionMask(outputTile.size(),
+                                                  path.translated(-outputTile.topLeft()));
+                                maskOffset = outputTile.topLeft();
+                            }
+                            if (mask.isNull())
+                                return {};
+                        }
+                        coverage =
+                            mask.constScanLine(outputY - maskOffset.y())[outputX - maskOffset.x()];
+                    }
+                    if (coverage == 0)
+                        continue;
+                    if (!detached) {
+                        if (!snowCanvasDetachImage(background))
+                            return {};
+                        row = reinterpret_cast<QRgb*>(background.scanLine(outputY));
+                        detached = true;
+                    }
+                    const int denominator = 255 - (alpha * coverage + 127) / 255;
+                    const int numerator = 255 - coverage;
+                    const QRgb pixel = row[outputX];
+                    const auto scale = [=](int component) {
+                        return (component * numerator + denominator / 2) / denominator;
+                    };
+                    row[outputX] = qRgba(scale(qRed(pixel)), scale(qGreen(pixel)),
+                                         scale(qBlue(pixel)), scale(qAlpha(pixel)));
+                }
+            }
+        }
+    }
+    return background;
+}
 } // namespace
+
+namespace {
+constexpr std::size_t kLiveRegionCacheByteLimit = 64u * 1024u * 1024u;
+
+// Keep the unrounded blur only where it can contribute shadow pixels. Interior
+// pixels have full coverage and distant exterior pixels have zero blur. This
+// keeps color-independent coverage proportional to the boundary, while retaining
+// the exact floating-point inputs used by the export compositor's tint rounding.
+struct RegionShadowCoverage {
+    struct Span {
+        int x = 0;
+        int y = 0;
+        int count = 0;
+        std::size_t offset = 0;
+    };
+    std::vector<Span> spans;
+    snow::memory::PixelArray<float> alpha;
+    snow::memory::PixelArray<uchar> mask;
+    QRect bounds;
+
+    std::size_t bytes() const {
+        return spans.capacity() * sizeof(Span) + alpha.capacity() * sizeof(float) + mask.capacity();
+    }
+
+    static RegionShadowCoverage fromBlur(const QImage& maskImage,
+                                         const snow::memory::PixelArray<float>& blurred) {
+        RegionShadowCoverage result;
+        const auto rowWidth = static_cast<std::size_t>(maskImage.width());
+        std::size_t samples = 0;
+        std::size_t spanCount = 0;
+        int left = maskImage.width(), top = maskImage.height(), right = -1, bottom = -1;
+        const auto contributes = [](float a, uchar coverage) {
+            // No permitted tint can reveal a sample that is transparent even
+            // at full opacity. This also removes floating running-sum residue.
+            return coverage != 255 &&
+                   qRound(static_cast<qreal>(a) * peakAlphaScale * (255 - coverage) / 255.0) > 0;
+        };
+        for (int y = 0; y < maskImage.height(); ++y) {
+            const auto* row = maskImage.constScanLine(y);
+            bool inside = false;
+            for (int x = 0; x < maskImage.width(); ++x) {
+                const bool present = contributes(
+                    blurred[static_cast<std::size_t>(y) * rowWidth + static_cast<std::size_t>(x)],
+                    row[x]);
+                samples += present ? 1u : 0u;
+                spanCount += present && !inside ? 1u : 0u;
+                if (present) {
+                    left = std::min(left, x);
+                    right = std::max(right, x);
+                    top = std::min(top, y);
+                    bottom = y;
+                }
+                inside = present;
+            }
+        }
+        result.spans.reserve(spanCount);
+        result.alpha.reserve(samples);
+        result.mask.reserve(samples);
+        if (samples > 0)
+            result.bounds = QRect(QPoint(left, top), QPoint(right, bottom));
+        for (int y = 0; y < maskImage.height(); ++y) {
+            const auto* row = maskImage.constScanLine(y);
+            bool inside = false;
+            for (int x = 0; x < maskImage.width(); ++x) {
+                const float a =
+                    blurred[static_cast<std::size_t>(y) * rowWidth + static_cast<std::size_t>(x)];
+                const bool present = contributes(a, row[x]);
+                if (present) {
+                    if (!inside)
+                        result.spans.push_back({x, y, 0, result.alpha.size()});
+                    ++result.spans.back().count;
+                    result.alpha.push_back(a);
+                    result.mask.push_back(row[x]);
+                }
+                inside = present;
+            }
+        }
+        return result;
+    }
+
+    QImage tinted(const QRect& rasterBounds, const QColor& color) const {
+        QImage image =
+            snowCanvasAllocateZeroedImage(rasterBounds.size(), QImage::Format_ARGB32_Premultiplied);
+        if (image.isNull())
+            return image;
+        for (const auto& span : spans) {
+            auto* row = reinterpret_cast<QRgb*>(image.scanLine(span.y - rasterBounds.y())) +
+                        span.x - rasterBounds.x();
+            for (int x = 0; x < span.count; ++x) {
+                const auto index = span.offset + static_cast<std::size_t>(x);
+                row[x] = regionShadowPixel(alpha[index], mask[index], color);
+            }
+        }
+        return image;
+    }
+};
+} // namespace
+
+struct ScreenshotRegionShadowRenderer::Cache {
+    struct Tile {
+        QRect core;
+        QRect halo;
+        QPainterPath path;
+        bool admitted = false;
+        bool hasCoverage = false;
+        QRect rasterBounds;
+        QImage shadow;
+        QColor color;
+        RegionShadowCoverage coverage;
+    };
+    struct Strip {
+        QRect core;
+        QRect halo;
+        QImage image;
+    };
+    std::optional<ScreenshotRegionGeometry> region;
+    int radius = -1;
+    int width = -1;
+    std::vector<Tile> tiles;
+    std::vector<Strip> strips;
+    std::vector<std::size_t> stripVisibleTiles;
+    int stripHeight = 0;
+    int stripHaloRows = 0;
+    QColor stripColor;
+    std::size_t coverageBytes = 0;
+    std::size_t publishedBytes = 0;
+
+    ~Cache() {
+        g_liveRegionCacheBytes -= publishedBytes;
+    }
+
+    std::size_t bytes() const {
+        std::size_t result = coverageBytes;
+        for (const auto& tile : tiles)
+            result += static_cast<std::size_t>(tile.shadow.sizeInBytes());
+        for (const auto& strip : strips)
+            result += static_cast<std::size_t>(strip.image.sizeInBytes());
+        return result;
+    }
+
+    void clearStrips() {
+        strips.clear();
+        stripVisibleTiles.clear();
+        stripHeight = 0;
+        stripHaloRows = 0;
+        stripColor = {};
+    }
+
+    void publishBytes() {
+        g_liveRegionCacheBytes -= publishedBytes;
+        publishedBytes = bytes();
+        g_liveRegionCacheBytes += publishedBytes;
+    }
+
+    void prepare(const ScreenshotRegionGeometry& localRegion, int cornerRadius, int shadowWidth) {
+        if (region == localRegion && radius == cornerRadius && width == shadowWidth)
+            return;
+        tiles.clear();
+        clearStrips();
+        coverageBytes = 0;
+        region = localRegion;
+        radius = cornerRadius;
+        width = shadowWidth;
+        const QSize contentSize = localRegion.boundingRect().size();
+        const QRect output(QPoint(), contentSize + QSize(width * 2, width * 2));
+        const QPainterPath path =
+            screenshotRegionPath(localRegion, radius).translated(width, width);
+        const auto append = [&](const QPainterPath& tilePath, const QRect& core,
+                                const QRect& halo) {
+            if (!tilePath.intersects(QRectF(halo)) || tilePath.contains(QRectF(halo)))
+                return;
+            Tile tile;
+            tile.core = core;
+            tile.halo = halo;
+            tile.path = tilePath;
+            tiles.push_back(std::move(tile));
+        };
+        const auto appendRegion = [&](const QPainterPath& tilePath, const QRect& bounds,
+                                      bool tiled) {
+            if (!tiled) {
+                append(tilePath, bounds, bounds);
+                return;
+            }
+            // Match export's grid and halo exactly: changing their origin can
+            // change the last bit of the finite-support float running sums.
+            const int side = std::max(512, width * 8);
+            for (int y = bounds.top(); y <= bounds.bottom(); y += side) {
+                for (int x = bounds.left(); x <= bounds.right(); x += side) {
+                    const QRect core = QRect(x, y, side, side).intersected(bounds);
+                    const QRect halo = core.adjusted(-width - 2, -width - 2, width + 2, width + 2)
+                                           .intersected(output);
+                    append(tilePath, core, halo);
+                }
+            }
+        };
+        const auto sparse = sparseRegionTiles(path, output, width);
+        if (!sparse.empty()) {
+            for (const auto& tile : sparse)
+                appendRegion(tile.path, tile.bounds,
+                             qint64(tile.bounds.width()) * tile.bounds.height() > 1024 * 1024);
+        } else {
+            appendRegion(path, output, qint64(output.width()) * output.height() > 1024 * 1024);
+        }
+        publishBytes();
+    }
+};
+
+ScreenshotRegionShadowRenderer::ScreenshotRegionShadowRenderer()
+    : m_cache(std::make_unique<Cache>()) {}
+
+ScreenshotRegionShadowRenderer::~ScreenshotRegionShadowRenderer() = default;
+
+void ScreenshotRegionShadowRenderer::reset() {
+    m_cache = std::make_unique<Cache>();
+}
+
+std::size_t ScreenshotRegionShadowRenderer::retainedBytes() const {
+    return m_cache->bytes();
+}
+
+void ScreenshotRegionShadowRenderer::render(
+    QPainter& painter, const ScreenshotRegionGeometry& region, int cornerRadius, int shadowWidth,
+    const QColor& shadowColor, const QTransform& canvasToView, const QRegion& exposedView) {
+    const QRect bounds = region.boundingRect();
+    shadowWidth =
+        std::clamp(shadowWidth, 0, snow_shot::presentation::kScreenshotSelectionShadowWidthMax);
+    if (bounds.isEmpty() || shadowWidth == 0 || exposedView.isEmpty())
+        return;
+    const QColor color = shadowColor.isValid() ? shadowColor : QColor(0x33, 0x33, 0x33);
+    const int radius =
+        region.custom() ? 0
+                        : std::clamp(cornerRadius, 0,
+                                     snow_shot::presentation::kScreenshotSelectionCornerRadiusMax);
+    auto& cache = *m_cache;
+    cache.prepare(region.translated(-bounds.topLeft()), radius, shadowWidth);
+    const QRectF outputBounds(
+        bounds.adjusted(-shadowWidth, -shadowWidth, shadowWidth, shadowWidth));
+    const QRectF fullTarget = canvasToView.mapRect(outputBounds);
+    QTransform imageToView;
+    imageToView.translate(fullTarget.left(), fullTarget.top());
+    imageToView.scale(fullTarget.width() / outputBounds.width(),
+                      fullTarget.height() / outputBounds.height());
+    painter.save();
+    painter.setWorldTransform(imageToView, true);
+    const auto imageForTile = [&](Cache::Tile& tile) {
+        QImage shadow = tile.shadow;
+        if (!tile.admitted || tile.color != color) {
+            if (tile.hasCoverage) {
+                shadow = tile.coverage.tinted(tile.rasterBounds, color);
+            } else {
+                const auto mask =
+                    regionMask(tile.halo.size(), tile.path.translated(-tile.halo.topLeft()));
+                if (mask.isNull())
+                    return QImage{};
+                const auto blurred = regionBlur(mask, shadowWidth);
+                auto coverage = RegionShadowCoverage::fromBlur(mask, blurred);
+                tile.rasterBounds =
+                    coverage.bounds.isEmpty()
+                        ? QRect()
+                        : coverage.bounds.adjusted(-1, -1, 1, 1).intersected(mask.rect());
+                if (cache.tiles.size() == 1 && tile.core == tile.halo &&
+                    tile.halo.topLeft().isNull())
+                    tile.rasterBounds = mask.rect();
+                shadow = coverage.tinted(tile.rasterBounds, color);
+                if (shadow.isNull() && !tile.rasterBounds.isEmpty())
+                    return shadow;
+                g_diagnostics.regionScratchPeakBytes =
+                    std::max(g_diagnostics.regionScratchPeakBytes,
+                             static_cast<std::size_t>(mask.sizeInBytes() + shadow.sizeInBytes()) +
+                                 blurred.capacity() * sizeof(float) + coverage.bytes());
+                // Admit complete color-independent assets by their actual
+                // boundary size. No entry is evicted while scanning a frame,
+                // so a larger working set cannot cause scan-order LRU churn.
+                if (coverage.bytes() + static_cast<std::size_t>(shadow.sizeInBytes()) <=
+                    kLiveRegionCacheByteLimit - cache.bytes()) {
+                    cache.coverageBytes += coverage.bytes();
+                    tile.coverage = std::move(coverage);
+                    tile.hasCoverage = true;
+                    tile.admitted = true;
+                }
+            }
+            if (shadow.isNull() && !tile.rasterBounds.isEmpty())
+                return shadow;
+            if (tile.admitted) {
+                tile.shadow = shadow;
+                tile.color = color;
+            }
+        }
+        return shadow;
+    };
+    const QTransform deviceToImage = painter.deviceTransform().inverted();
+    const qreal edgeGuardX =
+        std::max<qreal>(2, std::abs(deviceToImage.m11()) + std::abs(deviceToImage.m21()) + 1);
+    const qreal edgeGuardY =
+        std::max<qreal>(2, std::abs(deviceToImage.m12()) + std::abs(deviceToImage.m22()) + 1);
+    const qreal fixedStep = deviceToImage.m11() * 65536.0;
+    const bool exactStep = std::abs(fixedStep - std::round(fixedStep)) < 1.0e-8;
+    const bool singleFullTile = cache.tiles.size() == 1 &&
+                                cache.tiles.front().core == cache.tiles.front().halo &&
+                                cache.tiles.front().halo.topLeft().isNull();
+    const bool downsamples =
+        std::abs(deviceToImage.m11()) > 1.0 || std::abs(deviceToImage.m22()) > 1.0;
+    if ((!exactStep || downsamples) && !singleFullTile) {
+        // Qt's nearest texture fetch advances a truncated 16.16 horizontal
+        // step from each span's start. Independent tile clips restart that
+        // accumulation, which can select a neighboring pixel after a long
+        // transparent gap. Horizontal strips keep the original full-image span
+        // origins, while bounding temporary storage independently of its area.
+        constexpr int kStripByteLimit = 4 * 1024 * 1024;
+        const int outputWidth = qRound(outputBounds.width());
+        const int outputHeight = qRound(outputBounds.height());
+        const int haloRows = std::min(outputHeight, qCeil(edgeGuardY));
+        const int stripHeight =
+            std::max(1, std::min(512, kStripByteLimit / (outputWidth * 4) - haloRows * 2));
+        std::vector<std::size_t> visibleTiles;
+        for (std::size_t index = 0; index < cache.tiles.size(); ++index) {
+            if (exposedView.intersects(
+                    imageToView.mapRect(QRectF(cache.tiles[index].core)).toAlignedRect()))
+                visibleTiles.push_back(index);
+        }
+        if (cache.stripHeight != stripHeight || cache.stripHaloRows != haloRows ||
+            cache.stripColor != color || cache.stripVisibleTiles != visibleTiles) {
+            // A cached strip contains complete cores for this visible tile set.
+            // New exposure must not reuse a strip assembled without those cores.
+            cache.clearStrips();
+            cache.stripHeight = stripHeight;
+            cache.stripHaloRows = haloRows;
+            cache.stripColor = color;
+            cache.stripVisibleTiles = visibleTiles;
+            for (int y = 0; y < outputHeight; y += stripHeight) {
+                const QRect core(0, y, outputWidth, std::min(stripHeight, outputHeight - y));
+                const QRect halo = core.adjusted(0, -haloRows, 0, haloRows)
+                                       .intersected(QRect(0, 0, outputWidth, outputHeight));
+                cache.strips.push_back({core, halo, {}});
+            }
+        }
+        // Primary boundary assets get first admission to the shared budget.
+        // Otherwise the first large strips can crowd out later visible tiles,
+        // causing mask rasterization and blur on every subsequent repaint.
+        for (const auto index : visibleTiles)
+            imageForTile(cache.tiles[index]);
+        for (auto& cachedStrip : cache.strips) {
+            const auto& core = cachedStrip.core;
+            const auto& halo = cachedStrip.halo;
+            if (!exposedView.intersects(imageToView.mapRect(QRectF(core)).toAlignedRect()))
+                continue;
+            QImage strip = cachedStrip.image;
+            if (strip.isNull()) {
+                const bool hasBoundary =
+                    std::any_of(visibleTiles.begin(), visibleTiles.end(), [&](const auto index) {
+                        return cache.tiles[index].core.intersects(halo);
+                    });
+                if (!hasBoundary)
+                    continue;
+                strip =
+                    snowCanvasAllocateZeroedImage(halo.size(), QImage::Format_ARGB32_Premultiplied);
+                if (strip.isNull())
+                    continue;
+                ++g_diagnostics.regionStripBuilds;
+                g_diagnostics.regionScratchPeakBytes =
+                    std::max(g_diagnostics.regionScratchPeakBytes,
+                             static_cast<std::size_t>(strip.sizeInBytes()));
+                bool complete = true;
+                {
+                    QPainter stripPainter(&strip);
+                    for (const auto index : visibleTiles) {
+                        auto& tile = cache.tiles[index];
+                        if (!tile.core.intersects(halo))
+                            continue;
+                        const QImage shadow = imageForTile(tile);
+                        if (shadow.isNull() && (!tile.admitted || !tile.rasterBounds.isEmpty())) {
+                            complete = false;
+                            continue;
+                        }
+                        stripPainter.save();
+                        stripPainter.setClipRect(tile.core.translated(-halo.topLeft()));
+                        stripPainter.drawImage(tile.halo.topLeft() + tile.rasterBounds.topLeft() -
+                                                   halo.topLeft(),
+                                               shadow);
+                        stripPainter.restore();
+                    }
+                }
+                if (complete && static_cast<std::size_t>(strip.sizeInBytes()) <=
+                                    kLiveRegionCacheByteLimit - cache.bytes())
+                    cachedStrip.image = strip;
+            }
+            QRectF clip(core);
+            if (core.top() == 0)
+                clip.setTop(-edgeGuardY);
+            if (core.bottom() == outputHeight - 1)
+                clip.setBottom(outputHeight + edgeGuardY);
+            clip.setLeft(-edgeGuardX);
+            clip.setRight(outputWidth + edgeGuardX);
+            painter.save();
+            painter.setClipRect(clip, Qt::IntersectClip);
+            painter.drawImage(halo.topLeft(), strip);
+            painter.restore();
+        }
+        painter.restore();
+        cache.publishBytes();
+        return;
+    }
+    cache.clearStrips();
+    for (auto& tile : cache.tiles) {
+        const QRectF target = imageToView.mapRect(QRectF(tile.core));
+        if (!exposedView.intersects(target.toAlignedRect()))
+            continue;
+        const QImage shadow = imageForTile(tile);
+        // Share the full output's transform and clip cores instead of drawing
+        // separate target rectangles. Image-edge antialiasing and independent
+        // source-scale rounding would otherwise expose seams at fractional DPR.
+        painter.save();
+        if (tile.core != tile.halo) {
+            QRectF clip(tile.core);
+            // The original full image supplies antialiased perimeter coverage.
+            // An integer QRegion clip at that same fractional edge would cut it
+            // off, so clip only internal core edges.
+            if (tile.core.left() == 0)
+                clip.setLeft(-edgeGuardX);
+            if (tile.core.top() == 0)
+                clip.setTop(-edgeGuardY);
+            if (tile.core.right() == outputBounds.width() - 1)
+                clip.setRight(outputBounds.width() + edgeGuardX);
+            if (tile.core.bottom() == outputBounds.height() - 1)
+                clip.setBottom(outputBounds.height() + edgeGuardY);
+            painter.setClipRect(clip, Qt::IntersectClip);
+        }
+        painter.drawImage(tile.halo.topLeft() + tile.rasterBounds.topLeft(), shadow);
+        painter.restore();
+    }
+    painter.restore();
+    cache.publishBytes();
+}
 
 ScreenshotResultStyle
 ScreenshotResultCompositor::normalizedStyle(const ScreenshotResultStyle& style) {
     ScreenshotResultStyle normalized = style;
+    normalized.backgroundOpacityPercent = std::clamp(normalized.backgroundOpacityPercent, 0, 100);
     normalized.cornerRadius = std::clamp(
         normalized.cornerRadius, 0, snow_shot::presentation::kScreenshotSelectionCornerRadiusMax);
     if (normalized.region && normalized.region->custom())
@@ -788,14 +1308,60 @@ QImage ScreenshotResultCompositor::normalizeImage(const QImage& image) {
     return normalized;
 }
 
+QImage ScreenshotResultCompositor::maskBackgroundForSelection(QImage background,
+                                                              const QImage& content,
+                                                              const QPainterPath& selectionPath,
+                                                              const QPoint& contentOffset) {
+    if (background.format() != QImage::Format_ARGB32_Premultiplied ||
+        content.format() != QImage::Format_ARGB32_Premultiplied ||
+        !background.rect().contains(QRect(contentOffset, content.size())))
+        return {};
+    return backgroundOutsideSelection(std::move(background), content, selectionPath, contentOffset);
+}
+
 QImage ScreenshotResultCompositor::compose(const QImage& content,
                                            const ScreenshotResultStyle& style,
-                                           qreal devicePixelRatio, qreal outputOpacity) {
+                                           qreal devicePixelRatio, qreal outputOpacity,
+                                           const QImage& background) {
     QImage normalizedContent = normalizeImage(content);
     if (normalizedContent.isNull()) {
         return {};
     }
     const ScreenshotResultStyle normalized = normalizedStyle(style);
+    if (normalized.backgroundOpacityPercent > 0 && !background.isNull()) {
+        auto selectedStyle = normalized;
+        selectedStyle.backgroundOpacityPercent = 0;
+        QImage result = compose(normalizedContent, selectedStyle, devicePixelRatio);
+        if (result.isNull() || result.size() != background.size())
+            return {};
+        const auto layout =
+            layoutForContent(normalizedContent.size(), normalized, devicePixelRatio);
+        QPainterPath path;
+        if (normalized.region) {
+            QTransform transform;
+            transform.translate(layout.contentRect.x(), layout.contentRect.y());
+            transform.scale(normalized.regionScale, normalized.regionScale);
+            path = transform.map(
+                normalized.region->custom()
+                    ? normalized.region->path(normalized.regionScale)
+                    : screenshotRegionPath(*normalized.region, normalized.cornerRadius *
+                                                                   layout.devicePixelRatio /
+                                                                   normalized.regionScale));
+        } else {
+            path =
+                roundedHole(layout.contentRect, normalized.cornerRadius * layout.devicePixelRatio);
+        }
+        const auto retained = maskBackgroundForSelection(
+            normalizeImage(background), normalizedContent, path, layout.contentRect.topLeft());
+        if (retained.isNull())
+            return {};
+        QPainter painter(&result);
+        painter.setCompositionMode(QPainter::CompositionMode_DestinationOver);
+        painter.setOpacity(normalized.backgroundOpacityPercent / 100.0);
+        painter.drawImage(QPoint(), retained);
+        painter.end();
+        return applyOutputOpacity(std::move(result), outputOpacity);
+    }
     if (normalized.region) {
         return composeRegion(normalizedContent, normalized, devicePixelRatio, outputOpacity);
     }
@@ -808,6 +1374,7 @@ QImage ScreenshotResultCompositor::compose(const QImage& content,
         return {};
     }
 
+    ++g_diagnostics.selectionSizedTransientAllocations;
     QImage output =
         snowCanvasAllocateImage(layout.outputRect.size(), QImage::Format_ARGB32_Premultiplied);
     output.setColorSpace(normalizedContent.colorSpace());
@@ -881,7 +1448,8 @@ ScreenshotSelectionShadowRenderer::diagnosticsForCurrentThread() {
     result.retainedEntries = g_cache.entries.size();
     result.regionCacheRetainedBytes =
         static_cast<std::size_t>(g_regionCompositionCache.mask.sizeInBytes() +
-                                 g_regionCompositionCache.shadow.sizeInBytes());
+                                 g_regionCompositionCache.shadow.sizeInBytes()) +
+        g_liveRegionCacheBytes;
     result.regionPathCacheElements = static_cast<std::size_t>(
         g_regionPathCache.path.elementCount() + g_regionCompositionCache.path.elementCount());
     return result;

@@ -1,3 +1,4 @@
+#include "snow_shot/presentation/screenshotselectionbackground.h"
 #include "snow_shot/presentation/screenshotdisplaysession.h"
 #include "snow_shot/presentation/screenshotdefaultstyles.h"
 #include "snow_shot/presentation/screenshotexportservice.h"
@@ -12,6 +13,7 @@
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
 
 #include <QApplication>
+#include <QPainter>
 #include <QBuffer>
 #include <QEventLoop>
 #include <QImage>
@@ -609,6 +611,76 @@ void pointSelectionRetainsBackingPixelsAndScalesEffects() {
 }
 } // namespace
 
+void compoundExportsPreserveAnnotationsInGaps() {
+    for (bool points : {false, true}) {
+        ExportFixture fixture(points);
+        require(
+            !fixture.runtime()
+                 .applyAnnotationTransaction(
+                     R"({"version":1,"operations":[{"type":"rectangle","bounds":[0,12,40,6],"style":{"fill":[230,30,70,128],"stroke":[0,0,0,0]}}]})")
+                 .isEmpty(),
+            "gap annotation fixture");
+        const QRect selection(5, 5, 30, 20);
+        const int scale = points ? 2 : 1;
+        const auto ink = fixture.runtime().renderToImage(selection, selection.size() * scale, {});
+        for (bool hole : {false, true}) {
+            ScreenshotResultStyle style;
+            style.region = hole ? QRegion(QRect(0, 0, 30, 20)).subtracted(QRect(8, 4, 14, 12))
+                                : QRegion(QRect(0, 0, 8, 20)) + QRect(22, 0, 8, 20);
+            const auto result = waitForResult(
+                [&](QObject* receiver, auto callback) {
+                    return fixture.service().requestSelectionResult(selection, style, receiver,
+                                                                    std::move(callback));
+                },
+                [](QImage image) { return image; });
+            const QPoint gap(15 * scale, 10 * scale);
+            require(ink.pixelColor(gap).alpha() > 0 && ink.pixelColor(gap).alpha() < 255,
+                    "fixture must draw translucent ink across the gap");
+            require(result.pixelColor(gap) == ink.pixelColor(gap),
+                    "compound export must retain translucent annotations within overall bounds");
+            require(result.pixelColor(15 * scale, 5 * scale).alpha() == 0,
+                    "unannotated gaps must remain transparent");
+            require(result.size() == selection.size() * scale,
+                    "crossing annotations must remain clipped to overall selection bounds");
+            const auto clipboard = waitForResult(
+                [&](QObject* receiver, auto callback) {
+                    return fixture.service().requestSelectionClipboard(selection, style, receiver,
+                                                                       std::move(callback));
+                },
+                [](ScreenshotSelectionClipboardResult value) { return value.image; });
+            const auto pin = fixture.service().preparePinnedSelection(selection, style);
+            require(pin && hasSamePixels(clipboard, result) &&
+                        hasSamePixels(waitForPinnedResult(fixture.service(), *pin), result),
+                    "copy and pin must preserve the same gap annotations");
+            for (int opacity : {0, 50, 100}) {
+                style.backgroundOpacityPercent = opacity;
+                style.shadowWidth = 2;
+                style.cornerRadius = 3;
+                require(fixture.runtime().undo(), "hide annotations for capture reference");
+                auto expected = waitForResult(
+                    [&](QObject* receiver, auto callback) {
+                        return fixture.service().requestSelectionResult(selection, style, receiver,
+                                                                        std::move(callback));
+                    },
+                    [](QImage image) { return image; });
+                require(fixture.runtime().redo(), "restore gap annotations");
+                QPainter painter(&expected);
+                painter.drawImage(QPoint(2 * scale, 2 * scale), ink);
+                painter.end();
+                const auto actual = waitForResult(
+                    [&](QObject* receiver, auto callback) {
+                        return fixture.service().requestSelectionResult(selection, style, receiver,
+                                                                        std::move(callback));
+                    },
+                    [](QImage image) { return image; });
+                require(
+                    hasSamePixels(actual, expected),
+                    "annotations must blend once over styled captures and stop at their bounds");
+            }
+        }
+    }
+}
+
 void compoundExportsSnapshotTheirGeometry() {
     for (bool points : {false, true}) {
         ExportFixture fixture(points);
@@ -804,8 +876,224 @@ void clipboardPlacementMatchesDirectPin() {
     }
 }
 
+QImage compactedReference(SnowCanvasRuntime& runtime, const QRect& selection, const QSize& pixels,
+                          const QList<CanvasExportSource>& sources,
+                          const ScreenshotResultStyle& style, qreal scale,
+                          ScreenshotLayoutCompaction options) {
+    const auto full = runtime.renderToImage(selection, pixels, sources);
+    const auto plan = makeScreenshotLayoutCompactionPlan(
+        *style.region, pixels, scale, options,
+        screenshotSelectionRenderedShadowPixels(style.shadowWidth, scale));
+    require(plan.isValid(), "reference plan");
+    QImage content(plan.outputSize, QImage::Format_ARGB32_Premultiplied);
+    content.fill(Qt::transparent);
+    QPainter painter(&content);
+    if (!plan.changed)
+        painter.drawImage(QPoint(), full);
+    else
+        for (const auto& tile : plan.tiles)
+            painter.drawImage(tile.destination, full, tile.source);
+    painter.end();
+    auto outputStyle = style;
+    outputStyle.regionScale *= scale;
+    outputStyle.cornerRadius = qRound(style.cornerRadius * scale);
+    outputStyle.shadowWidth = screenshotSelectionRenderedShadowPixels(style.shadowWidth, scale);
+    outputStyle = compactedScreenshotResultStyle(outputStyle, plan);
+    const auto background =
+        renderScreenshotSelectionBackground(sources, selection, pixels, outputStyle, &plan);
+    return ScreenshotResultCompositor::compose(content, outputStyle, 1.0, 1.0, background);
+}
+
+void compactionOutputsAgree() {
+    for (bool points : {false, true}) {
+        ExportFixture fixture(points);
+        const QRect selection(5, 5, 30, 20);
+        const qreal backing = points ? 2.0 : 1.0;
+        const QList<CanvasExportSource> sources{
+            {fixture.displaySnapshot(), points ? QRectF(0, 0, 40, 30) : QRectF(0, 0, 80, 60)}};
+        QRegion geometry(QRect(0, 0, 8, 20));
+        geometry += QRect(20, 0, 10, 20);
+        ScreenshotResultStyle style{3, 2, QColor(0, 0, 0, 160), ScreenshotRegionGeometry(geometry)};
+        for (int percent : {0, 50, 100}) {
+            style.backgroundOpacityPercent = percent;
+            for (int spacing : {0, 4, 20}) {
+                const ScreenshotLayoutCompaction options{true, spacing};
+                const auto expected = compactedReference(
+                    fixture.runtime(), selection,
+                    screenshotSelectionRenderedPixelSize(selection.size(), backing), sources, style,
+                    backing, options);
+                const int shadow =
+                    screenshotSelectionRenderedShadowPixels(style.shadowWidth, backing);
+                require(expected.size() == QSize(qRound((18 + spacing) * backing) + 4 * shadow,
+                                                 qRound(20 * backing) + 2 * shadow),
+                        "export spacing must separate the full rendered shadow footprints");
+                const auto saved = waitForResult(
+                    [&](QObject* receiver, auto callback) {
+                        return fixture.service().requestSelectionResult(
+                            selection, style, receiver, std::move(callback), options);
+                    },
+                    [](QImage image) { return image; });
+                require(hasSamePixels(saved, expected),
+                        "compacted saved output must match reference");
+                const auto request =
+                    fixture.service().preparePinnedSelection(selection, style, options);
+                require(request && request->layoutPlan && request->layoutPlan->changed &&
+                            request->initialWindowSize == QSize(26 + spacing, 24) &&
+                            request->contentCanvasRect.topLeft() == selection.topLeft(),
+                        "pin metadata must use compacted bounds at the original selection origin");
+                const auto pinned = waitForPinnedResult(fixture.service(), *request);
+                require(hasSamePixels(pinned, saved),
+                        "pin and save must use identical compacted rasters");
+                const auto copied = waitForResult(
+                    [&](QObject* receiver, auto callback) {
+                        return fixture.service().requestSelectionClipboard(
+                            selection, style, receiver, std::move(callback), options);
+                    },
+                    [&](ScreenshotSelectionClipboardResult result) {
+                        require(result.isValid(), "compacted clipboard payload");
+                        const auto placement =
+                            decodeScreenshotClipboardPlacement(result.payload.placementBytes());
+                        const auto appearance =
+                            decodeScreenshotClipboardAppearance(result.payload.appearanceBytes());
+                        require(placement && appearance &&
+                                    placement->windowRect == request->geometry.nativeGeometry &&
+                                    appearance->borderAppearance ==
+                                        screenshotSelectionBorderAppearance(selection.size(), style,
+                                                                            options),
+                                "clipboard and pin metadata must agree");
+                        return result.image;
+                    });
+                require(hasSamePixels(copied, saved),
+                        "clipboard and save must use identical compacted rasters");
+                const qreal scale = backing * 1.25;
+                const auto scaled = waitForResult(
+                    [&](QObject* receiver, auto callback) {
+                        return fixture.service().requestSelectionResultAtScale(
+                            selection, style, 1.25, receiver, std::move(callback), options);
+                    },
+                    [](QImage image) { return image; });
+                const auto scaledExpected = compactedReference(
+                    fixture.runtime(), selection,
+                    screenshotSelectionRenderedPixelSize(selection.size(), scale), sources, style,
+                    scale, options);
+                require(hasSamePixels(scaled, scaledExpected),
+                        "scaled compaction must preserve pixel rounding");
+            }
+        }
+    }
+}
+
+void compactionAcrossMixedDpiSources() {
+    ScreenshotDisplaySession displays;
+    QList<CanvasExportSource> sources;
+    for (int i = 0; i < 2; ++i) {
+        CapturedDisplayModel display;
+        display.active = true;
+        display.canvasUsesPoints = true;
+        display.backingScale = i + 1;
+        display.physicalRect = QRect(40 * i, 0, 40, 30);
+        display.capturedLogicalRect = display.physicalRect;
+        display.canvasRect = display.physicalRect;
+        display.imageSourceCanvasRect = display.physicalRect;
+        display.image = patternedImage(QSize(40, 30) * (i + 1), 7 + i);
+        display.screen = QGuiApplication::primaryScreen();
+        sources.append({display.image, display.imageSourceCanvasRect});
+        displays.appendDisplay(std::move(display));
+    }
+    ScreenshotGeometryMapper geometry;
+    geometry.rebuild(displays);
+    SnowCanvasRuntime runtime;
+    ScreenshotExportService service({displays, runtime, geometry});
+    const QRect selection(10, 5, 60, 20);
+    const ScreenshotResultStyle style{
+        2, 2, Qt::black,
+        ScreenshotRegionGeometry(QRegion(0, 0, 10, 20).united(QRegion(40, 0, 20, 20)))};
+    const auto spec = screenshotSelectionRenderSpec(displays, selection);
+    const auto expected = compactedReference(runtime, selection, spec.pixelSize, sources, style,
+                                             spec.scale, {true, 3});
+    const auto actual = waitForResult(
+        [&](QObject* receiver, auto callback) {
+            return service.requestSelectionResult(selection, style, receiver, std::move(callback),
+                                                  {true, 3});
+        },
+        [](QImage image) { return image; });
+    require(hasSamePixels(actual, expected),
+            "mixed-DPI layers must retain their original sampling scale");
+}
+
+void compactionPreservesSamplingEffects() {
+    for (const auto type : {SnowCanvasFilterType::Mosaic, SnowCanvasFilterType::GaussianBlur,
+                            SnowCanvasFilterType::Emboss, SnowCanvasFilterType::Brightness}) {
+        ExportFixture fixture;
+        SnowCanvasWidget canvas(fixture.runtime());
+        canvas.resize(80, 60);
+        canvas.show();
+        QCoreApplication::processEvents();
+        require(canvas.setViewportCamera(40, 30, 1), "compaction camera");
+        require(canvas.setCanvasTool(SnowCanvasTool::RectangleFilter), "compaction filter tool");
+        SnowCanvasFilterStyle filter;
+        filter.type = type;
+        filter.strength = 0.7;
+        require(canvas.setCanvasFilterStyle(filter, SnowCanvasFilterStylePropertyType |
+                                                        SnowCanvasFilterStylePropertyStrength),
+                "compaction filter style");
+        QMouseEvent press(QEvent::MouseButtonPress, QPointF(5, 5), canvas.mapToGlobal(QPoint(5, 5)),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent move(QEvent::MouseMove, QPointF(75, 55), canvas.mapToGlobal(QPoint(75, 55)),
+                         Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(75, 55),
+                            canvas.mapToGlobal(QPoint(75, 55)), Qt::LeftButton, Qt::NoButton,
+                            Qt::NoModifier);
+        QCoreApplication::sendEvent(&canvas, &press);
+        QCoreApplication::sendEvent(&canvas, &move);
+        QCoreApplication::sendEvent(&canvas, &release);
+        require(canvas.canvasHistoryState().canUndo, "compaction filter must commit");
+        const QRect selection(10, 5, 60, 45);
+        QRegion region(QRect(0, 0, 20, 45));
+        region += QRect(40, 0, 20, 45);
+        const ScreenshotResultStyle style{0, 0, Qt::black, ScreenshotRegionGeometry(region)};
+        const QList<CanvasExportSource> sources{{fixture.displaySnapshot(), QRectF(0, 0, 80, 60)}};
+        // Regions clip the capture before document rendering. Compare tiled
+        // filtering against a full scene using that same transparent backdrop,
+        // preserving the original source frame and filter phase before compaction.
+        const auto backdrop =
+            ScreenshotResultCompositor::compose(fixture.displaySnapshot().copy(selection), style);
+        const auto full =
+            fixture.runtime().renderToImage(selection, selection.size(), sources, backdrop);
+        const auto plan =
+            makeScreenshotLayoutCompactionPlan(*style.region, selection.size(), 1, {true, 3});
+        QImage expected(plan.outputSize, QImage::Format_ARGB32_Premultiplied);
+        expected.fill(Qt::transparent);
+        QPainter painter(&expected);
+        for (const auto& tile : plan.tiles)
+            painter.drawImage(tile.destination, full, tile.source);
+        painter.end();
+        const auto actual = waitForResult(
+            [&](QObject* receiver, auto callback) {
+                return fixture.service().requestSelectionResult(selection, style, receiver,
+                                                                std::move(callback), {true, 3});
+            },
+            [](QImage image) { return image; });
+        if (!hasSamePixels(actual, expected)) {
+            std::cerr << "Filter mismatch: " << int(type) << '\n';
+        }
+        require(hasSamePixels(actual, expected),
+                "compaction must retain the original filter sampling frame");
+    }
+}
+
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    if (app.arguments().contains(QStringLiteral("--gap-annotations-only"))) {
+        compoundExportsPreserveAnnotationsInGaps();
+        return EXIT_SUCCESS;
+    }
+    if (app.arguments().contains(QStringLiteral("--compaction-only"))) {
+        compactionOutputsAgree();
+        compactionAcrossMixedDpiSources();
+        compactionPreservesSamplingEffects();
+        return EXIT_SUCCESS;
+    }
     if (app.arguments().contains(QStringLiteral("--fractional-dpi"))) {
         fractionalDpiExportsPreserveCapturePixels();
         return EXIT_SUCCESS;
@@ -817,6 +1105,7 @@ int main(int argc, char** argv) {
     exportWorkerReleasesSharedDerivedContours();
     exportWorkerReleasesDocumentSnapshotsBeforeCompletion();
     compoundExportsSnapshotTheirGeometry();
+    compoundExportsPreserveAnnotationsInGaps();
     pointSelectionRetainsBackingPixelsAndScalesEffects();
     styledClipboardResultRetainsPngTransparency();
     selectionClipboardPreservesEffects();

@@ -12,11 +12,12 @@ namespace snow_shot::presentation {
 inline SnowCanvasStyleDefaults screenshotCanvasStyleDefaults() {
     const QColor red(0xf5, 0x22, 0x2d, 255);
     const QColor redAccent(0xf4, 0x21, 0x2c, 255);
+    const QColor fill(0xff, 0xcc, 0xc7, 255);
     const QColor transparent(0xff, 0xff, 0xff, 0);
 
     SnowCanvasStyleDefaults defaults;
-    defaults.rectangle.fill = transparent;
-    defaults.rectangle.fillStyle = SnowCanvasFillStyle::Solid;
+    defaults.rectangle.fill = fill;
+    defaults.rectangle.fillStyle = SnowCanvasFillStyle::Border;
     defaults.rectangle.stroke = red;
     defaults.rectangle.strokeWidth = 2.0;
     defaults.rectangle.strokeStyle = SnowCanvasStrokeStyle::Solid;
@@ -36,8 +37,8 @@ inline SnowCanvasStyleDefaults screenshotCanvasStyleDefaults() {
     defaults.magnifier.stroke = red;
     defaults.magnifier.strokeWidth = 2.0;
 
-    defaults.line.fill = transparent;
-    defaults.line.fillStyle = SnowCanvasFillStyle::Solid;
+    defaults.line.fill = fill;
+    defaults.line.fillStyle = SnowCanvasFillStyle::Border;
     defaults.line.stroke = red;
     defaults.line.strokeWidth = 2.0;
     defaults.line.strokeStyle = SnowCanvasStrokeStyle::Solid;
@@ -77,8 +78,8 @@ inline SnowCanvasStyleDefaults screenshotCanvasStyleDefaults() {
     defaults.text.color = red;
     defaults.text.fontSize = 30.0;
     defaults.text.fontFamily.clear();
-    defaults.text.fill = transparent;
-    defaults.text.fillStyle = SnowCanvasFillStyle::Solid;
+    defaults.text.fill = fill;
+    defaults.text.fillStyle = SnowCanvasFillStyle::Border;
     defaults.text.stroke = QColor(0xff, 0xcc, 0xc7, 255);
     defaults.text.strokeWidth = 0.0;
     defaults.text.cornerRadii = {6.0, 6.0, 6.0, 6.0};
@@ -89,8 +90,8 @@ inline SnowCanvasStyleDefaults screenshotCanvasStyleDefaults() {
     defaults.serialNumber.number = 1;
     defaults.serialNumber.type = SnowCanvasSerialNumberType::OutlinedCircle;
     defaults.serialNumber.color = red;
-    defaults.serialNumber.fill = transparent;
-    defaults.serialNumber.fillStyle = SnowCanvasFillStyle::Solid;
+    defaults.serialNumber.fill = fill;
+    defaults.serialNumber.fillStyle = SnowCanvasFillStyle::Border;
     defaults.serialNumber.fontSize = 24.0;
     defaults.serialNumber.fontFamily.clear();
     defaults.serialNumber.strokeWidth = 2.0;

@@ -1,4 +1,9 @@
+#include <QRhiWidget>
 #include "snow_shot/presentation/screenshotscrollingthumbnailwidget.h"
+#ifdef Q_OS_WIN
+#include "../src/platform/windows/captureexclusioncomposition.h"
+#include "snow_shot/platform/windowcaptureexclusion.h"
+#endif
 
 #include <QApplication>
 #include <QEvent>
@@ -388,10 +393,120 @@ void tilePaintingPreservesOffsetsAfterEdgePatches(ScreenshotScrollingRecognition
                 initialDimmed.blue() < appendedDimmed.blue(),
             "paint index must keep source order across appended tiles at the viewport end");
 }
+
+#ifdef Q_OS_WIN
+void thumbnailCaptureCompositionRegistration() {
+    namespace composition = snow_shot::platform::windows::detail;
+    QWidget parent;
+    ScreenshotScrollingThumbnailWidget thumbnail(parent);
+    require(thumbnail.property(composition::captureExclusionCompositionFallbackProperty).toBool(),
+            "scrolling thumbnail must opt into the older Windows capture exclusion fallback");
+    thumbnail.setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
+                             Qt::WindowDoesNotAcceptFocus);
+    thumbnail.setAttribute(Qt::WA_ShowWithoutActivating);
+    thumbnail.setAttribute(Qt::WA_TranslucentBackground);
+    for (const auto mode : {ScreenshotScrollingRecognitionMode::Vertical,
+                            ScreenshotScrollingRecognitionMode::Horizontal}) {
+        thumbnail.setRecognitionMode(mode);
+        thumbnail.reset();
+        thumbnail.releaseNativeSurface();
+        require(thumbnail.internalWinId() == 0 && !thumbnail.isVisible() &&
+                    !composition::usesCaptureExclusionComposition(&thumbnail),
+                "thumbnail registration and reset must not create a native or GPU surface");
+        require(
+            thumbnail.property(composition::captureExclusionCompositionFallbackProperty).toBool(),
+            "thumbnail fallback eligibility must survive reset and native surface release");
+    }
+}
+
+void thumbnailNativeCaptureComposition(ScreenshotScrollingRecognitionMode mode, bool visible) {
+    namespace composition = snow_shot::platform::windows::detail;
+    QWidget parent;
+    ScreenshotScrollingThumbnailWidget thumbnail(parent);
+    thumbnail.setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
+                             Qt::WindowDoesNotAcceptFocus);
+    thumbnail.setAttribute(Qt::WA_ShowWithoutActivating);
+    thumbnail.setAttribute(Qt::WA_TranslucentBackground);
+    thumbnail.setRecognitionMode(mode);
+    QImage preview(mode == ScreenshotScrollingRecognitionMode::Horizontal ? QSize(256, 128)
+                                                                          : QSize(128, 256),
+                   QImage::Format_RGBA8888);
+    preview.fill(QColor(80, 100, 120));
+    thumbnail.setStitchedImage(preview, preview.size(), ScreenshotScrollingStitchChange::Initial,
+                               0);
+    // The overlay anchors the thumbnail before exclusion; otherwise Qt chooses
+    // the initial native position when the first HWND is created.
+    thumbnail.move(80, 80);
+    if (visible)
+        thumbnail.show();
+    QApplication::processEvents();
+    const QRect geometry = thumbnail.geometry();
+    require(snow_shot::platform::setWindowExcludedFromCapture(&thumbnail, true),
+            "thumbnail must support capture exclusion before its first frame is shown");
+    // Also exercise the rendering upgrade on hosts whose native affinity already works.
+    if (!composition::usesCaptureExclusionComposition(&thumbnail)) {
+        require(composition::applyCaptureExclusionCompositionFallback(&thumbnail),
+                "registered thumbnail must accept the composition upgrade");
+    }
+    require(snow_shot::platform::setWindowExcludedFromCapture(&thumbnail, true),
+            "composited thumbnail must accept capture exclusion");
+    const auto verify = [&] {
+        DWORD affinity = WDA_NONE;
+        require(GetWindowDisplayAffinity(reinterpret_cast<HWND>(thumbnail.winId()), &affinity) &&
+                    affinity == WDA_EXCLUDEFROMCAPTURE,
+                "thumbnail native surface must remain excluded from capture");
+        const auto children = thumbnail.findChildren<QRhiWidget*>(
+            QStringLiteral("snowCaptureExclusionComposition"), Qt::FindDirectChildrenOnly);
+        require(children.size() == 1 && children.front()->isHidden(),
+                "thumbnail must retain exactly one hidden composition helper");
+        if (thumbnail.geometry() != geometry) {
+            const QRect actual = thumbnail.geometry();
+            std::cerr << "thumbnail geometry expected=" << geometry.x() << ',' << geometry.y()
+                      << ',' << geometry.width() << ',' << geometry.height()
+                      << " actual=" << actual.x() << ',' << actual.y() << ',' << actual.width()
+                      << ',' << actual.height() << " visible=" << visible << '\n';
+        }
+        require(thumbnail.isVisible() == visible,
+                "capture exclusion must preserve thumbnail visibility");
+        require(thumbnail.geometry() == geometry,
+                "capture exclusion must preserve thumbnail geometry");
+        require(thumbnail.windowFlags().testFlag(Qt::WindowDoesNotAcceptFocus),
+                "capture exclusion must preserve thumbnail focus policy");
+    };
+    verify();
+    thumbnail.releaseNativeSurface();
+    require(composition::usesCaptureExclusionComposition(&thumbnail),
+            "native release must preserve the thumbnail composition helper");
+    require(snow_shot::platform::setWindowExcludedFromCapture(&thumbnail, true),
+            "recreated thumbnail surface must accept capture exclusion");
+    if (visible)
+        thumbnail.show();
+    QApplication::processEvents();
+    verify();
+    require(snow_shot::platform::setWindowExcludedFromCapture(&thumbnail, false),
+            "thumbnail capture sharing must be restorable");
+    DWORD affinity = WDA_EXCLUDEFROMCAPTURE;
+    require(GetWindowDisplayAffinity(reinterpret_cast<HWND>(thumbnail.winId()), &affinity) &&
+                affinity == WDA_NONE,
+            "thumbnail cleanup must restore native capture sharing");
+}
+#endif
 } // namespace
 
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
+#ifdef Q_OS_WIN
+    thumbnailCaptureCompositionRegistration();
+    if (application.arguments().contains(QStringLiteral("--capture-composition-only"))) {
+        for (const auto mode : {ScreenshotScrollingRecognitionMode::Vertical,
+                                ScreenshotScrollingRecognitionMode::Horizontal}) {
+            for (const bool visible : {false, true})
+                thumbnailNativeCaptureComposition(mode, visible);
+        }
+        std::cout << "scrolling thumbnail capture composition tests passed\n";
+        return 0;
+    }
+#endif
     for (const auto mode : {ScreenshotScrollingRecognitionMode::Vertical,
                             ScreenshotScrollingRecognitionMode::Horizontal}) {
         hoverGeometryAndNavigation(mode);

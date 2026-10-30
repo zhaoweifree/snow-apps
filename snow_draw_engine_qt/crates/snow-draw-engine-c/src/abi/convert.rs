@@ -217,6 +217,28 @@ pub(crate) fn snow_stroke_style_to_rust(value: SnowStrokeStyle) -> StrokeStyle {
     }
 }
 
+pub(crate) fn snow_stroke_rendering_style_from_rust(
+    value: snow_draw_engine_core::arrow::StrokeRenderingStyle,
+) -> SnowStrokeRenderingStyle {
+    use snow_draw_engine_core::arrow::StrokeRenderingStyle as Style;
+    match value {
+        Style::Architect => SnowStrokeRenderingStyle::Architect,
+        Style::Artist => SnowStrokeRenderingStyle::Artist,
+        Style::Cartoonist => SnowStrokeRenderingStyle::Cartoonist,
+    }
+}
+
+pub(crate) fn snow_stroke_rendering_style_to_rust(
+    value: SnowStrokeRenderingStyle,
+) -> snow_draw_engine_core::arrow::StrokeRenderingStyle {
+    use snow_draw_engine_core::arrow::StrokeRenderingStyle as Style;
+    match value {
+        SnowStrokeRenderingStyle::Architect => Style::Architect,
+        SnowStrokeRenderingStyle::Artist => Style::Artist,
+        SnowStrokeRenderingStyle::Cartoonist => Style::Cartoonist,
+    }
+}
+
 pub(crate) fn snow_arrow_shaft_type_from_rust(
     value: snow_draw_engine_core::arrow::ArrowShaftType,
 ) -> SnowArrowShaftType {
@@ -375,6 +397,7 @@ fn snow_arrowhead_primitives_from_rust(
                     y: primitive.center[1],
                 },
                 diameter: primitive.diameter,
+                roughness_cap: primitive.roughness_cap.unwrap_or(-1.0),
             }
         })
         .collect()
@@ -405,6 +428,7 @@ pub(crate) fn snow_fill_style_from_rust(value: DisplayFillStyle) -> SnowFillStyl
         DisplayFillStyle::Line => SnowFillStyle::Line,
         DisplayFillStyle::CrossLine => SnowFillStyle::CrossLine,
         DisplayFillStyle::Solid => SnowFillStyle::Solid,
+        DisplayFillStyle::Border => SnowFillStyle::Border,
     }
 }
 
@@ -413,6 +437,7 @@ pub(crate) fn snow_fill_style_to_rust(value: SnowFillStyle) -> snow_draw_engine:
         SnowFillStyle::Line => snow_draw_engine::FillStyle::Line,
         SnowFillStyle::CrossLine => snow_draw_engine::FillStyle::CrossLine,
         SnowFillStyle::Solid => snow_draw_engine::FillStyle::Solid,
+        SnowFillStyle::Border => snow_draw_engine::FillStyle::Border,
     }
 }
 
@@ -421,6 +446,7 @@ pub(crate) fn snow_document_fill_style_from_rust(value: FillStyle) -> SnowFillSt
         FillStyle::Line => SnowFillStyle::Line,
         FillStyle::CrossLine => SnowFillStyle::CrossLine,
         FillStyle::Solid => SnowFillStyle::Solid,
+        FillStyle::Border => SnowFillStyle::Border,
     }
 }
 
@@ -724,6 +750,12 @@ impl Default for SnowDistanceStyle {
 impl From<SnowShapeStyle> for ShapeStyle {
     fn from(value: SnowShapeStyle) -> Self {
         Self {
+            brush_mode: match value.brush_mode {
+                SnowBrushMode::Regular => snow_draw_engine_core::BrushMode::Regular,
+                SnowBrushMode::PressureSensitive => {
+                    snow_draw_engine_core::BrushMode::PressureSensitive
+                }
+            },
             fill: value.fill.into(),
             fill_style: snow_fill_style_to_rust(value.fill_style),
             stroke: value.stroke.into(),
@@ -732,6 +764,9 @@ impl From<SnowShapeStyle> for ShapeStyle {
             start_arrowhead: snow_arrowhead_to_rust(value.start_arrowhead),
             end_arrowhead: snow_arrowhead_to_rust(value.end_arrowhead),
             stroke_style: snow_stroke_style_to_rust(value.stroke_style),
+            stroke_rendering_style: snow_stroke_rendering_style_to_rust(
+                value.stroke_rendering_style,
+            ),
             arrow_type: snow_arrow_type_to_rust(value.arrow_type),
             arrow_shaft_type: snow_arrow_shaft_type_to_rust(value.arrow_shaft_type),
             arrow_ratio: snow_draw_engine_core::arrow::normalize_arrow_ratio(value.arrow_ratio),
@@ -797,6 +832,9 @@ impl From<SnowRectangleShapeStyle> for RectangleShapeStyle {
             stroke: value.stroke.into(),
             stroke_width: value.stroke_width,
             stroke_style: snow_stroke_style_to_rust(value.stroke_style),
+            stroke_rendering_style: snow_stroke_rendering_style_to_rust(
+                value.stroke_rendering_style,
+            ),
             corner_radii: value.corner_radii.into(),
             shape: snow_draw_engine::HighlightShape::Rectangle,
         }
@@ -811,6 +849,9 @@ impl From<RectangleShapeStyle> for SnowRectangleShapeStyle {
             stroke: value.stroke.into(),
             stroke_width: value.stroke_width,
             stroke_style: snow_stroke_style_from_rust(value.stroke_style),
+            stroke_rendering_style: snow_stroke_rendering_style_from_rust(
+                value.stroke_rendering_style,
+            ),
             corner_radii: value.corner_radii.into(),
         }
     }
@@ -824,6 +865,9 @@ impl From<SnowArrowStyle> for snow_draw_engine::ArrowStyle {
             start_arrowhead: snow_arrowhead_to_rust(value.start_arrowhead),
             end_arrowhead: snow_arrowhead_to_rust(value.end_arrowhead),
             stroke_style: snow_stroke_style_to_rust(value.stroke_style),
+            stroke_rendering_style: snow_stroke_rendering_style_to_rust(
+                value.stroke_rendering_style,
+            ),
             arrow_type: snow_arrow_type_to_rust(value.arrow_type),
             arrow_shaft_type: snow_arrow_shaft_type_to_rust(value.arrow_shaft_type),
             arrow_ratio: snow_draw_engine_core::arrow::normalize_arrow_ratio(value.arrow_ratio),
@@ -839,6 +883,9 @@ impl From<snow_draw_engine::ArrowStyle> for SnowArrowStyle {
             start_arrowhead: snow_arrowhead_from_rust(value.start_arrowhead),
             end_arrowhead: snow_arrowhead_from_rust(value.end_arrowhead),
             stroke_style: snow_stroke_style_from_rust(value.stroke_style),
+            stroke_rendering_style: snow_stroke_rendering_style_from_rust(
+                value.stroke_rendering_style,
+            ),
             arrow_type: snow_arrow_type_from_rust(value.arrow_type),
             arrow_shaft_type: snow_arrow_shaft_type_from_rust(value.arrow_shaft_type),
             arrow_ratio: snow_draw_engine_core::arrow::normalize_arrow_ratio(value.arrow_ratio),
@@ -873,11 +920,7 @@ impl From<TextStyle> for SnowTextStyle {
             color: value.color.into(),
             font_size: value.font_size,
             fill: value.fill.into(),
-            fill_style: match value.fill_style {
-                snow_draw_engine::FillStyle::Line => SnowFillStyle::Line,
-                snow_draw_engine::FillStyle::CrossLine => SnowFillStyle::CrossLine,
-                snow_draw_engine::FillStyle::Solid => SnowFillStyle::Solid,
-            },
+            fill_style: snow_document_fill_style_from_rust(value.fill_style),
             stroke: value.stroke.into(),
             stroke_width: value.stroke_width,
             corner_radii: value.corner_radii.into(),
@@ -951,6 +994,9 @@ impl From<SnowSerialNumberStyle> for SerialNumberStyle {
             font_family: font_family_from_c(&value.font_family_utf8, value.font_family_utf8_len),
             stroke_width: value.stroke_width,
             stroke_style: snow_stroke_style_to_rust(value.stroke_style),
+            stroke_rendering_style: snow_stroke_rendering_style_to_rust(
+                value.stroke_rendering_style,
+            ),
             opacity: value.opacity,
         }
     }
@@ -970,14 +1016,13 @@ impl From<SerialNumberStyle> for SnowSerialNumberStyle {
             },
             color: value.color.into(),
             fill: value.fill.into(),
-            fill_style: match value.fill_style {
-                snow_draw_engine::FillStyle::Line => SnowFillStyle::Line,
-                snow_draw_engine::FillStyle::CrossLine => SnowFillStyle::CrossLine,
-                snow_draw_engine::FillStyle::Solid => SnowFillStyle::Solid,
-            },
+            fill_style: snow_document_fill_style_from_rust(value.fill_style),
             font_size: value.font_size,
             stroke_width: value.stroke_width,
             stroke_style: snow_stroke_style_from_rust(value.stroke_style),
+            stroke_rendering_style: snow_stroke_rendering_style_from_rust(
+                value.stroke_rendering_style,
+            ),
             opacity: value.opacity,
             font_family_utf8_len: 0,
             font_family_truncated: 0,
@@ -997,6 +1042,12 @@ impl From<SerialNumberStyle> for SnowSerialNumberStyle {
 impl From<ShapeStyle> for SnowShapeStyle {
     fn from(value: ShapeStyle) -> Self {
         Self {
+            brush_mode: match value.brush_mode {
+                snow_draw_engine_core::BrushMode::Regular => SnowBrushMode::Regular,
+                snow_draw_engine_core::BrushMode::PressureSensitive => {
+                    SnowBrushMode::PressureSensitive
+                }
+            },
             fill: value.fill.into(),
             fill_style: snow_document_fill_style_from_rust(value.fill_style),
             stroke: value.stroke.into(),
@@ -1005,6 +1056,9 @@ impl From<ShapeStyle> for SnowShapeStyle {
             start_arrowhead: snow_arrowhead_from_rust(value.start_arrowhead),
             end_arrowhead: snow_arrowhead_from_rust(value.end_arrowhead),
             stroke_style: snow_stroke_style_from_rust(value.stroke_style),
+            stroke_rendering_style: snow_stroke_rendering_style_from_rust(
+                value.stroke_rendering_style,
+            ),
             arrow_type: snow_arrow_type_from_rust(value.arrow_type),
             arrow_shaft_type: snow_arrow_shaft_type_from_rust(value.arrow_shaft_type),
             arrow_ratio: snow_draw_engine_core::arrow::normalize_arrow_ratio(value.arrow_ratio),
@@ -1043,6 +1097,7 @@ pub(crate) unsafe fn raw_c_enum_is_valid<E: crate::abi::raw_enum::SnowRawEnum>(
 unsafe fn runtime_style_default_enums_are_valid(defaults: *const SnowStyleDefaults) -> bool {
     let shapes = [
         unsafe { std::ptr::addr_of!((*defaults).rectangle) },
+        unsafe { std::ptr::addr_of!((*defaults).speech_bubble) },
         unsafe { std::ptr::addr_of!((*defaults).arrow) },
         unsafe { std::ptr::addr_of!((*defaults).line) },
         unsafe { std::ptr::addr_of!((*defaults).free_draw) },
@@ -1055,10 +1110,12 @@ unsafe fn runtime_style_default_enums_are_valid(defaults: *const SnowStyleDefaul
                 && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).start_arrowhead))
                 && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).end_arrowhead))
                 && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).stroke_style))
+                && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).stroke_rendering_style))
                 && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).arrow_type))
                 && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).arrow_shaft_type))
                 && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).highlight_shape))
                 && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).shape))
+                && raw_c_enum_is_valid(std::ptr::addr_of!((*shape).brush_mode))
         } {
             return false;
         }
@@ -1083,6 +1140,9 @@ unsafe fn runtime_style_default_enums_are_valid(defaults: *const SnowStyleDefaul
             && raw_c_enum_is_valid(std::ptr::addr_of!((*defaults).serial_number.numeric_type))
             && raw_c_enum_is_valid(std::ptr::addr_of!((*defaults).serial_number.fill_style))
             && raw_c_enum_is_valid(std::ptr::addr_of!((*defaults).serial_number.stroke_style))
+            && raw_c_enum_is_valid(std::ptr::addr_of!(
+                (*defaults).serial_number.stroke_rendering_style
+            ))
             && raw_c_enum_is_valid(std::ptr::addr_of!(
                 (*defaults).serial_number.serial_number_type
             ))
@@ -1184,6 +1244,9 @@ pub(crate) fn runtime_config_from_c(
                     fill_style: snow_fill_style_to_rust(defaults.serial_number.fill_style),
                     font_size: defaults.serial_number.font_size,
                     font_family: normalize_font_family(Some(serial_font_family)),
+                    stroke_rendering_style: snow_stroke_rendering_style_to_rust(
+                        defaults.serial_number.stroke_rendering_style,
+                    ),
                     stroke_width: defaults.serial_number.stroke_width,
                     stroke_style: snow_stroke_style_to_rust(defaults.serial_number.stroke_style),
                     opacity: defaults.serial_number.opacity,
@@ -1552,6 +1615,9 @@ pub(crate) fn snow_pointer_event_to_rust(value: &SnowPointerEvent) -> PointerEve
     };
 
     PointerEvent {
+        pressure: (value.has_pressure != 0 && value.pressure.is_finite())
+            .then(|| value.pressure.clamp(0.0, 1.0)),
+        timestamp_ms: value.timestamp_ms,
         pointer_id: value.pointer_id,
         event_type,
         device,
@@ -1562,6 +1628,55 @@ pub(crate) fn snow_pointer_event_to_rust(value: &SnowPointerEvent) -> PointerEve
         button,
         buttons: PointerButtons(value.buttons),
         modifiers: snow_modifiers_to_rust(value.modifiers),
+    }
+}
+
+#[cfg(test)]
+mod pressure_bridge_tests {
+    use super::*;
+
+    #[test]
+    fn brush_mode_round_trips_without_changing_nominal_width() {
+        let style = SnowShapeStyle {
+            brush_mode: SnowBrushMode::PressureSensitive,
+            stroke_width: 12.0,
+            ..SnowShapeStyle::default()
+        };
+        let native: ShapeStyle = style.into();
+        assert_eq!(
+            native.brush_mode,
+            snow_draw_engine_core::BrushMode::PressureSensitive
+        );
+        assert_eq!(SnowShapeStyle::from(native), style);
+    }
+
+    #[test]
+    fn pointer_pressure_is_optional_clamped_and_preserves_time() {
+        let mut pointer = SnowPointerEvent {
+            pointer_id: 7,
+            event_type: SnowPointerEventType::Move,
+            device: SnowPointerDevice::Pen,
+            position_x: 10.0,
+            position_y: 20.0,
+            button: SnowPointerButton::None,
+            buttons: 1,
+            has_pressure: 1,
+            reserved0: [0; 2],
+            modifiers: SnowModifiers::default(),
+            pressure: 0.25,
+            timestamp_ms: 1234,
+        };
+        let native = snow_pointer_event_to_rust(&pointer);
+        assert_eq!(native.pressure, Some(0.25));
+        assert_eq!(native.timestamp_ms, 1234);
+        pointer.pressure = 2.0;
+        assert_eq!(snow_pointer_event_to_rust(&pointer).pressure, Some(1.0));
+        pointer.pressure = f64::NAN;
+        assert_eq!(snow_pointer_event_to_rust(&pointer).pressure, None);
+        pointer.pressure = 0.0;
+        assert_eq!(snow_pointer_event_to_rust(&pointer).pressure, Some(0.0));
+        pointer.has_pressure = 0;
+        assert_eq!(snow_pointer_event_to_rust(&pointer).pressure, None);
     }
 }
 
@@ -1697,6 +1812,27 @@ impl From<snow_draw_engine::BrushEraserStyle> for SnowBrushEraserStyle {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn border_fill_round_trips_through_document_and_display_abi() {
+        assert_eq!(SnowFillStyle::Border as i32, 3);
+        assert_eq!(
+            snow_fill_style_from_rust(DisplayFillStyle::Border),
+            SnowFillStyle::Border
+        );
+        assert_eq!(
+            snow_fill_style_to_rust(SnowFillStyle::Border),
+            FillStyle::Border
+        );
+        assert_eq!(
+            snow_document_fill_style_from_rust(FillStyle::Border),
+            SnowFillStyle::Border
+        );
+        assert_eq!(SnowFillStyle::Line as i32, 0);
+        assert_eq!(SnowFillStyle::CrossLine as i32, 1);
+        assert_eq!(SnowFillStyle::Solid as i32, 2);
+    }
+
     use super::*;
     use snow_draw_engine::{FillStyle, StyleDefaults};
 
@@ -1860,6 +1996,7 @@ mod tests {
             fill_style: FillStyle::Solid,
             font_size: 16.0,
             font_family: Some(family),
+            stroke_rendering_style: Default::default(),
             stroke_width: 2.0,
             stroke_style: StrokeStyle::Solid,
             opacity: 1.0,
@@ -2049,6 +2186,110 @@ mod tests {
             style_defaults: &defaults,
         };
 
+        assert_eq!(
+            runtime_config_from_c(Some(&config)),
+            Err(SnowError::InvalidArgument)
+        );
+    }
+}
+
+#[cfg(test)]
+mod stroke_rendering_tests {
+    use super::*;
+    use snow_draw_engine_core::arrow::StrokeRenderingStyle;
+
+    #[test]
+    fn stroke_rendering_style_and_display_round_trip_through_abi() {
+        for style in [
+            SnowStrokeRenderingStyle::Architect,
+            SnowStrokeRenderingStyle::Artist,
+            SnowStrokeRenderingStyle::Cartoonist,
+        ] {
+            let value = SnowShapeStyle {
+                stroke_rendering_style: style,
+                ..Default::default()
+            };
+            let native: ShapeStyle = value.into();
+            assert_eq!(SnowShapeStyle::from(native).stroke_rendering_style, style);
+            let serial = SnowSerialNumberStyle {
+                stroke_rendering_style: style,
+                ..Default::default()
+            };
+            let native: SerialNumberStyle = serial.into();
+            assert_eq!(
+                SnowSerialNumberStyle::from(native).stroke_rendering_style,
+                style
+            );
+        }
+        let item = snow_draw_engine::RectangleDisplayItem {
+            stroke_rendering_style: StrokeRenderingStyle::Cartoonist,
+            stroke_rendering_seed: 0x1234_abcd,
+            ..Default::default()
+        };
+        let converted = snow_scene_display_item_from_rust(
+            &snow_draw_engine::SceneDisplayItem::Rectangle(item),
+            false,
+            false,
+        );
+        assert_eq!(
+            converted.view.stroke_rendering_style,
+            SnowStrokeRenderingStyle::Cartoonist
+        );
+        assert_eq!(converted.view.stroke_rendering_seed, 0x1234_abcd);
+        let serial = snow_draw_engine::SerialNumberDisplayItem {
+            stroke_rendering_style: StrokeRenderingStyle::Artist,
+            stroke_rendering_seed: 123,
+            ..Default::default()
+        };
+        let converted = snow_scene_display_item_from_rust(
+            &snow_draw_engine::SceneDisplayItem::SerialNumber(serial),
+            false,
+            false,
+        );
+        assert_eq!(
+            converted.view.stroke_rendering_style,
+            SnowStrokeRenderingStyle::Artist
+        );
+        assert_eq!(converted.view.stroke_rendering_seed, 123);
+        assert_eq!(
+            crate::snow_stroke_rendering_outset(SnowStrokeRenderingStyle::Artist, f64::INFINITY),
+            2.0
+        );
+        let primitives = snow_arrowhead_primitives_from_rust(&[
+            ArrowheadDisplayPrimitive {
+                kind: ArrowheadDisplayPrimitiveKind::Circle,
+                points: Vec::new(),
+                center: [0.0, 0.0],
+                diameter: 10.0,
+                fill_mode: ArrowheadDisplayFillMode::Stroke,
+                dash_mode: ArrowheadDisplayDashMode::Solid,
+                roughness_cap: Some(0.5),
+            },
+            ArrowheadDisplayPrimitive {
+                kind: ArrowheadDisplayPrimitiveKind::Line,
+                points: vec![[0.0, 0.0], [10.0, 5.0]],
+                center: [0.0, 0.0],
+                diameter: 0.0,
+                fill_mode: ArrowheadDisplayFillMode::Stroke,
+                dash_mode: ArrowheadDisplayDashMode::Inherit,
+                roughness_cap: None,
+            },
+        ]);
+        assert_eq!(primitives[0].roughness_cap, 0.5);
+        assert_eq!(primitives[1].roughness_cap, -1.0);
+    }
+
+    #[test]
+    fn stroke_rendering_invalid_default_discriminant_is_rejected_before_typed_read() {
+        let mut defaults: SnowStyleDefaults = StyleDefaults::default().into();
+        unsafe {
+            std::ptr::addr_of_mut!(defaults.rectangle.stroke_rendering_style)
+                .cast::<i32>()
+                .write(17)
+        };
+        let config = SnowRuntimeConfig {
+            style_defaults: &defaults,
+        };
         assert_eq!(
             runtime_config_from_c(Some(&config)),
             Err(SnowError::InvalidArgument)

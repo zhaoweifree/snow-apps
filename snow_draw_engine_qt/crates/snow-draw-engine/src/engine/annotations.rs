@@ -232,6 +232,7 @@ struct Style {
     strength: f64,
     gap: f64,
     stroke_style: crate::StrokeStyle,
+    stroke_rendering_style: crate::StrokeRenderingStyle,
     arrow_type: crate::ArrowType,
     filter: Filter,
 }
@@ -262,6 +263,7 @@ impl Default for Style {
             strength: 0.5,
             gap: 56.0,
             stroke_style: Default::default(),
+            stroke_rendering_style: Default::default(),
             arrow_type: Default::default(),
             filter: Default::default(),
         }
@@ -330,10 +332,11 @@ fn text_valid(text: &str) -> Result<(), ErrorCode> {
         Ok(())
     }
 }
-fn rectangle(b: [f64; 4], s: &Style) -> Result<RectangleData, ErrorCode> {
+fn rectangle(b: [f64; 4], s: &Style, id: ElementId) -> Result<RectangleData, ErrorCode> {
     s.validate()?;
     let (center, width, height) = bounds(b)?;
     Ok(RectangleData {
+        text_element_id: None,
         center,
         width,
         height,
@@ -345,6 +348,11 @@ fn rectangle(b: [f64; 4], s: &Style) -> Result<RectangleData, ErrorCode> {
         stroke: rgba(s.stroke),
         stroke_width: s.stroke_width,
         stroke_style: s.stroke_style,
+        stroke_rendering_style: s.stroke_rendering_style,
+        stroke_rendering_seed: snow_draw_engine_core::arrow::stroke_rendering_seed(
+            id.index,
+            id.generation,
+        ),
         corner_radii: CornerRadii::default(),
         opacity: s.opacity,
     })
@@ -380,6 +388,7 @@ impl Engine {
         let mut tx = Transaction::new(batch.label);
         let mut next = self.model.peek_next_element_id();
         let mut created = Vec::new();
+        let mut removed = std::collections::HashSet::new();
         let mut selection = None;
         for op in batch.operations {
             let id = next;
@@ -404,7 +413,14 @@ impl Engine {
                         if self.model.element(id)?.data.is_background_restore() {
                             return Err(ErrorCode::InvalidState);
                         }
-                        tx.remove_element(id);
+                        if removed.insert(id) {
+                            tx.remove_element(id);
+                        }
+                        if let Some(text_id) = self.model.bound_text_id_for_shape(id)
+                            && removed.insert(text_id)
+                        {
+                            tx.remove_element(text_id);
+                        }
                     }
                     continue;
                 }
@@ -427,13 +443,13 @@ impl Engine {
                     bounds: b,
                     style: s,
                 } => {
-                    tx.insert_rectangle(id, meta, rectangle(b, &s)?);
+                    tx.insert_rectangle(id, meta, rectangle(b, &s, id)?);
                 }
                 Annotation::Ellipse {
                     bounds: b,
                     style: s,
                 } => {
-                    let mut data = rectangle(b, &s)?;
+                    let mut data = rectangle(b, &s, id)?;
                     data.highlight_shape = HighlightShape::Ellipse;
                     tx.insert_rectangle(id, meta, data);
                 }
@@ -441,7 +457,7 @@ impl Engine {
                     bounds: b,
                     style: s,
                 } => {
-                    let mut data = rectangle(b, &s)?;
+                    let mut data = rectangle(b, &s, id)?;
                     data.highlight_shape = HighlightShape::Diamond;
                     tx.insert_rectangle(id, meta, data);
                 }
@@ -452,14 +468,14 @@ impl Engine {
                     tx.insert_rectangle(
                         id,
                         meta,
-                        rectangle(b, &s)?.into_highlight(HighlightShape::Ellipse),
+                        rectangle(b, &s, id)?.into_highlight(HighlightShape::Ellipse),
                     );
                 }
                 Annotation::RoundedRectangle {
                     bounds: b,
                     style: s,
                 } => {
-                    let mut r = rectangle(b, &s)?;
+                    let mut r = rectangle(b, &s, id)?;
                     r.corner_radii = CornerRadii::splat(s.corner_radius);
                     tx.insert_rectangle(id, meta, r);
                 }
@@ -470,14 +486,14 @@ impl Engine {
                     tx.insert_rectangle(
                         id,
                         meta,
-                        rectangle(b, &s)?.into_highlight(HighlightShape::Rectangle),
+                        rectangle(b, &s, id)?.into_highlight(HighlightShape::Rectangle),
                     );
                 }
                 Annotation::Spotlight {
                     bounds: b,
                     style: s,
                 } => {
-                    tx.insert_rectangle(id, meta, rectangle(b, &s)?.into_spotlight());
+                    tx.insert_rectangle(id, meta, rectangle(b, &s, id)?.into_spotlight());
                     tx.update_spotlight(SpotlightConfig {
                         color: rgba(s.color),
                         opacity: s.opacity,
@@ -530,6 +546,7 @@ impl Engine {
                         Vec::new(),
                         closed,
                         FreeDrawStyle {
+                            brush_mode: Default::default(),
                             stroke: rgba(s.stroke),
                             stroke_width: s.stroke_width,
                             stroke_style: s.stroke_style,
@@ -635,6 +652,12 @@ impl Engine {
                     )
                     .ok_or(ErrorCode::InvalidArgument)?;
                     data.opacity = s.opacity;
+                    data.stroke_rendering_style = s.stroke_rendering_style;
+                    data.stroke_rendering_seed =
+                        snow_draw_engine_core::arrow::stroke_rendering_seed(
+                            id.index,
+                            id.generation,
+                        );
                     data = match linear_kind {
                         LinearElementKind::Line => data.into_line(rgba(s.fill), FillStyle::Solid),
                         LinearElementKind::PenHighlight => data.into_pen_highlight(),
@@ -695,6 +718,12 @@ impl Engine {
                                 s.font_family,
                             )),
                             stroke_width: s.stroke_width,
+                            stroke_rendering_style: s.stroke_rendering_style,
+                            stroke_rendering_seed:
+                                snow_draw_engine_core::arrow::stroke_rendering_seed(
+                                    id.index,
+                                    id.generation,
+                                ),
                             opacity: s.opacity,
                             ..Default::default()
                         },
@@ -746,6 +775,52 @@ mod tests {
         )?;
         Ok(serde_json::from_slice(&result).unwrap())
     }
+    #[test]
+    fn shape_text_annotation_delete_removes_label_once_and_undo_restores_binding() {
+        for delete_label_explicitly in [false, true] {
+            let mut engine = Engine::default();
+            let viewport = engine.create_viewport(ViewportConfig::default()).unwrap();
+            apply(
+                &mut engine,
+                json!([
+                    {"type":"rectangle","bounds":[10,20,40,60]},
+                    {"type":"text","bounds":[100,100,80,30],"text":"label"}
+                ]),
+            )
+            .unwrap();
+            let shape_id = engine.model.paint_order()[0];
+            let text_id = engine.model.paint_order()[1];
+            let mut shape = *engine.model.rectangle(shape_id).unwrap();
+            shape.text_element_id = Some(text_id);
+            let mut transaction = Transaction::new("bind shape label");
+            transaction.update_rectangle(shape_id, shape);
+            engine
+                .commit_transaction(
+                    viewport,
+                    ApplyTransactionCommand {
+                        transaction,
+                        history_undo_snapshot: None,
+                    },
+                )
+                .unwrap();
+            let ids = if delete_label_explicitly {
+                vec![text_id, shape_id]
+            } else {
+                vec![shape_id]
+            };
+            apply(&mut engine, json!([{"type":"delete","ids":ids}])).unwrap();
+            assert!(engine.model.paint_order().is_empty());
+            engine.undo().unwrap();
+            assert_eq!(
+                engine.model.bound_text_id_for_shape(shape_id),
+                Some(text_id)
+            );
+            assert_eq!(engine.model.text(text_id).unwrap().text, "label");
+            engine.redo().unwrap();
+            assert!(engine.model.paint_order().is_empty());
+        }
+    }
+
     #[test]
     fn document_content_excludes_styles_and_history() {
         let mut engine = Engine::new(EngineConfig::default());
@@ -857,6 +932,116 @@ mod tests {
                 json!(vec![json!({"type":"rectangle","bounds":[0,0,1,1]}); 257])
             )
             .is_err()
+        );
+    }
+    #[test]
+    fn stroke_rendering_annotations_history_and_sessions_preserve_styles_and_seeds() {
+        use snow_draw_engine_core::arrow::StrokeRenderingStyle;
+        let mut engine = Engine::new(EngineConfig::default());
+        apply(&mut engine, json!([
+            {"type":"rectangle", "bounds":[10,20,100,80], "style":{"stroke_rendering_style":"artist"}},
+            {"type":"arrow", "points":[[0,0],[100,80]], "style":{"stroke_rendering_style":"cartoonist"}},
+            {"type":"line", "points":[[0,80],[100,0]], "style":{"stroke_rendering_style":"artist"}},
+            {"type":"serial_number", "center":[50,50], "number":4, "style":{"stroke_rendering_style":"cartoonist"}}
+        ])).unwrap();
+        let ids = engine.model.paint_order().to_vec();
+        let rect = *engine.model.rectangle(ids[0]).unwrap();
+        let arrow = engine.model.arrow(ids[1]).unwrap().clone();
+        let line = engine.model.arrow(ids[2]).unwrap().clone();
+        let serial = engine.model.serial_number(ids[3]).unwrap().clone();
+        assert_eq!(
+            serial.stroke_rendering_style,
+            StrokeRenderingStyle::Cartoonist
+        );
+        assert_ne!(serial.stroke_rendering_seed, 0);
+        assert_eq!(rect.stroke_rendering_style, StrokeRenderingStyle::Artist);
+        assert_eq!(
+            arrow.stroke_rendering_style,
+            StrokeRenderingStyle::Cartoonist
+        );
+        assert_eq!(line.stroke_rendering_style, StrokeRenderingStyle::Artist);
+        assert!(line.is_line());
+        assert_ne!(rect.stroke_rendering_seed, arrow.stroke_rendering_seed);
+        engine.undo().unwrap();
+        assert!(engine.model.paint_order().is_empty());
+        engine.redo().unwrap();
+        assert_eq!(*engine.model.rectangle(ids[0]).unwrap(), rect);
+        assert_eq!(*engine.model.arrow(ids[1]).unwrap(), arrow);
+        assert_eq!(*engine.model.serial_number(ids[3]).unwrap(), serial);
+        for restored in [
+            Engine::from_serialized_document_session_with_config(
+                &engine.serialize_document_session().unwrap(),
+                EngineConfig::default(),
+            )
+            .unwrap(),
+            Engine::from_serialized_document_history_with_config(
+                &engine.serialize_document_history().unwrap(),
+                EngineConfig::default(),
+            )
+            .unwrap(),
+        ] {
+            assert_eq!(*restored.model.rectangle(ids[0]).unwrap(), rect);
+            assert_eq!(*restored.model.arrow(ids[1]).unwrap(), arrow);
+            assert_eq!(*restored.model.arrow(ids[2]).unwrap(), line);
+            assert_eq!(*restored.model.serial_number(ids[3]).unwrap(), serial);
+        }
+    }
+    #[test]
+    fn stroke_rendering_legacy_sessions_default_to_architect_without_changing_undo_history() {
+        fn remove_rendering_fields(value: &mut serde_json::Value) {
+            match value {
+                serde_json::Value::Object(fields) => {
+                    fields.remove("stroke_rendering_style");
+                    fields.remove("stroke_rendering_seed");
+                    for child in fields.values_mut() {
+                        remove_rendering_fields(child);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for child in items {
+                        remove_rendering_fields(child);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut engine = Engine::new(EngineConfig::default());
+        apply(
+            &mut engine,
+            json!([
+                {"type":"rectangle", "bounds":[10,20,100,80]},
+                {"type":"arrow", "points":[[0,0],[100,80]]}
+            ]),
+        )
+        .unwrap();
+        let ids = engine.model.paint_order().to_vec();
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&engine.serialize_document_session().unwrap()).unwrap();
+        legacy["schemaVersion"] = 14.into();
+        remove_rendering_fields(&mut legacy);
+        let mut restored = Engine::from_serialized_document_session_with_config(
+            &serde_json::to_vec(&legacy).unwrap(),
+            EngineConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            restored
+                .model
+                .rectangle(ids[0])
+                .unwrap()
+                .stroke_rendering_style,
+            crate::StrokeRenderingStyle::Architect
+        );
+        assert_eq!(
+            restored.model.arrow(ids[1]).unwrap().stroke_rendering_seed,
+            0
+        );
+        restored.undo().unwrap();
+        assert!(restored.model.paint_order().is_empty());
+        restored.redo().unwrap();
+        assert_eq!(
+            restored.model.arrow(ids[1]).unwrap().stroke_rendering_style,
+            crate::StrokeRenderingStyle::Architect
         );
     }
 }

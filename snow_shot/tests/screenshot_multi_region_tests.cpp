@@ -53,6 +53,7 @@ void geometryAndTransactions() {
     require(model.selectionRegion() == QRegion(QRect(10, 10, 120, 60)), "hole fill preview");
     model.cancelRegionOperation();
     require(model.selectionRegion() == hole, "cancel must restore original shape");
+    model.setSelectionRegion(hole); // A restored aggregate has no creation identities.
     model.beginMoveDrag(QPointF(10, 10));
     model.setDraggedSelectionRect(QRectF(30, 40, 120, 60), ScreenshotSelectionDragMode::All);
     require(model.selectionRegion() == hole.translated(20, 30), "move must preserve holes");
@@ -76,6 +77,372 @@ void geometryAndTransactions() {
     apply(model, Operation::Subtract, QRect(30, 0, 10, 100));
     require(!model.rectangular() && !model.selectionRegion().contains(QPoint(35, 35)),
             "subtraction must split a region");
+}
+
+void individualRegionSnapping() {
+    using Operation = ScreenshotSelectionModel::RegionOperation;
+    const QRect bounds(-200, -200, 600, 600);
+    ScreenshotSelectionModel model;
+    const QRect fixed(20, 30, 40, 40), moving(180, 130, 40, 40);
+    model.setSelectionRect(fixed);
+    apply(model, Operation::Add, moving);
+    const auto id = model.regionAt({190, 140});
+    model.beginMoveDrag({190, 140});
+    const QRectF candidate(24, 112, 40, 40);
+    require(model.snapIndividualRegionMove(candidate, bounds, 1, false) == candidate &&
+                model.moveSnapGuides().isEmpty(),
+            "unmodified drag never snaps");
+    const auto snapped = model.snapIndividualRegionMove(candidate, bounds, 1, true);
+    require(snapped.x() == 20 && !model.moveSnapGuides().isEmpty(), "nearby edges snap");
+    model.setDraggedSelectionRect(snapped, ScreenshotSelectionDragMode::All);
+    model.finishMoveDrag();
+    require(model.regionAt(snapped.center()) == id && model.regionAt({30, 40}) != id &&
+                model.moveSnapGuides().isEmpty(),
+            "snap preserves identity and clears guides");
+    model.beginMoveDrag(snapped.center());
+    const auto origin = model.moveOriginalSelection();
+    for (qreal scale : {0.5, 1.0, 1.5, 2.0}) {
+        for (int x : {-100, 12, 13, 20, 24, 28, 29, 40, 100}) {
+            const QRectF raw(x, 112, 40, 40);
+            const auto engine = snowCanvasSnapMove(raw, {QRectF(fixed)}, scale);
+            require(engine.has_value(), "reference snap succeeds");
+            const QPointF expected(qRound(raw.x() + engine->correction.x()),
+                                   qRound(raw.y() + engine->correction.y()));
+            require(model.snapIndividualRegionMove(raw, bounds, scale, true).topLeft() == expected,
+                    "region edges, centers and thresholds match rectangle movement at every scale");
+        }
+    }
+    // Moving back near its old position cannot snap to itself.
+    require(model.snapIndividualRegionMove(QRectF(181, 131, 40, 40), bounds, 1, true) ==
+                QRectF(181, 131, 40, 40),
+            "moving identity is excluded from snap references");
+    model.rebaseMoveDrag(origin.center(), true);
+    require(model.snapIndividualRegionMove(candidate, bounds, 1, true) == candidate &&
+                model.moveSnapGuides().isEmpty(),
+            "group drag does not snap");
+    model.finishMoveDrag();
+
+    model.setSelectionRect(QRect(20, 30, 40, 40));
+    apply(model, Operation::Add, QRect(100, 30, 40, 40));
+    apply(model, Operation::Add, QRect(240, 100, 40, 40));
+    model.beginMoveDrag({250, 110});
+    require(model.snapIndividualRegionMove(QRectF(178, 30, 40, 40), bounds, 1, true).x() == 180 &&
+                std::any_of(model.moveSnapGuides().begin(), model.moveSnapGuides().end(),
+                            [](const auto& guide) { return guide.gap; }),
+            "equal spacing uses gap guides");
+    model.finishMoveDrag();
+
+    model.setSelectionRect(QRect(20, 20, 41, 40));
+    apply(model, Operation::Add, QRect(140, 100, 20, 20));
+    model.beginMoveDrag({145, 105});
+    const auto odd = model.snapIndividualRegionMove(QRectF(31, 100, 20, 20), bounds, 1, true);
+    require(odd.x() == 31 && odd.width() == 20 && model.moveSnapGuides().isEmpty(),
+            "unrepresentable half-pixel center guides are suppressed without resizing");
+    const auto mixed = model.snapIndividualRegionMove(QRectF(31, 22, 20, 20), bounds, 1, true);
+    require(mixed == QRectF(31, 20, 20, 20) && !model.moveSnapGuides().isEmpty() &&
+                std::all_of(model.moveSnapGuides().begin(), model.moveSnapGuides().end(),
+                            [](const auto& guide) { return !guide.vertical && !guide.gap; }),
+            "a fractional center on X must preserve exact top-edge alignment on Y");
+    model.finishMoveDrag();
+    model.setSelectionRect(QRect(28, 20, 40, 40));
+    apply(model, Operation::Add, QRect(100, 100, 40, 40));
+    model.beginMoveDrag({110, 110});
+    const auto clamped =
+        model.snapIndividualRegionMove(QRectF(24, 100, 40, 40), QRectF(0, 0, 64, 300), 1, true);
+    require(clamped.x() == 24 && model.moveSnapGuides().isEmpty(),
+            "capture bounds override snapping and erase misleading guides");
+
+    for (bool curved : {false, true}) {
+        model.setSelectionRect(QRect(20, 30, 40, 40));
+        QPainterPath path;
+        path.addEllipse(QRectF(180, 130, 40, 40));
+        const ScreenshotRegionGeometry shape =
+            curved ? ScreenshotRegionGeometry::fromPath(path, ScreenshotRegionType::Curve)
+                   : ScreenshotRegionGeometry(QRegion(moving).subtracted(QRect(190, 140, 10, 10)));
+        model.beginRegionOperation(Operation::Add);
+        model.setDraftRegion(shape);
+        model.commitDraftRegion(bounds);
+        model.beginMoveDrag({185, 150});
+        const QRectF result = model.snapIndividualRegionMove(candidate, bounds, 1, true);
+        model.setDraggedSelectionRect(result, ScreenshotSelectionDragMode::All);
+        require(model.highlightedRegion() ==
+                    shape.translated(result.topLeft().toPoint() - moving.topLeft()),
+                "snapping translates curves and cutouts without altering their geometry");
+        model.clearSelection();
+        require(model.moveSnapGuides().isEmpty(), "replacement retires snap state");
+    }
+}
+
+void independentRegionsAndDuplication() {
+    using Operation = ScreenshotSelectionModel::RegionOperation;
+    ScreenshotSelectionModel model;
+    const QRect bounds(-100, -100, 400, 300);
+    const QRect first(10, 10, 40, 40), second(30, 10, 40, 40);
+    model.setSelectionRect(first);
+    model.beginRegionOperation(Operation::Add);
+    require(model.multiRegionEditing() && model.createdRegionCount() == 1,
+            "entering add seeds the original created region");
+    model.cancelRegionOperation();
+    require(!model.multiRegionEditing(), "cancel restores the preceding editing mode");
+    apply(model, Operation::Add, second);
+    require(model.rectangular() && !model.resizable() && model.createdRegionCount() == 2,
+            "rectangular unions retain independent identity without combined resize handles");
+    const auto older = model.regionAt({15, 15});
+    const auto newer = model.regionAt({35, 15});
+    require(older && newer && older != newer, "newest overlapping region must win hit testing");
+    model.beginMoveDrag({35, 15});
+    const auto moved =
+        model.selectionRectForDrag(ScreenshotSelectionDragMode::All, {135, 65}, bounds, 1);
+    model.setDraggedSelectionRect(moved, ScreenshotSelectionDragMode::All);
+    require(model.selectionRegion() == QRegion(first).united(second.translated(100, 50)),
+            "drag translates only the grabbed region");
+    const auto revision = model.changeRevision();
+    model.setDraggedSelectionRect(moved, ScreenshotSelectionDragMode::All);
+    require(model.changeRevision() == revision, "unchanged drag pixels must do no semantic work");
+    model.rebaseMoveDrag({135, 65});
+    model.setDraggedSelectionRect(
+        model.selectionRectForDrag(ScreenshotSelectionDragMode::All, {145, 65}, bounds, 1),
+        ScreenshotSelectionDragMode::All);
+    model.finishMoveDrag();
+    require(model.regionAt({145, 65}) == newer && model.regionAt({15, 15}) == older,
+            "rebasing retains identity and leaves the other region stationary");
+    model.beginMoveDrag({15, 15});
+    model.setDraggedSelectionRect(
+        model.selectionRectForDrag(ScreenshotSelectionDragMode::All, {15, 25}, bounds, 1),
+        ScreenshotSelectionDragMode::All);
+    model.finishMoveDrag();
+    require(model.duplicateLatestRegion({290, 190}, bounds), "duplicate newest after moving older");
+    require(model.createdRegionCount() == 3 &&
+                model.highlightedRegion() == ScreenshotRegionGeometry(QRect(260, 160, 40, 40)),
+            "copy clamps its whole size to the capture corner");
+    apply(model, Operation::Subtract, QRect(270, 160, 10, 40));
+    require(!model.regionAt({275, 180}), "a cut is not a move target");
+    const auto cut = QRegion(QRect(260, 160, 40, 40)).subtracted(QRect(270, 160, 10, 40));
+    require(model.duplicateLatestRegion({0, 0}, bounds) &&
+                model.highlightedRegion() == ScreenshotRegionGeometry(cut.translated(-280, -180)),
+            "copies retain cuts and split remnants as one created region");
+    const auto before = model.selectionRegion();
+    const auto count = model.createdRegionCount();
+    model.beginRegionOperation(Operation::Subtract);
+    model.setSelectionRect(bounds);
+    model.cancelRegionOperation();
+    require(model.multiRegionEditing() && model.createdRegionCount() == count &&
+                model.selectionRegion() == before,
+            "cancel preserves every created identity");
+    apply(model, Operation::Subtract, bounds);
+    require(model.multiRegionEditing() && model.createdRegionCount() == 0 &&
+                !model.duplicateLatestRegion({0, 0}, bounds),
+            "empty multi-region editing must retain its no-op duplication context");
+    model.setSelectionRect(first);
+    require(!model.multiRegionEditing(), "explicit replacement ends multi-region editing");
+
+    apply(model, Operation::Add, first);
+    require(model.createdRegionCount() == 2, "identical additions retain creation identity");
+    require(model.duplicateLatestRegion({30, 30}, bounds) && model.createdRegionCount() == 3,
+            "an identical duplicate is still a new region");
+    const auto copy = model;
+    model.clearSelection();
+    model = copy;
+    require(model.createdRegionCount() == 3 && model.multiRegionEditing(),
+            "model copies retain the editable collection");
+    require(model.adjustFromToolbar(5, 7, 5, 7, bounds, 1) &&
+                model.duplicateLatestRegion({30, 30}, bounds),
+            "toolbar translation retains duplicate source identity");
+    model.reset();
+    require(!model.multiRegionEditing() && model.createdRegionCount() == 0,
+            "capture reset releases all creation state");
+}
+
+void duplicateGeometryBoundariesAndCurves() {
+    using Operation = ScreenshotSelectionModel::RegionOperation;
+    const QRect bounds(-100, -60, 200, 120);
+    for (const QSize size : {QSize(1, 1), QSize(31, 21), bounds.size()}) {
+        for (int x : {-200, -100, -1, 0, 99, 200}) {
+            for (int y : {-160, -60, -1, 0, 59, 160}) {
+                ScreenshotSelectionModel model;
+                model.setSelectionRect(QRect(bounds.topLeft(), size));
+                model.beginRegionOperation(Operation::Add);
+                require(model.duplicateLatestRegion({qreal(x), qreal(y)}, bounds),
+                        "valid sizes duplicate at and beyond every capture edge");
+                const QRect actual = model.highlightedRegion()->boundingRect();
+                const QPoint expected =
+                    bounds.topLeft() +
+                    QPoint(std::clamp(qRound(x - bounds.x() - size.width() / 2.0), 0,
+                                      bounds.width() - size.width()),
+                           std::clamp(qRound(y - bounds.y() - size.height() / 2.0), 0,
+                                      bounds.height() - size.height()));
+                require(actual == QRect(expected, size) && bounds.contains(actual),
+                        "duplicate preserves size with nearest centered integer translation and "
+                        "clamping");
+            }
+        }
+    }
+    ScreenshotSelectionModel model;
+    QPainterPath curve;
+    curve.addEllipse(QRectF(0.25, 0.5, 30.5, 20.25));
+    const auto original = ScreenshotRegionGeometry::fromPath(curve, ScreenshotRegionType::Curve);
+    model.setSelectionRegion(original);
+    model.beginRegionOperation(Operation::Add);
+    require(model.duplicateLatestRegion({50, 30}, bounds), "custom curves can be duplicated");
+    const auto copy = *model.highlightedRegion();
+    const QPoint offset = copy.boundingRect().topLeft() - original.boundingRect().topLeft();
+    require(copy == original.translated(offset) &&
+                copy.path().elementCount() == curve.elementCount(),
+            "duplication retains untouched vector control points");
+    const auto state = model;
+    require(!model.duplicateLatestRegion({0, 0}, {}) &&
+                !model.duplicateLatestRegion({0, 0}, QRect(0, 0, 1, 1)) &&
+                model.selectionRegion() == state.selectionRegion() &&
+                model.createdRegionCount() == state.createdRegionCount() &&
+                model.changeRevision() == state.changeRevision(),
+            "invalid or too-small bounds leave creation state unchanged");
+    model.beginMoveDrag(copy.boundingRect().center());
+    const auto count = model.regionEditCompositionsForTesting();
+    const auto revision = model.changeRevision();
+    for (int i = 0; i < 1000; ++i)
+        model.setDraggedSelectionRect(model.moveOriginalSelection(),
+                                      ScreenshotSelectionDragMode::All);
+    require(model.regionEditCompositionsForTesting() == count && model.changeRevision() == revision,
+            "unchanged pointer bursts perform zero compositions and revisions");
+    model.finishMoveDrag();
+    const auto params = model.params(bounds);
+    ScreenshotSelectionModel restored;
+    require(restored.applyParams(params, bounds) && !restored.multiRegionEditing() &&
+                restored.selectionRegion() == model.selectionRegion(),
+            "history restores the same exported mask without session-local creation identities");
+}
+
+void containedMovesAndSurvivingCreationOrder() {
+    using Operation = ScreenshotSelectionModel::RegionOperation;
+    const QRect bounds(0, 0, 500, 400);
+    ScreenshotSelectionModel model;
+    const QRect base(20, 20, 200, 200), contained(50, 50, 31, 21);
+    model.setSelectionRect(base);
+    apply(model, Operation::Add, contained);
+    const auto olderId = model.regionAt({25, 25});
+    const auto containedId = model.regionAt({55, 55});
+    ScreenshotSelectionModel before = model;
+    model.beginMoveDrag({55, 55});
+    model.setDraggedSelectionRect(
+        model.selectionRectForDrag(ScreenshotSelectionDragMode::All, {115, 55}, bounds, 1),
+        ScreenshotSelectionDragMode::All);
+    require(model.selectionRegion() == before.selectionRegion() &&
+                model.regionAt({115, 55}) == containedId && model.regionAt({55, 55}) == olderId,
+            "contained drag changes the hit target while preserving the combined mask");
+    const auto oldRevision = before.changeRevision();
+    before = model;
+    require(before.changeRevision() == oldRevision + 1 &&
+                before.highlightedRegion() == model.highlightedRegion(),
+            "copy assignment observes contained movement even when the mask is unchanged");
+    model.finishMoveDrag();
+    const auto settledRevision = before.changeRevision();
+    before = model;
+    require(before.changeRevision() == settledRevision,
+            "committing the same preview does not introduce another semantic revision");
+    model.beginMoveDrag({25, 25});
+    model.setDraggedSelectionRect(
+        model.selectionRectForDrag(ScreenshotSelectionDragMode::All, {25, 35}, bounds, 1),
+        ScreenshotSelectionDragMode::All);
+    model.finishMoveDrag();
+    require(model.duplicateLatestRegion({350, 300}, bounds) &&
+                model.highlightedRegion()->boundingRect().size() == contained.size(),
+            "moving an older, larger region does not change the latest-created source");
+    const QRect newest = model.highlightedRegion()->boundingRect();
+    apply(model, Operation::Subtract, newest);
+    require(model.createdRegionCount() == 2 && model.duplicateLatestRegion({350, 300}, bounds) &&
+                model.highlightedRegion()->boundingRect().size() == contained.size(),
+            "removing the latest region falls back to the newest surviving identity");
+    const auto splitId = model.regionAt({350, 300});
+    apply(model, Operation::Subtract, QRect(345, 280, 5, 40));
+    const auto cut = model.selectionRegion();
+    model.beginMoveDrag({340, 300});
+    const auto original = *model.highlightedRegion();
+    model.setDraggedSelectionRect(
+        model.selectionRectForDrag(ScreenshotSelectionDragMode::All, {480, 390}, bounds, 1),
+        ScreenshotSelectionDragMode::All);
+    const auto moved = *model.highlightedRegion();
+    model.finishMoveDrag();
+    require(model.selectionRegion() == cut.subtracted(original).united(moved) &&
+                moved == original.translated(moved.boundingRect().topLeft() -
+                                             original.boundingRect().topLeft()) &&
+                bounds.contains(moved.boundingRect()) &&
+                model.regionAt(QPointF(moved.boundingRect().topLeft()) + QPointF(1, 1)) == splitId,
+            "split remnants move together, retain their cut and identity, and clamp as one region");
+}
+
+void wholeSelectionMovesPreserveEditableRegions() {
+    using Operation = ScreenshotSelectionModel::RegionOperation;
+    const QRect bounds(-100, -60, 300, 240);
+    for (const bool curves : {false, true}) {
+        ScreenshotSelectionModel model;
+        model.setSelectionRect(QRect(-80, -40, 40, 40));
+        model.beginRegionOperation(Operation::Add);
+        QPainterPath ellipse;
+        ellipse.addEllipse(QRectF(10.25, 20.5, 50.5, 30.25));
+        model.setDraftRegion(
+            curves ? ScreenshotRegionGeometry::fromPath(ellipse, ScreenshotRegionType::Curve)
+                   : ScreenshotRegionGeometry(QRect(10, 20, 51, 31)));
+        model.commitRegionOperation();
+        apply(model, Operation::Subtract, QRect(-65, -40, 10, 40));
+        const QPointF firstPoint(-75, -30), latestPoint(35, 35), start(-20, 0);
+        const auto firstId = model.regionAt(firstPoint);
+        const auto latestId = model.regionAt(latestPoint);
+        require(firstId && latestId && firstId != latestId, "group move fixture has two regions");
+        static_cast<void>(model.setHoveredRegion(latestPoint));
+        const auto latest = *model.highlightedRegion();
+        const auto original = model.selectionRegion();
+        model.beginMoveDrag(start, true);
+        require(model.moveOriginalSelection() == QRectF(original.boundingRect()) &&
+                    model.highlightedRegion() == original && !model.stationaryRegionsDuringMove(),
+                "whole-selection drag uses the combined bounds and highlights every moving region");
+        for (const QPointF endpoint : {QPointF(1000, 1000), QPointF(-1000, -1000)}) {
+            const auto target =
+                model.selectionRectForDrag(ScreenshotSelectionDragMode::All, endpoint, bounds, 1);
+            const QPoint offset = target.topLeft().toPoint() - original.boundingRect().topLeft();
+            model.setDraggedSelectionRect(target, ScreenshotSelectionDragMode::All);
+            require(model.selectionRegion() == original.translated(offset) &&
+                        bounds.contains(model.pixelSelection()) &&
+                        model.regionAt(firstPoint + offset) == firstId &&
+                        model.regionAt(latestPoint + offset) == latestId,
+                    "group movement clamps the combined bounds and retains cuts, curves, and IDs");
+            const auto revision = model.changeRevision();
+            const auto compositions = model.regionEditCompositionsForTesting();
+            model.setDraggedSelectionRect(target, ScreenshotSelectionDragMode::All);
+            require(
+                model.changeRevision() == revision &&
+                    model.regionEditCompositionsForTesting() == compositions &&
+                    !model.duplicateLatestRegion(latestPoint, bounds),
+                "unchanged group moves do no geometry work and active moves reject duplication");
+        }
+        ScreenshotSelectionModel copied;
+        copied = model;
+        copied.setDraggedSelectionRect(QRectF(original.boundingRect()),
+                                       ScreenshotSelectionDragMode::All);
+        copied.finishMoveDrag();
+        require(copied.selectionRegion() == original && copied.createdRegionCount() == 2 &&
+                    copied.regionAt(firstPoint) == firstId &&
+                    copied.regionAt(latestPoint) == latestId,
+                "copying an active group drag retains the complete movement transaction");
+        copied.beginMoveDrag(firstPoint);
+        const auto first = *copied.highlightedRegion();
+        copied.setDraggedSelectionRect(copied.selectionRectForDrag(ScreenshotSelectionDragMode::All,
+                                                                   firstPoint + QPointF(5, 7),
+                                                                   bounds, 1),
+                                       ScreenshotSelectionDragMode::All);
+        copied.finishMoveDrag();
+        require(copied.selectionRegion() == latest.united(first.translated(5, 7)),
+                "individual moves after a group move retain split remnants as one editable region");
+        require(copied.duplicateLatestRegion({100, 100}, bounds) &&
+                    copied.highlightedRegion() ==
+                        latest.translated(copied.highlightedRegion()->boundingRect().topLeft() -
+                                          latest.boundingRect().topLeft()),
+                "group moves preserve the newest region's exact geometry for duplication");
+        model.reset();
+        model.setSelectionRect(QRect(0, 0, 20, 20));
+        model.setDraggedSelectionRect(QRectF(5, 7, 20, 20), ScreenshotSelectionDragMode::All);
+        require(!model.multiRegionEditing() && model.pixelSelection() == QRect(5, 7, 20, 20),
+                "resetting an active group move releases its transient movement scope");
+    }
 }
 
 void moveSnapshotEndsWithSelection() {
@@ -130,7 +497,7 @@ void animatedMarqueeUsesDisplayedGeometry() {
         require(model.selectionRegion() == targetRegion,
                 "animated region preview must not change the capture target");
 
-        static_cast<void>(transition.advance(ScreenshotSmartSelectionTransition::kDurationMs));
+        static_cast<void>(transition.advance(400));
         require(!transition.isRunning(), "region preview transition must finish");
         require(displayed == targetRegion, "region preview must finish at the target shape");
     };
@@ -760,6 +1127,11 @@ int main(int argc, char** argv) {
     shapeCodecAndSamplingBoundaries();
     customGeometryTransactionsAndPersistence();
     geometryAndTransactions();
+    individualRegionSnapping();
+    independentRegionsAndDuplication();
+    duplicateGeometryBoundariesAndCurves();
+    containedMovesAndSurvivingCreationOrder();
+    wholeSelectionMovesPreserveEditableRegions();
     moveSnapshotEndsWithSelection();
     animatedMarqueeUsesDisplayedGeometry();
 #if defined(SNOW_SHOT_BENCH_INTERNALS)

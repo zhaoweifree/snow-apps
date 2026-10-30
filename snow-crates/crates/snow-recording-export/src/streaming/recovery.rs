@@ -88,8 +88,12 @@ pub(super) fn create(builder: StreamingEncoderBuilder) -> Result<StreamingEncode
             global_header,
             &recovery.config.audio,
             recovery.config.encode_threads,
+            None,
         )?;
-        output.write_header().map_err(error)?;
+        crate::codec::write_audio_bitrate_metadata(&mut output, &recovery.config.audio);
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("movflags", "use_metadata_tags");
+        output.write_header_with(options).map_err(error)?;
         for state in &mut audio {
             state.stream_time_base = output
                 .stream(state.stream_index)
@@ -116,7 +120,8 @@ fn segment(
         path.clone(),
         false,
         fallback_threads,
-        false,
+        VideoEncoderPurpose::LiveOutput,
+        None,
         None,
         #[cfg(windows)]
         gpu,
@@ -490,7 +495,16 @@ fn remux(
         }
         streams.push(mapping);
     }
-    output.write_header().map_err(error)?;
+    let mut options = ffmpeg::Dictionary::new();
+    if let Some(audio) = inputs.get(1)
+        && let Some(rates) = audio.metadata().get(crate::codec::AUDIO_BITRATES_METADATA)
+    {
+        let mut metadata = ffmpeg::Dictionary::new();
+        metadata.set(crate::codec::AUDIO_BITRATES_METADATA, rates);
+        output.set_metadata(metadata);
+        options.set("movflags", "use_metadata_tags");
+    }
+    output.write_header_with(options).map_err(error)?;
     for (input, mapping) in inputs.iter_mut().zip(streams) {
         let mut video_offset = None;
         let mut video_packets = RemuxVideoPackets::default();
@@ -546,6 +560,7 @@ fn normalize(
     settings.output_path = path.to_owned();
     settings.audio.clear();
     let mut output = StreamingEncoder::builder(settings)
+        .offline_output()
         .software_only()
         .create()?;
     let mut last_pts = None;

@@ -68,6 +68,7 @@ QPainterPath arrowPathFromCommands(const ViewProjection& projection,
 QRectF sceneItemBounds(const SceneDisplayInfo& displayInfo, const SnowSceneDisplayItem& item);
 QRectF sceneItemBounds(const SceneDisplayInfo& displayInfo, const SnowCanvasSceneItem& item);
 QRectF overlayItemBounds(const OverlayDisplayInfo& displayInfo, const SnowOverlayDisplayItem& item);
+QRectF overlayItemBounds(const OverlayDisplayInfo& displayInfo, const SnowCanvasOverlayItem& item);
 
 ViewCornerRadii toViewCornerRadii(const SnowCornerRadii& radii, double zoom, const QRectF& rect);
 QPainterPath roundedRectPath(const QRectF& rect, const ViewCornerRadii& radii);

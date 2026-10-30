@@ -163,6 +163,7 @@ pub(crate) fn run() -> Result<()> {
         mouse_trail_rgba: if effects { [255, 85, 0, 255] } else { [0; 4] },
         mouse_trail_duration_ms: 500,
         mouse_click_rgba: if effects { [255, 0, 0, 255] } else { [0; 4] },
+        mouse_highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
         mouse_highlight_rgba: [0; 4],
         excluded_windows: Default::default(),
         excluded_processes: Default::default(),

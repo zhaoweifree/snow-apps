@@ -30,11 +30,11 @@ Qt::WindowFlags nativeWindowChromeFlags() {
 #endif
 }
 
-void applyNativeWindowChrome(QWidget* surface) {
+void applyNativeWindowChrome(QWidget* surface, bool minimizeEnabled, bool maximizeEnabled) {
   if (!surface) return;
 #ifdef Q_OS_MACOS
   if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
-    applyMacWindowSurfaceChrome(surface);
+    applyMacWindowSurfaceChrome(surface, minimizeEnabled, maximizeEnabled);
   }
 #endif
 #ifdef Q_OS_WIN
@@ -46,6 +46,8 @@ void applyNativeWindowChrome(QWidget* surface) {
   LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
   style |= WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
   style &= ~(WS_MAXIMIZEBOX | WS_MINIMIZEBOX);
+  if (minimizeEnabled) style |= WS_MINIMIZEBOX;
+  if (maximizeEnabled) style |= WS_MAXIMIZEBOX;
   SetWindowLongPtr(hwnd, GWL_STYLE, style);
 
   LONG_PTR exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
@@ -58,6 +60,10 @@ void applyNativeWindowChrome(QWidget* surface) {
   DwmExtendFrameIntoClientArea(hwnd, &margins);
   SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+#endif
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+  Q_UNUSED(minimizeEnabled)
+  Q_UNUSED(maximizeEnabled)
 #endif
 }
 

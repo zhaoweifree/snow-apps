@@ -34,7 +34,8 @@ pub(crate) fn choose_video_pixel_format(
     mode: ExportExecutionMode,
 ) -> ffmpeg::format::Pixel {
     let preferred = match format {
-        // GIF must use the adaptive palette converter even for RGB8 sources.
+        // FFmpeg's GIF context supplies stream parameters to the muxer. The
+        // streaming GIF backend accepts RGB24 and quantizes changed pixels.
         ExportFormat::Gif => return ffmpeg::format::Pixel::PAL8,
         ExportFormat::Apng => [
             ffmpeg::format::Pixel::RGBA,
@@ -145,7 +146,26 @@ pub(crate) fn choose_audio_channel_layout(
 }
 
 pub(crate) fn effective_audio_bitrate_kbps(requested_kbps: u16) -> u16 {
-    requested_kbps.clamp(128, 192)
+    // Honor speech/mono budgets instead of silently promoting them to stereo rates.
+    requested_kbps.clamp(8, 192)
+}
+
+/// Audio-track order, independent of video stream indices. Retain the target
+/// because a file's measured average can be dominated by silence.
+pub(crate) const AUDIO_BITRATES_METADATA: &str = "snow_audio_bitrates_kbps";
+
+pub(crate) fn write_audio_bitrate_metadata(
+    output: &mut ffmpeg::format::context::Output,
+    configs: &[crate::StreamingAudioConfig],
+) {
+    let rates = configs
+        .iter()
+        .map(|track| effective_audio_bitrate_kbps(track.bitrate_kbps).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut metadata = output.metadata().to_owned();
+    metadata.set(AUDIO_BITRATES_METADATA, &rates);
+    output.set_metadata(metadata);
 }
 
 pub(crate) fn choose_audio_sample_format(codec: ffmpeg::codec::Audio) -> ffmpeg::format::Sample {
@@ -377,7 +397,8 @@ pub(crate) fn hardware_codec_candidates(codec: VideoCodec) -> Vec<ffmpeg::Codec>
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VideoEncoderPurpose {
-    Output,
+    LiveOutput,
+    OfflineOutput,
     RecordingSource,
 }
 
@@ -393,15 +414,17 @@ pub(crate) fn open_video_encoder(
     // Let the selected preset use B-frames, lookahead and frame workers; stop
     // drains that finite codec tail instead of re-encoding the whole recording.
     let source = purpose == VideoEncoderPurpose::RecordingSource;
+    let offline = purpose == VideoEncoderPurpose::OfflineOutput;
     let mut options = ffmpeg::Dictionary::new();
     if source || is_hardware_video_encoder(codec) {
-        // All hardware outputs share a GOP of two nominal seconds. FFmpeg's
-        // default of 12 frames inflated continuously animated overlays.
+        // Keep seeking bounded without FFmpeg's short default hardware GOP.
         let gop = fps
             .saturating_mul(if source { 1 } else { 2 })
             .min(i32::MAX as u32);
         video_encoder.set_gop(gop);
-        video_encoder.set_max_b_frames(0);
+        if !offline {
+            video_encoder.set_max_b_frames(0);
+        }
     }
     if should_use_x264_options(codec) || should_use_x265_options(codec) {
         options.set("preset", x264_preset_for(video_config.speed));
@@ -423,6 +446,10 @@ pub(crate) fn open_video_encoder(
         video_config.quality,
         purpose,
     ) {
+        if offline && codec.name().contains("nvenc") {
+            // CQ VBR must not inherit the resolution-based average bitrate target.
+            video_encoder.set_bit_rate(0);
+        }
         if codec.name().ends_with("_videotoolbox") && cfg!(target_arch = "aarch64") {
             // Apple Silicon accepts normalized quality; zero disables that mode.
             // Intel VideoToolbox retains the explicit bitrate fallback.
@@ -454,17 +481,27 @@ pub(crate) fn apply_hardware_encoder_options(
     purpose: VideoEncoderPurpose,
 ) -> bool {
     let source = purpose == VideoEncoderPurpose::RecordingSource;
+    let offline = purpose == VideoEncoderPurpose::OfflineOutput;
     let qp = quality_to_h264_crf(quality).to_string();
-    // Preserve each live encoder's speed policy while passing the requested
-    // quality. Hardware queues remain bounded and non-reordering for recovery.
+    // Offline CPU uploads can buffer and reorder. Live surfaces and recovery
+    // retain their bounded, non-reordering policy.
     if name.ends_with("_videotoolbox") {
         options.set("allow_sw", "0");
         options.set("require_sw", "0");
-        options.set("realtime", "1");
-        options.set("bf", "0");
+        options.set("realtime", if offline { "0" } else { "1" });
+        options.set("bf", if offline { "2" } else { "0" });
         return true;
     }
     if name.contains("nvenc") {
+        if offline {
+            options.set("preset", "p5");
+            options.set("tune", "hq");
+            options.set("rc", "vbr");
+            options.set("cq", &qp);
+            options.set("rc-lookahead", "16");
+            options.set("bf", "3");
+            return true;
+        }
         options.set("preset", if source { "p1" } else { "p4" });
         options.set("tune", "ull");
         options.set("rc", "constqp");
@@ -475,22 +512,57 @@ pub(crate) fn apply_hardware_encoder_options(
         return true;
     }
     if name.contains("qsv") {
-        options.set("preset", if source { "veryfast" } else { "medium" });
+        options.set(
+            "preset",
+            if source {
+                "veryfast"
+            } else if offline {
+                "slow"
+            } else {
+                "medium"
+            },
+        );
         options.set("global_quality", &qp);
-        options.set("look_ahead", "0");
-        options.set("async_depth", "1");
-        options.set("bf", "0");
+        options.set("look_ahead", if offline { "1" } else { "0" });
+        if offline {
+            options.set("look_ahead_depth", "16");
+        }
+        options.set("async_depth", if offline { "4" } else { "1" });
+        options.set("bf", if offline { "3" } else { "0" });
         return true;
     }
     if name.contains("amf") {
-        options.set("usage", "ultralowlatency");
-        options.set("quality", if source { "speed" } else { "balanced" });
+        options.set(
+            "usage",
+            if offline {
+                "transcoding"
+            } else {
+                "ultralowlatency"
+            },
+        );
+        options.set(
+            "quality",
+            if source {
+                "speed"
+            } else if offline {
+                "quality"
+            } else {
+                "balanced"
+            },
+        );
         options.set("rc", "cqp");
         options.set("qp_i", &qp);
         options.set("qp_p", &qp);
-        options.set("preanalysis", "0");
+        // CQP keeps the existing quality scale; preencode is for bitrate control.
+        options.set("preanalysis", if offline { "1" } else { "0" });
         options.set("preencode", "0");
+        // FFmpeg's AMF reorder-delay initialization requires a successor PTS.
+        // Coalesced exports can contain one picture, so retain preanalysis
+        // without either fixed or adaptive B-frames.
         options.set("bf", "0");
+        if offline && name == "h264_amf" {
+            options.set("pa_adaptive_mini_gop", "0");
+        }
         return true;
     }
     if name.contains("mf") {
@@ -498,6 +570,10 @@ pub(crate) fn apply_hardware_encoder_options(
         options.set("hw_encoding", "1");
         options.set("rate_control", "quality");
         options.set("quality", &quality.min(100).to_string());
+        if offline {
+            options.set("scenario", "archive");
+        }
+        // MF does not reliably negotiate B-frame support across vendor MFTs.
         options.set("bf", "0");
         return true;
     }
@@ -534,14 +610,12 @@ where
 }
 
 pub(crate) fn ensure_video_frame_writable(frame: &mut ffmpeg::frame::Video) -> Result<()> {
-    let status = unsafe { ffmpeg::ffi::av_frame_make_writable(frame.as_mut_ptr()) };
-    if status < 0 {
-        return Err(ScreenRecorderError::Export(format!(
-            "failed to make video frame writable: {}",
-            ffmpeg::Error::from(status)
-        )));
-    }
-    Ok(())
+    // SAFETY: Codec callers use FFmpeg-allocated frames whose format, dimensions, and
+    // plane layout remain consistent with their allocation or scaler output.
+    unsafe { crate::ffmpeg_util::ensure_video_frame_writable(frame) }.map_err(|error| match error {
+        ScreenRecorderError::Encode(message) => ScreenRecorderError::Export(message),
+        other => other,
+    })
 }
 
 #[inline]
@@ -584,13 +658,13 @@ mod tests {
                 &mut lower,
                 name,
                 40,
-                VideoEncoderPurpose::Output
+                VideoEncoderPurpose::LiveOutput
             ));
             assert!(apply_hardware_encoder_options(
                 &mut higher,
                 name,
                 80,
-                VideoEncoderPurpose::Output
+                VideoEncoderPurpose::LiveOutput
             ));
             for key in keys {
                 let low: u8 = lower.get(key).unwrap().parse().unwrap();
@@ -607,21 +681,21 @@ mod tests {
             assert_eq!(higher.get("bf"), Some("0"));
         }
         let mut mf = ffmpeg::Dictionary::new();
-        apply_hardware_encoder_options(&mut mf, "h264_mf", 80, VideoEncoderPurpose::Output);
+        apply_hardware_encoder_options(&mut mf, "h264_mf", 80, VideoEncoderPurpose::LiveOutput);
         assert_eq!(mf.get("hw_encoding"), Some("1"));
         assert_eq!(mf.get("rate_control"), Some("quality"));
         assert_eq!(mf.get("quality"), Some("80"));
     }
 
     #[test]
-    fn final_output_presets_are_shared_and_clean_sources_remain_fast() {
+    fn live_output_and_clean_sources_keep_their_bounded_presets() {
         for (name, key, output, source) in [
             ("h264_nvenc", "preset", "p4", "p1"),
             ("h264_amf", "quality", "balanced", "speed"),
             ("h264_qsv", "preset", "medium", "veryfast"),
         ] {
             for (purpose, expected) in [
-                (VideoEncoderPurpose::Output, output),
+                (VideoEncoderPurpose::LiveOutput, output),
                 (VideoEncoderPurpose::RecordingSource, source),
             ] {
                 let mut options = ffmpeg::Dictionary::new();
@@ -629,5 +703,129 @@ mod tests {
                 assert_eq!(options.get(key), Some(expected));
             }
         }
+    }
+
+    #[test]
+    fn offline_hardware_options_are_valid_and_keep_quality_control() {
+        crate::ffmpeg_util::ensure_ffmpeg_initialized().unwrap();
+        for (name, quality_key, b_frames) in [
+            ("h264_nvenc", "cq", "3"),
+            ("h264_amf", "qp_p", "0"),
+            ("h264_qsv", "global_quality", "3"),
+            ("h264_mf", "quality", "0"),
+            ("h264_videotoolbox", "", "2"),
+            ("hevc_videotoolbox", "", "2"),
+        ] {
+            let mut options = ffmpeg::Dictionary::new();
+            assert!(apply_hardware_encoder_options(
+                &mut options,
+                name,
+                80,
+                VideoEncoderPurpose::OfflineOutput
+            ));
+            assert_eq!(options.get("bf"), Some(b_frames));
+            if name == "h264_amf" {
+                assert_eq!(options.get("pa_adaptive_mini_gop"), Some("0"));
+                assert_eq!(options.get("preanalysis"), Some("1"));
+                assert_eq!(options.get("usage"), Some("transcoding"));
+                assert_eq!(options.get("quality"), Some("quality"));
+            }
+            if !quality_key.is_empty() {
+                assert_eq!(
+                    options.get(quality_key),
+                    Some(if name == "h264_mf" { "80" } else { "18" })
+                );
+            }
+            // Parse against the packaged FFmpeg without requiring a physical GPU.
+            if let Some(codec) = ffmpeg::encoder::find_by_name(name) {
+                let mut context = ffmpeg::codec::context::Context::new_with_codec(codec);
+                for (key, value) in options.iter() {
+                    let key = std::ffi::CString::new(key).unwrap();
+                    let value = std::ffi::CString::new(value).unwrap();
+                    let status = unsafe {
+                        ffmpeg::ffi::av_opt_set(
+                            context.as_mut_ptr().cast(),
+                            key.as_ptr(),
+                            value.as_ptr(),
+                            ffmpeg::ffi::AV_OPT_SEARCH_CHILDREN,
+                        )
+                    };
+                    assert!(
+                        status >= 0,
+                        "{name}: {key:?}={value:?}: {}",
+                        ffmpeg::Error::from(status)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires an available native AMD AMF H.264 encoder"]
+    fn offline_amf_single_picture_drains_without_a_successor() {
+        crate::ffmpeg_util::ensure_ffmpeg_initialized().unwrap();
+        let codec = ffmpeg::encoder::find_by_name("h264_amf").expect("AMF encoder required");
+        let mut context = ffmpeg::codec::context::Context::new_with_codec(codec)
+            .encoder()
+            .video()
+            .unwrap();
+        context.set_width(640);
+        context.set_height(360);
+        context.set_format(ffmpeg::format::Pixel::NV12);
+        context.set_time_base((1, 30));
+        context.set_frame_rate(Some((30, 1)));
+        let mut encoder = open_video_encoder(
+            context,
+            &codec,
+            &VideoEncodeConfig::default(),
+            VideoEncoderPurpose::OfflineOutput,
+            30,
+            None,
+        )
+        .unwrap();
+        let mut picture = ffmpeg::frame::Video::new(encoder.format(), 640, 360);
+        picture.data_mut(0).fill(80);
+        picture.data_mut(1).fill(128);
+        picture.set_pts(Some(0));
+        // One coded picture can cover an arbitrarily long static recording.
+        // It must drain without an artificial successor or a duplicate sample.
+        unsafe { (*picture.as_mut_ptr()).duration = 90 };
+        encoder.send_frame(&picture).unwrap();
+        let mut packets = Vec::new();
+        let mut drain = |encoder: &mut ffmpeg::encoder::video::Encoder, flushing| loop {
+            let mut packet = ffmpeg::Packet::empty();
+            match encoder.receive_packet(&mut packet) {
+                Ok(()) => packets.push(packet),
+                Err(ffmpeg::Error::Eof) if flushing => break,
+                Err(error) if !flushing && is_eagain(&error) => break,
+                Err(error) => panic!("AMF single-picture packet drain failed: {error}"),
+            }
+        };
+        drain(&mut encoder, false);
+        encoder
+            .send_eof()
+            .expect("single-picture AMF EOF must succeed");
+        drain(&mut encoder, true);
+        assert_eq!(packets.len(), 1, "retain exactly the submitted picture");
+        assert_eq!(packets[0].pts(), Some(0));
+        assert!(packets[0].is_key());
+
+        let mut decoder = ffmpeg::codec::context::Context::from_parameters(
+            ffmpeg::codec::Parameters::from(&encoder),
+        )
+        .unwrap()
+        .decoder()
+        .video()
+        .unwrap();
+        decoder.send_packet(&packets[0]).unwrap();
+        decoder.send_eof().unwrap();
+        let mut decoded = ffmpeg::frame::Video::empty();
+        decoder.receive_frame(&mut decoded).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (640, 360));
+        assert_eq!(decoded.pts(), Some(0));
+        assert!(matches!(
+            decoder.receive_frame(&mut decoded),
+            Err(ffmpeg::Error::Eof)
+        ));
     }
 }

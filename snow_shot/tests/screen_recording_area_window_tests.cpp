@@ -2,6 +2,7 @@
 #include "../../test-support/canvas_quick_selection_test_support.h"
 #include "physical_key_test_support.h"
 #include "snow_shot/presentation/screenrecordingareawindow.h"
+#include "snow_shot/presentation/crosshaircursor.h"
 
 #include "snow_shot/presentation/screenshotgeometry.h"
 #include "snow_shot/storage/applicationstorage.h"
@@ -526,7 +527,8 @@ void logicalRegionDragAndResize() {
     require(area.cursor().shape() == Qt::ArrowCursor,
             "the recording interior must not advertise movement");
     area.setInputMode(ScreenRecordingAreaWindow::InputMode::Drawing);
-    require(area.canvas()->cursor().shape() == Qt::CrossCursor,
+    require(area.canvas()->cursor() ==
+                snow_shot::presentation::crosshairCursor(area.canvas()->devicePixelRatioF()),
             "leaving region editing must release the host cursor to the drawing tool");
 }
 #endif
@@ -786,7 +788,7 @@ void childDragHandleOwnsCaptureAndPreservesAnnotations() {
     require(button->parentWidget() == &area && !button->isWindow() && button->window() == &area &&
                 QApplication::topLevelWidgets().size() == windows.size(),
             "the recording move button must be a child widget without an auxiliary window");
-    require(button->size() == QSize(32, 32) && button->iconSize() == QSize(16, 16) &&
+    require(button->size() == QSize(32, 32) && button->iconSize() == QSize(18, 18) &&
                 button->cursor().shape() == Qt::SizeAllCursor &&
                 button->accessibleName() == QStringLiteral("Move recording area"),
             "the move control must use the pinned window's size, icon and drag affordance");
@@ -1717,6 +1719,16 @@ int main(int argc, char** argv) {
                 .initialize({executableDirectory, storageDirectory.path(), 60000})
                 .success,
             "failed to initialize isolated recording area test storage");
+    if (application.arguments().contains(QStringLiteral("--crosshair-only"))) {
+        ScreenRecordingAreaWindow area;
+        area.setInputMode(ScreenRecordingAreaWindow::InputMode::Drawing);
+        require(area.canvas()->setCanvasTool(SnowCanvasTool::Shape), "activate a recording tool");
+        require(area.canvas()->cursor() ==
+                    snow_shot::presentation::crosshairCursor(area.canvas()->devicePixelRatioF()),
+                "recording annotation tools must use Snow Shot's crosshair");
+        snow_shot::storage::ApplicationStorage::instance().shutdown();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--angle-wheel-only"))) {
         recordingAngleWheel();
         snow_shot::storage::ApplicationStorage::instance().shutdown();

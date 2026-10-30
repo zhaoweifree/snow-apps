@@ -1,7 +1,9 @@
 #include "../src/presentation/recording/recordingcolorsampler.h"
 #include "snow_shot/presentation/screenrecordingtoolbarwindow.h"
+#include "snow_shot/presentation/screenshottoolpalettehost.h"
 #include "snow_shot/presentation/screenshotstylebinding.h"
 #include "snow_shot/presentation/screenshotcanvastoolstyles.h"
+#include "snow_shot/storage/settingsadapters.h"
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
 #include "widgets/color_picker.h"
 
@@ -9,9 +11,15 @@
 #include <QApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QScopeGuard>
+#include <QScreen>
+#include <QTimer>
 
 #include <cstdlib>
 #include <iostream>
+
+void setRecordingToolbarAutoHideTestCursor(ScreenRecordingToolbarWindow& toolbar,
+                                           const QPoint& position);
 
 namespace {
 void require(bool condition, const char* message) {
@@ -24,13 +32,27 @@ void require(bool condition, const char* message) {
 
 void recordingColorSamplerInteractions() {
     using snow_shot::presentation::recording::RecordingColorSampler;
+    const snow_shot::storage::RecordingSettings settings;
+    const bool savedAutoHide = settings.autoHideToolbar();
+    const auto restore = qScopeGuard([&] {
+        require(settings.setAutoHideToolbar(savedAutoHide), "restore sampler auto-hide preference");
+    });
+    require(settings.setAutoHideToolbar(true), "enable auto-hide for sampler protection coverage");
     ScreenRecordingAreaWindow area;
     ScreenRecordingToolbarWindow toolbar;
     area.setRecordingRegion(QRect(10, 10, 640, 480));
     area.setRecordingState(ScreenshotToolPalette::RecordingState::Recording);
     area.setInputMode(ScreenRecordingAreaWindow::InputMode::Drawing);
     area.show();
+    toolbar.placeForRecordingRegion(area.recordingRegion());
     toolbar.showWithoutActivating();
+    const QRect monitor = toolbar.screen()->geometry();
+    const QRect row = toolbar.paletteHost()->mainToolbarContentRect();
+    toolbar.moveContentTo(QPoint(monitor.left() - row.left(), toolbar.contentPosition().y()));
+    const QPoint outside = monitor.bottomRight() + QPoint(100, 100);
+    auto* retreat = toolbar.findChild<QTimer*>(QStringLiteral("recordingToolbarRetreatTimer"));
+    require(retreat != nullptr, "sampler fixture has the toolbar auto-hide retreat timer");
+    setRecordingToolbarAutoHideTestCursor(toolbar, outside);
     auto* canvas = area.canvas();
     auto* tools = toolbar.palette();
     require(canvas->setCanvasTool(SnowCanvasTool::Shape), "activate shape canvas tool");
@@ -59,6 +81,9 @@ void recordingColorSamplerInteractions() {
     QObject::connect(picker, &adqt::widgets::AdColorPicker::editingFinished, &toolbar,
                      [&](const auto&) { ++commits; });
     const auto begin = [&] {
+        const QRect mainRow = toolbar.paletteHost()->mainToolbarContentRect();
+        toolbar.moveContentTo(
+            QPoint(monitor.left() - mainRow.left(), toolbar.contentPosition().y()));
         picker->setPopupVisible(true);
         QCoreApplication::processEvents();
         auto* button = qobject_cast<QAbstractButton*>(picker->previewContent());
@@ -66,6 +91,9 @@ void recordingColorSamplerInteractions() {
         button->click();
         require(!picker->popupVisible() && QApplication::overrideCursor() != nullptr,
                 "eyedropper starts sampling and closes the popup");
+        setRecordingToolbarAutoHideTestCursor(toolbar, outside);
+        require(toolbar.isVisible() && !retreat->isActive(),
+                "the real color sampler protects a docked toolbar from auto-hide");
     };
     const QPointF local(100.25, 80.5);
     const QPointF global = canvas->mapToGlobal(local);
@@ -130,6 +158,9 @@ void recordingColorSamplerInteractions() {
     sampling.cancel();
     require(area.inputMode() == ScreenRecordingAreaWindow::InputMode::PassThrough,
             "cancelling restores the previous recording input mode");
+    QCoreApplication::processEvents();
+    setRecordingToolbarAutoHideTestCursor(toolbar, outside);
+    require(retreat->isActive(), "cancelling real color sampling releases auto-hide protection");
     area.setInputMode(ScreenRecordingAreaWindow::InputMode::Drawing);
     begin();
     area.regionInteractionStarted();

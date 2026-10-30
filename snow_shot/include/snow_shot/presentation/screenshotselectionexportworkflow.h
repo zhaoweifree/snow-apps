@@ -20,7 +20,6 @@ struct ScreenshotSelectionExportWorkflowContext {
     ScreenshotSelectionModel& selection;
     ScreenshotSelectionImageComposerPort& imageComposer;
     ScreenshotSelectionExportDestinationPort& destination;
-    ScreenshotSelectionParamsStorePort& selectionSettings;
     QObject& callbackContext;
     std::function<ScreenshotRecognitionResults()> cachedRecognitionResults;
 };
@@ -39,10 +38,6 @@ class ScreenshotSelectionExportWorkflow final {
     [[nodiscard]] bool pinSelectionToScreen(ResultValidator validator, Completion completion);
 
   private:
-    [[nodiscard]] ScreenshotSelectionParams currentSelectionParams() const;
-    [[nodiscard]] QRect selectionBounds() const;
-    void persistSelectionParams(const ScreenshotSelectionParams& params);
-
     ScreenshotSelectionExportWorkflowContext m_context;
 };
 

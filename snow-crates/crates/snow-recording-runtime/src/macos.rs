@@ -793,9 +793,13 @@ fn audio_discontinuity(
 mod direct;
 pub use direct::{DirectSession, recording_dimensions};
 
+mod cursor_rasterizer;
 pub(crate) mod deferred;
+#[cfg(feature = "legacy-capture")]
 mod editable;
+#[cfg(feature = "legacy-capture")]
 mod editable_cursor;
+#[cfg(feature = "legacy-capture")]
 pub use editable::{NativeEditableReport, NativeEditableSession};
 
 #[cfg(test)]

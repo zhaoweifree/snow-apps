@@ -10,7 +10,7 @@ namespace snow_shot::platform {
 
 static bool focusedFullscreenWindowMatches(QScreen* target) {
     NSRunningApplication* frontmost = NSWorkspace.sharedWorkspace.frontmostApplication;
-    if (frontmost == nil || frontmost.processIdentifier <= 0) {
+    if (frontmost == nil || !isExternalFocusedWindowProcess(frontmost.processIdentifier)) {
         return false;
     }
     const pid_t processId = frontmost.processIdentifier;

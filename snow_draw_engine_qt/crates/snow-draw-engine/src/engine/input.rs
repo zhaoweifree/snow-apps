@@ -37,13 +37,22 @@ impl Engine {
         let before_view = self.viewport_slot(id)?.view;
         let mut interaction = InteractionOutput::default();
         let mut capture = PointerCaptureCommand::NoChange;
+        self.editor.defer_free_draw_preview(true);
         for event in events.iter().copied() {
             let update = {
                 let model = &self.model;
                 let slot = self.viewports.get_mut(&id).ok_or(ErrorCode::NotFound)?;
-                self.editor.process_input(model, &mut slot.view, event)?
+                self.editor.process_input(model, &mut slot.view, event)
+            };
+            let update = match update {
+                Ok(update) => update,
+                Err(error) => {
+                    self.editor.defer_free_draw_preview(false);
+                    return Err(error);
+                }
             };
             if update.command.is_some() {
+                self.editor.defer_free_draw_preview(false);
                 return Err(ErrorCode::InvalidArgument);
             }
             if update.interaction.capture != PointerCaptureCommand::NoChange {
@@ -51,6 +60,7 @@ impl Engine {
             }
             interaction = update.interaction;
         }
+        self.editor.defer_free_draw_preview(false);
         interaction.capture = capture;
 
         let changed_viewports = if self.editor.scene_input_revision() != before_scene_revision
@@ -133,6 +143,8 @@ mod tests {
 
     fn pointer(event_type: PointerEventType, x: f64, y: f64) -> InputEvent {
         InputEvent::Pointer(PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 1,
             event_type,
             device: PointerDevice::Mouse,

@@ -3,6 +3,7 @@
 #include "snow_canvas_renderer.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QPainter>
@@ -47,6 +48,7 @@ std::vector<SnowCanvasSceneItem> makeRectangles(int count, SnowFillStyle fillSty
         view.fill_style = fillStyle;
         view.stroke = SnowColorRgba8{20, 40, 60, 255};
         view.stroke_width = 1.5;
+        view.opacity = 1.0;
         if (index % 5 == 0) {
             view.corner_radii = SnowCornerRadii{3.0, 3.0, 3.0, 3.0};
         }
@@ -130,10 +132,85 @@ void benchmarkMiddleReplacement() {
               << timer.nsecsElapsed() / 1'000'000.0 << '\n';
 }
 
+// The same fixtures can be linked against the pre-change renderer to verify
+// that Architect retains its pixels, including fractional-DPI rasterization.
+bool writeArchitectSnapshots(const QString& directory) {
+    if (!QDir().mkpath(directory))
+        return false;
+    SceneDisplayInfo info{};
+    info.item_count = 1;
+    info.surface_width = 512;
+    info.surface_height = 256;
+    info.camera_zoom = 1.0;
+    const auto save = [&](const SnowCanvasSceneItem& item, const QString& name, double dpr) {
+        QImage image(QSize(512, 256) * dpr, QImage::Format_ARGB32_Premultiplied);
+        image.setDevicePixelRatio(dpr);
+        renderOnce(image, {item}, info, QRegion(QRect(0, 0, 512, 256)), {});
+        return image.save(
+            QDir(directory).filePath(name + QString::number(dpr) + QStringLiteral(".png")));
+    };
+    for (double dpr : {1.0, 1.5}) {
+        for (int shape = 0; shape < 3; ++shape) {
+            for (int pattern = 0; pattern < 3; ++pattern) {
+                for (int rounded = 0; rounded < 2; ++rounded) {
+                    SnowSceneDisplayItem source{};
+                    source.kind = SNOW_SCENE_DISPLAY_ITEM_DRAW_RECT;
+                    source.width = 185;
+                    source.height = 99;
+                    source.rotation = rounded != 0 ? 0.23 : 0.0;
+                    source.rect_shape = static_cast<std::uint8_t>(shape);
+                    source.fill = {20, 130, 210, 110};
+                    source.fill_style = rounded != 0 ? SNOW_FILL_STYLE_LINE : SNOW_FILL_STYLE_SOLID;
+                    source.stroke = {30, 50, 80, 190};
+                    source.stroke_width = 3;
+                    source.stroke_style = static_cast<SnowStrokeStyle>(pattern);
+                    source.opacity = 0.7;
+                    if (rounded != 0)
+                        source.corner_radii = {8, 14, 20, 6};
+                    if (!save(
+                            SnowCanvasSceneItem(source),
+                            QStringLiteral("shape-%1-%2-%3-").arg(shape).arg(pattern).arg(rounded),
+                            dpr))
+                        return false;
+                }
+            }
+        }
+        for (int route = 0; route < 3; ++route) {
+            for (int pattern = 0; pattern < 3; ++pattern) {
+                for (const auto head : {SNOW_ARROWHEAD_ARROW, SNOW_ARROWHEAD_TRIANGLE,
+                                        SNOW_ARROWHEAD_CIRCLE_OUTLINE}) {
+                    const SnowArrowPoint points[] = {{-160, -30}, {-40, -30}, {40, 35}, {160, 35}};
+                    SnowSceneDisplayItem source{};
+                    source.kind = SNOW_SCENE_DISPLAY_ITEM_ARROW;
+                    source.arrow_points = points;
+                    source.arrow_point_count = 4;
+                    source.arrow_type = static_cast<SnowArrowType>(route);
+                    source.arrow_stroke_style = static_cast<SnowStrokeStyle>(pattern);
+                    source.arrow_end_head = head;
+                    source.arrow_ratio = 1;
+                    source.stroke = {30, 50, 80, 190};
+                    source.stroke_width = 3;
+                    source.opacity = 0.7;
+                    if (!save(SnowCanvasSceneItem(source),
+                              QStringLiteral("arrow-%1-%2-%3-")
+                                  .arg(route)
+                                  .arg(pattern)
+                                  .arg(static_cast<int>(head)),
+                              dpr))
+                        return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
+    if (argc == 3 && std::string_view(argv[1]) == "--architect-snapshots")
+        return writeArchitectSnapshots(QString::fromLocal8Bit(argv[2])) ? 0 : 1;
     std::cout << "abi scene_bytes=" << sizeof(SnowSceneDisplayItem)
               << " overlay_bytes=" << sizeof(SnowOverlayDisplayItem) << '\n';
     const QRegion full(QRect(0, 0, kSurfaceWidth, kSurfaceHeight));

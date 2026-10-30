@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QLabel>
+#include <QKeyEvent>
 #include <QLineEdit>
 #include <QScopeGuard>
 #include <QScopedValueRollback>
@@ -159,6 +160,8 @@ struct FormField::Impl {
             palette.setColor(QPalette::WindowText, descriptionError
                                                        ? scheme.map.colorErrorText
                                                        : scheme.map.colorTextSecondary);
+            palette.setColor(QPalette::Link, scheme.map.colorLink);
+            palette.setColor(QPalette::LinkVisited, scheme.map.colorLink);
             description->setPalette(palette);
         }
     }
@@ -272,6 +275,11 @@ FormField::FormField(const Metadata& metadata, const Options& options, CustomBin
         copyLayout->setSpacing(4);
         state.title = new QLabel(copy);
         state.description = new QLabel(copy);
+        state.description->setObjectName(QStringLiteral("formFieldDescription"));
+        state.description->setOpenExternalLinks(false);
+        state.description->installEventFilter(this);
+        connect(state.description, &QLabel::linkActivated, this,
+                [this] { emit descriptionActionRequested(); });
         state.title->setWordWrap(true);
         state.description->setWordWrap(true);
         copyLayout->addWidget(state.title);
@@ -479,13 +487,23 @@ void FormField::retranslateUi() {
                 state.focus->setAccessibleName(label);
             }
         }
-        if (copy.description.isValid() || !state.descriptionOverride.isEmpty() ||
-            state.clearingDescriptionOverride) {
+        if (copy.description.isValid() || copy.descriptionAction.isValid() ||
+            !state.descriptionOverride.isEmpty() || state.clearingDescriptionOverride) {
             const QString description = state.descriptionText();
             if (state.description) {
-                state.description->setTextFormat(Qt::PlainText);
-                state.description->setText(description);
-                state.description->setVisible(!description.isEmpty());
+                const bool hasAction = copy.descriptionAction.isValid();
+                state.description->setTextFormat(hasAction ? Qt::RichText : Qt::PlainText);
+                state.description->setTextInteractionFlags(
+                    hasAction ? Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard
+                              : Qt::NoTextInteraction);
+                state.description->setFocusPolicy(hasAction ? Qt::StrongFocus : Qt::NoFocus);
+                state.description->setText(
+                    hasAction ? description.toHtmlEscaped().replace(QLatin1Char('\n'),
+                                                                    QStringLiteral("<br>")) +
+                                    QStringLiteral(" <a href=\"description-action\">%1</a>")
+                                        .arg(copy.descriptionAction.translated().toHtmlEscaped())
+                              : description);
+                state.description->setVisible(!description.isEmpty() || hasAction);
                 state.refreshDescriptionStyle(styles::ThemeManager::instance().themeColorScheme());
             }
             state.item->setTooltipText(description);
@@ -599,6 +617,17 @@ void FormField::notifyCommitted() {
 
 bool FormField::eventFilter(QObject* watched, QEvent* event) {
     const QPointer<FormField> guard(this);
+    if (watched == m_impl->description && m_impl->metadata.descriptionAction.isValid() &&
+        event->type() == QEvent::KeyPress) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) &&
+            (key->modifiers() == Qt::NoModifier || key->modifiers() == Qt::KeypadModifier)) {
+            // There is one action in the description, regardless of the rich-text cursor position.
+            event->accept();
+            emit descriptionActionRequested();
+            return true;
+        }
+    }
     if (m_impl->awaitingOwner && watched == m_impl->item &&
         ((event->type() == QEvent::ParentChange && m_impl->item->parentWidget()) ||
          event->type() == QEvent::Show)) {

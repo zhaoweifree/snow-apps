@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused x264 stack-alignment and static macOS LTO contract tests."""
+"""Focused x264 patch, stack-alignment and static macOS LTO contract tests."""
 
 from pathlib import Path
 import platform
@@ -15,6 +15,24 @@ ROOT = Path(__file__).resolve().parents[1]
 FLAGS = ('VCPKG_C_FLAGS', 'VCPKG_CXX_FLAGS', 'VCPKG_LINKER_FLAGS',
          'VCPKG_C_FLAGS_DEBUG', 'VCPKG_CXX_FLAGS_DEBUG', 'VCPKG_LINKER_FLAGS_DEBUG',
          'VCPKG_C_FLAGS_RELEASE', 'VCPKG_CXX_FLAGS_RELEASE', 'VCPKG_LINKER_FLAGS_RELEASE')
+
+
+class X264PatchContract(unittest.TestCase):
+    def test_overlay_patches_are_valid_unified_diffs(self):
+        # Parse patches without --recount, as vcpkg does, so malformed hunk counts
+        # fail offline before an expensive dependency build reaches this port.
+        git = shutil.which('git')
+        self.assertIsNotNone(git, 'Git must be available')
+        patches = sorted((ROOT / 'cmake/vcpkg-overlay-ports/x264').glob('*.patch'))
+        self.assertTrue(patches, 'The x264 overlay must contain its source patches')
+        with tempfile.TemporaryDirectory(prefix='snow-x264-patches-') as directory:
+            for patch in patches:
+                with self.subTest(patch=patch.name):
+                    result = subprocess.run([git, 'apply', '--numstat', str(patch)],
+                                            cwd=directory, capture_output=True, text=True,
+                                            timeout=30, check=False)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertTrue(result.stdout.strip(), 'The patch must modify source files')
 
 
 class X264LtoFixture(unittest.TestCase):

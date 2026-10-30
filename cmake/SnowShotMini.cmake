@@ -11,7 +11,7 @@ endforeach()
 
 set(_snow_mini_libraries
     snow_shot_cloud_upload snow_shot_storage snow_shot_main_window_skin snow_shot_settings_catalog snow_shot_settings_search
-    snow_shot_settings snow_shot_global_mouse snow_shot_login_item
+    snow_shot_settings snow_shot_collage snow_shot_image_split snow_shot_global_mouse snow_shot_login_item
     snow_shot_administrator snow_shot_permissions snow_shot_updates
     snow_shot_diagnostics snow_shot_crash_bridge)
 
@@ -248,7 +248,7 @@ if(WIN32)
     endif()
     snow_shot_stage_ffmpeg_runtime(snow_shot_mini)
 endif()
-if(EXISTS "${SNOW_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}")
+if(WIN32 AND EXISTS "${SNOW_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}")
     add_custom_command(TARGET snow_shot_mini POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:snow_shot_mini>/audios"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${SNOW_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}"

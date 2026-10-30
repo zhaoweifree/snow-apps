@@ -66,5 +66,58 @@ fn opencv_adapter_round_trips_bgr_pixels() -> Result<(), Box<dyn std::error::Err
     assert_eq!(round_trip.rows(), 3);
     assert_eq!(round_trip.cols(), 4);
     assert_eq!(round_trip.data_bytes()?, mat.data_bytes()?);
+    assert!(opencv_backend::detect_regions(&mat)?.is_empty());
+
+    let regions = [visual_region_detector::Region {
+        rect: Rect::new(1, 1, 2, 1),
+        kind: "image".into(),
+    }];
+    let preview = opencv_backend::draw_regions(&mat, &regions, 1)?;
+    assert_ne!(preview.data_bytes()?, mat.data_bytes()?);
+    let json = opencv_backend::regions_to_jsonable("memory", &mat, &regions)?;
+    assert_eq!(json["regions"][0]["type"], "image");
+    assert_eq!(json["regions"][0]["x"], 1);
+    assert_eq!(visual_region_detector::backend_name(), "opencv");
+    Ok(())
+}
+
+#[cfg(all(feature = "opencv", feature = "file-io"))]
+#[test]
+fn opencv_adapter_exports_exact_png_crops() -> Result<(), Box<dyn std::error::Error>> {
+    use visual_region_detector::{Region, opencv_backend};
+
+    struct ExportDirectory(std::path::PathBuf);
+    impl Drop for ExportDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let directory = ExportDirectory(std::env::temp_dir().join(format!(
+        "snow-region-detector-crops-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    )));
+    let source = image::RgbImage::from_fn(4, 3, |x, y| {
+        image::Rgb([(x * 31) as u8, (y * 47) as u8, (x + y * 4) as u8])
+    });
+    let mat = opencv_backend::to_mat(&BgrImage::from_rgb8(&source))?;
+    let regions = [Region {
+        rect: Rect::new(1, 1, 2, 2),
+        kind: "image".into(),
+    }];
+
+    let crops = opencv_backend::write_crops(&mat, &regions, &directory.0)?;
+
+    assert_eq!(crops.len(), 1);
+    assert_eq!(crops[0]["file"], "0000_image.png");
+    assert_eq!(
+        image::open(directory.0.join("0000_image.png"))?.to_rgb8(),
+        image::imageops::crop_imm(&source, 1, 1, 2, 2).to_image()
+    );
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(directory.0.join("index.json"))?)?;
+    assert_eq!(index["crops"], serde_json::json!(crops));
     Ok(())
 }

@@ -6,11 +6,24 @@
 ScreenshotPinnedSelectionRequest
 screenshotSelectionPinRequest(const ScreenshotDisplaySession& displaySession,
                               const ScreenshotGeometryMapper& geometry, const QRect& selection,
-                              const ScreenshotResultStyle& style) {
+                              const ScreenshotResultStyle& style,
+                              ScreenshotLayoutCompaction compaction) {
     ScreenshotPinnedSelectionRequest request;
     request.resultStyle = ScreenshotResultCompositor::normalizedStyle(style);
+    request.layoutCompaction = compaction.normalized();
+    QSize contentSize = selection.size();
+    auto outputStyle = request.resultStyle;
+    if (compaction.enabled && style.region) {
+        request.layoutPlan =
+            screenshotLayoutCompactionPlan(*style.region, contentSize, style.regionScale,
+                                           compaction, request.resultStyle.shadowWidth);
+        if (!request.layoutPlan->isValid())
+            return {};
+        contentSize = request.layoutPlan->outputSize;
+        outputStyle = compactedScreenshotResultStyle(outputStyle, *request.layoutPlan);
+    }
     const ScreenshotResultLayout layout =
-        ScreenshotResultCompositor::layoutForContent(selection.size(), request.resultStyle);
+        ScreenshotResultCompositor::layoutForContent(contentSize, outputStyle);
     if (!layout.isValid()) {
         return request;
     }
@@ -21,7 +34,7 @@ screenshotSelectionPinRequest(const ScreenshotDisplaySession& displaySession,
         return request;
     }
     request.selection = selection;
-    request.contentCanvasRect = QRectF(selection);
+    request.contentCanvasRect = QRectF(selection.topLeft(), contentSize);
     request.surfaceCanvasRect = request.contentCanvasRect.adjusted(
         -static_cast<qreal>(shadowPadding), -static_cast<qreal>(shadowPadding),
         static_cast<qreal>(shadowPadding), static_cast<qreal>(shadowPadding));

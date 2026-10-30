@@ -6,7 +6,7 @@ include_guard(GLOBAL)
 set(SNOW_SHOT_MINI_EXCLUDED_SOURCE_NAMES
     selectedtexttranslationcoordinator selectedtexttranslationcontroller
     standalonetranslationwindow translationpagewidget translationpagecontroller
-    translationservice translationlanguages snowshotapiclient
+    translationservice translationlanguages translationlanguagedetector snowshotapiclient
     texttranslationsettingswidget customaimodelssettingswidget
     screenshottranslationsettingsdialog
     screenshotqrcontroller screenshotqrrecognitionservice
@@ -17,14 +17,15 @@ list(JOIN SNOW_SHOT_MINI_EXCLUDED_SOURCE_NAMES "|" _snow_mini_source_names)
 set(SNOW_SHOT_MINI_EXCLUDED_SOURCE_PATTERN
     "(^|[/,:])(${_snow_mini_source_names})\\.(cpp|h|mm)($|>)")
 set(SNOW_SHOT_MINI_EXCLUDED_LINK_TARGETS
-    snow_shot_translation snow_selected_text_c snow_shot_full_rust_ffi_bundle
+    snow_shot_translation snow_selected_text_c snow_language_detection_c
+    snow_shot_full_rust_ffi_bundle
     opencv_wechat_qrcode opencv_objdetect opencv_dnn
     snow_shot_latex_renderer snow_shot_microtex)
 set(SNOW_SHOT_MINI_EXCLUDED_TARGETS
     ${SNOW_SHOT_MINI_EXCLUDED_LINK_TARGETS}
     snow_shot snow_shot_edition_full
     snow_shot_storage snow_shot_main_window_skin snow_shot_settings_catalog snow_shot_settings_search
-    snow_shot_settings snow_shot_global_mouse snow_shot_login_item
+    snow_shot_settings snow_shot_collage snow_shot_image_split snow_shot_global_mouse snow_shot_login_item
     snow_shot_administrator snow_shot_permissions snow_shot_updates
     snow_shot_diagnostics snow_shot_crash_bridge
     snow_shot_mcp snow_shot_mcp_build
@@ -34,8 +35,7 @@ if(WIN32)
     # Windows Mini acquires its trusted text OCR worker on demand. macOS Mini
     # bundles the local worker but acquires every selected model on demand.
     list(APPEND SNOW_SHOT_MINI_EXCLUDED_TARGETS
-        snow_ocr_process snow_ocr_process_build snow_ocr_diagnostics_bridge
-        onnxruntime::onnxruntime)
+        snow_ocr_process snow_ocr_process_build snow_ocr_diagnostics_bridge)
 endif()
 
 function(snow_shot_mini_filter_sources output)

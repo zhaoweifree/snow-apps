@@ -20,9 +20,11 @@ pub use snow_recording_runtime::{
     DirectRecordingConfig, DirectRecordingReport, DirectRecordingSession, KeyboardOverlayConfig,
     KeyboardOverlayFont, MediaPermission, MonitorSelector, RecordingAudioConfig,
     RecordingAudioMode, RecordingAudioTrackConfig, RecordingAudioTrackSource, RecordingConfig,
-    RecordingRegion, RecordingSession, RecordingState, RecordingTarget, ScreenRecorderError,
-    WindowId,
+    RecordingRegion, RecordingState, RecordingTarget, ScreenRecorderError, WindowId,
 };
 
 #[cfg(target_os = "macos")]
 pub use snow_recording_runtime::macos;
+
+#[cfg(feature = "legacy-capture")]
+pub use snow_recording_runtime::RecordingSession;

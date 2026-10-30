@@ -11,6 +11,8 @@ namespace snow_shot::storage {
 namespace {
 constexpr int kMaximumCornerRadius = 256;
 constexpr int kMaximumShadowWidth = 64;
+// Accept the previous spacing range so existing history and presets can be clamped on load.
+constexpr int kLegacyMaximumLayoutSpacing = 1000;
 
 bool integer(const QJsonValue& value, int minimum, int maximum, int* result) {
     if (!value.isDouble() || !std::isfinite(value.toDouble()) ||
@@ -64,6 +66,9 @@ QJsonObject persistedSelectionToJson(const PersistedSelection& selection) {
         {QStringLiteral("lock_aspect_ratio"), selection.lockAspectRatio},
         {QStringLiteral("lock_drag_aspect_ratio"), selection.lockDragAspectRatio},
     };
+    result.insert(QStringLiteral("background_opacity_percent"), selection.backgroundOpacityPercent);
+    result.insert(QStringLiteral("layout_compaction_enabled"), selection.layoutCompaction.enabled);
+    result.insert(QStringLiteral("layout_compaction_spacing"), selection.layoutCompaction.spacing);
     if (selection.region && selection.region->custom()) {
         result.insert(QStringLiteral("geometry"), selection.region->toJson());
     } else if (selection.region) {
@@ -134,6 +139,17 @@ PersistedSelectionNormalization normalizePersistedSelection(const QJsonValue& va
         selection.region = region;
         selection.rectangle = bounds;
     }
+    const auto opacity = object.value(QStringLiteral("background_opacity_percent"));
+    if (!opacity.isUndefined() && !integer(opacity, 0, 100, &selection.backgroundOpacityPercent))
+        return {};
+    const auto enabled = object.value(QStringLiteral("layout_compaction_enabled"));
+    const auto spacing = object.value(QStringLiteral("layout_compaction_spacing"));
+    if ((!enabled.isUndefined() && !enabled.isBool()) ||
+        (!spacing.isUndefined() &&
+         !integer(spacing, 0, kLegacyMaximumLayoutSpacing, &selection.layoutCompaction.spacing)))
+        return {};
+    selection.layoutCompaction.enabled = enabled.toBool(false);
+    selection.layoutCompaction = selection.layoutCompaction.normalized();
     selection.cornerRadius = cornerRadius;
     selection.shadowWidth = shadowWidth;
     selection.shadowColor = color;

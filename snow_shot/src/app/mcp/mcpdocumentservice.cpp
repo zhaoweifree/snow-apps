@@ -8,7 +8,10 @@
 #include "snow_shot/app/mcp/mcpstylepatch.h"
 #include "snow_shot/app/mcp/mcpimageexportoptions.h"
 #include "snow_shot/presentation/screenshotdefaultstyles.h"
+#include "snow_shot/presentation/screenshotselectionbackground.h"
+#include "snow_shot/presentation/screenshotselectioncomposition.h"
 #include "snow_shot/presentation/screenshotexportartifact.h"
+#include "snow_shot/presentation/screenshotgeometry.h"
 #include "snow_shot/presentation/screenshotrecognitionsessioncontroller.h"
 #include "snow_shot/presentation/screenshotocrpresentation.h"
 #include "snow_shot/storage/settingsadapters.h"
@@ -233,6 +236,7 @@ struct Document {
         SnowCanvasRuntimeConfig{snow_shot::presentation::screenshotCanvasStyleDefaults()}};
     QImage rendered;
     qreal renderedScale = 0;
+    ScreenshotLayoutCompaction renderedCompaction;
     QJsonObject state() const {
         return {{QStringLiteral("document_id"), id},
                 {QStringLiteral("revision"), static_cast<qint64>(revision)},
@@ -249,6 +253,54 @@ struct Document {
                 {QStringLiteral("source"), metadata}};
     }
 };
+using LayoutPlan = std::shared_ptr<const ScreenshotLayoutCompactionPlan>;
+
+LayoutPlan documentLayoutPlan(const Document& document, const QSize& size, qreal scale,
+                              ScreenshotLayoutCompaction compaction) {
+    auto style = document.selection.resultStyle();
+    style.shadowWidth = qRound(style.shadowWidth * scale);
+    return compaction.enabled && style.region
+               ? screenshotLayoutCompactionPlan(
+                     *style.region, size, style.regionScale * scale, compaction,
+                     ScreenshotResultCompositor::normalizedStyle(style).shadowWidth)
+               : nullptr;
+}
+
+QImage renderDocumentResult(Document& document, const QSize& size, qreal scale,
+                            const LayoutPlan& plan, bool includeBackground = true) {
+    const auto outputSize = plan ? plan->outputSize : size;
+    if (!validSize(outputSize))
+        return {};
+    auto style = document.selection.resultStyle();
+    if (!includeBackground)
+        style.backgroundOpacityPercent = 0;
+    style.regionScale *= scale;
+    style.cornerRadius = qRound(style.cornerRadius * scale);
+    style.shadowWidth = qRound(style.shadowWidth * scale);
+    if (plan && plan->changed)
+        style = compactedScreenshotResultStyle(style, *plan);
+    if (style.region && document.runtime.hasDocumentContent())
+        return renderAnnotatedScreenshotSelection(document.runtime,
+                                                  document.selection.pixelSelection(), size,
+                                                  document.sources, style, plan.get());
+    QImage image;
+    if (plan && plan->changed) {
+        QList<CanvasExportTile> tiles;
+        for (const auto& tile : plan->tiles)
+            tiles.append({tile.source, tile.destination});
+        image = document.runtime.renderTilesToImage(document.selection.pixelSelection(), size,
+                                                    outputSize, tiles, document.sources);
+    } else {
+        image = document.runtime.renderToImage(document.selection.pixelSelection(), size,
+                                               document.sources);
+    }
+    const auto background = renderScreenshotSelectionBackground(
+        document.sources, document.selection.pixelSelection(), size, style, plan.get());
+    if (style.backgroundOpacityPercent > 0 && background.isNull())
+        return {};
+    return ScreenshotResultCompositor::compose(image, style, 1.0, 1.0, background);
+}
+
 struct WorkerResult {
     ScreenshotMcpResponse response;
     QImage image;
@@ -617,7 +669,16 @@ class DocumentWorker final : public QObject {
                 const auto selection = document.selection.pixelSelection();
                 if (workObserved)
                     workObserved(document.id, QStringLiteral("render"));
-                auto background = base.renderToImage(selection, selection.size(), document.sources);
+                const auto plan = documentLayoutPlan(document, selection.size(), 1,
+                                                     document.selection.exportLayoutCompaction());
+                if (plan && !validSize(plan->outputSize))
+                    return {failure(request, QStringLiteral("output_too_large")), {}};
+                // A changed layout is handed off as a completed image. The original
+                // document remains available for capture editing and recognition.
+                auto background =
+                    ((plan && plan->changed) || document.selection.backgroundOpacityPercent() > 0)
+                        ? renderDocumentResult(document, selection.size(), 1, plan)
+                        : base.renderToImage(selection, selection.size(), document.sources);
                 if (background.isNull())
                     return {failure(request, QStringLiteral("output_failed")), {}};
                 return {success(request, document.state()), std::move(background),
@@ -991,23 +1052,26 @@ class DocumentWorker final : public QObject {
         const QRect selection = document.selection.pixelSelection();
         const QSize size(std::max(1, qCeil(selection.width() * scale)),
                          std::max(1, qCeil(selection.height() * scale)));
-        if (!validSize(size))
+        const auto compaction = method == QStringLiteral("snow_shot_document_recognize")
+                                    ? ScreenshotLayoutCompaction{}
+                                    : document.selection.exportLayoutCompaction();
+        const auto plan = documentLayoutPlan(document, size, scale, compaction);
+        if (!validSize(plan ? plan->outputSize : size))
             return {failure(request, QStringLiteral("output_too_large")), {}};
-        const bool cached = !document.rendered.isNull() && document.renderedScale == scale;
+        const bool includeBackground = method != QStringLiteral("snow_shot_document_recognize");
+        const bool cacheEligible =
+            includeBackground || document.selection.backgroundOpacityPercent() == 0;
+        const bool cached = cacheEligible && !document.rendered.isNull() &&
+                            document.renderedScale == scale &&
+                            document.renderedCompaction == compaction;
         if (!cached && workObserved)
             workObserved(document.id, QStringLiteral("render"));
-        QImage image = cached ? document.rendered
-                              : document.runtime.renderToImage(selection, size, document.sources);
+        QImage image = cached
+                           ? document.rendered
+                           : renderDocumentResult(document, size, scale, plan, includeBackground);
         if (image.isNull())
             return {failure(request, QStringLiteral("output_failed")), {}};
-        if (!cached) {
-            auto style = document.selection.resultStyle();
-            style.regionScale *= scale;
-            style.cornerRadius = qRound(style.cornerRadius * scale);
-            style.shadowWidth = qRound(style.shadowWidth * scale);
-            image = ScreenshotResultCompositor::compose(image, style);
-            if (image.isNull())
-                return {failure(request, QStringLiteral("output_failed")), {}};
+        if (!cached && cacheEligible) {
             invalidate(document);
             if (image.sizeInBytes() <= kMaximumCacheBytes) {
                 bool retained = admission->reserveCache(image.sizeInBytes());
@@ -1019,6 +1083,7 @@ class DocumentWorker final : public QObject {
                 if (retained) {
                     document.rendered = image;
                     document.renderedScale = scale;
+                    document.renderedCompaction = compaction;
                 }
             }
         }

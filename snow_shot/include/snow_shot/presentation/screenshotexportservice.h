@@ -27,20 +27,23 @@ class ScreenshotExportService final : public ScreenshotSelectionImageComposerPor
 
     [[nodiscard]] bool requestSelectionResult(const QRect& selection,
                                               const ScreenshotResultStyle& style, QObject* receiver,
-                                              ImageCallback callback) override;
-    [[nodiscard]] bool requestSelectionClipboard(const QRect& selection,
-                                                 const ScreenshotResultStyle& style,
-                                                 QObject* receiver,
-                                                 ClipboardCallback callback) override;
+                                              ImageCallback callback,
+                                              ScreenshotLayoutCompaction compaction = {}) override;
+    [[nodiscard]] bool
+    requestSelectionClipboard(const QRect& selection, const ScreenshotResultStyle& style,
+                              QObject* receiver, ClipboardCallback callback,
+                              ScreenshotLayoutCompaction compaction = {}) override;
     [[nodiscard]] bool requestSelectionResultAtScale(const QRect& selection,
                                                      const ScreenshotResultStyle& style,
                                                      qreal scale, QObject* receiver,
-                                                     ImageCallback callback);
+                                                     ImageCallback callback,
+                                                     ScreenshotLayoutCompaction compaction = {});
     [[nodiscard]] std::optional<ScreenshotPinnedSelectionRequest>
-    preparePinnedSelection(const QRect& selection,
-                           const ScreenshotResultStyle& style) const override;
+    preparePinnedSelection(const QRect& selection, const ScreenshotResultStyle& style,
+                           ScreenshotLayoutCompaction compaction = {}) const override;
     [[nodiscard]] std::optional<ScreenshotClipboardPlacement>
-    prepareClipboardPlacement(const QRect& selection, const ScreenshotResultStyle& style) const;
+    prepareClipboardPlacement(const QRect& selection, const ScreenshotResultStyle& style,
+                              ScreenshotLayoutCompaction compaction = {}) const;
     [[nodiscard]] bool schedulePinnedSelection(ScreenshotPinnedSelectionRequest request,
                                                QObject* receiver,
                                                PinRequestCallback callback) override;

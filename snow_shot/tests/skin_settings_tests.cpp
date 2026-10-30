@@ -76,7 +76,8 @@ class SkinStatusBackend final : public settings::SettingsBackend {
     }
 
     QString filePathStatus(settings::SettingsFilePathBinding binding) const override {
-        if (binding == settings::SettingsFilePathBinding::TrayCustomIcon)
+        if (binding == settings::SettingsFilePathBinding::TrayCustomIcon ||
+            binding == settings::SettingsFilePathBinding::TrayDarkCustomIcon)
             return m_backend.filePathStatus(binding);
         switch (m_status) {
         case Status::Ready:
@@ -91,6 +92,7 @@ class SkinStatusBackend final : public settings::SettingsBackend {
     }
     bool filePathStatusError(settings::SettingsFilePathBinding binding) const override {
         return binding != settings::SettingsFilePathBinding::TrayCustomIcon &&
+               binding != settings::SettingsFilePathBinding::TrayDarkCustomIcon &&
                m_status == Status::Error;
     }
     QVariant selectValue(settings::SettingsSelectBinding binding) const override {

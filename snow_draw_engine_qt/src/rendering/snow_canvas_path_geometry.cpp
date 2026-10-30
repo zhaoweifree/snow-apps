@@ -40,7 +40,13 @@ QPainterPath snowCanvasCatmullRomPath(const QVector<QPointF>& vertices, bool clo
 }
 
 SnowCanvasStrokeFilter::~SnowCanvasStrokeFilter() {
+    clear();
+}
+
+void SnowCanvasStrokeFilter::clear() noexcept {
     snow_stroke_filter_free(m_filter);
+    m_filter = nullptr;
+    QVector<QPointF>().swap(m_pending);
 }
 
 void SnowCanvasStrokeFilter::reset(const QPointF& start, qreal scale) {

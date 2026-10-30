@@ -119,6 +119,16 @@ class PopupInteractionHost final : public QObject {
         [owner](const SuspendedOwnerState& suspended) { return suspended.owner == owner; });
   }
 
+  bool interactionActive() const {
+    if (!scopeWindow_ || !scopeWindow_->isVisible()) return false;
+    if (activeOwnerObject_ && activeOwner_ && activeOwner_->popupIsRequestedVisible()) return true;
+    return std::any_of(suspendedOwners_.cbegin(), suspendedOwners_.cend(),
+                       [](const SuspendedOwnerState& suspended) {
+                         return suspended.ownerObject && suspended.owner &&
+                                suspended.owner->popupIsRequestedVisible();
+                       });
+  }
+
   bool containsGlobalPos(const QPoint& position, QSet<const PopupInteractionHost*>& visited) const {
     if (!scopeWindow_ || !scopeWindow_->isVisible() || visited.contains(this)) return false;
     visited.insert(this);
@@ -725,6 +735,11 @@ PopupInteractionHost* hostForOwner(const PopupInteractionOwner* owner) {
 }
 
 }  // namespace
+
+bool popupInteractionActive(const QWidget* scopeWindow) {
+  const auto* host = hostForScope(scopeWindow);
+  return host && host->interactionActive();
+}
 
 bool popupInteractionContainsGlobalPos(const QWidget* scopeWindow, const QPoint& globalPosition) {
   const auto* host = hostForScope(scopeWindow);

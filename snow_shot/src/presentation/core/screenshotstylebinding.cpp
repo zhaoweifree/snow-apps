@@ -12,8 +12,11 @@ ScreenshotStyleBinding::ScreenshotStyleBinding(ScreenshotToolPalette& palette,
                                                SnowCanvasWidget& canvas, QObject* parent,
                                                Replicate replicate, Save save)
     : QObject(parent) {
-    connect(&canvas, &SnowCanvasWidget::angleAdjustmentTargetChanged, &palette,
-            &ScreenshotToolPalette::resetAngleWheelInput);
+    connect(&canvas, &SnowCanvasWidget::angleAdjustmentTargetChanged, this,
+            [source = QPointer<ScreenshotToolPalette>(&palette)] {
+                if (source != nullptr)
+                    source->resetAngleWheelInput();
+            });
     connect(&palette, &ScreenshotToolPalette::angleValueAdjustmentRequested, this,
             [target = QPointer<SnowCanvasWidget>(&canvas)](int steps, bool fine) {
                 if (target != nullptr)

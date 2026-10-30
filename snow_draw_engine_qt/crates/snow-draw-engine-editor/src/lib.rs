@@ -8,6 +8,8 @@ mod creation_workflow;
 pub use creation_workflow::SerialNumberLabelLayoutRequest;
 mod speech_bubble;
 pub use speech_bubble::*;
+mod shape_text;
+pub use shape_text::ShapeBoundTextPreview;
 mod magnifier;
 pub use magnifier::*;
 mod angle;
@@ -19,6 +21,7 @@ mod document_ops;
 mod draw_template;
 mod edit_workflow;
 mod eraser_workflow;
+mod free_draw_pressure;
 mod free_draw_workflow;
 mod geometry;
 mod input;
@@ -44,12 +47,13 @@ pub use api::{
     SERIAL_NUMBER_STYLE_MIXED_FILL_STYLE, SERIAL_NUMBER_STYLE_MIXED_FONT_FAMILY,
     SERIAL_NUMBER_STYLE_MIXED_FONT_SIZE, SERIAL_NUMBER_STYLE_MIXED_NUMBER,
     SERIAL_NUMBER_STYLE_MIXED_NUMERIC_TYPE, SERIAL_NUMBER_STYLE_MIXED_OPACITY,
-    SERIAL_NUMBER_STYLE_MIXED_STROKE_STYLE, SERIAL_NUMBER_STYLE_MIXED_STROKE_WIDTH,
-    SERIAL_NUMBER_STYLE_MIXED_TYPE, SHAPE_STYLE_MIXED_ARROW_RATIO,
-    SHAPE_STYLE_MIXED_ARROW_SHAFT_TYPE, SHAPE_STYLE_MIXED_ARROW_TYPE,
-    SHAPE_STYLE_MIXED_CORNER_RADII, SHAPE_STYLE_MIXED_END_ARROWHEAD, SHAPE_STYLE_MIXED_FILL,
-    SHAPE_STYLE_MIXED_FILL_STYLE, SHAPE_STYLE_MIXED_HIGHLIGHT_SHAPE, SHAPE_STYLE_MIXED_OPACITY,
-    SHAPE_STYLE_MIXED_SHAPE, SHAPE_STYLE_MIXED_START_ARROWHEAD, SHAPE_STYLE_MIXED_STROKE,
+    SERIAL_NUMBER_STYLE_MIXED_STROKE_RENDERING_STYLE, SERIAL_NUMBER_STYLE_MIXED_STROKE_STYLE,
+    SERIAL_NUMBER_STYLE_MIXED_STROKE_WIDTH, SERIAL_NUMBER_STYLE_MIXED_TYPE,
+    SHAPE_STYLE_MIXED_ARROW_RATIO, SHAPE_STYLE_MIXED_ARROW_SHAFT_TYPE,
+    SHAPE_STYLE_MIXED_ARROW_TYPE, SHAPE_STYLE_MIXED_CORNER_RADII, SHAPE_STYLE_MIXED_END_ARROWHEAD,
+    SHAPE_STYLE_MIXED_FILL, SHAPE_STYLE_MIXED_FILL_STYLE, SHAPE_STYLE_MIXED_HIGHLIGHT_SHAPE,
+    SHAPE_STYLE_MIXED_OPACITY, SHAPE_STYLE_MIXED_SHAPE, SHAPE_STYLE_MIXED_START_ARROWHEAD,
+    SHAPE_STYLE_MIXED_STROKE, SHAPE_STYLE_MIXED_STROKE_RENDERING_STYLE,
     SHAPE_STYLE_MIXED_STROKE_STYLE, SHAPE_STYLE_MIXED_STROKE_WIDTH, SHAPE_STYLE_PROPERTY_ALL,
     SHAPE_STYLE_PROPERTY_ARROW, SHAPE_STYLE_PROPERTY_ARROW_RATIO,
     SHAPE_STYLE_PROPERTY_ARROW_SHAFT_TYPE, SHAPE_STYLE_PROPERTY_ARROW_TYPE,
@@ -58,16 +62,17 @@ pub use api::{
     SHAPE_STYLE_PROPERTY_HIGHLIGHT_SHAPE, SHAPE_STYLE_PROPERTY_LINE, SHAPE_STYLE_PROPERTY_OPACITY,
     SHAPE_STYLE_PROPERTY_RECTANGLE, SHAPE_STYLE_PROPERTY_SHAPE,
     SHAPE_STYLE_PROPERTY_START_ARROWHEAD, SHAPE_STYLE_PROPERTY_STROKE,
-    SHAPE_STYLE_PROPERTY_STROKE_STYLE, SHAPE_STYLE_PROPERTY_STROKE_WIDTH, SelectionArrowState,
-    SelectionBounds, SelectionRectState, SerialNumberToolbarState, ShapeKind, ShapeStyle,
-    ShapeStylePatch, SnapGuideTargets, StyleToolbarSource, StyleToolbarState,
-    TEXT_STYLE_ALL_PROPERTIES, TEXT_STYLE_MIXED_BOLD, TEXT_STYLE_MIXED_COLOR,
-    TEXT_STYLE_MIXED_CORNER_RADII, TEXT_STYLE_MIXED_FILL, TEXT_STYLE_MIXED_FILL_STYLE,
-    TEXT_STYLE_MIXED_FONT_FAMILY, TEXT_STYLE_MIXED_FONT_SIZE, TEXT_STYLE_MIXED_HORIZONTAL_ALIGN,
-    TEXT_STYLE_MIXED_ITALIC, TEXT_STYLE_MIXED_OPACITY, TEXT_STYLE_MIXED_STROKE,
-    TEXT_STYLE_MIXED_STROKE_WIDTH, TEXT_STYLE_MIXED_VERTICAL_ALIGN,
+    SHAPE_STYLE_PROPERTY_STROKE_RENDERING_STYLE, SHAPE_STYLE_PROPERTY_STROKE_STYLE,
+    SHAPE_STYLE_PROPERTY_STROKE_WIDTH, SelectionArrowState, SelectionBounds, SelectionRectState,
+    SerialNumberToolbarState, ShapeKind, ShapeStyle, ShapeStylePatch, SnapGuideTargets,
+    StyleToolbarSource, StyleToolbarState, TEXT_STYLE_ALL_PROPERTIES, TEXT_STYLE_MIXED_BOLD,
+    TEXT_STYLE_MIXED_COLOR, TEXT_STYLE_MIXED_CORNER_RADII, TEXT_STYLE_MIXED_FILL,
+    TEXT_STYLE_MIXED_FILL_STYLE, TEXT_STYLE_MIXED_FONT_FAMILY, TEXT_STYLE_MIXED_FONT_SIZE,
+    TEXT_STYLE_MIXED_HORIZONTAL_ALIGN, TEXT_STYLE_MIXED_ITALIC, TEXT_STYLE_MIXED_OPACITY,
+    TEXT_STYLE_MIXED_STROKE, TEXT_STYLE_MIXED_STROKE_WIDTH, TEXT_STYLE_MIXED_VERTICAL_ALIGN,
     selection_box_visible_for_members,
 };
+pub use api::{SHAPE_STYLE_MIXED_BRUSH_MODE, SHAPE_STYLE_PROPERTY_BRUSH_MODE};
 pub use defaults::{EditorStyleDefaults, editor_style_defaults};
 pub use draw_template::DrawTemplate;
 pub use session::{
@@ -350,6 +355,9 @@ impl Editor {
         if self.speech_bubble_tail_drag.take().is_some() {
             self.bump_scene_state_revision();
         }
+        if self.state.shape_text_drag.take().is_some() {
+            self.bump_scene_state_revision();
+        }
         self.state.ui.free_draw_hover_position = None;
         self.state.pending_text_edit = None;
         self.state.pending_new_text_draft = false;
@@ -445,6 +453,9 @@ mod tests {
 
     fn test_rect() -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(10.0, 20.0),

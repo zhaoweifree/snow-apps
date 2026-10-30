@@ -9,7 +9,7 @@ use snow_draw_engine_model::DocumentModel;
 
 use crate::{ApplyTransactionCommand, Editor, EditorCommand, expanded_duplicate_ids};
 
-pub const DRAW_TEMPLATE_SCHEMA_VERSION: u32 = 4;
+pub const DRAW_TEMPLATE_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -128,6 +128,8 @@ impl Editor {
             match &element.data {
                 ElementData::Rectangle(data) => {
                     let mut data = *data;
+                    data.text_element_id =
+                        data.text_element_id.and_then(|id| id_map.get(&id).copied());
                     data.center.x += offset.x;
                     data.center.y += offset.y;
                     validate_element_data(&ElementData::Rectangle(data))?;

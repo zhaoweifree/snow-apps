@@ -193,7 +193,8 @@ impl Editor {
         &mut self,
         _document: &DocumentModel,
     ) -> Result<InteractionOutput, ErrorCode> {
-        let had_interaction = !matches!(&self.state.interaction, InteractionState::Idle);
+        let had_interaction = !matches!(&self.state.interaction, InteractionState::Idle)
+            || self.state.shape_text_drag.is_some();
         self.cancel_interaction();
         self.clear_stroke_cursor_state();
         self.set_hovered_element(None);
@@ -237,6 +238,8 @@ mod tests {
         let document = DocumentModel::new();
         let mut editor = editor_for(ActiveTool::FreeDraw);
         let enter = InputEvent::Pointer(PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 1,
             event_type: PointerEventType::Enter,
             device: PointerDevice::Mouse,

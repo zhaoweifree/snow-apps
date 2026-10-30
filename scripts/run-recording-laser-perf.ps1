@@ -1,12 +1,13 @@
 [CmdletBinding()]
-param([string]$PreviewDirectory = "")
+param([string]$PreviewDirectory = "", [ValidateSet("x64", "arm64")][string]$Architecture = "x64")
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-Set-SnowBuildEnvironment -Preset windows-msvc-performance | Out-Null
+. (Join-Path $PSScriptRoot "../snow_shot/scripts/performance-environment.ps1")
+$target = Get-SnowPerformanceTarget -Architecture $Architecture -RequireNative
+Set-SnowBuildEnvironment -Preset $target.Preset | Out-Null
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$env:FFMPEG_DIR = Join-Path $repoRoot ".tools/vcpkg/installed/dynamic/x64-windows"
-$env:VCPKGRS_TRIPLET = "x64-windows"
+$env:FFMPEG_DIR = Join-Path $target.InstalledRoot $target.Triplet
+$env:VCPKGRS_TRIPLET = $target.Triplet
 $env:VCPKGRS_DYNAMIC = "1"
 $env:Path = "$(Join-Path $env:FFMPEG_DIR 'bin');$env:Path"
 $benchmarkArguments = @()
@@ -15,8 +16,8 @@ if ($PreviewDirectory) {
 }
 Push-Location (Join-Path $repoRoot "snow-crates")
 try {
-    & cargo run -p snow-recording-runtime --release --target x86_64-pc-windows-msvc `
-        --target-dir (Join-Path $repoRoot "build/windows-msvc-performance/cargo") `
+    & cargo run -p snow-recording-runtime --release --target $target.RustTarget `
+        --target-dir (Join-Path $repoRoot "build/$($target.Preset)/cargo") `
         --example laser_trail_benchmark -- @benchmarkArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Recording laser benchmark failed."

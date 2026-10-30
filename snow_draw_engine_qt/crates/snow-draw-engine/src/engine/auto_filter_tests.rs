@@ -145,6 +145,8 @@ fn smart_erase_sparse_sync_preserves_uncropped_creation_selection_and_document_c
         e.process_input(
             v,
             InputEvent::Pointer(PointerEvent {
+                pressure: None,
+                timestamp_ms: 0,
                 pointer_id: 1,
                 event_type: kind,
                 device: PointerDevice::Mouse,

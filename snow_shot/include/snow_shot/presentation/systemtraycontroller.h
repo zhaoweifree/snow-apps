@@ -48,6 +48,10 @@ class SystemTrayController final : public QObject {
     [[nodiscard]] QString iconSelection() const;
     void setCustomIconPath(const QString& path);
     [[nodiscard]] QString customIconPath() const;
+    void setDarkIconSelection(const QString& selection);
+    [[nodiscard]] QString darkIconSelection() const;
+    void setDarkCustomIconPath(const QString& path);
+    [[nodiscard]] QString darkCustomIconPath() const;
     void setLeftClickAction(const QString& action);
     [[nodiscard]] QString leftClickAction() const;
     [[nodiscard]] QString middleClickAction() const;

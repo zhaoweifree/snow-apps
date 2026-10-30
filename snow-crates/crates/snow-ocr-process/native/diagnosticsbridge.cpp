@@ -2,7 +2,7 @@
 #define SNOW_DIAGNOSTICS_PRODUCT "Snow Shot"
 #endif
 
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "diagnosticsbridge.h"
 
 #include <algorithm>

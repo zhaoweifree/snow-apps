@@ -231,6 +231,15 @@ pub const SNOW_DISTANCE_STYLE_MIXED_ENDPOINT_SCALE: u32 =
 pub const SNOW_DISTANCE_STYLE_MIXED_ENDPOINT_STYLE: u32 =
     SNOW_DISTANCE_STYLE_PROPERTY_ENDPOINT_STYLE;
 
+snow_c_enum! {
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum SnowBrushMode {
+        #[default]
+        Regular = 0,
+        PressureSensitive = 1,
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SnowShapeStyle {
@@ -241,6 +250,7 @@ pub struct SnowShapeStyle {
     pub start_arrowhead: SnowArrowhead,
     pub end_arrowhead: SnowArrowhead,
     pub stroke_style: SnowStrokeStyle,
+    pub stroke_rendering_style: SnowStrokeRenderingStyle,
     pub arrow_type: SnowArrowType,
     pub arrow_shaft_type: SnowArrowShaftType,
     pub arrow_ratio: f64,
@@ -248,6 +258,7 @@ pub struct SnowShapeStyle {
     pub opacity: f64,
     pub highlight_shape: SnowHighlightShape,
     pub shape: SnowRectangleShape,
+    pub brush_mode: SnowBrushMode,
 }
 
 #[repr(C)]
@@ -336,6 +347,7 @@ pub struct SnowRectangleShapeStyle {
     pub stroke: SnowColorRgba8,
     pub stroke_width: f64,
     pub stroke_style: SnowStrokeStyle,
+    pub stroke_rendering_style: SnowStrokeRenderingStyle,
     pub corner_radii: SnowCornerRadii,
 }
 
@@ -360,6 +372,7 @@ pub struct SnowArrowStyle {
     pub start_arrowhead: SnowArrowhead,
     pub end_arrowhead: SnowArrowhead,
     pub stroke_style: SnowStrokeStyle,
+    pub stroke_rendering_style: SnowStrokeRenderingStyle,
     pub arrow_type: SnowArrowType,
     pub arrow_shaft_type: SnowArrowShaftType,
     pub arrow_ratio: f64,
@@ -413,7 +426,11 @@ mod spotlight_abi_tests {
         assert_eq!(SnowSerialNumberType::OutlinedSquare as i32, 2);
         assert_eq!(SnowSerialNumberType::SolidSquare as i32, 3);
         assert_eq!(SnowSerialNumberType::Circle as i32, 4);
-        assert_eq!(std::mem::size_of::<SnowSerialNumberStyle>(), 200);
+        assert_eq!(std::mem::size_of::<SnowSerialNumberStyle>(), 208);
+        assert_eq!(
+            std::mem::offset_of!(SnowSerialNumberStyle, stroke_rendering_style),
+            200
+        );
         assert_eq!(std::mem::align_of::<SnowSerialNumberStyle>(), 8);
         assert_eq!(
             std::mem::offset_of!(SnowSerialNumberStyle, numeric_type),
@@ -445,6 +462,7 @@ pub struct SnowSerialNumberStyle {
     pub reserved1: [u8; 3],
     pub font_family_utf8: [std::ffi::c_char; SNOW_FONT_FAMILY_UTF8_CAPACITY],
     pub numeric_type: SnowSerialNumberNumericType,
+    pub stroke_rendering_style: SnowStrokeRenderingStyle,
 }
 
 snow_c_enum! {
@@ -645,6 +663,8 @@ impl Default for SnowSnapConfig {
 impl Default for SnowShapeStyle {
     fn default() -> Self {
         Self {
+            stroke_rendering_style: SnowStrokeRenderingStyle::Architect,
+
             fill: SnowColorRgba8::default(),
             stroke: SnowColorRgba8::default(),
             stroke_width: 0.0,
@@ -659,6 +679,7 @@ impl Default for SnowShapeStyle {
             opacity: 1.0,
             highlight_shape: SnowHighlightShape::Rectangle,
             shape: SnowRectangleShape::Rectangle,
+            brush_mode: SnowBrushMode::Regular,
         }
     }
 }
@@ -666,6 +687,8 @@ impl Default for SnowShapeStyle {
 impl Default for SnowRectangleShapeStyle {
     fn default() -> Self {
         Self {
+            stroke_rendering_style: SnowStrokeRenderingStyle::Architect,
+
             fill: SnowColorRgba8::default(),
             fill_style: SnowFillStyle::Solid,
             stroke: SnowColorRgba8::default(),
@@ -679,6 +702,8 @@ impl Default for SnowRectangleShapeStyle {
 impl Default for SnowArrowStyle {
     fn default() -> Self {
         Self {
+            stroke_rendering_style: SnowStrokeRenderingStyle::Architect,
+
             stroke: SnowColorRgba8::default(),
             stroke_width: 0.0,
             start_arrowhead: SnowArrowhead::None,
@@ -748,6 +773,7 @@ impl Default for SnowTextStyle {
 impl Default for SnowSerialNumberStyle {
     fn default() -> Self {
         Self {
+            stroke_rendering_style: SnowStrokeRenderingStyle::Architect,
             number: 0,
             color: SnowColorRgba8::default(),
             fill: SnowColorRgba8::default(),

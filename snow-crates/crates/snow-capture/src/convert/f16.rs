@@ -26,18 +26,18 @@ pub(crate) fn linear_to_srgb_u8(v: f32) -> u8 {
 
 /// Constants for the SMPTE ST 2084 Perceptual Quantizer (PQ) transfer function.
 /// These are exact rational values from SMPTE ST 2084.
-const PQ_M1: f32 = 0.159_301_76;
-const PQ_M2: f32 = 78.843_75;
-const PQ_C1: f32 = 0.835_937_5;
-const PQ_C2: f32 = 18.851_563;
-const PQ_C3: f32 = 18.687_5;
+pub(super) const PQ_M1: f32 = 0.159_301_76;
+pub(super) const PQ_M2: f32 = 78.843_75;
+pub(super) const PQ_C1: f32 = 0.835_937_5;
+pub(super) const PQ_C2: f32 = 18.851_563;
+pub(super) const PQ_C3: f32 = 18.687_5;
 
-const PQ_ABSOLUTE_NITS: f32 = 10_000.0;
-const SDR_REFERENCE_WHITE_NITS: f32 = 80.0;
+pub(super) const PQ_ABSOLUTE_NITS: f32 = 10_000.0;
+pub(super) const SDR_REFERENCE_WHITE_NITS: f32 = 80.0;
 const SDR_OUTPUT_WHITE_NITS: f32 = 100.0;
 const SDR_OUTPUT_BLACK_NITS: f32 = 0.1;
-const HDR_INPUT_BLACK_NITS: f32 = 0.001;
-const EPSILON: f32 = 1e-6;
+pub(super) const HDR_INPUT_BLACK_NITS: f32 = 0.001;
+pub(super) const EPSILON: f32 = 1e-6;
 // Retain the original SDR identity tolerance. Finish the smooth handoff within
 // the existing output-white headroom (100/80); the HDR curve stays unchanged.
 pub(crate) const HDR_SDR_TRANSITION_START: f32 = 1.0 + 1e-3;
@@ -69,19 +69,19 @@ impl HdrLumaLut {
     }
 
     #[inline(always)]
-    #[cfg(any(windows, target_arch = "x86_64"))]
+    #[cfg(any(windows, target_arch = "x86_64", target_arch = "aarch64"))]
     pub(crate) fn values_ptr(&self) -> *const f32 {
         self.values.as_ptr()
     }
 
     #[inline(always)]
-    #[cfg(any(windows, target_arch = "x86_64"))]
+    #[cfg(any(windows, target_arch = "x86_64", target_arch = "aarch64"))]
     pub(crate) fn input_max(&self) -> f32 {
         self.input_max
     }
 
     #[inline(always)]
-    #[cfg(any(windows, target_arch = "x86_64"))]
+    #[cfg(any(windows, target_arch = "x86_64", target_arch = "aarch64"))]
     pub(crate) fn inv_step(&self) -> f32 {
         self.inv_step
     }
@@ -390,7 +390,7 @@ fn tone_map_hdr_pixel_with_luma(rgb: &mut [f32; 3], y_in: f32, y_out: f32) {
 /// This trades memory for speed: a single table lookup replaces the
 /// per-channel `powf(1/2.4)` call in the scalar F16->sRGB path, turning
 /// the conversion into three byte loads per pixel (plus one for alpha).
-fn f16_to_srgb_lut() -> &'static [u8; 65_536] {
+pub(super) fn f16_to_srgb_lut() -> &'static [u8; 65_536] {
     static LUT: OnceLock<[u8; 65_536]> = OnceLock::new();
     LUT.get_or_init(|| {
         let mut lut = [0u8; 65_536];

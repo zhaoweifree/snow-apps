@@ -1605,6 +1605,7 @@ mod tests {
             mouse_trail_rgba: [0; 4],
             mouse_trail_duration_ms: 500,
             mouse_click_rgba: [0; 4],
+            mouse_highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
             mouse_highlight_rgba: [0; 4],
             record_mouse_clicks: false,
             show_keyboard: false,

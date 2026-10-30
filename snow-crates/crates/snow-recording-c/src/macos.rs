@@ -121,6 +121,7 @@ pub struct SnowMacRecordingConfig {
     pub output_path: *const c_char,
     pub highlight_rgba: u32,
     pub record_mouse_clicks: u32,
+    pub highlight_radius: u32,
 }
 pub struct SnowMacRecording {
     session: Option<RecordingSession>,
@@ -195,7 +196,11 @@ pub unsafe extern "C" fn snow_recording_macos_create(
         }
         let size = unsafe { config.cast::<u32>().read() } as usize;
         let legacy_size = std::mem::offset_of!(SnowMacRecordingConfig, highlight_rgba);
-        if size != legacy_size && size != size_of::<SnowMacRecordingConfig>() {
+        let previous_size = std::mem::offset_of!(SnowMacRecordingConfig, highlight_radius);
+        if size != legacy_size
+            && size != previous_size
+            && size != size_of::<SnowMacRecordingConfig>()
+        {
             return Err(invalid());
         }
         let mut extended: SnowMacRecordingConfig = unsafe { std::mem::zeroed() };
@@ -277,6 +282,11 @@ pub unsafe extern "C" fn snow_recording_macos_create(
                 trail: config.trail == 1,
                 show_keyboard: config.keyboard == 1,
                 record_mouse_clicks: config.record_mouse_clicks == 1,
+                highlight_radius: if size == size_of::<SnowMacRecordingConfig>() {
+                    config.highlight_radius
+                } else {
+                    snow_screen_recorder::EffectsConfig::default().mouse_highlight_radius
+                },
                 highlight_rgba: if config.cursor != 0 {
                     config.highlight_rgba.to_be_bytes()
                 } else {

@@ -46,8 +46,8 @@
             <translation>無法插入標註範本</translation>
         </message>
         <message>
-            <source>Could not open the selected image file: %1</source>
-            <translation>無法開啟所選影像檔案：%1</translation>
+            <source>Could not open the selected file: %1</source>
+            <translation>無法開啟所選檔案：%1</translation>
         </message>
         <message>
             <source>Could not read the selected files from Finder. Please try again.</source>
@@ -82,8 +82,8 @@
             <translation>正在準備雲端上傳…</translation>
         </message>
         <message>
-            <source>Save recognition text</source>
-            <translation>儲存辨識文字</translation>
+            <source>Save recognition result</source>
+            <translation>儲存辨識結果</translation>
         </message>
         <message>
             <source>Save screenshot</source>
@@ -114,6 +114,10 @@
             <translation>剪貼簿中沒有可固定到螢幕的內容</translation>
         </message>
         <message>
+            <source>The clipboard export directory could not be locked</source>
+            <translation>無法鎖定剪貼簿匯出目錄</translation>
+        </message>
+        <message>
             <source>The clipboard pin could not be presented</source>
             <translation>無法顯示已固定到螢幕的剪貼簿內容</translation>
         </message>
@@ -138,8 +142,8 @@
             <translation>無法隱藏固定到螢幕視窗</translation>
         </message>
         <message>
-            <source>The recognition text could not be saved: %1</source>
-            <translation>無法儲存辨識文字：%1</translation>
+            <source>The recognition result could not be saved: %1</source>
+            <translation>無法儲存辨識結果：%1</translation>
         </message>
         <message>
             <source>The screenshot clipboard operation could not be started</source>

@@ -5,7 +5,8 @@ pub const CLICK_ANIMATION_MS: u64 = 600;
 pub const CLICK_QUEUE_DEPTH: usize = 128;
 /// Half-open pixel bounds [-radius, radius), with a one-pixel feather.
 /// Passed to the GPU compositor as well as used by the CPU/preview renderer.
-pub const HIGHLIGHT_RADIUS: i32 = 41;
+pub const HIGHLIGHT_RADIUS: i32 =
+    snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS as i32;
 #[derive(Clone, Copy)]
 pub struct RenderClick {
     pub timestamp_ms: u64,
@@ -129,21 +130,22 @@ pub fn draw_highlight_to(
     center: (i32, i32),
     color: [u8; 4],
     multiply: bool,
+    radius: u32,
 ) {
     if color[3] == 0 {
         return;
     }
+    let radius = radius as i32;
     let (width, height) = surface.size();
-    for y in (center.1.saturating_sub(HIGHLIGHT_RADIUS)).max(0)
-        ..(center.1.saturating_add(HIGHLIGHT_RADIUS)).min(height as i32)
+    for y in (center.1.saturating_sub(radius)).max(0)
+        ..(center.1.saturating_add(radius)).min(height as i32)
     {
-        for x in (center.0.saturating_sub(HIGHLIGHT_RADIUS)).max(0)
-            ..(center.0.saturating_add(HIGHLIGHT_RADIUS)).min(width as i32)
+        for x in (center.0.saturating_sub(radius)).max(0)
+            ..(center.0.saturating_add(radius)).min(width as i32)
         {
             let dx = (x - center.0) as f32 + 0.5;
             let dy = (y - center.1) as f32 + 0.5;
-            let coverage =
-                (HIGHLIGHT_RADIUS as f32 + 0.5 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
+            let coverage = (radius as f32 + 0.5 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
             // Ties round to even so the CPU reference matches HLSL round() in recording_cursor.hlsl.
             let alpha = (f32::from(color[3]) * coverage).round_ties_even() as u32;
             if alpha == 0 {
@@ -168,6 +170,35 @@ pub fn draw_highlight_to(
 mod highlight_tests {
     use super::*;
     #[test]
+    fn custom_radius_controls_extent_and_clips_at_surface_edges() {
+        let size = (300, 300);
+        for radius in [8, 41, 96, 128] {
+            for multiply in [false, true] {
+                for center in [(150, 150), (0, 0), (299, 299)] {
+                    let mut pixels = [255; 4].repeat(300 * 300);
+                    draw_highlight_to(
+                        &mut RgbaSurface {
+                            pixels: &mut pixels,
+                            dimensions: size,
+                        },
+                        center,
+                        [255, 255, 0, 255],
+                        multiply,
+                        radius,
+                    );
+                    let blue = |x: usize, y: usize| pixels[(y * 300 + x) * 4 + 2];
+                    assert_eq!(blue(center.0 as usize, center.1 as usize), 0);
+                    if center == (150, 150) {
+                        assert_eq!(blue(150 + radius as usize - 2, 150), 0);
+                        assert_eq!(blue(150 + radius as usize, 150), 255);
+                        assert_eq!(blue(150, 150 - radius as usize - 1), 255);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn multiply_preserves_black_and_tints_content_with_alpha() {
         for (background, expected) in [
             ([255, 255, 255, 255], [255, 255, 127, 255]),
@@ -183,6 +214,7 @@ mod highlight_tests {
                 (32, 32),
                 [255, 255, 0, 128],
                 true,
+                snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
             );
             assert_eq!(
                 &pixels[(32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 4],
@@ -202,6 +234,7 @@ mod highlight_tests {
             (0, 0),
             [255, 255, 0, 0],
             true,
+            snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
         );
         assert!(pixels.iter().all(|v| *v == 255));
         draw_highlight_to(
@@ -212,6 +245,7 @@ mod highlight_tests {
             (0, 0),
             [255, 255, 0, 255],
             true,
+            snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
         );
         assert_eq!(&pixels[..4], &[255, 255, 0, 255]);
         assert!(pixels.chunks_exact(4).any(|p| p[2] > 0 && p[2] < 255));

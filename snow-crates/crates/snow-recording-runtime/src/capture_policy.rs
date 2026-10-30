@@ -7,6 +7,7 @@ use snow_capture::{CaptureSystem, error::CaptureResult};
 #[derive(Clone, Copy)]
 pub(crate) enum RecordingCapturePath {
     Direct,
+    #[cfg(feature = "legacy-capture")]
     Buffered,
 }
 
@@ -40,6 +41,7 @@ fn recording_backend_policy(
             CaptureBackendKind::WindowsGraphicsCapture,
             CaptureBackendKind::Gdi,
         ],
+        #[cfg(feature = "legacy-capture")]
         RecordingCapturePath::Buffered => [
             CaptureBackendKind::WindowsGraphicsCapture,
             CaptureBackendKind::DxgiDuplication,
@@ -100,6 +102,7 @@ mod tests {
         };
         for (path, defaults) in [
             (RecordingCapturePath::Direct, [Dxgi, Wgc, Gdi]),
+            #[cfg(feature = "legacy-capture")]
             (RecordingCapturePath::Buffered, [Wgc, Dxgi, Gdi]),
         ] {
             for preferred in [Auto, Dxgi, Wgc, Gdi] {

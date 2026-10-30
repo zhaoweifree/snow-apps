@@ -260,6 +260,8 @@ impl Editor {
                 .or_else(|| self.free_draw_creation_preview())
                 .or_else(|| self.state.creation_preview.clone()),
             active_text_draft: self.active_text_draft_display_presentation(),
+            shape_bound_text_preview: self.shape_bound_text_preview(),
+            shape_text_handle: self.shape_text_handle(document),
             preview_arrows,
             speech_bubble_previews: self.speech_bubble_previews(document),
             speech_bubble_text_previews: self.speech_bubble_text_previews(document),
@@ -1197,6 +1199,9 @@ mod tests {
             ..document.text(text_id).unwrap().clone()
         };
         let draft_rect = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: draft_text.center,
@@ -1260,6 +1265,9 @@ mod tests {
         );
         let committed_rect = document.element_rect_proxy(text_id).unwrap();
         let stale_draft_rect = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::new(240.0, 60.0),
@@ -1444,6 +1452,9 @@ mod tests {
         let rect_id = insert_rectangle(
             &mut document,
             RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
                 highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
                 center: Point::new(24.0, 0.0),
@@ -1473,6 +1484,9 @@ mod tests {
 
     fn text_element_rect(text: &TextData) -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: text.center,

@@ -39,6 +39,11 @@ control column. It owns an inner inline AdForm for feedback; never register that
 second form. The item inherits the inline layout so the settings section alone supplies row
 spacing. Theme colors and metrics are shared, while compact controls keep their native size.
 
+For settings-row help, set `Metadata::descriptionAction` to a translated label and connect
+`descriptionActionRequested`. The action follows the description, supports mouse and keyboard
+activation, and remains visible when the owner supplies a description override. Descriptions
+remain plain text for accessibility; markup in descriptions is escaped.
+
 For a dialog-level AdForm, call `configureForm(form)` and pass `options.form = form` before
 creating fields. This registers their items with the form. Use AdForm initial values/reset to
 initialize its touched/dirty baseline. When arranging registered items into a grid, register all

@@ -2,10 +2,13 @@
 
 use snow_screen_recorder::{
     EditingSession, ExportRequest, IntermediateRecordingProfile, RecordingArtifact,
-    RecordingAudioTrackConfig, RecordingAudioTrackSource, RecordingConfig, RecordingSession,
-    VideoEncodeConfig,
+    RecordingAudioTrackConfig, RecordingAudioTrackSource, VideoEncodeConfig,
 };
 
+#[cfg(feature = "legacy-capture")]
+use snow_screen_recorder::{RecordingConfig, RecordingSession};
+
+#[cfg(feature = "legacy-capture")]
 #[test]
 fn facade_reexports_recording_runtime_types() {
     fn _assert_config(_: &RecordingConfig) {}

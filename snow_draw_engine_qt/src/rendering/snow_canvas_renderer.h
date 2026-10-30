@@ -74,6 +74,8 @@ struct FilterRenderDiagnostics {
     std::size_t parallelJobs = 0;
     std::size_t retainedWorkspaceBytes = 0;
     std::size_t gaussianPasses = 0;
+    std::size_t gaussianDownsampleNeonExecutions = 0;
+    std::size_t gaussianReconstructionNeonExecutions = 0;
     std::size_t gaussianDownsampleAvx2Executions = 0;
     std::size_t gaussianReconstructionAvx2Executions = 0;
     std::size_t opaqueRectDispatchCount = 0;
@@ -129,6 +131,9 @@ struct SceneRenderRequest {
     bool enableOriginalBackgroundCache = false;
     // Canvas-space originals remain independent of viewport/filter scratch rasters.
     const QList<SnowCanvasBaseImageSource>* baseImageSources = nullptr;
+    // Tiled exports must retain the full export's background resampling pass,
+    // including tiles outside filters. Interactive paints leave this disabled.
+    bool forceBackgroundRaster = false;
 };
 
 QColor toQColor(const SnowColorRgba8& color);

@@ -36,7 +36,6 @@ struct ScreenshotOcrRecognitionResult {
 
 enum class ScreenshotOcrRequestPriority { Interactive, Prefetch };
 
-enum class ScreenshotOcrBackendPreference { Cpu, DirectMl };
 enum class ScreenshotOcrDetectorResizePolicy { Max, Min };
 enum class ScreenshotOcrTextDetectionProcessing { AccuracyFirst, SpeedFirst };
 
@@ -55,15 +54,13 @@ screenshotOcrTextDetectionProcessingFromValue(const QString& value) {
 
 struct ScreenshotOcrRuntimeConfiguration {
     ScreenshotOcrModelType modelType = ScreenshotOcrModelType::Small;
-    ScreenshotOcrBackendPreference backend = ScreenshotOcrBackendPreference::Cpu;
     ScreenshotOcrDetectorResizePolicy detectorResizePolicy = ScreenshotOcrDetectorResizePolicy::Max;
     bool residentProcess = false;
     bool modelHotStart = false;
     ScreenshotOcrTextDetectionProcessing textDetectionProcessing =
         ScreenshotOcrTextDetectionProcessing::AccuracyFirst;
     bool operator==(const ScreenshotOcrRuntimeConfiguration& other) const {
-        return modelType == other.modelType && backend == other.backend &&
-               detectorResizePolicy == other.detectorResizePolicy &&
+        return modelType == other.modelType && detectorResizePolicy == other.detectorResizePolicy &&
                residentProcess == other.residentProcess && modelHotStart == other.modelHotStart &&
                textDetectionProcessing == other.textDetectionProcessing;
     }
@@ -141,7 +138,6 @@ class ScreenshotOcrRecognitionService final : public ScreenshotOcrRecognitionPor
         QString detectorModelPath;
         QString recognizerModelPath;
         QString dictionaryPath;
-        QString stateDirectory;
         // Bound on waiting for in-flight local rendering at shutdown before
         // the render pool is abandoned.
         int shutdownTimeoutMilliseconds = 5000;
@@ -152,10 +148,7 @@ class ScreenshotOcrRecognitionService final : public ScreenshotOcrRecognitionPor
     };
 
     explicit ScreenshotOcrRecognitionService(QObject* parent = nullptr);
-    explicit ScreenshotOcrRecognitionService(
-        const Options& options,
-        ScreenshotOcrBackendPreference backendPreference = ScreenshotOcrBackendPreference::Cpu,
-        QObject* parent = nullptr);
+    explicit ScreenshotOcrRecognitionService(const Options& options, QObject* parent = nullptr);
     ~ScreenshotOcrRecognitionService() override;
 
     RequestToken recognize(ScreenshotOcrRequest request, QObject* receiver,
@@ -168,7 +161,6 @@ class ScreenshotOcrRecognitionService final : public ScreenshotOcrRecognitionPor
     bool reprioritize(RequestToken token, ScreenshotOcrRequestPriority priority) override;
     [[nodiscard]] bool modelFilesReady() const override;
     [[nodiscard]] ScreenshotOcrAssetStatus assetStatus() const override;
-    void setBackendPreference(ScreenshotOcrBackendPreference preference);
     void setProxyUrl(const QString& proxyUrl);
     void setModelType(ScreenshotOcrModelType modelType);
     void setDetectorResizePolicy(ScreenshotOcrDetectorResizePolicy policy);

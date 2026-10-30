@@ -155,7 +155,8 @@ impl SnowPatchPayload {
                     closed: u8::from(op.closed),
                     full_reset: u8::from(op.full_reset),
                     element_removed: u8::from(op.element_removed),
-                    reserved0: [0; 5],
+                    role: op.role as u8,
+                    reserved0: [0; 4],
                 }
             })
             .collect::<Vec<_>>()
@@ -346,6 +347,7 @@ mod tests {
         let inserted = geometry.chunks[1].clone();
         let patch = ViewportPatch {
             path_geometry_ops: vec![PathGeometryPatch {
+                role: Default::default(),
                 id,
                 expected_geometry_revision: 8,
                 resulting_geometry_revision: 9,

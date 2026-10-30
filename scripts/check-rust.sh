@@ -10,5 +10,12 @@ fi
 package="$1"; shift
 [[ "${1:-}" != -- ]] || shift
 cd "$repo_root/snow-crates"
-cargo fmt -p "$package" -- --check
-cargo clippy --locked -p "$package" --all-targets "$@" -- -D warnings
+toolchain=()
+if [[ "$package" == snow-ocr-process ]]; then
+    pin="$repo_root/snow-crates/crates/simd-paddle-ocr-rs/rust-toolchain.toml"
+    channel="$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin")"
+    [[ "$channel" == nightly-* ]] || { echo 'Invalid OCR toolchain pin' >&2; exit 1; }
+    toolchain=("+$channel")
+fi
+cargo "${toolchain[@]}" fmt -p "$package" -- --check
+cargo "${toolchain[@]}" clippy --locked -p "$package" --all-targets "$@" -- -D warnings

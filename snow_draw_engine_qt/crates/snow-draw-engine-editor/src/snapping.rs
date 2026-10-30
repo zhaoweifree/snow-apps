@@ -288,6 +288,15 @@ impl Editor {
             current
         };
         let mut preview = preview_rectangle(start, current, style, modifiers.shift, modifiers.alt);
+        if let Some(rect) = &mut preview {
+            let id = document.peek_next_element_id();
+            rect.stroke_rendering_seed = match &self.state.interaction {
+                crate::state::InteractionState::CreatingRectangle(state) => {
+                    state.stroke_rendering_seed
+                }
+                _ => snow_draw_engine_core::arrow::stroke_rendering_seed(id.index, id.generation),
+            };
+        }
         if highlight {
             preview = preview.map(|mut rect| {
                 rect = rect.into_highlight(snow_draw_engine_document::HighlightShape::Rectangle);
@@ -846,6 +855,7 @@ fn preview_rectangle(
 
     Some(RectangleData {
         rectangle_kind: RectangleElementKind::Rectangle,
+        text_element_id: None,
         highlight_shape: style.shape,
         center,
         width,
@@ -856,6 +866,8 @@ fn preview_rectangle(
         stroke: style.stroke,
         stroke_width: style.stroke_width,
         stroke_style: style.stroke_style,
+        stroke_rendering_style: style.stroke_rendering_style,
+        stroke_rendering_seed: 0,
         corner_radii: snow_draw_engine_document::normalize_shape_corner_radii(
             style.shape,
             width,

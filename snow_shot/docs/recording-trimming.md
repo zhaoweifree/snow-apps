@@ -47,9 +47,37 @@ interval with the recorded settings. Publication uses temporary files and never 
 The editor caches the latest successful range and speed for repeated Copy or Save. Each export
 retains its immutable submitted selection independently of later UI state.
 
+Normal-speed partial MP4 exports preserve sparse decoded pictures and coalesce identical SDR
+frames. Stored samples can cover multiple presentation slots; the configured FPS, selected first
+picture, audio clock, and exact endpoint remain intact. HDR trims retain 10-bit PQ pictures and
+their original holds. Speed-adjusted MP4 exports continue to store every output presentation slot.
+Finalized audio tracks retain their source bitrate budget and mono/stereo layout instead of
+defaulting to 192 kbps stereo. Replay PCM remains 48 kHz stereo and is converted to each track's
+encoded layout. Explicit lower AAC budgets, including 96 kbps mono, are honored.
+New MP4 recordings retain the intended per-track bitrate in `snow_audio_bitrates_kbps`
+container metadata, including through recovery remuxing and repeated trims. This prevents long
+silences from lowering the budget for a later speech selection. Older files without this metadata
+use supplied audio settings when available, otherwise the measured container bitrate or defaults.
+
+Deferred rendering, partial trims, and generated exports use an explicit offline encoder policy.
+NVENC uses HQ/CQ VBR with lookahead and B-frames; AMF uses its quality/transcoding preset with
+preanalysis enabled and frame reordering disabled so single-picture exports can drain; QSV uses
+its slow preset with lookahead and B-frames. VideoToolbox disables real-time mode and permits
+reordering. Media Foundation uses the archive scenario with its existing
+quality control. Software encoders retain the selected CRF and speed preset. Live capture and clean
+recording sources retain bounded buffering; the offline policy rejects live GPU surface pools and
+segmented recovery. Encoder draining and duration finalization include the offline buffered tail.
+
 Cropped Copy exports and Save suggestions expand the configured video filename format at export
 time, keeping the original output directory and extension. They share normal recording exports'
 `_1`, `_2`, and subsequent collision suffixes. Repeated Copy reuses the cached clip and its filename.
+
+Recording filename and save-directory templates also support `{AN}` (application name) and
+`{WN}` (window title). Both names come from the window under the selected recording region's
+center when capture starts, after any countdown, ignoring the recording controls even when the
+toolbar is included in the video. Trimmed exports retain those names as other windows or titles
+change. Values use the same safe path characters as screenshot exports; unavailable names become
+`Unknown`. Without a recording context, directory pickers and folder resolution use `Unknown`.
 
 A single playback worker owns FFmpeg and the native audio sink. Seek commands coalesce, revision
 numbers reject stale frames, and cancellation interrupts forward decoding. Hardware frames stay on
@@ -88,6 +116,12 @@ cargo test -p snow-recording-export --lib clip::tests
 cargo test -p snow-recording-export --lib tempo::tests
 cargo test -p snow-recording-export --lib playback::tests
 cargo test -p snow-recording-export --lib deferred::tests
+cargo test -p snow-recording-export --lib codec::tests
+cargo test -p snow-recording-export --lib software_presets_buffer_reorder_and_flush_variable_duration_frames
+# Optional native encoder validation; no screen capture or audio output.
+cargo test -p snow-recording-export --lib offline_hardware_sparse_frames_preserve_timestamps_and_endpoint -- --ignored
+# Optional AMD AMF single-picture drain regression; no capture or audio output.
+cargo test -p snow-recording-export --lib offline_amf_single_picture_drains_without_a_successor -- --ignored
 cargo test -p snow-recording-export --test retimed_av_sync
 cargo test -p snow-recording-c --lib clip::tests
 # Optional native adapter check; plays only silence and requires an output device.
@@ -125,6 +159,30 @@ exercise tempo processing and bounded buffers. It checks
 pixel agreement and a 768 MiB memory-growth ceiling. The 30-minute fixture is sparse (one stored
 frame per second on a 60 fps presentation timeline); the 1080p60 and 4K60 fixtures are dense.
 Generated media is reused for subsequent runs.
+
+For a fixed-frame comparison of live and offline hardware policies:
+
+```powershell
+cmake --build --preset build-windows-msvc-performance --target snow-shot-recording-encoder-performance-benchmark
+& build/windows-msvc-performance/cargo/x86_64-pc-windows-msvc/release/examples/recording_encoder_benchmark.exe build/windows-msvc-performance/live.mp4 10 0 1 h264 80 ui live
+& build/windows-msvc-performance/cargo/x86_64-pc-windows-msvc/release/examples/recording_encoder_benchmark.exe build/windows-msvc-performance/offline.mp4 10 0 1 h264 80 ui offline
+```
+
+The final argument defaults to `live`; replace `ui` with `gradient` for dense moving content.
+Both profiles use the same requested quality, dimensions, frame count, and GOP. CSV output reports
+the encoder actually opened, file size, sampled decoded RGB PSNR, and timing. On the Radeon RX
+6750 XT development host (2026-10-18, Release, one run per fixture, 1080p30, 300 frames, quality 80),
+both profiles used AMF and decoded all 300 frames. These measurements predate disabling AMF
+frame reordering for single-picture exports:
+
+| Fixture | Live bytes | Offline bytes | Reduction | Live / offline PSNR | Live / offline encode seconds |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| UI | 147,107 | 124,558 | 15.3% | 38.874 / 38.897 dB | 4.19 / 6.54 |
+| Moving gradient | 27,311,177 | 23,447,640 | 14.1% | 24.806 / 24.799 dB | 3.35 / 4.77 |
+
+These measurements exclude setup and final draining from encode time. They show the expected
+compression/time tradeoff, not guaranteed savings for arbitrary recordings. NVENC, QSV, Media
+Foundation, and VideoToolbox still require native validation on their respective hardware.
 
 Optional arguments select one fixture (`1080p60`, `4k60`, `long-30min`, or `separate-audio`)
 and one validated integer speed percentage. Set `SNOW_TRIM_MEMORY_TRACE=1` for absolute

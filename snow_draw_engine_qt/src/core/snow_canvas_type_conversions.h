@@ -33,6 +33,9 @@ SnowFillStyle toEngineFillStyle(SnowCanvasFillStyle fillStyle);
 SnowCanvasStrokeStyle toCanvasStrokeStyle(SnowStrokeStyle strokeStyle);
 SnowStrokeStyle toEngineStrokeStyle(SnowCanvasStrokeStyle strokeStyle);
 
+SnowCanvasStrokeRenderingStyle toCanvasStrokeRenderingStyle(SnowStrokeRenderingStyle style);
+SnowStrokeRenderingStyle toEngineStrokeRenderingStyle(SnowCanvasStrokeRenderingStyle style);
+
 SnowCanvasCornerRadii toCanvasCornerRadii(const SnowCornerRadii& cornerRadii);
 SnowCornerRadii toEngineCornerRadii(const SnowCanvasCornerRadii& cornerRadii);
 

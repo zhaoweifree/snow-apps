@@ -141,7 +141,8 @@ class ScreenshotRecognitionWindow final : public QWidget {
     [[nodiscard]] QImage printViewportSnapshot(QImage background = {},
                                                const QRectF& canvasRect = {}, QImage filtered = {},
                                                const QRectF& filteredRect = {},
-                                               qreal contentOpacity = 1.0);
+                                               qreal contentOpacity = 1.0,
+                                               QSize outputPixelSize = {});
     void showFormattedText(
         std::shared_ptr<QTextDocument> document,
         ScreenshotOcrTextLayer::RenderingMode mode = ScreenshotOcrTextLayer::RenderingMode::Normal,

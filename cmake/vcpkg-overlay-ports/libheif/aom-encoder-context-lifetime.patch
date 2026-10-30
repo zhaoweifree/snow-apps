@@ -1,0 +1,40 @@
+--- a/libheif/plugins/encoder_aom.cc
++++ b/libheif/plugins/encoder_aom.cc
+@@ -59,13 +59,18 @@
+       delete[] error;
+     }
+ 
+-    // automatically destroy aom_codec_ctx_t when we leave the function
+-//    auto codec_ctx_deleter = std::unique_ptr<aom_codec_ctx_t, aom_codec_err_t (*)(aom_codec_ctx_t*)>(&codec, aom_codec_destroy);
+-
+-    aom_codec_destroy(&codec);
+-  }
+-
+-  aom_codec_ctx_t codec;
++    reset_codec();
++  }
++
++  void reset_codec()
++  {
++    if (codec.priv) {
++      aom_codec_destroy(&codec);
++    }
++    codec = {};
++  }
++
++  aom_codec_ctx_t codec{};
+ 
+   // --- parameters
+ 
+@@ -1025,7 +1030,10 @@
+     encoder_flags = (aom_codec_flags_t) (encoder_flags | AOM_CODEC_USE_HIGHBITDEPTH);
+   }
+ 
+-  // allocate aom_codec_ctx_t
++  // A still image with alpha starts separate color and alpha encodes on this
++  // encoder. Reusing it for another image or sequence also starts a new codec.
++  // Retire the previous context before init overwrites its private allocation.
++  encoder->reset_codec();
+   if (aom_codec_enc_init(&codec, iface, &cfg, encoder_flags)) {
+     // AOM makes sure that the error text returned by aom_codec_error_detail() is always a static
+     // text that is valid even though the codec allocation failed (#788).

@@ -267,6 +267,73 @@ void resizePackedTransferParity() {
     }
 }
 
+void preparedResizeRowsMatchFullOutput() {
+    for (const auto format : {kRgba8, kBgra8}) {
+        for (const auto method :
+             {ResamplingMethod::nearest, ResamplingMethod::linear, ResamplingMethod::lanczos3}) {
+            for (const bool source_major : {false, true}) {
+                auto source = std::make_shared<RowSource>(23, 257, format);
+                ResizeOptions resize{11, 17, method};
+                resize.maximum_threads = 1;
+                if (source_major)
+                    resize.maximum_worker_cache_bytes = 1;
+                auto reference = take(MutableImage::allocate(11, 17, format),
+                                      "allocate prepared resize reference");
+                require(
+                    resize_raster_into(*source, resize,
+                                       {11, 17, format, reference.row_stride(), reference.pixels()})
+                        .has_value(),
+                    "resize prepared reference");
+                const auto prepared = take(prepare_resized_raster(source, resize),
+                                           "prepare reusable resize filter tables");
+                const auto weak = std::weak_ptr<const RasterSource>(source);
+                source.reset();
+                require(!weak.expired() && prepared->descriptor().canvas_width == 11 &&
+                            prepared->descriptor().canvas_height == 17 &&
+                            !has_access(prepared->access(), RasterAccess::concurrent_reads),
+                        "prepared resize retains its source and its access capabilities");
+                for (const std::uint32_t first : {14U, 0U, 7U, 3U, 16U}) {
+                    const auto count = std::min(3U, 17U - first);
+                    constexpr std::size_t stride = 11U * 4U + 12U;
+                    std::vector<std::byte> rows((count - 1U) * stride + 11U * 4U);
+                    require(prepared->read_rows(0, 0, first, count, stride, rows).has_value(),
+                            "prepared resize reads arbitrary output row intervals");
+                    for (std::uint32_t row = 0; row < count; ++row)
+                        require(std::memcmp(rows.data() + row * stride,
+                                            reference.pixels().data() +
+                                                (first + row) * reference.row_stride(),
+                                            11U * 4U) == 0,
+                                "prepared resize rows must be bit-identical to full output");
+                }
+                std::stop_source stopped;
+                stopped.request_stop();
+                std::vector<std::byte> row(11U * 4U);
+                const auto cancelled =
+                    prepared->read_rows(0, 0, 1, 1, row.size(), row, stopped.get_token());
+                require(!cancelled && cancelled.error().code == ErrorCode::cancelled &&
+                            !prepared->read_rows(0, 0, 17, 1, row.size(), row) &&
+                            !prepared->read_rows(0, 0, 0, 0, row.size(), row),
+                        "prepared resize validates row intervals and cancellation");
+            }
+        }
+    }
+    auto identity_source = std::make_shared<RowSource>(19, 13);
+    ResizeOptions identity{19, 13};
+    auto identity_rows =
+        take(prepare_resized_raster(identity_source, identity), "prepare identity resize");
+    std::vector<std::byte> expected(19U * 4U * 3U);
+    std::vector<std::byte> actual(expected.size());
+    require(identity_source->read_rows(0, 0, 5, 3, 19U * 4U, expected, {}).has_value() &&
+                identity_rows->read_rows(0, 0, 5, 3, 19U * 4U, actual).has_value() &&
+                expected == actual,
+            "identity prepared resize copies the requested source rows without filter work");
+    std::stop_source stopped;
+    stopped.request_stop();
+    const auto cancelled = prepare_resized_raster(identity_source, identity, stopped.get_token());
+    require(!cancelled && cancelled.error().code == ErrorCode::cancelled,
+            "prepared resize can be canceled before constructing any tables");
+}
+
 void packedCodecStreamingAndOpacity() {
     Service service;
     for (const Format format :
@@ -468,10 +535,13 @@ void mappedOnlyCodecParity() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
     try {
         resizeParityAndValidation();
         resizePackedTransferParity();
+        preparedResizeRowsMatchFullOutput();
+        if (argc == 2 && std::string_view(argv[1]) == "--resize-only")
+            return EXIT_SUCCESS;
         packedCodecStreamingAndOpacity();
         packedBgrAndRgbCodecParity();
         mappedOnlyCodecParity();

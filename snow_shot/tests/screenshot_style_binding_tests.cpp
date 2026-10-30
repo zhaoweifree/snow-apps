@@ -26,6 +26,7 @@
 #include <QTimeZone>
 #include <QToolButton>
 #include <limits>
+#include <memory>
 #include <cstdlib>
 #include <iostream>
 
@@ -48,6 +49,42 @@ ScreenshotToolPalette::Options options() {
     result.showSpotlightTool = true;
     result.styleDefaults = screenshotCanvasToolStyleDefaults();
     return result;
+}
+class StyleBindingCanvas final : public SnowCanvasWidget {
+  public:
+    int angleAdjustmentConnectionCount() const {
+        return receivers(SIGNAL(angleAdjustmentTargetChanged()));
+    }
+};
+void styleBindingsReleaseConnectionsForPooledEditors() {
+    StyleBindingCanvas canvas;
+    ScreenshotToolPalette palette(options());
+    const int originalConnections = canvas.angleAdjustmentConnectionCount();
+    for (int capture = 0; capture < 160; ++capture) {
+        {
+            ScreenshotStyleBinding binding(palette, canvas, nullptr);
+            require(canvas.angleAdjustmentConnectionCount() == originalConnections + 1,
+                    "each capture binding owns exactly one angle adjustment connection");
+        }
+        require(canvas.angleAdjustmentConnectionCount() == originalConnections,
+                "ending capture releases angle adjustment connections while editors stay pooled");
+    }
+}
+void styleBindingsTolerateEditorDestruction() {
+    {
+        SnowCanvasWidget canvas;
+        auto palette = std::make_unique<ScreenshotToolPalette>(options());
+        ScreenshotStyleBinding binding(*palette, canvas, nullptr);
+        palette.reset();
+        canvas.angleAdjustmentTargetChanged();
+    }
+    {
+        ScreenshotToolPalette palette(options());
+        auto canvas = std::make_unique<SnowCanvasWidget>();
+        ScreenshotStyleBinding binding(palette, *canvas, nullptr);
+        canvas.reset();
+        palette.angleValueAdjustmentRequested(1, false);
+    }
 }
 struct Editor {
     SnowCanvasWidget canvas;
@@ -1292,6 +1329,8 @@ void runScreenshotStyleBindingTests() {
     const auto restore = qScopeGuard([&] {
         static_cast<void>(snow_shot::presentation::persistScreenshotCanvasToolStyles(original));
     });
+    styleBindingsReleaseConnectionsForPooledEditors();
+    styleBindingsTolerateEditorDestruction();
     arrowCreationDefaultsRestoreShaftAndRatio();
     creationDefaultsDoNotActivateFilterTools();
     creationDefaultsPreserveDocumentAndEditingCleanup();

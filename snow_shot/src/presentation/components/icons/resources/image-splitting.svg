@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="currentColor" data-adqt-slot="primary">
+  <path fill-rule="evenodd" d="M96 176h320a32 32 0 0 1 32 32v608a32 32 0 0 1-32 32H96a32 32 0 0 1-32-32V208a32 32 0 0 1 32-32zm40 72v528h240V248H136zm472-72h320a32 32 0 0 1 32 32v608a32 32 0 0 1-32 32H608a32 32 0 0 1-32-32V208a32 32 0 0 1 32-32zm40 72v528h240V248H648z"/>
+  <path d="M136 680l120-120 120 120M648 616l104-104 136 136" fill="none" stroke="currentColor" stroke-width="72" stroke-linejoin="round" data-adqt-slot="primary"/>
+  <circle cx="256" cy="384" r="48"/>
+</svg>

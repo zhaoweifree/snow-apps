@@ -19,6 +19,7 @@ int main(void) {
     config.struct_size = sizeof(config);
     config.cancellation = cancellation;
     config.fps = 30;
+    config.highlight_radius = 41;
     config.output_width = 64;
     config.output_height = 64;
     config.output_path = "/nonexistent/canceled-recording.mp4";

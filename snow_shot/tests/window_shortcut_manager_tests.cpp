@@ -1,4 +1,5 @@
 #include "snow_shot/presentation/windowcloseshortcut.h"
+#include "snow_shot/presentation/cursormovementshortcuts.h"
 #include "physical_key_test_support.h"
 #include "snow_shot/presentation/windowshortcutmanager.h"
 #include "snow_shot/shortcuts/shortcutbinding.h"
@@ -1447,6 +1448,148 @@ void standaloneControlHoldIsOptInAndReleases() {
             "interrupted Ctrl holds must cancel without a delayed release action");
 }
 
+void cursorMovementHoldsStackAndBalanceInput() {
+    QWidget window;
+    QWidget outside;
+    WindowShortcutManager manager;
+    manager.addScopeWindow(&window);
+    snow_shot::presentation::CursorMovementShortcuts movement;
+    QVector<QPoint> moves;
+    bool apply = true;
+    const struct {
+        Qt::Key key;
+        Qt::Key alias;
+        QPoint direction;
+    } bindings[] = {
+        {Qt::Key_Left, Qt::Key_A, QPoint(-1, 0)},
+        {Qt::Key_Right, Qt::Key_D, QPoint(1, 0)},
+        {Qt::Key_Up, Qt::Key_W, QPoint(0, -1)},
+        {Qt::Key_Down, Qt::Key_S, QPoint(0, 1)},
+    };
+    for (const auto& item : bindings) {
+        WindowShortcutManager::Binding cursor;
+        cursor.keyCombinations = {QKeyCombination(Qt::NoModifier, item.key),
+                                  QKeyCombination(Qt::NoModifier, item.alias)};
+        movement.configureBinding(cursor, item.direction, [&](const QPoint& direction) {
+            if (!apply)
+                return false;
+            moves.push_back(direction);
+            return true;
+        });
+        require(manager.addBinding(&window, std::move(cursor)) != 0,
+                "held cursor movement bindings must register");
+    }
+    bool competitorEnabled = false;
+    int competingActivations = 0;
+    auto competitor = binding(QStringLiteral("competing-up"), Qt::Key_Up, 100, [&] {
+        ++competingActivations;
+        return true;
+    });
+    competitor.canActivate = [&](const auto&) { return competitorEnabled; };
+    competitor.autoRepeat = true;
+    require(manager.addBinding(&window, std::move(competitor)) != 0,
+            "competing repeat binding must register");
+    const struct {
+        Qt::Key horizontal;
+        Qt::Key vertical;
+        QPoint diagonal;
+    } diagonals[] = {
+        {Qt::Key_Left, Qt::Key_Up, QPoint(-1, -1)},
+        {Qt::Key_Right, Qt::Key_Up, QPoint(1, -1)},
+        {Qt::Key_Left, Qt::Key_Down, QPoint(-1, 1)},
+        {Qt::Key_Right, Qt::Key_Down, QPoint(1, 1)},
+    };
+    for (const auto& item : diagonals) {
+        for (const bool horizontalFirst : {true, false}) {
+            const auto first = horizontalFirst ? item.horizontal : item.vertical;
+            const auto second = horizontalFirst ? item.vertical : item.horizontal;
+            moves.clear();
+            sendKey(&window, QEvent::KeyPress, first);
+            sendKey(&window, QEvent::KeyPress, second);
+            sendKey(&window, QEvent::KeyPress, first, Qt::NoModifier, true);
+            sendKey(&window, QEvent::KeyRelease, second, Qt::NoModifier, true);
+            sendKey(&window, QEvent::KeyPress, second, Qt::NoModifier, true);
+            require(moves.size() == 4 && moves.at(1) == item.diagonal &&
+                        moves.at(2) == item.diagonal && moves.at(3) == item.diagonal,
+                    "every diagonal must survive repeats of either key and synthetic releases");
+            sendKey(&outside, QEvent::KeyRelease, first);
+            sendKey(&window, QEvent::KeyPress, second, Qt::NoModifier, true);
+            require(
+                moves.size() == 5 &&
+                    moves.constLast() ==
+                        (horizontalFirst
+                             ? (item.vertical == Qt::Key_Up ? QPoint(0, -1) : QPoint(0, 1))
+                             : (item.horizontal == Qt::Key_Left ? QPoint(-1, 0) : QPoint(1, 0))),
+                "only the surviving key may contribute after release");
+            sendKey(&window, QEvent::KeyRelease, second);
+        }
+    }
+
+    moves.clear();
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Left);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_A);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Up);
+    sendKey(&window, QEvent::KeyRelease, Qt::Key_Left);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier, true);
+    require(moves.size() == 4 && moves.constLast() == QPoint(-1, -1),
+            "a second alias must keep its direction held without increasing its speed");
+    sendKey(&window, QEvent::KeyRelease, Qt::Key_A);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier, true);
+    require(moves.size() == 5 && moves.constLast() == QPoint(0, -1),
+            "releasing the final alias must remove that direction");
+    sendKey(&window, QEvent::KeyRelease, Qt::Key_Up);
+
+    moves.clear();
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Left);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Up);
+    competitorEnabled = true;
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier, true);
+    require(moves.size() == 3 && moves.constLast() == QPoint(-1, -1) && competingActivations == 0,
+            "a higher-priority shortcut must not take over a held movement repeat");
+    apply = false;
+    require(sendKey(&window, QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier, true) &&
+                moves.size() == 3 && competingActivations == 0,
+            "a declined repeat must retain ownership of the held input sequence");
+    apply = true;
+    competitorEnabled = false;
+    sendKey(&window, QEvent::KeyRelease, Qt::Key_Left);
+    sendKey(&window, QEvent::KeyRelease, Qt::Key_Up);
+
+    moves.clear();
+    for (const auto key : {Qt::Key_Left, Qt::Key_Right, Qt::Key_Up, Qt::Key_Down})
+        sendKey(&window, QEvent::KeyPress, key);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier, true);
+    require(moves == QVector<QPoint>{QPoint(-1, 0), QPoint(0, -1)},
+            "opposite directions must cancel independently on each axis");
+    sendKey(&window, QEvent::KeyRelease, Qt::Key_Left);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier, true);
+    require(moves.size() == 3 && moves.constLast() == QPoint(1, 0),
+            "releasing an opposing direction must restore the remaining axis");
+
+    const auto suspension = manager.suspendInput();
+    manager.resumeInput(suspension);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Up);
+    require(moves.size() == 4 && moves.constLast() == QPoint(0, -1),
+            "modal interruption must clear every held direction");
+    QEvent deactivate(QEvent::ApplicationDeactivate);
+    QCoreApplication::sendEvent(qApp, &deactivate);
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Right);
+    require(moves.size() == 5 && moves.constLast() == QPoint(1, 0),
+            "application deactivation must clear held cursor movement");
+    sendKey(&window, QEvent::KeyRelease, Qt::Key_Right);
+
+    apply = false;
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Left);
+    apply = true;
+    sendKey(&window, QEvent::KeyPress, Qt::Key_Up);
+    require(moves.size() == 6 && moves.constLast() == QPoint(0, -1),
+            "a declined movement press must not leave a phantom held direction");
+    for (const auto& item : bindings) {
+        sendKey(&window, QEvent::KeyRelease, item.key);
+        sendKey(&window, QEvent::KeyRelease, item.alias);
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1454,6 +1597,7 @@ int main(int argc, char** argv) {
         qputenv("QT_QPA_PLATFORM", "offscreen");
     }
     QApplication application(argc, argv);
+    cursorMovementHoldsStackAndBalanceInput();
     removedScopesReleaseTheirLifetimeObservers();
     removedBindingsReleaseTheirLifetimeObservers();
     managerDestructionRetiresObserversBeforeItsState();

@@ -15,14 +15,7 @@ use snow_draw_engine_document::{
 };
 
 pub(crate) fn rect_bounds(rect: RectangleData) -> DrawRect {
-    let (extent_x, extent_y) =
-        rotated_rect_extents(rect.width, rect.height, rect.rotation, rect.stroke_width);
-    DrawRect::new(
-        rect.center.x - extent_x,
-        rect.center.y - extent_y,
-        rect.center.x + extent_x,
-        rect.center.y + extent_y,
-    )
+    snow_draw_engine_document::rect_paint_bounds(&rect)
 }
 
 pub(crate) fn bounds_visible(bounds: DrawRect, viewport: (f64, f64, f64, f64)) -> bool {
@@ -42,7 +35,7 @@ pub(crate) fn scene_display_item_bounds(
     item: &SceneDisplayItem,
     frame_view: FrameView,
 ) -> Option<DirtyRegion> {
-    match item {
+    let bounds = match item {
         SceneDisplayItem::Rectangle(item) => match item.shape {
             DisplayRectangleShape::Diamond => draw_diamond_bounds(
                 frame_view,
@@ -106,13 +99,56 @@ pub(crate) fn scene_display_item_bounds(
             draw_serial_number_connector_bounds(frame_view, *item)
         }
         SceneDisplayItem::Stroke | SceneDisplayItem::Image => None,
-    }
+    };
+    let style = match item {
+        SceneDisplayItem::Rectangle(item) if item.stroke.a != 0 && item.stroke_width > 0.0 => {
+            item.stroke_rendering_style
+        }
+        SceneDisplayItem::Arrow(item) if item.stroke.a != 0 && item.stroke_width > 0.0 => {
+            item.stroke_rendering_style
+        }
+        SceneDisplayItem::SerialNumber(item)
+            if item.color.a != 0
+                && item.stroke_width > 0.0
+                && matches!(
+                    item.serial_number_type,
+                    snow_draw_engine_display::DisplaySerialNumberType::OutlinedCircle
+                        | snow_draw_engine_display::DisplaySerialNumberType::OutlinedSquare
+                ) =>
+        {
+            item.stroke_rendering_style
+        }
+        _ => Default::default(),
+    };
+    let outset = snow_draw_engine_core::arrow::stroke_rendering_outset(style, f64::MAX)
+        * frame_view.camera.zoom.max(0.0);
+    bounds.map(|bounds| {
+        DirtyRegion::new(
+            bounds.min_x - outset,
+            bounds.min_y - outset,
+            bounds.max_x + outset,
+            bounds.max_y + outset,
+        )
+    })
 }
 
 fn draw_path_item_bounds(
     frame_view: FrameView,
     item: &snow_draw_engine_display::ArrowDisplayItem,
 ) -> Option<DirtyRegion> {
+    if let Some(pressure) = &item.pressure_geometry {
+        let mut bounds = pressure.canvas_bounds;
+        if item.fill_style.is_visible(item.fill) {
+            let center = item.geometry.canvas_bounds;
+            bounds = [
+                bounds[0].min(center[0]),
+                bounds[1].min(center[1]),
+                bounds[2].max(center[2]),
+                bounds[3].max(center[3]),
+            ];
+        }
+        return draw_path_geometry_bounds(frame_view, bounds, 0.0, &[]);
+    }
     draw_path_geometry_bounds(
         frame_view,
         item.geometry.canvas_bounds,
@@ -516,6 +552,8 @@ fn display_arrow_to_document_arrow(
         end_arrowhead,
     )
     .unwrap_or_else(|| ArrowData {
+        stroke_rendering_seed: 0,
+        stroke_rendering_style: Default::default(),
         linear_kind: LinearElementKind::Arrow,
         distance: None,
         angle: None,
@@ -915,5 +953,80 @@ mod tests {
         assert!((bounds.max_x - (500.0 + expected_extent)).abs() < 1e-9);
         assert!((bounds.min_y - (500.0 - expected_extent)).abs() < 1e-9);
         assert!((bounds.max_y - (500.0 + expected_extent)).abs() < 1e-9);
+    }
+    #[test]
+    fn stroke_rendering_scene_dirty_bounds_cover_shared_ink_outset() {
+        use snow_draw_engine_core::arrow::StrokeRenderingStyle;
+        let mut item = RectangleDisplayItem {
+            width: 100.0,
+            height: 80.0,
+            stroke_width: 2.0,
+            stroke: ColorRgba8 {
+                r: 10,
+                g: 20,
+                b: 30,
+                a: 255,
+            },
+            ..Default::default()
+        };
+        for zoom in [0.5, 1.0, 3.0] {
+            let mut frame = frame_view();
+            frame.camera.zoom = zoom;
+            item.stroke_rendering_style = StrokeRenderingStyle::Architect;
+            let exact =
+                scene_display_item_bounds(&SceneDisplayItem::Rectangle(item), frame).unwrap();
+            item.stroke_rendering_style = StrokeRenderingStyle::Cartoonist;
+            let rough =
+                scene_display_item_bounds(&SceneDisplayItem::Rectangle(item), frame).unwrap();
+            assert_eq!(rough.min_x, exact.min_x - 4.0 * zoom);
+            assert_eq!(rough.max_y, exact.max_y + 4.0 * zoom);
+        }
+    }
+
+    #[test]
+    fn serial_stroke_rendering_dirty_bounds_expand_only_outlined_badges() {
+        use snow_draw_engine_core::arrow::StrokeRenderingStyle;
+        use snow_draw_engine_display::{DisplaySerialNumberType, SerialNumberDisplayItem};
+        for zoom in [0.75, 1.0, 1.5] {
+            let mut frame = frame_view();
+            frame.camera.zoom = zoom;
+            for kind in [
+                DisplaySerialNumberType::OutlinedCircle,
+                DisplaySerialNumberType::OutlinedSquare,
+                DisplaySerialNumberType::SolidCircle,
+                DisplaySerialNumberType::SolidSquare,
+                DisplaySerialNumberType::Circle,
+            ] {
+                let mut item = SerialNumberDisplayItem {
+                    diameter: 40.0,
+                    color: ColorRgba8 {
+                        r: 255,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                    stroke_width: 2.0,
+                    serial_number_type: kind,
+                    ..Default::default()
+                };
+                let exact =
+                    scene_display_item_bounds(&SceneDisplayItem::SerialNumber(item.clone()), frame)
+                        .unwrap();
+                item.stroke_rendering_style = StrokeRenderingStyle::Cartoonist;
+                let rough = scene_display_item_bounds(&SceneDisplayItem::SerialNumber(item), frame)
+                    .unwrap();
+                let extra = if matches!(
+                    kind,
+                    DisplaySerialNumberType::OutlinedCircle
+                        | DisplaySerialNumberType::OutlinedSquare
+                ) {
+                    4.0 * zoom
+                } else {
+                    0.0
+                };
+                assert_eq!(rough.min_x, exact.min_x - extra);
+                assert_eq!(rough.max_y, exact.max_y + extra);
+            }
+        }
     }
 }

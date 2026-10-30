@@ -5,7 +5,7 @@ param(
     [string]$PreviousTag = 'v1.1.4-beta',
     [string]$Winget = 'winget.exe',
     [switch]$AllowUnrecognizedRelease,
-    [ValidateSet('Full', 'Mini')][string]$Edition = 'Full',
+    [ValidateSet('Full')][string]$Edition = 'Full',
     [ValidateSet('x64', 'arm64')][string]$Architecture = 'x64',
     [switch]$SkipUpgrade,
     # Historical release fixtures refuse; newly built installers close and restart.
@@ -21,7 +21,7 @@ if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows'
 $hostArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
 if ($hostArchitecture -cne $Architecture) { throw 'WinGet lifecycle validation must run on the matching native Windows host.' }
 $product = Get-SnowShotEdition $Edition $Architecture
-$installerVariant = if ($Edition -eq 'Mini') { 'online' } else { 'offline' }
+$installerVariant = 'offline'
 $version = Get-SnowShotWingetVersion $Tag
 $previousVersion = if ($SkipUpgrade) { $version } else { Get-SnowShotWingetVersion $PreviousTag }
 if (-not $SkipUpgrade -and $version -eq $previousVersion) { throw 'The upgrade fixture requires two different releases.' }

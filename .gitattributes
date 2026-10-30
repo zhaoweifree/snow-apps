@@ -1,5 +1,8 @@
 *.onnx binary
 *.dll binary
+# Preserve the original bytes of shared vcpkg ABI inputs across Windows checkouts.
+/cmake/SnowBuildToolchain.cmake text eol=lf
+/scripts/build-toolchain.json text eol=lf
 /scripts/static-qt-features.json text eol=lf
 /scripts/qtbase-timezone-without-cldr.patch text eol=lf
 /snow_shot/packaging/linux/** text eol=lf

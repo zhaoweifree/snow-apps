@@ -155,7 +155,7 @@ struct ScreenshotToolPaletteFilterFamilyResult {
 };
 
 // Behavior hooks for a filter row; the palette owns filter state mutations,
-// intensity availability and the filterStyleChanged signal.
+// intensity availability and submission through the style-edit handler.
 struct ScreenshotToolPaletteFilterCallbacks {
     std::function<void(int typeValue)> setType;
     std::function<void(double strength)> setStrength;
@@ -321,7 +321,8 @@ class ScreenshotToolPaletteStyleControls final {
         ShapeCornerRefresh = 1u << 4,
         ShapeArrowTypeRefresh = 1u << 5,
         ShapeArrowheadsRefresh = 1u << 6,
-        AllShapeRefreshes = (1u << 7) - 1,
+        ShapeBrushModeRefresh = 1u << 7,
+        AllShapeRefreshes = (1u << 8) - 1,
     };
     enum TextRefreshGroup : quint32 {
         TextColorRefresh = 1u << 0,
@@ -342,7 +343,8 @@ class ScreenshotToolPaletteStyleControls final {
         SerialNumberFontFamilyRefresh = 1u << 4,
         SerialNumberTypeRefresh = 1u << 5,
         SerialNumberNumericTypeRefresh = 1u << 6,
-        AllSerialNumberRefreshes = (1u << 7) - 1,
+        SerialNumberStrokeRenderingRefresh = 1u << 7,
+        AllSerialNumberRefreshes = (1u << 8) - 1,
     };
     static constexpr quint32 kAllRefreshGroups = 0xffffffffu;
 
@@ -399,6 +401,8 @@ class ScreenshotToolPaletteStyleControls final {
     void cycleStrokeWidth();
     void setStrokeColor(const QColor& color);
     void setStrokeStyle(SnowCanvasStrokeStyle strokeStyle);
+    void setStrokeRenderingStyle(SnowCanvasStrokeRenderingStyle style);
+    void setBrushMode(SnowCanvasBrushMode brushMode);
     void setFillColor(const QColor& color);
     void setFillStyle(SnowCanvasFillStyle fillStyle);
     void setCornerRadius(int cornerRadius);
@@ -409,6 +413,7 @@ class ScreenshotToolPaletteStyleControls final {
     void cycleArrowStrokeWidth();
     void setArrowStrokeColor(const QColor& color);
     void setArrowStrokeStyle(SnowCanvasStrokeStyle strokeStyle);
+    void setArrowStrokeRenderingStyle(SnowCanvasStrokeRenderingStyle style);
     void setArrowType(SnowCanvasArrowType arrowType);
     void setLineType(SnowCanvasArrowType arrowType);
     void setArrowRatio(double ratio);
@@ -439,6 +444,7 @@ class ScreenshotToolPaletteStyleControls final {
     void setWatermarkGap(double gap);
     void setWatermarkOpacity(double opacity);
     void setSerialNumberColor(const QColor& color);
+    void setSerialNumberStrokeRenderingStyle(SnowCanvasStrokeRenderingStyle style);
     void setSerialNumberType(SnowCanvasSerialNumberType type);
     void setSerialNumberNumericType(SnowCanvasSerialNumberNumericType type);
     void setSerialNumberFillColor(const QColor& color);
@@ -568,6 +574,7 @@ class ScreenshotToolPaletteStyleControls final {
     std::unique_ptr<ScreenshotToolPaletteNumericPresetEditor> m_arrowStrokeWidthEditor;
     std::unique_ptr<ScreenshotToolPaletteStrokeEditor> m_arrowStrokeEditor;
     adqt::widgets::AdRadioButtonGroup* m_arrowTypeButtonGroup = nullptr;
+    QPointer<adqt::widgets::AdRadioButtonGroup> m_brushModeButtonGroup;
     std::unique_ptr<ScreenshotToolPaletteIconOptionEditor> m_arrowShaftEditor;
     IconNumericValuePreviewButton* m_arrowRatioEditor = nullptr;
     std::unique_ptr<ScreenshotToolPaletteIconOptionEditor> m_startArrowheadEditor;

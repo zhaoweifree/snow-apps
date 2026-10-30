@@ -1,4 +1,9 @@
 #include "physical_key_test_support.h"
+#ifdef Q_OS_WIN
+#include "toolbar_capture_exclusion_native_tests.h"
+#include "../src/platform/windows/captureexclusioncomposition.h"
+#include "snow_shot/platform/windowcaptureexclusion.h"
+#endif
 #include "snow_shot/presentation/screenshotcapturestate.h"
 #include "snow_shot/presentation/screenshotdisplaysession.h"
 #include "snow_shot/presentation/screenshotgeometry.h"
@@ -21,9 +26,12 @@
 #include "widgets/button.h"
 #include <QAbstractButton>
 #include <QEvent>
+#include <QElapsedTimer>
 #include <QPointer>
 #include <QScopeGuard>
 #include <QTemporaryDir>
+#include <QThread>
+#include <QWindow>
 
 #include <cstdlib>
 #include <functional>
@@ -76,6 +84,9 @@ class RecordingToolbarCommands : public ScreenshotToolbarCommandSink {
     void setSerialNumberTool() override {}
     void setOcrTool() override {}
     void startScrollingScreenshot() override {}
+    void splitScrollingScreenshot() override {
+        ++scrollingImageSplits;
+    }
     void pinSelectionToScreen() override {}
     void cancelCapture() override {}
     void copySelectionToClipboard() override {}
@@ -98,6 +109,7 @@ class RecordingToolbarCommands : public ScreenshotToolbarCommandSink {
         ++intervalChanges;
     }
     int interval = 0;
+    int scrollingImageSplits = 0;
     int intervalChanges = 0;
     int moveToolCount = 0;
     int selectToolCount = 0;
@@ -386,6 +398,12 @@ void scrollingIntervalRestoresAndReachesCommands() {
         QWidget owner;
         window.setTransientOwnerWindow(&owner);
         palette->setScrollingScreenshotMode(true);
+        auto* splitButton = palette->findChild<QAbstractButton*>(
+            QStringLiteral("screenshotScrollingImageSplittingButton"));
+        require(splitButton != nullptr, "scrolling toolbar must expose Image Splitting");
+        splitButton->click();
+        require(commands.scrollingImageSplits == 1,
+                "Image Splitting must reach the capture command exactly once");
         auto* settingsButton = palette->findChild<QAbstractButton*>(
             QStringLiteral("screenshotScrollingSettingsButton"));
         require(settingsButton != nullptr, "scrolling toolbar must expose settings");
@@ -683,6 +701,76 @@ void speechBubbleReachesScreenshotCommands() {
     require(palette->activeTool() == ScreenshotToolPalette::Tool::SpeechBubble,
             "screenshot tool synchronization recognizes Speech Bubble");
 }
+#ifdef Q_OS_WIN
+void scrollingCompositionPreservesVisibleToolbar() {
+    // Match main.cpp: native toolbars must not materialize every sibling widget.
+    const bool nativeSiblingsDisabled =
+        QCoreApplication::testAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
+    QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
+    const auto restoreNativeSiblings = qScopeGuard([&] {
+        QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings,
+                                       nativeSiblingsDisabled);
+    });
+    QWidget owner(nullptr, Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    owner.setGeometry(100, 100, 1200, 700);
+    owner.show();
+    RecordingToolbarCommands commands;
+    ScreenshotToolbarWindow toolbar(commands);
+    toolbar.setOwnerWindow(&owner);
+    toolbar.moveContentTo(QPoint(150, 300));
+    toolbar.show();
+    QCoreApplication::processEvents();
+    namespace composition = snow_shot::platform::windows::detail;
+    require(snow_shot::platform::setWindowExcludedFromCapture(&owner, true), "exclude overlay");
+    const QPointer<QWindow> overlayWindow(owner.windowHandle());
+    const QPointer<QWindow> toolbarWindow(toolbar.windowHandle());
+    QWidget thumbnail(&owner);
+    thumbnail.setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
+    thumbnail.setAttribute(Qt::WA_TranslucentBackground);
+    thumbnail.hide();
+    composition::enableCaptureExclusionCompositionFallback(&thumbnail);
+    require(!thumbnail.windowHandle(),
+            "the scrolling thumbnail must start without a native surface");
+    // Exercise the fallback even on Windows versions where native affinity succeeds.
+    require(composition::applyCaptureExclusionCompositionFallback(&thumbnail), "compose thumbnail");
+    require(snow_shot::platform::setWindowExcludedFromCapture(&thumbnail, true),
+            "exclude thumbnail");
+    require(overlayWindow && owner.windowHandle() == overlayWindow && toolbarWindow &&
+                toolbar.windowHandle() == toolbarWindow && toolbar.isVisible(),
+            "excluding the hidden thumbnail must preserve the overlay and visible toolbar");
+    DWORD affinity = WDA_NONE;
+    require(GetWindowDisplayAffinity(reinterpret_cast<HWND>(owner.internalWinId()), &affinity) &&
+                affinity == WDA_EXCLUDEFROMCAPTURE && thumbnail.isHidden(),
+            "thumbnail composition must preserve overlay exclusion and stay hidden until preview");
+    require(composition::applyCaptureExclusionCompositionFallback(&toolbar), "compose toolbar");
+    require(snow_shot::platform::setWindowExcludedFromCapture(&toolbar, true), "exclude toolbar");
+    for (const bool scrolling : {true, false, true}) {
+        toolbar.setScrollingScreenshotMode(scrolling);
+        const auto hwnd = reinterpret_cast<HWND>(toolbar.internalWinId());
+        const QPoint center = toolbar.palette()->mainPanel()->mapTo(
+            &toolbar, toolbar.palette()->mainPanel()->rect().center());
+        const qreal dpr = toolbar.devicePixelRatioF();
+        const auto hasCoverage = [&] {
+            const HRGN region = CreateRectRgn(0, 0, 0, 0);
+            const int type = GetWindowRgn(hwnd, region);
+            const bool covered = type != ERROR && PtInRegion(region, qRound(center.x() * dpr),
+                                                             qRound(center.y() * dpr));
+            DeleteObject(region);
+            return covered;
+        };
+        QElapsedTimer deadline;
+        deadline.start();
+        do {
+            QCoreApplication::processEvents();
+            if (hasCoverage())
+                break;
+            QThread::msleep(1);
+        } while (deadline.elapsed() < 3000);
+        require(toolbar.isVisible() && IsWindowVisible(hwnd) && hasCoverage(),
+                "scrolling mode changes must preserve visible, interactive toolbar content");
+    }
+}
+#endif
 } // namespace
 
 int main(int argc, char** argv) {
@@ -693,6 +781,25 @@ int main(int argc, char** argv) {
     static_cast<void>(
         applicationStorage.initialize({storageDirectory.filePath(QStringLiteral("bin")),
                                        storageDirectory.filePath(QStringLiteral("data")), 60000}));
+#ifdef Q_OS_WIN
+    if (application.arguments().contains(QStringLiteral("--scrolling-composition-only"))) {
+        scrollingCompositionPreservesVisibleToolbar();
+        applicationStorage.shutdown();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--native-capture-exclusion-only")) ||
+        application.arguments().contains(
+            QStringLiteral("--native-capture-exclusion-affinity-only"))) {
+        RecordingToolbarCommands commands;
+        ScreenshotToolbarWindow toolbar(commands);
+        const int result = application.arguments().contains(
+                               QStringLiteral("--native-capture-exclusion-affinity-only"))
+                               ? verifyToolbarCaptureExclusionAffinity(toolbar, "screenshot")
+                               : verifyToolbarCaptureExclusion(toolbar, "screenshot");
+        applicationStorage.shutdown();
+        return result;
+    }
+#endif
     if (application.arguments().contains(QStringLiteral("--speech-bubble-only"))) {
         speechBubbleReachesScreenshotCommands();
         applicationStorage.shutdown();

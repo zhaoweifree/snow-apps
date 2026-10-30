@@ -1,6 +1,7 @@
 #include "snow/image/resource_plan.h"
 
 #include "snow/image/processing.h"
+#include "resize_resource_bounds.h"
 
 #include <algorithm>
 #include <cmath>
@@ -278,6 +279,32 @@ Result<ResourcePlan> plan_resources(const ResourcePlanRequest& request) {
     }
     if (!add(row_working, std::uint64_t{8} << 20U, &row_working))
         return overflow();
+    if (request.source.canvas_width != request.output.canvas_width ||
+        request.source.canvas_height != request.output.canvas_height) {
+        auto horizontal = detail::resize_axis_resources(
+            request.source.canvas_width, request.output.canvas_width, request.resampling_support);
+        auto vertical = detail::resize_axis_resources(
+            request.source.canvas_height, request.output.canvas_height, request.resampling_support);
+        if (!horizontal || !vertical)
+            return !horizontal ? horizontal.error() : vertical.error();
+        std::uint64_t tables = 0;
+        if (!add(horizontal.value().retained_bytes, vertical.value().retained_bytes, &tables) ||
+            !add(tables,
+                 std::max(horizontal.value().construction_bytes,
+                          vertical.value().construction_bytes),
+                 &tables) ||
+            !add(row_working, tables, &row_working))
+            return overflow();
+        if (vertical_streaming) {
+            // The existing streaming term includes inverted coefficients and one source-offset
+            // array. The inversion also keeps activity and cursor arrays while packed tables live.
+            std::uint64_t inversion_indices = 0;
+            if (!multiply(static_cast<std::uint64_t>(request.source.canvas_height) + 1U,
+                          sizeof(std::size_t) * 2U, &inversion_indices) ||
+                !add(row_working, inversion_indices, &row_working))
+                return overflow();
+        }
+    }
     const std::uint32_t hardware = std::max(1U, std::thread::hardware_concurrency());
     const std::uint32_t requested_threads = request.maximum_cpu_threads == 0
                                                 ? hardware

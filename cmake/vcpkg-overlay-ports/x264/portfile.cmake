@@ -23,6 +23,7 @@ vcpkg_from_gitlab(
         parallel-install.patch
         allow-clang-cl.patch
         configure.patch
+        alias-safe-preallocation.patch
 )
 
 function(add_cross_prefix)

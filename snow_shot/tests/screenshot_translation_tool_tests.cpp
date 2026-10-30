@@ -18,6 +18,7 @@
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -93,6 +94,7 @@ class ToolbarCommands final : public ScreenshotToolbarCommandSink,
     void setSelectionAspectRatioPresetFromToolbar(ScreenshotSelectionAspectRatioPreset) override {}
     void openSelectionResizeModalFromToolbar() override {}
     void adjustSelectionFromToolbar(int, int, int, int) override {}
+    void adjustSelectionEffectsFromWheel(int, int) override {}
     void setSelectionCornerRadiusFromToolbar(int) override {}
     void setSelectionShadowWidthFromToolbar(int) override {}
     void setSelectionToolbarHovered(bool) override {}
@@ -109,7 +111,11 @@ class Recognition final : public ScreenshotOcrRecognitionPort {
     bool reprioritize(RequestToken, ScreenshotOcrRequestPriority) override {
         return true;
     }
-    void complete(qsizetype index) {
+    void complete(qsizetype index, bool failed = false, bool empty = false) {
+        if (failed) {
+            completions.at(index)({{}, QStringLiteral("Recognition failed")});
+            return;
+        }
         auto presentation = std::make_shared<ScreenshotOcrPresentation>();
         presentation->selection = requests.at(index).canvasRect.toAlignedRect();
         ScreenshotOcrLine line;
@@ -117,13 +123,105 @@ class Recognition final : public ScreenshotOcrRecognitionPort {
         line.confidence = 1.0;
         const QRectF rect = requests.at(index).canvasRect;
         line.quad = {rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()};
-        presentation->lines.append(line);
+        if (!empty)
+            presentation->lines.append(line);
         presentation->prepareForRendering();
         completions.at(index)({std::move(presentation)});
     }
     QVector<ScreenshotOcrRequest> requests;
     QVector<Completion> completions;
 };
+
+void copyAfterRecognitionOwnsCompletion() {
+    enum class Scenario { Fresh, Cached, Cancelled, Failed, Empty, Superseded, QueuedCancellation };
+    for (const QString& followUp : {QStringLiteral("no_action"), QStringLiteral("enable_edit_mode"),
+                                    QStringLiteral("copy_text")}) {
+        require(
+            snow_shot::storage::ScreenshotSettings().setAutoExecuteAfterTextRecognition(followUp),
+            "configure the general recognition follow-up");
+        for (const auto scenario :
+             {Scenario::Fresh, Scenario::Cached, Scenario::Cancelled, Scenario::Failed,
+              Scenario::Empty, Scenario::Superseded, Scenario::QueuedCancellation}) {
+            ScreenshotCaptureState capture;
+            capture.presentationSuppressed = true;
+            ScreenshotInteractionState interaction;
+            ScreenshotSelectionModel selection;
+            selection.setSelectionRect(QRectF(10, 10, 80, 60));
+            ScreenshotDisplaySession displays;
+            CapturedDisplayModel display;
+            display.stableId = QStringLiteral("copy-recognition");
+            display.logicalRect = QRect(0, 0, 200, 160);
+            display.physicalRect = display.logicalRect;
+            display.active = true;
+            display.geometryResolved = true;
+            display.image = QImage(display.physicalRect.size(), QImage::Format_RGB32);
+            display.image.fill(Qt::white);
+            displays.appendDisplay(display);
+            ScreenshotGeometryMapper geometry;
+            geometry.rebuild(displays);
+            OverlayEvents events;
+            SnowCanvasRuntime runtime;
+            snow_shot::presentation::WindowShortcutManager shortcuts;
+            ScreenshotOverlayCoordinator coordinator(events, runtime, shortcuts);
+            Recognition recognition;
+            int ended = 0;
+            int automaticActions = 0;
+            ScreenshotOcrController* activeController = nullptr;
+            ScreenshotOcrController controller({capture, interaction, selection, displays, geometry,
+                                                coordinator, recognition, nullptr, nullptr, [] {},
+                                                [&] {
+                                                    ++ended;
+                                                    activeController->invalidateSession();
+                                                }});
+            activeController = &controller;
+            QObject::connect(&controller, &ScreenshotOcrController::textResultChanged, &controller,
+                             [&](bool available) {
+                                 if (available)
+                                     ++automaticActions;
+                             });
+            if (scenario == Scenario::Cached) {
+                controller.activate();
+                recognition.complete(0);
+                automaticActions = 0;
+            }
+            QApplication::clipboard()->setText(QStringLiteral("Previous clipboard"));
+            controller.activateAndCopy();
+            require(recognition.requests.size() == 1,
+                    "copy recognition must start OCR or reuse the existing result");
+            if (scenario != Scenario::Cached) {
+                require(ended == 0 && QApplication::clipboard()->text() ==
+                                          QStringLiteral("Previous clipboard"),
+                        "copy recognition must wait for text before copying or ending capture");
+                if (scenario == Scenario::Cancelled)
+                    controller.invalidateSession();
+                else if (scenario == Scenario::Superseded)
+                    controller.activate();
+                recognition.complete(0, scenario == Scenario::Failed, scenario == Scenario::Empty);
+                if (scenario == Scenario::QueuedCancellation)
+                    controller.invalidateSession();
+            }
+            QCoreApplication::processEvents();
+            const bool copied = scenario == Scenario::Fresh || scenario == Scenario::Cached ||
+                                scenario == Scenario::Empty;
+            require(ended == (copied ? 1 : 0) &&
+                        QApplication::clipboard()->text() ==
+                            (scenario == Scenario::Empty ? QString()
+                             : copied                    ? QStringLiteral("Recognized text")
+                                                         : QStringLiteral("Previous clipboard")),
+                    "only successful active copy recognition may replace the clipboard and end "
+                    "capture");
+            require(scenario == Scenario::Superseded ? automaticActions > 0 : automaticActions == 0,
+                    "explicit copy recognition must supersede the configurable follow-up");
+            controller.invalidateSession();
+            QApplication::clipboard()->setText(QStringLiteral("Next capture"));
+            controller.activate();
+            recognition.complete(recognition.requests.size() - 1);
+            require(ended == (copied ? 1 : 0) &&
+                        QApplication::clipboard()->text() == QStringLiteral("Next capture"),
+                    "copy recognition must not leak into later screenshot activations");
+        }
+    }
+}
 
 void translationIdentitySurvivesSelectionResize(bool completeBeforeResize, bool cancelResize) {
     ScreenshotCaptureState capture;
@@ -259,6 +357,7 @@ int main(int argc, char* argv[]) {
             translationIdentitySurvivesSelectionResize(completeBeforeResize, cancelResize);
         }
     }
+    copyAfterRecognitionOwnsCompletion();
     storage.shutdown();
     return 0;
 }

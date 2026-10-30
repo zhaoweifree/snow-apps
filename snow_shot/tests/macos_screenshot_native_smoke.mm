@@ -326,10 +326,14 @@ int main(int argc, char** argv) {
         snow_shot::presentation::DirectCaptureRequest request;
         request.target = snow_shot::presentation::DirectCaptureTarget::FocusedWindow;
         request.window = focused;
-        const auto direct = snow_shot::presentation::captureDirectTarget(request);
-        if (!direct.isValid()) {
-            std::cerr << "direct focused capture failed: " << direct.error.toStdString() << '\n';
-            return QImage();
+        for (const bool historyEnabled : {false, true}) {
+            request.historyEnabled = historyEnabled;
+            const auto direct = snow_shot::presentation::captureDirectTarget(request);
+            if (!direct.isValid() || direct.displays.isEmpty() == historyEnabled) {
+                std::cerr << "direct focused capture failed (history=" << historyEnabled
+                          << "): " << direct.error.toStdString() << '\n';
+                return QImage();
+            }
         }
         if (capture(window, false).isNull())
             return QImage();

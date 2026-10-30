@@ -26,6 +26,8 @@ ScreenshotSelectionParams clampScreenshotSelectionParams(const ScreenshotSelecti
     result.selection =
         QRect(std::clamp(normalized.left(), actualBounds.left(), maxLeft),
               std::clamp(normalized.top(), actualBounds.top(), maxTop), width, height);
+    result.layoutCompaction = result.layoutCompaction.normalized();
+    result.backgroundOpacityPercent = std::clamp(result.backgroundOpacityPercent, 0, 100);
     result.radius = std::clamp(result.radius, 0, kScreenshotSelectionCornerRadiusMax);
     result.shadowWidth = std::clamp(result.shadowWidth, 0, kScreenshotSelectionShadowWidthMax);
     if (!result.shadowColor.isValid()) {

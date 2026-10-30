@@ -410,6 +410,14 @@ struct NarrowKernels {
 
 impl NarrowKernels {
     fn new() -> Self {
+        #[cfg(target_arch = "aarch64")]
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return Self {
+                horizontal: horizontal_neon,
+                accumulate: accumulate_neon,
+                write: write_neon,
+            };
+        }
         #[cfg(target_arch = "x86_64")]
         if std::arch::is_x86_feature_detected!("sse4.1") {
             if std::arch::is_x86_feature_detected!("avx2") {
@@ -475,6 +483,112 @@ fn write_narrow(source: &[[u32; 4]], output: &mut [u8], denominator: u32, recipr
             let estimate = ((u64::from(numerator) * u64::from(reciprocal)) >> 32) as u32;
             *channel = (estimate - u32::from(estimate * denominator > numerator)) as u8;
         }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn horizontal_neon(
+    axis: &AxisPlan,
+    row: &[u8],
+    columns: Range<usize>,
+    output: &mut [[u32; 4]],
+) {
+    use std::arch::aarch64::*;
+    if let Some(short) = &axis.short {
+        // SAFETY: plans record complete in-bounds pixels, including the
+        // zero-weight padding taps. AArch64 provides baseline NEON.
+        unsafe {
+            match axis.short_taps {
+                1 => horizontal_short_neon::<1>(&short[columns], row, output),
+                2 => horizontal_short_neon::<2>(&short[columns], row, output),
+                3 => horizontal_short_neon::<3>(&short[columns], row, output),
+                4 => horizontal_short_neon::<4>(&short[columns], row, output),
+                _ => unreachable!("short footprints have at most four taps"),
+            }
+        }
+        return;
+    }
+    for (destination, x) in output.iter_mut().zip(columns) {
+        let span = &axis.spans[x];
+        let weights = &axis.weights[span.weights.clone()];
+        let pixels = &row[span.first * 4..(span.first + weights.len()) * 4];
+        let mut sum = vdupq_n_u32(0);
+        for (pixel, &weight) in pixels.chunks_exact(4).zip(weights) {
+            let bytes = vcreate_u8(u64::from(u32::from_le_bytes(pixel.try_into().unwrap())));
+            let rgba = vmovl_u16(vget_low_u16(vmovl_u8(bytes)));
+            sum = vmlaq_n_u32(sum, rgba, weight);
+        }
+        // SAFETY: each destination owns four u32 channels. The narrow-plan
+        // denominator bounds every weighted sum to its unsigned channel lane.
+        unsafe { vst1q_u32(destination.as_mut_ptr(), sum) };
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn horizontal_short_neon<const TAPS: usize>(
+    spans: &[ShortFootprint],
+    row: &[u8],
+    output: &mut [[u32; 4]],
+) {
+    use std::arch::aarch64::*;
+    for (span, destination) in spans.iter().zip(output) {
+        let mut sum = vdupq_n_u32(0);
+        for tap in 0..TAPS {
+            // SAFETY: even absent taps point at a complete pixel in this row.
+            let pixel = unsafe {
+                row.as_ptr()
+                    .add(span.offsets[tap])
+                    .cast::<u32>()
+                    .read_unaligned()
+            };
+            let rgba = vmovl_u16(vget_low_u16(vmovl_u8(vcreate_u8(u64::from(pixel)))));
+            sum = vmlaq_n_u32(sum, rgba, span.weights[tap]);
+        }
+        // SAFETY: the destination contains exactly four writable channels.
+        unsafe { vst1q_u32(destination.as_mut_ptr(), sum) };
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn accumulate_neon(source: &[[u32; 4]], output: &mut [[u32; 4]], weight: u32) {
+    use std::arch::aarch64::*;
+    for (source, destination) in source.iter().zip(output) {
+        // SAFETY: each array has four initialized channels, and narrow-plan
+        // bounds ensure all products and accumulated sums fit in u32.
+        unsafe {
+            let value = vld1q_u32(source.as_ptr());
+            let sum = vld1q_u32(destination.as_ptr());
+            vst1q_u32(destination.as_mut_ptr(), vmlaq_n_u32(sum, value, weight));
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn write_neon(source: &[[u32; 4]], output: &mut [u8], denominator: u32, reciprocal: u32) {
+    use std::arch::aarch64::*;
+    let half = vdupq_n_u32(denominator / 2);
+    let shift = vdupq_n_s32(-(denominator.trailing_zeros() as i32));
+    for (sum, pixel) in source.iter().zip(output.chunks_exact_mut(4)) {
+        // SAFETY: each source contains four initialized u32 channels.
+        let numerator = vaddq_u32(unsafe { vld1q_u32(sum.as_ptr()) }, half);
+        let rounded = if denominator.is_power_of_two() {
+            vshlq_u32(numerator, shift)
+        } else {
+            let low = vshrn_n_u64::<32>(vmull_n_u32(vget_low_u32(numerator), reciprocal));
+            let high = vshrn_n_u64::<32>(vmull_high_n_u32(numerator, reciprocal));
+            let estimate = vcombine_u32(low, high);
+            let product = vmulq_n_u32(estimate, denominator);
+            let correction = vshrq_n_u32::<31>(vcgtq_u32(product, numerator));
+            vsubq_u32(estimate, correction)
+        };
+        // Exact reciprocal correction bounds the result to an 8-bit channel.
+        let words = vmovn_u32(rounded);
+        let bytes = vmovn_u16(vcombine_u16(words, vdup_n_u16(0)));
+        pixel.copy_from_slice(&vget_lane_u32::<0>(vreinterpret_u32_u8(bytes)).to_le_bytes());
     }
 }
 
@@ -724,6 +838,11 @@ fn resize_half_row(top: &[u8], bottom: &[u8], columns: Range<usize>, output: &mu
     debug_assert_eq!(top.len(), output.len() * 2);
     debug_assert_eq!(bottom.len(), top.len());
     debug_assert!(columns.end <= output.len() / 4);
+    #[cfg(target_arch = "aarch64")]
+    // SAFETY: AArch64 provides NEON and the validated row slices cover every
+    // selected output pixel.
+    let mut x = unsafe { resize_half_neon(top, bottom, columns.clone(), output) };
+    #[cfg(not(target_arch = "aarch64"))]
     let mut x = columns.start;
     #[cfg(target_arch = "x86_64")]
     {
@@ -764,6 +883,40 @@ fn resize_half_row(top: &[u8], bottom: &[u8], columns: Range<usize>, output: &mu
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn resize_half_neon(
+    top: &[u8],
+    bottom: &[u8],
+    columns: Range<usize>,
+    output: &mut [u8],
+) -> usize {
+    use std::arch::aarch64::*;
+    let mut x = columns.start;
+    while x + 4 <= columns.end {
+        // SAFETY: four output pixels consume eight complete pixels in each
+        // source row. Interleaved loads split even and odd RGBA pixels without
+        // reading outside those 32 bytes; all accesses permit unaligned rows.
+        unsafe {
+            let first = vld2q_u32(top.as_ptr().add(x * 8).cast());
+            let second = vld2q_u32(bottom.as_ptr().add(x * 8).cast());
+            let a = vreinterpretq_u8_u32(first.0);
+            let b = vreinterpretq_u8_u32(first.1);
+            let c = vreinterpretq_u8_u32(second.0);
+            let d = vreinterpretq_u8_u32(second.1);
+            let low = vaddq_u16(
+                vaddl_u8(vget_low_u8(a), vget_low_u8(b)),
+                vaddl_u8(vget_low_u8(c), vget_low_u8(d)),
+            );
+            let high = vaddq_u16(vaddl_high_u8(a, b), vaddl_high_u8(c, d));
+            let pixels = vcombine_u8(vrshrn_n_u16::<2>(low), vrshrn_n_u16::<2>(high));
+            vst1q_u8(output.as_mut_ptr().add(x * 4), pixels);
+        }
+        x += 4;
+    }
+    x
+}
+
 #[cfg(target_arch = "x86_64")]
 #[inline]
 fn half_row_pair(
@@ -794,13 +947,13 @@ struct AxisPlan {
     spans: Vec<AxisSpan>,
     weights: Vec<u32>,
     denominator: u32,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     short: Option<Vec<ShortFootprint>>,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     short_taps: usize,
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 #[derive(Clone, Debug)]
 struct ShortFootprint {
     offsets: [usize; 4],
@@ -847,13 +1000,13 @@ impl AxisPlan {
                 weights: start_weight..weights.len(),
             });
         }
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         let short_taps = spans
             .iter()
             .map(|span| span.weights.len())
             .max()
             .unwrap_or(1);
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         let short = (short_taps <= 4).then(|| {
             spans
                 .iter()
@@ -874,9 +1027,9 @@ impl AxisPlan {
             spans,
             weights,
             denominator: if output < source { source / divisor } else { 1 },
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             short,
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             short_taps,
         }
     }
@@ -1041,6 +1194,52 @@ mod tests {
             .collect()
     }
 
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn arm64_selects_neon_area_kernels_and_processes_half_vectors() {
+        let kernels = NarrowKernels::new();
+        assert!(std::ptr::fn_addr_eq(
+            kernels.horizontal,
+            horizontal_neon as HorizontalNarrowKernel
+        ));
+        assert!(std::ptr::fn_addr_eq(
+            kernels.accumulate,
+            accumulate_neon as AccumulateNarrowKernel
+        ));
+        assert!(std::ptr::fn_addr_eq(
+            kernels.write,
+            write_neon as WriteNarrowKernel
+        ));
+        for offset in 0..16 {
+            let top: Vec<_> = (0..160).map(|i| (i * 37 % 256) as u8).collect();
+            let bottom: Vec<_> = (0..160).map(|i| (i * 71 % 256) as u8).collect();
+            for start in 0..4 {
+                for count in 0..=12 - start {
+                    let range = start..start + count;
+                    let mut actual = [0xa5; 64];
+                    let mut expected = actual;
+                    let top = &top[offset..offset + 96];
+                    let bottom = &bottom[offset..offset + 96];
+                    // Directly exercise the vector entry point and prove it
+                    // processed the full batches, leaving the tail untouched.
+                    let end =
+                        unsafe { resize_half_neon(top, bottom, range.clone(), &mut actual[1..49]) };
+                    assert_eq!(end, start + count / 4 * 4);
+                    for x in start..end {
+                        for c in 0..4 {
+                            let sum = u16::from(top[x * 8 + c])
+                                + u16::from(top[x * 8 + 4 + c])
+                                + u16::from(bottom[x * 8 + c])
+                                + u16::from(bottom[x * 8 + 4 + c]);
+                            expected[1 + x * 4 + c] = ((sum + 2) / 4) as u8;
+                        }
+                    }
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+
     #[test]
     #[ignore = "run explicitly in the performance Release build"]
     fn fractional_area_kernel_performance_comparison() {
@@ -1051,6 +1250,8 @@ mod tests {
         }
         #[allow(unused_mut)]
         let mut kernels = vec![("portable", NarrowKernels::portable())];
+        #[cfg(target_arch = "aarch64")]
+        kernels.push(("neon", NarrowKernels::new()));
         #[cfg(target_arch = "x86_64")]
         if std::arch::is_x86_feature_detected!("sse4.1") {
             kernels.push((

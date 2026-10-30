@@ -1,3 +1,4 @@
+#include "snow_shot/shortcuts/screenshotshortcutcontext.h"
 #include "snow_shot/storage/settingsadapters.h"
 #include "snow_shot/storage/floatingtoolbarsettings.h"
 
@@ -87,7 +88,9 @@ const QStringList& screenshotShortcutActionIds() {
             QStringLiteral("previous_selection_type"),
             QStringLiteral("previous_screenshot_history"),
             QStringLiteral("next_screenshot_history"),
+            QStringLiteral("duplicate_latest_region"),
             QStringLiteral("select_previously_selected_area"),
+            QStringLiteral("select_next_previously_selected_area"),
             QStringLiteral("recapture"),
             QStringLiteral("toggle_cursor_visibility"),
             QStringLiteral("copy_color"),
@@ -650,6 +653,14 @@ bool ShortcutSettings::setScreenshotOcr(const shortcuts::ShortcutBindingList& bi
     return setShortcutValue(QStringLiteral("global_shortcuts/screenshot_ocr"), bindings);
 }
 
+shortcuts::ShortcutBindingList ShortcutSettings::screenshotOcrCopy() const {
+    return shortcutValue(QStringLiteral("global_shortcuts/screenshot_ocr_copy"));
+}
+
+bool ShortcutSettings::setScreenshotOcrCopy(const shortcuts::ShortcutBindingList& bindings) const {
+    return setShortcutValue(QStringLiteral("global_shortcuts/screenshot_ocr_copy"), bindings);
+}
+
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION
 shortcuts::ShortcutBindingList ShortcutSettings::screenshotTranslation() const {
     return shortcutValue(QStringLiteral("global_shortcuts/screenshot_translation"));
@@ -754,6 +765,24 @@ shortcuts::ShortcutBindingList ShortcutSettings::globalCanvas() const {
 
 bool ShortcutSettings::setGlobalCanvas(const shortcuts::ShortcutBindingList& bindings) const {
     return setShortcutValue(QStringLiteral("global_shortcuts/global_canvas"), bindings);
+}
+
+shortcuts::ShortcutBindingList ShortcutSettings::stitchSelectedImages() const {
+    return shortcutValue(QStringLiteral("global_shortcuts/stitch_selected_images"));
+}
+
+bool ShortcutSettings::setStitchSelectedImages(
+    const shortcuts::ShortcutBindingList& bindings) const {
+    return setShortcutValue(QStringLiteral("global_shortcuts/stitch_selected_images"), bindings);
+}
+
+shortcuts::ShortcutBindingList ShortcutSettings::splitSelectedImages() const {
+    return shortcutValue(QStringLiteral("global_shortcuts/split_selected_images"));
+}
+
+bool ShortcutSettings::setSplitSelectedImages(
+    const shortcuts::ShortcutBindingList& bindings) const {
+    return setShortcutValue(QStringLiteral("global_shortcuts/split_selected_images"), bindings);
 }
 
 shortcuts::ShortcutBindingList ShortcutSettings::openPinToScreenManagement() const {
@@ -1248,6 +1277,11 @@ shortcuts::ShortcutBindingList ScreenshotShortcutSettings::selectPreviouslySelec
     return shortcuts(QStringLiteral("select_previously_selected_area"));
 }
 
+shortcuts::ShortcutBindingList
+ScreenshotShortcutSettings::selectNextPreviouslySelectedArea() const {
+    return shortcuts(QStringLiteral("select_next_previously_selected_area"));
+}
+
 shortcuts::ShortcutBindingList ScreenshotShortcutSettings::recapture() const {
     return shortcuts(QStringLiteral("recapture"));
 }
@@ -1365,7 +1399,10 @@ bool setLocalShortcutValuesAtomic(const QMap<QString, QJsonValue>& values) {
                     }
                     if (std::any_of(seen.cbegin(), seen.cend(),
                                     [&binding, &id, &group](const auto& existing) {
-                                        return (group.prefix !=
+                                        return (group.policy != LocalShortcutPolicy::Screenshot ||
+                                                shortcuts::screenshotShortcutActionsMayConflict(
+                                                    existing.first, id)) &&
+                                               (group.prefix !=
                                                     QStringLiteral("pin_to_screen_shortcuts/") ||
                                                 PinToScreenShortcutSettings::actionsMayConflict(
                                                     existing.first, id)) &&
@@ -1554,13 +1591,15 @@ bool ScreenshotUiSettings::setToolbarSize(const QString& size) const {
     return cache().setValue(QStringLiteral("screenshot_ui/toolbar_size"), size);
 }
 
-bool ScreenshotUiSettings::selectionTransitionAnimationEnabled() const {
-    return cache().value(QStringLiteral("screenshot_ui/selection_transition_animation")).toBool();
+SelectionTransitionAnimation ScreenshotUiSettings::selectionTransitionAnimation() const {
+    return static_cast<SelectionTransitionAnimation>(
+        cache().value(QStringLiteral("screenshot_ui/selection_transition_animation")).toInt());
 }
 
-bool ScreenshotUiSettings::setSelectionTransitionAnimationEnabled(bool enabled) const {
+bool ScreenshotUiSettings::setSelectionTransitionAnimation(
+    SelectionTransitionAnimation animation) const {
     return cache().setValue(QStringLiteral("screenshot_ui/selection_transition_animation"),
-                            enabled);
+                            static_cast<int>(animation));
 }
 
 QString ScreenshotUiSettings::selectionDisplayUnit() const {
@@ -1883,6 +1922,14 @@ bool RecordingSettings::setMouseHighlightColor(const QColor& color) const {
     return setColorValue(QStringLiteral("screen_recording/mouse_highlight_color"), color);
 }
 
+int RecordingSettings::mouseHighlightRadius() const {
+    return cache().value(QStringLiteral("screen_recording/mouse_highlight_radius")).toInt();
+}
+
+bool RecordingSettings::setMouseHighlightRadius(int radius) const {
+    return cache().setValue(QStringLiteral("screen_recording/mouse_highlight_radius"), radius);
+}
+
 bool RecordingSettings::showCursor() const {
     return cache().value(QStringLiteral("screen_recording/show_cursor")).toBool();
 }
@@ -1922,6 +1969,14 @@ bool RecordingSettings::captureToolbarInRecording() const {
 bool RecordingSettings::setCaptureToolbarInRecording(bool capture) const {
     return cache().setValue(QStringLiteral("screen_recording/capture_toolbar_in_recording"),
                             capture);
+}
+
+bool RecordingSettings::autoHideToolbar() const {
+    return cache().value(QStringLiteral("screen_recording/auto_hide_toolbar")).toBool();
+}
+
+bool RecordingSettings::setAutoHideToolbar(bool enabled) const {
+    return cache().setValue(QStringLiteral("screen_recording/auto_hide_toolbar"), enabled);
 }
 
 bool RecordingSettings::autoExitAfterRecordingEnds() const {
@@ -2133,13 +2188,17 @@ bool ScreenshotTranslationSettings::setOriginalImageTranslationEnabled(bool enab
 
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION
 ScreenshotTranslationConfiguration ScreenshotTranslationSettings::configuration() const {
-    return {cache().value(QStringLiteral("screenshot_translation/source_language")).toString(),
-            cache().value(QStringLiteral("screenshot_translation/target_language")).toString(),
-            cache().value(QStringLiteral("screenshot_translation/model")).toString(),
-            layoutProcessing(),
-            cache()
-                .value(QStringLiteral("screenshot_translation/secondary_target_language"))
-                .toString()};
+    return {
+        cache().value(QStringLiteral("screenshot_translation/source_language")).toString(),
+        cache().value(QStringLiteral("screenshot_translation/target_language")).toString(),
+        cache().value(QStringLiteral("screenshot_translation/model")).toString(),
+        layoutProcessing(),
+        cache()
+            .value(QStringLiteral("screenshot_translation/secondary_target_language"))
+            .toString(),
+        cache()
+            .value(QStringLiteral("screenshot_translation/language_detection_confidence_threshold"))
+            .toInt()};
 }
 #endif
 
@@ -2163,6 +2222,8 @@ bool ScreenshotTranslationSettings::setConfiguration(
         {QStringLiteral("screenshot_translation/target_language"), configuration.targetLanguage},
         {QStringLiteral("screenshot_translation/secondary_target_language"),
          configuration.secondaryTargetLanguage},
+        {QStringLiteral("screenshot_translation/language_detection_confidence_threshold"),
+         configuration.languageDetectionConfidenceThreshold},
         {QStringLiteral("screenshot_translation/model"), configuration.modelId},
         {QStringLiteral("screenshot_translation/layout_processing"),
          configuration.layoutProcessing},
@@ -2232,23 +2293,57 @@ QVector<DrawTemplate> DrawTemplateSettings::templates() const {
 bool DrawTemplateSettings::setTemplates(const QVector<DrawTemplate>& templates) const {
     QJsonArray array;
     for (const DrawTemplate& drawTemplate : templates) {
-        const QString name = drawTemplate.name.trimmed();
-        QJsonParseError error;
-        const QJsonDocument document = QJsonDocument::fromJson(drawTemplate.payload, &error);
-        const QJsonObject payload = document.object();
-        if (name.isEmpty() || drawTemplate.payload.isEmpty() ||
-            drawTemplate.payload.size() > 16 * 1024 * 1024 ||
-            error.error != QJsonParseError::NoError ||
-            payload.value(QStringLiteral("schemaVersion")).toInt(-1) != 1 ||
-            payload.value(QStringLiteral("elements")).toArray().isEmpty() ||
-            payload.value(QStringLiteral("selectedIds")).toArray().isEmpty()) {
-            return false;
-        }
         array.push_back(QJsonObject{
-            {QStringLiteral("name"), name},
+            {QStringLiteral("name"), drawTemplate.name.trimmed()},
             {QStringLiteral("payload"), QString::fromLatin1(drawTemplate.payload.toBase64())}});
     }
-    return cache().setValue(QStringLiteral("drawing/draw_templates"), array);
+    const QString key = QStringLiteral("drawing/draw_templates");
+    const auto normalized = ConfigurationSchema::normalize(key, array);
+    // Loading salvages valid entries; an explicit edit must retain every requested template.
+    if (!normalized.valid || normalized.value.toArray().size() != templates.size()) {
+        return false;
+    }
+    return cache().setValue(key, normalized.value);
+}
+
+int PinToScreenSettings::textMaximumWidth() const {
+    return cache().value(QStringLiteral("pin_to_screen/text_maximum_width")).toInt();
+}
+
+bool PinToScreenSettings::setTextMaximumWidth(int value) const {
+    return cache().setValue(QStringLiteral("pin_to_screen/text_maximum_width"), value);
+}
+
+QString PinToScreenSettings::textFontFamily() const {
+    return cache().value(QStringLiteral("pin_to_screen/text_font_family")).toString();
+}
+
+bool PinToScreenSettings::setTextFontFamily(const QString& value) const {
+    return cache().setValue(QStringLiteral("pin_to_screen/text_font_family"), value);
+}
+
+int PinToScreenSettings::textFontSize() const {
+    return cache().value(QStringLiteral("pin_to_screen/text_font_size")).toInt();
+}
+
+bool PinToScreenSettings::setTextFontSize(int value) const {
+    return cache().setValue(QStringLiteral("pin_to_screen/text_font_size"), value);
+}
+
+QColor PinToScreenSettings::textColor() const {
+    return colorValue(QStringLiteral("pin_to_screen/text_color"));
+}
+
+bool PinToScreenSettings::setTextColor(const QColor& value) const {
+    return setColorValue(QStringLiteral("pin_to_screen/text_color"), value);
+}
+
+QColor PinToScreenSettings::textBackgroundColor() const {
+    return colorValue(QStringLiteral("pin_to_screen/text_background_color"));
+}
+
+bool PinToScreenSettings::setTextBackgroundColor(const QColor& value) const {
+    return setColorValue(QStringLiteral("pin_to_screen/text_background_color"), value);
 }
 
 bool PinToScreenSettings::showBorderByDefault() const {
@@ -2273,6 +2368,17 @@ bool PinToScreenSettings::showWindowButtons() const {
 
 bool PinToScreenSettings::setShowWindowButtons(bool enabled) const {
     return cache().setValue(QStringLiteral("pin_to_screen/show_window_buttons"), enabled);
+}
+
+bool PinToScreenSettings::exitAnnotationModeBeforeClosing() const {
+    return cache()
+        .value(QStringLiteral("pin_to_screen/exit_annotation_mode_before_closing"))
+        .toBool();
+}
+
+bool PinToScreenSettings::setExitAnnotationModeBeforeClosing(bool enabled) const {
+    return cache().setValue(QStringLiteral("pin_to_screen/exit_annotation_mode_before_closing"),
+                            enabled);
 }
 
 bool PinToScreenSettings::confirmBeforeClosingWindow() const {
@@ -2364,6 +2470,22 @@ bool PinToScreenSettings::setMouseWheelZoomMode(const QString& mode) const {
     return cache().setValue(QStringLiteral("pin_to_screen/mouse_wheel_zoom_mode"), mode);
 }
 
+int PinToScreenSettings::mouseWheelOpacityStep() const {
+    return cache().value(QStringLiteral("pin_to_screen/mouse_wheel_opacity_step")).toInt();
+}
+
+bool PinToScreenSettings::setMouseWheelOpacityStep(int value) const {
+    return cache().setValue(QStringLiteral("pin_to_screen/mouse_wheel_opacity_step"), value);
+}
+
+int PinToScreenSettings::mouseWheelZoomStep() const {
+    return cache().value(QStringLiteral("pin_to_screen/mouse_wheel_zoom_step")).toInt();
+}
+
+bool PinToScreenSettings::setMouseWheelZoomStep(int value) const {
+    return cache().setValue(QStringLiteral("pin_to_screen/mouse_wheel_zoom_step"), value);
+}
+
 QString PinToScreenSettings::duplicateContentAction() const {
     return cache().value(QStringLiteral("pin_to_screen/duplicate_content_action")).toString();
 }
@@ -2421,6 +2543,22 @@ QString TraySettings::customIcon() const {
 
 bool TraySettings::setCustomIcon(const QString& path) const {
     return cache().setValue(QStringLiteral("tray/custom_icon"), path);
+}
+
+QString TraySettings::darkIcon() const {
+    return cache().value(QStringLiteral("tray/dark_icon")).toString();
+}
+
+bool TraySettings::setDarkIcon(const QString& icon) const {
+    return cache().setValue(QStringLiteral("tray/dark_icon"), icon);
+}
+
+QString TraySettings::darkCustomIcon() const {
+    return cache().value(QStringLiteral("tray/dark_custom_icon")).toString();
+}
+
+bool TraySettings::setDarkCustomIcon(const QString& path) const {
+    return cache().setValue(QStringLiteral("tray/dark_custom_icon"), path);
 }
 
 QString TraySettings::leftClickAction() const {

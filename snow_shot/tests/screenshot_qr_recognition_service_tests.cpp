@@ -8,6 +8,7 @@
 #include <QImage>
 #include <QPainter>
 #include <QLineF>
+#include <QPointer>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QThread>
@@ -107,8 +108,6 @@ QImage eanFixture() {
 ScreenshotQrRecognitionResult
 recognize(ScreenshotQrRecognitionService& service, const QImage& image, const char* timeoutMessage,
           ScreenshotQrRecognitionMode mode = ScreenshotQrRecognitionMode::QrAndBarcode) {
-    require(service.findChildren<QThread*>().isEmpty(),
-            "QR service should not create a worker thread before recognition is requested");
     QEventLoop loop;
     ScreenshotQrRecognitionResult output;
     bool completed = false;
@@ -125,8 +124,8 @@ recognize(ScreenshotQrRecognitionService& service, const QImage& image, const ch
         [&](ScreenshotQrRecognitionResult result) {
             output = std::move(result);
             completed = true;
-            require(service.findChildren<QThread*>().isEmpty(),
-                    "QR worker thread should be destroyed before completion delivery");
+            require(service.findChildren<QThread*>().size() == 1,
+                    "QR completion retains one worker for consecutive requests");
             loop.quit();
         },
         mode);
@@ -140,8 +139,37 @@ recognize(ScreenshotQrRecognitionService& service, const QImage& image, const ch
     return output;
 }
 
+void copyModelsTo(const QString& directory) {
+    const QDir stagedModels(
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("assets/qrcode")));
+    for (const auto* name :
+         {"detect.prototxt", "detect.caffemodel", "sr.prototxt", "sr.caffemodel"}) {
+        require(QFile::copy(stagedModels.filePath(QString::fromLatin1(name)),
+                            QDir(directory).filePath(QString::fromLatin1(name))),
+                "the staged WeChat QR models can be copied to an isolated directory");
+    }
+}
+
+void waitForWorkerRelease(ScreenshotQrRecognitionService& service) {
+    QEventLoop loop;
+    QTimer poll;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&poll, &QTimer::timeout, &loop, [&] {
+        if (service.findChildren<QThread*>().isEmpty())
+            loop.quit();
+    });
+    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    poll.start(5);
+    timeout.start(5000);
+    loop.exec();
+    require(timeout.isActive() && service.findChildren<QThread*>().isEmpty(),
+            "the QR worker and decoder cache are released after the idle grace period");
+}
+
 void defaultDetectorDecodesTheSelectedImage() {
     ScreenshotQrRecognitionService service;
+    require(service.findChildren<QThread*>().isEmpty(), "the QR worker is created lazily");
     const ScreenshotQrRecognitionResult output =
         recognize(service, qrFixture(), "QR recognition should complete within the test timeout");
     require(output.error.isEmpty(), "the default QR detector should not report an error");
@@ -230,14 +258,15 @@ void unicodeModelsDirectoryStillLoadsAndDecodes() {
             "the QR detector should decode with models loaded from a unicode directory");
 }
 
-void queuedRequestsReuseNoPersistentWorker() {
-    ScreenshotQrRecognitionService service;
+void queuedRequestsShareTheSerializedWorker() {
+    ScreenshotQrRecognitionService service(nullptr, {}, 20);
     QObject receiver;
     QEventLoop loop;
     QTimer timeout;
     timeout.setSingleShot(true);
     int completions = 0;
     bool timedOut = false;
+    QPointer<QThread> worker;
     QObject::connect(&timeout, &QTimer::timeout, &loop, [&]() {
         timedOut = true;
         loop.quit();
@@ -249,14 +278,15 @@ void queuedRequestsReuseNoPersistentWorker() {
                     result.contents == QStringList{QString::fromLatin1(kPayload)},
                 "queued QR requests should decode successfully");
         ++completions;
+        require(worker && service.findChildren<QThread*>() == QList<QThread*>{worker.data()},
+                "queued QR requests retain the same serialized worker");
         if (completions == 2) {
-            require(service.findChildren<QThread*>().isEmpty(),
-                    "the final queued QR request should leave no worker thread");
             loop.quit();
         }
     };
 
     const auto firstToken = service.recognize(image, &receiver, completion);
+    worker = service.findChild<QThread*>();
     const auto secondToken = service.recognize(image, &receiver, completion);
     require(firstToken != 0 && secondToken != 0, "queued QR requests should both be accepted");
     require(service.findChildren<QThread*>().size() == 1,
@@ -266,10 +296,45 @@ void queuedRequestsReuseNoPersistentWorker() {
     loop.exec();
     require(!timedOut && completions == 2,
             "queued QR requests should both complete within the test timeout");
+    waitForWorkerRelease(service);
+    require(!worker, "idle eviction destroys the retained worker");
+}
+
+void cachedDecodersAreIsolatedAndExpireWhenIdle() {
+    QTemporaryDir directory;
+    require(directory.isValid(), "the decoder reuse fixture has an isolated model directory");
+    copyModelsTo(directory.path());
+    ScreenshotQrRecognitionService service(nullptr, directory.path(), 20);
+    const auto first = recognize(service, qrFixture(), "initial decoder construction timed out");
+    require(first.contents == QStringList{QString::fromLatin1(kPayload)},
+            "isolated QR models decode before caching");
+    const QPointer<QThread> worker(service.findChild<QThread*>());
+    for (const auto& file : QDir(directory.path()).entryList(QDir::Files))
+        require(QFile::remove(QDir(directory.path()).filePath(file)),
+                "isolated QR models can be removed after decoder construction");
+    const auto cached = recognize(service, qrFixture(), "cached decoder reuse timed out");
+    require(cached.error.isEmpty() && cached.contents == first.contents && worker &&
+                worker == service.findChild<QThread*>(),
+            "consecutive requests reuse the loaded decoders without reopening model files");
+    {
+        ScreenshotQrRecognitionService other(nullptr, directory.path());
+        const auto isolated = recognize(other, qrFixture(), "isolated decoder fixture timed out");
+        require(!isolated.error.isEmpty() && isolated.contents.isEmpty(),
+                "another service cannot borrow a decoder loaded from its missing models");
+    }
+    waitForWorkerRelease(service);
+    require(!worker, "idle expiry discards the worker that owned the loaded model sessions");
+    const auto expired = recognize(service, qrFixture(), "expired decoder fixture timed out");
+    require(!expired.error.isEmpty() && expired.contents.isEmpty(),
+            "a worker recreated after idle expiry must load its own models again");
+    copyModelsTo(directory.path());
+    const auto restored = recognize(service, qrFixture(), "restored decoder fixture timed out");
+    require(restored.error.isEmpty() && restored.contents == first.contents,
+            "restored model files recover without retaining an initialization failure");
 }
 
 void destroyingReceiverCancelsQueuedCompletion() {
-    ScreenshotQrRecognitionService service;
+    ScreenshotQrRecognitionService service(nullptr, {}, 20);
     bool completed = false;
     auto receiver = std::make_unique<QObject>();
     const ScreenshotQrRecognitionPort::RequestToken token = service.recognize(
@@ -281,8 +346,22 @@ void destroyingReceiverCancelsQueuedCompletion() {
     QTimer::singleShot(250, &loop, &QEventLoop::quit);
     loop.exec();
     require(!completed, "destroying the receiver must cancel QR result delivery");
-    require(service.findChildren<QThread*>().isEmpty(),
-            "canceled QR recognition should destroy its worker thread");
+    waitForWorkerRelease(service);
+}
+
+void destroyingServiceCancelsPendingRequests() {
+    QObject receiver;
+    bool completed = false;
+    auto service = std::make_unique<ScreenshotQrRecognitionService>();
+    for (int index = 0; index < 3; ++index)
+        require(service->recognize(qrFixture(), &receiver,
+                                   [&](ScreenshotQrRecognitionResult) { completed = true; }) != 0,
+                "shutdown fixture accepts queued recognition requests");
+    const QPointer<QThread> worker(service->findChild<QThread*>());
+    service.reset();
+    QCoreApplication::processEvents();
+    require(!worker && !completed,
+            "service shutdown joins its worker and cancels all pending completions");
 }
 } // namespace
 
@@ -293,7 +372,9 @@ int main(int argc, char** argv) {
     qrOnlySkipsBarcodesAndRetainsMultipleLocations();
     oversizedScreenshotIsBoundedAndStillDecoded();
     unicodeModelsDirectoryStillLoadsAndDecodes();
-    queuedRequestsReuseNoPersistentWorker();
+    queuedRequestsShareTheSerializedWorker();
+    cachedDecodersAreIsolatedAndExpireWhenIdle();
     destroyingReceiverCancelsQueuedCompletion();
+    destroyingServiceCancelsPendingRequests();
     return 0;
 }

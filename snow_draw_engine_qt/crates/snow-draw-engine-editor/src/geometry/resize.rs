@@ -225,6 +225,9 @@ pub(crate) fn resized_selection_rect(
     let (width, height) =
         resized_dimensions(original_rect.width, original_rect.height, scale_x, scale_y);
     RectangleData {
+        stroke_rendering_seed: original_rect.stroke_rendering_seed,
+        text_element_id: original_rect.text_element_id,
+        stroke_rendering_style: original_rect.stroke_rendering_style,
         rectangle_kind: original_rect.rectangle_kind,
         highlight_shape: original_rect.highlight_shape,
         center: transform.map_point(original_bounds, original_rect.center),
@@ -300,6 +303,9 @@ pub(crate) fn text_resize_preview_rect(
     layout_override: Option<TextResizeLayoutOverride>,
 ) -> Option<RectangleData> {
     let original_rect = RectangleData {
+        text_element_id: None,
+        stroke_rendering_seed: 0,
+        stroke_rendering_style: Default::default(),
         rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
         highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
         center: text.center,
@@ -478,6 +484,9 @@ pub(crate) fn resized_text_rect_from_size(
     };
 
     RectangleData {
+        stroke_rendering_seed: original_rect.stroke_rendering_seed,
+        text_element_id: original_rect.text_element_id,
+        stroke_rendering_style: original_rect.stroke_rendering_style,
         rectangle_kind: original_rect.rectangle_kind,
         highlight_shape: original_rect.highlight_shape,
         center: rect_local_to_canvas(
@@ -725,6 +734,9 @@ mod tests {
                 generation: 1,
             },
             rect: RectangleData {
+                text_element_id: None,
+                stroke_rendering_seed: 0,
+                stroke_rendering_style: Default::default(),
                 rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
                 highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
                 center: bounds.center,
@@ -821,6 +833,9 @@ mod tests {
     fn flipped_selection_rect_mirrors_corner_radii() {
         let bounds = selection_bounds();
         let rect = RectangleData {
+            text_element_id: None,
+            stroke_rendering_seed: 0,
+            stroke_rendering_style: Default::default(),
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: bounds.center,

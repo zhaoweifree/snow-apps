@@ -151,11 +151,9 @@ QPoint offsetForDirection(PhysicalCursorDirection direction) {
     Q_UNREACHABLE_RETURN(QPoint());
 }
 
-std::optional<QPoint> targetPosition(const QPoint& current, PhysicalCursorDirection direction,
-                                     qint64 distance) {
-    if (distance <= 0)
+std::optional<QPoint> targetPosition(const QPoint& current, const QPoint& offset, qint64 distance) {
+    if (distance <= 0 || offset.isNull())
         return std::nullopt;
-    const QPoint offset = offsetForDirection(direction);
     const qint64 x = static_cast<qint64>(current.x()) + static_cast<qint64>(offset.x()) * distance;
     const qint64 y = static_cast<qint64>(current.y()) + static_cast<qint64>(offset.y()) * distance;
     if (x < std::numeric_limits<int>::min() || x > std::numeric_limits<int>::max() ||
@@ -197,6 +195,10 @@ PhysicalCursorMoveResult PhysicalCursor::moveOnePixel(PhysicalCursorDirection di
 
 PhysicalCursorMoveResult PhysicalCursor::movePixels(PhysicalCursorDirection direction,
                                                     int distance) const {
+    return movePixels(offsetForDirection(direction), distance);
+}
+
+PhysicalCursorMoveResult PhysicalCursor::movePixels(const QPoint& direction, int distance) const {
     if (!isSupported()) {
         return {PhysicalCursorMoveStatus::Unsupported, std::nullopt};
     }

@@ -13,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <mutex>
 
 #include <QFile>
 #include <QFileDevice>
@@ -361,7 +362,8 @@ QImage takeDecodedImage(OwnedBackendBuffer output, QImage::Format format) {
 
 QImage decodeBytes(const QByteArray& encoded, snow::image::Format expectedFormat,
                    uint32_t preferredIconExtent = 0,
-                   QImage::Format pixelFormat = QImage::Format_RGBA8888) {
+                   QImage::Format pixelFormat = QImage::Format_RGBA8888,
+                   bool firstFrameOnly = false) {
     const uint32_t bridgeExpectedFormat = bridgeFormat(expectedFormat);
     if (!backendAbiIsCompatible() || encoded.isEmpty() ||
         bridgeExpectedFormat == SNOW_SHOT_IMAGE_CODEC_FORMAT_UNKNOWN) {
@@ -373,6 +375,7 @@ QImage decodeBytes(const QByteArray& encoded, snow::image::Format expectedFormat
         return {};
     std::array<char, kBackendErrorCapacity> backendError{};
     const auto decoder = preferredIconExtent != 0 ? snow_shot_image_codec_decode_icon_rgba8
+                         : firstFrameOnly         ? snow_shot_image_codec_decode_first_rgba8
                                                   : (pixelFormat == QImage::Format_ARGB32
                                                          ? snow_shot_image_codec_decode_bgra8
                                                          : snow_shot_image_codec_decode_rgba8);
@@ -476,7 +479,10 @@ bool encodeToDevice(const ScreenshotImageRowSource& source, QIODevice* device,
     bridgeSink.is_cancelled = &cancelledCallback;
     bridgeSink.seekable = device->isSequential() ? 0 : 1;
 
-    const SnowShotImageCodecEncodeOptions encodedOptions = bridgeOptions(format, options);
+    auto verifiedOptions = options;
+    if (!verifiedOptions.verified_alpha_content && source.isKnownOpaque)
+        verifiedOptions.verified_alpha_content = snow::image::AlphaContent::opaque;
+    const SnowShotImageCodecEncodeOptions encodedOptions = bridgeOptions(format, verifiedOptions);
     std::array<char, kBackendErrorCapacity> backendError{};
     SnowShotImageCodecEncodeResult bridgeResult{};
     bridgeResult.struct_size = sizeof(bridgeResult);
@@ -560,6 +566,226 @@ bool resizeToRgba8(const ScreenshotImageRowSource& source, const QSize& outputSi
     return true;
 }
 
+namespace {
+bool outsideImage(const QImage& image, const uchar* destination, qsizetype bytes) {
+    if (image.isNull())
+        return true;
+    const auto source = reinterpret_cast<std::uintptr_t>(image.constBits());
+    const auto output = reinterpret_cast<std::uintptr_t>(destination);
+    // Borrowed crops retain the original row stride. Padding after the final pixel row can
+    // extend beyond that source storage and must not falsely overlap an adjacent destination.
+    const auto sourceBytes =
+        static_cast<std::uintptr_t>(image.sizeInBytes() - image.bytesPerLine() +
+                                    (qsizetype(image.width()) * image.depth() + 7) / 8);
+    const auto outputBytes = static_cast<std::uintptr_t>(bytes);
+    const auto maximum = std::numeric_limits<std::uintptr_t>::max();
+    return sourceBytes <= maximum - source && outputBytes <= maximum - output &&
+           !(source < output + outputBytes && output < source + sourceBytes);
+}
+
+bool validRgbaRegion(QSize size, QRect region, qsizetype stride, const uchar* destination,
+                     qsizetype capacity, const QImage& owner = {}) {
+    if (region.x() < 0 || region.y() < 0 || region.width() <= 0 || region.height() <= 0 ||
+        region.x() >= size.width() || region.y() >= size.height() ||
+        region.width() > size.width() - region.x() ||
+        region.height() > size.height() - region.y() || destination == nullptr)
+        return false;
+    const qsizetype rowBytes = qsizetype(region.width()) * 4;
+    const auto maximum = std::numeric_limits<qsizetype>::max();
+    if (stride < rowBytes || region.height() - 1 > (maximum - rowBytes) / stride)
+        return false;
+    const qsizetype extent = qsizetype(region.height() - 1) * stride + rowBytes;
+    const auto address = reinterpret_cast<std::uintptr_t>(destination);
+    return capacity >= extent &&
+           static_cast<std::uintptr_t>(extent) <=
+               std::numeric_limits<std::uintptr_t>::max() - address &&
+           outsideImage(owner, destination, extent);
+}
+
+int resizeCacheRows(QSize output) {
+    constexpr qsizetype cacheBytes = 2 * 1024 * 1024;
+    const qsizetype rowBytes = qsizetype(output.width()) * 4;
+    return std::min(output.height(), static_cast<int>(std::min<qsizetype>(
+                                         64, std::max<qsizetype>(1, cacheBytes / rowBytes))));
+}
+
+uint64_t resizeCacheBytes(QSize output) {
+    const auto rows = resizeCacheRows(output);
+    return rows <= 1
+               ? uint64_t{0}
+               : uint64_t{static_cast<uint32_t>(output.width())} * static_cast<uint32_t>(rows) * 4U;
+}
+
+class ResizeRowReader final {
+  public:
+    ResizeRowReader(ScreenshotImageRowSource source, QSize output)
+        : m_source(std::move(source)), m_context{&m_source, nullptr, {}}, m_output(output),
+          m_cacheRows(resizeCacheRows(output)),
+          m_plan(nullptr, &snow_shot_image_codec_destroy_resize) {}
+
+    bool prepare(QString* error) {
+        SnowShotImageCodecRgba8Source source{};
+        source.struct_size = sizeof(source);
+        source.abi_version = SNOW_SHOT_IMAGE_CODEC_ABI_VERSION;
+        source.context = &m_context;
+        source.width = static_cast<uint32_t>(m_source.size.width());
+        source.height = static_cast<uint32_t>(m_source.size.height());
+        source.read_rows = &readRowsCallback;
+        source.is_cancelled = m_source.cancellationRequested ? &cancelledCallback : nullptr;
+        std::array<char, kBackendErrorCapacity> detail{};
+        m_plan.reset(snow_shot_image_codec_prepare_resize(
+            &source, static_cast<uint32_t>(m_output.width()),
+            static_cast<uint32_t>(m_output.height()), detail.data(), detail.size()));
+        if (!m_plan)
+            setError(error, detail.data(), "Image resizing failed.");
+        return static_cast<bool>(m_plan);
+    }
+
+    bool operator()(int first, int count, qsizetype stride, uchar* destination,
+                    qsizetype capacity) {
+        const std::lock_guard lock(m_mutex);
+        const qsizetype rowBytes = qsizetype(m_output.width()) * 4;
+        if (first < 0 || count <= 0 || first >= m_output.height() ||
+            count > m_output.height() - first || destination == nullptr || stride < rowBytes ||
+            capacity < rowBytes || count - 1 > (capacity - rowBytes) / stride ||
+            (m_source.cancellationRequested && m_source.cancellationRequested()))
+            return false;
+        const qsizetype extent = qsizetype(count - 1) * stride + rowBytes;
+        const auto address = reinterpret_cast<std::uintptr_t>(destination);
+        if (static_cast<std::uintptr_t>(extent) >
+                std::numeric_limits<std::uintptr_t>::max() - address ||
+            !outsideImage(m_source.backingImage, destination, extent) ||
+            !outsideImage(m_cache, destination, extent))
+            return false;
+        if (m_cacheRows <= 1 || count >= m_cacheRows)
+            return read(first, count, stride, destination, capacity);
+        int copied = 0;
+        while (copied < count) {
+            if (m_source.cancellationRequested && m_source.cancellationRequested())
+                return false;
+            const int sourceRow = first + copied;
+            if (sourceRow < m_cachedFirst || sourceRow >= m_cachedFirst + m_cachedCount) {
+                if (m_cache.isNull())
+                    m_cache = snowCanvasAllocateImage(QSize(m_output.width(), m_cacheRows),
+                                                      QImage::Format_RGBA8888);
+                if (m_cache.isNull())
+                    return false;
+                m_cachedCount = 0;
+                m_cachedFirst = sourceRow / m_cacheRows * m_cacheRows;
+                const int rows = std::min(m_cacheRows, m_output.height() - m_cachedFirst);
+                if (!read(m_cachedFirst, rows, m_cache.bytesPerLine(), m_cache.bits(),
+                          m_cache.sizeInBytes()))
+                    return false;
+                m_cachedCount = rows;
+            }
+            const int local = sourceRow - m_cachedFirst;
+            const int rows = std::min(count - copied, m_cachedCount - local);
+            for (int row = 0; row < rows; ++row)
+                std::memcpy(destination + qsizetype(copied + row) * stride,
+                            m_cache.constScanLine(local + row), static_cast<size_t>(rowBytes));
+            copied += rows;
+        }
+        return true;
+    }
+
+    bool region(QRect region, qsizetype stride, uchar* destination, qsizetype capacity) {
+        if (!validRgbaRegion(m_output, region, stride, destination, capacity,
+                             m_source.backingImage))
+            return false;
+        QImage row = snowCanvasAllocateImage(QSize(m_output.width(), 1), QImage::Format_RGBA8888);
+        if (row.isNull())
+            return false;
+        const qsizetype bytes = qsizetype(region.width()) * 4;
+        for (int y = 0; y < region.height(); ++y) {
+            if (!(*this)(region.y() + y, 1, row.bytesPerLine(), row.bits(), row.sizeInBytes()))
+                return false;
+            std::memcpy(destination + qsizetype(y) * stride,
+                        row.constBits() + qsizetype(region.x()) * 4, static_cast<size_t>(bytes));
+        }
+        return true;
+    }
+
+  private:
+    bool read(int first, int count, qsizetype stride, uchar* destination, qsizetype capacity) {
+        std::array<char, kBackendErrorCapacity> detail{};
+        return snow_shot_image_codec_resize_rows(
+                   m_plan.get(), static_cast<uint32_t>(first), static_cast<uint32_t>(count),
+                   destination, static_cast<uint64_t>(stride), static_cast<uint64_t>(capacity),
+                   detail.data(), detail.size()) != 0;
+    }
+
+    ScreenshotImageRowSource m_source;
+    StreamingBridgeContext m_context;
+    QSize m_output;
+    int m_cacheRows;
+    std::mutex m_mutex;
+    QImage m_cache;
+    int m_cachedFirst = -1;
+    int m_cachedCount = 0;
+    std::unique_ptr<SnowShotImageCodecResizePlan, decltype(&snow_shot_image_codec_destroy_resize)>
+        m_plan;
+};
+} // namespace
+
+std::optional<ResizeResourceEstimate> resizeResources(QSize source, QSize output) {
+    if (!backendAbiIsCompatible() || source.isEmpty() || output.isEmpty())
+        return std::nullopt;
+    if (source == output)
+        return ResizeResourceEstimate{};
+    uint64_t retained = 0;
+    uint64_t working = 0;
+    if (!snow_shot_image_codec_resize_resources(
+            static_cast<uint32_t>(source.width()), static_cast<uint32_t>(source.height()),
+            static_cast<uint32_t>(output.width()), static_cast<uint32_t>(output.height()),
+            &retained, &working))
+        return std::nullopt;
+    const auto cache = resizeCacheBytes(output);
+    const auto maximum = static_cast<uint64_t>(std::numeric_limits<qint64>::max());
+    if (retained > maximum - cache || working > maximum)
+        return std::nullopt;
+    return ResizeResourceEstimate{static_cast<qint64>(retained + cache),
+                                  static_cast<qint64>(working)};
+}
+
+std::optional<qint64> resizeWorkingBytes(QSize source, QSize output) {
+    const auto estimate = resizeResources(source, output);
+    if (!estimate ||
+        estimate->retainedBytes > std::numeric_limits<qint64>::max() - estimate->scratchBytes)
+        return std::nullopt;
+    return estimate->retainedBytes + estimate->scratchBytes -
+           (source == output ? 0 : static_cast<qint64>(resizeCacheBytes(output)));
+}
+
+ScreenshotImageRowSource resizedRowSource(ScreenshotImageRowSource source, QSize output,
+                                          QString* error) {
+    if (error)
+        error->clear();
+    if (!source.isValid() || !resizeResources(source.size, output)) {
+        setError(error, nullptr, "The resize source or destination is invalid.");
+        return {};
+    }
+    if (source.size == output)
+        return source;
+    ScreenshotImageRowSource result;
+    result.size = output;
+    result.cancellationRequested = source.cancellationRequested;
+    result.reserveResources = source.reserveResources;
+    result.isKnownOpaque = source.isKnownOpaque;
+    result.previewImage = source.previewImage;
+    auto reader = std::make_shared<ResizeRowReader>(std::move(source), output);
+    if (!reader->prepare(error))
+        return {};
+    result.readRows = [reader](int first, int count, qsizetype stride, uchar* destination,
+                               qsizetype capacity) {
+        return (*reader)(first, count, stride, destination, capacity);
+    };
+    result.readRegion = [reader = std::move(reader)](QRect region, qsizetype stride,
+                                                     uchar* destination, qsizetype capacity) {
+        return reader->region(region, stride, destination, capacity);
+    };
+    return result;
+}
+
 QByteArray encodePng(const QImage& image, int compressionLevel) {
     snow::image::EncodeOptions options;
     options.compression_level = qBound(0, compressionLevel, 9);
@@ -573,6 +799,7 @@ ScreenshotImageRowSource srgbRowSource(const QImage& image) {
     const bool convertColor = image.colorSpace().isValid() && image.colorSpace() != srgb;
     ScreenshotImageRowSource source;
     source.size = image.size();
+    source.isKnownOpaque = !image.hasAlphaChannel();
     // Untagged images retain the existing assumption that their pixels are
     // sRGB. Retagging a shared image here would detach its complete raster.
     if (!convertColor && image.format() == QImage::Format_RGBA8888) {
@@ -581,8 +808,40 @@ ScreenshotImageRowSource srgbRowSource(const QImage& image) {
                                   qsizetype capacity) {
             return snowCanvasCopyRgba8888Rows(image, first, count, destination, capacity, stride);
         };
+        source.readRegion = [image](QRect region, qsizetype stride, uchar* destination,
+                                    qsizetype capacity) {
+            if (!validRgbaRegion(image.size(), region, stride, destination, capacity, image))
+                return false;
+            for (int row = 0; row < region.height(); ++row)
+                std::memcpy(destination + qsizetype(row) * stride,
+                            image.constScanLine(region.y() + row) + qsizetype(region.x()) * 4,
+                            static_cast<size_t>(region.width()) * 4U);
+            return true;
+        };
     } else {
-        source.readRows = detail::BoundedSrgbRowReader(image);
+        auto reader = std::make_shared<detail::BoundedSrgbRowReader>(image);
+        source.readRows = [reader](int first, int count, qsizetype stride, uchar* destination,
+                                   qsizetype capacity) {
+            return (*reader)(first, count, stride, destination, capacity);
+        };
+        source.readRegion = [reader = std::move(reader), image](QRect region, qsizetype stride,
+                                                                uchar* destination,
+                                                                qsizetype capacity) {
+            if (!validRgbaRegion(image.size(), region, stride, destination, capacity, image))
+                return false;
+            QImage row = snowCanvasAllocateImage(QSize(image.width(), 1), QImage::Format_RGBA8888);
+            if (row.isNull())
+                return false;
+            for (int y = 0; y < region.height(); ++y) {
+                if (!(*reader)(region.y() + y, 1, row.bytesPerLine(), row.bits(),
+                               row.sizeInBytes()))
+                    return false;
+                std::memcpy(destination + qsizetype(y) * stride,
+                            row.constBits() + qsizetype(region.x()) * 4,
+                            static_cast<size_t>(region.width()) * 4U);
+            }
+            return true;
+        };
     }
     return source;
 }
@@ -608,6 +867,10 @@ QByteArray encodeWebp(const QImage& image, int quality) {
 QImage decode(const QByteArray& encoded, snow::image::Format expectedFormat,
               const char* /*nameHint*/) {
     return decodeBytes(encoded, expectedFormat);
+}
+
+QImage decodeFirstFrame(const QByteArray& encoded, snow::image::Format expectedFormat) {
+    return decodeBytes(encoded, expectedFormat, 0, QImage::Format_RGBA8888, true);
 }
 
 QImage readManagedImage(QImageReader& reader) {
@@ -673,6 +936,22 @@ QSize inspectSize(const QByteArray& encoded, snow::image::Format expectedFormat)
                                       static_cast<uint64_t>(encoded.size()), format, &information,
                                       backendError.data(),
                                       static_cast<uint64_t>(backendError.size())) == 0 ||
+        information.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+        information.height > static_cast<uint32_t>(std::numeric_limits<int>::max()))
+        return {};
+    return QSize(static_cast<int>(information.width), static_cast<int>(information.height));
+}
+
+QSize inspectCanvasSize(const QByteArray& encoded, snow::image::Format expectedFormat) {
+    const auto format = bridgeFormat(expectedFormat);
+    if (!backendAbiIsCompatible() || encoded.isEmpty() ||
+        format == SNOW_SHOT_IMAGE_CODEC_FORMAT_UNKNOWN)
+        return {};
+    SnowShotImageCodecImageInfo information{};
+    std::array<char, kBackendErrorCapacity> error{};
+    if (!snow_shot_image_codec_inspect_canvas(reinterpret_cast<const uint8_t*>(encoded.constData()),
+                                              static_cast<uint64_t>(encoded.size()), format,
+                                              &information, error.data(), error.size()) ||
         information.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
         information.height > static_cast<uint32_t>(std::numeric_limits<int>::max()))
         return {};

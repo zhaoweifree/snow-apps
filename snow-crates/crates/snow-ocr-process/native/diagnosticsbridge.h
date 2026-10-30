@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 #ifndef SNOW_DIAGNOSTICS_BRIDGE_H
 #define SNOW_DIAGNOSTICS_BRIDGE_H
 #include <stddef.h>

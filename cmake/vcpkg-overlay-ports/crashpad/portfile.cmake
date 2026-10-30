@@ -86,7 +86,9 @@ vcpkg_replace_string("${SOURCE_PATH}/third_party/mini_chromium/mini_chromium/bui
     "    args.extend((script_arch_name, '&&', 'set'))"
     [==[    args.append(script_arch_name)
     if script_path.endswith('vcvarsall.bat'):
-      args.append('-vcvars_ver=14.51')
+      tools_version = os.environ.get('VCToolsVersion', '').rstrip('\\/')
+      if tools_version:
+        args.append('-vcvars_ver=' + tools_version)
     args.extend(('&&', 'set'))]==])
 ]=])
 string(REPLACE "vcpkg_gn_configure(" "${_snow_build_tools}\nvcpkg_gn_configure("

@@ -44,9 +44,11 @@
 #include <QUuid>
 #include <QLabel>
 #include <QLayout>
+#include <QKeyEvent>
 #include <QTemporaryDir>
 #include <QTranslator>
 #include <QTimer>
+#include <QHoverEvent>
 
 #include <algorithm>
 #include <cstdlib>
@@ -67,6 +69,19 @@ void flushEvents() {
     QCoreApplication::sendPostedEvents(nullptr, QEvent::PolishRequest);
     QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
     QCoreApplication::processEvents();
+}
+
+void activateMenuAction(QMenu* menu, QAction* action) {
+    const QRect geometry = menu->actionGeometry(action);
+    const QPoint local = geometry.center();
+    const QPoint global = menu->mapToGlobal(local);
+    QCursor::setPos(global);
+    QMouseEvent press(QEvent::MouseButtonPress, local, global, Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, local, global, Qt::LeftButton, Qt::NoButton,
+                        Qt::NoModifier);
+    QApplication::sendEvent(menu, &press);
+    QApplication::sendEvent(menu, &release);
 }
 
 void recordFiltersPreserveLocalDateBoundaries() {
@@ -458,6 +473,8 @@ void entriesUseBordersAndSupportCrossPageSelection() {
         page.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistoryDeleteSelected"));
     auto* selectAll =
         page.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistorySelectAll"));
+    auto* collage =
+        page.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistoryCollage"));
     auto* deselectAll =
         page.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistoryDeselectAll"));
     auto* pagination =
@@ -468,18 +485,23 @@ void entriesUseBordersAndSupportCrossPageSelection() {
         QStringLiteral("screenshotHistoryDateRangeFilter"));
     require(filters != nullptr && selectionBar != nullptr && selectionPanel != nullptr &&
                 selectionActions != nullptr && summary != nullptr && deleteSelected != nullptr &&
-                selectAll != nullptr && deselectAll != nullptr && pagination != nullptr &&
-                sourceFilter != nullptr && dateFilter != nullptr,
+                selectAll != nullptr && collage != nullptr && deselectAll != nullptr &&
+                pagination != nullptr && sourceFilter != nullptr && dateFilter != nullptr,
             "history selection controls must be discoverable");
     require(!selectionBar->isVisible(), "selection bar must be hidden before selection");
+    require(!collage->isVisible(), "Collage must be hidden when no history entry is selected");
     QWidget* firstEntry = checkboxes.first()->parentWidget()->parentWidget();
     require(verticalLayoutGap(page, filters, firstEntry) > 0,
             "history entries must retain a gap below the filters when selection is empty");
     require(selectionActions->layout() != nullptr && selectionActions->layout()->spacing() == 0,
             "selection actions must not add redundant spacing between link buttons");
+    require(selectionActions->layout()->indexOf(collage) + 1 ==
+                selectionActions->layout()->indexOf(selectAll),
+            "Collage must appear immediately to the left of Select all");
     require(deleteSelected->buttonStyle() == adqt::widgets::AdButton::ButtonStyle::Link &&
                 deleteSelected->accentRole() == adqt::widgets::AdButton::AccentRole::Danger &&
                 selectAll->buttonStyle() == adqt::widgets::AdButton::ButtonStyle::Link &&
+                collage->buttonStyle() == adqt::widgets::AdButton::ButtonStyle::Link &&
                 deselectAll->buttonStyle() == adqt::widgets::AdButton::ButtonStyle::Link,
             "selection actions must use link styling with a danger Delete action");
 
@@ -496,6 +518,16 @@ void entriesUseBordersAndSupportCrossPageSelection() {
     flushEvents();
     require(selectionBar->isVisible() && summary->text() == QStringLiteral("Selected 1 item"),
             "selecting one entry must show the singular selection summary");
+    require(collage->isVisible() && collage->text() == QStringLiteral("Collage") &&
+                !collage->toolTip().isEmpty() && !collage->accessibleName().isEmpty(),
+            "one selected screenshot exposes an accessible Collage action");
+    QVector<QVector<storage::CaptureHistoryRecord>> collageRequests;
+    QObject::connect(
+        &page, &ScreenshotHistoryPageWidget::collageRequested, &page,
+        [&collageRequests](const auto& selected) { collageRequests.append(selected); });
+    collage->click();
+    require(collageRequests.size() == 1 && collageRequests.first() == QVector{records.first()},
+            "Collage emits the selected complete history record");
     auto* countLabel = page.findChild<QLabel*>(QStringLiteral("screenshotHistoryCountLabel"));
     require(countLabel != nullptr &&
                 countLabel->font().pixelSize() == summary->font().pixelSize() &&
@@ -541,6 +573,17 @@ void entriesUseBordersAndSupportCrossPageSelection() {
     flushEvents();
     require(summary->text() == QStringLiteral("Selected 11 items"),
             "cross-page selection count must include the newly selected entry");
+    collage->click();
+    collage->click();
+    require(collageRequests.size() == 3 && collageRequests.at(1).size() == 11 &&
+                collageRequests.at(2) == collageRequests.at(1),
+            "each Collage click independently emits all selections across pages");
+    for (qsizetype index = 0; index < collageRequests.at(1).size(); ++index)
+        require(collageRequests.at(1).at(index) == records.at(index),
+                "collage inputs must preserve history list order and the complete record metadata");
+    require(summary->text() == QStringLiteral("Selected 11 items") &&
+                checkboxes.first()->isChecked(),
+            "opening collages must leave the original history selection unchanged");
 
     pagination->setCurrentPage(1);
     flushEvents();
@@ -560,6 +603,7 @@ void entriesUseBordersAndSupportCrossPageSelection() {
                 std::none_of(checkboxes.cbegin(), checkboxes.cend(),
                              [](const auto* checkbox) { return checkbox->isChecked(); }),
             "Deselect all must clear the complete cross-page selection");
+    require(!collage->isVisible(), "clearing history selection hides Collage");
 
     entryCheckboxes(page).first()->click();
     sourceFilter->setCurrentValues({QStringLiteral("clipboard")});
@@ -739,7 +783,174 @@ void pageTextAndEmptyStateMatchPinnedWindowManagement() {
     }
 }
 
-void moreMenuOffersPinAndDelete() {
+void entryStitchActionUsesOnlyItsRecord() {
+    MutableHistoryDataSource dataSource;
+    auto records = historyRecords(3);
+    storage::CaptureHistoryResultRecord result;
+    result.imageSize = QSize(32, 18);
+    records[0].result = result;
+    records[2].result = result;
+    dataSource.setRecords(records);
+    ScreenshotHistoryPageWidget page(&dataSource, nullptr);
+    page.resize(900, 720);
+    page.show();
+    page.setActive(true);
+    flushEvents();
+
+    QVector<storage::CaptureHistoryRecord> requested;
+    int requests = 0;
+    QObject::connect(&page, &ScreenshotHistoryPageWidget::collageRequested, &page,
+                     [&](const auto& selected) {
+                         requested = selected;
+                         ++requests;
+                     });
+    auto* entry = page.findChild<QWidget*>(QStringLiteral("screenshotHistoryEntry-record-0"));
+    auto* other = page.findChild<QWidget*>(QStringLiteral("screenshotHistoryEntry-record-2"));
+    require(entry && other, "stitching fixtures retain their record identities");
+    auto* selection = other->findChild<adqt::widgets::AdCheckbox*>();
+    selection->setChecked(true);
+    auto* more =
+        entry->findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistoryEntryMore"));
+    require(more && !entry->findChild<adqt::widgets::AdButton*>(
+                        QStringLiteral("screenshotHistoryEntryStitch")),
+            "history keeps Stitch Image inside More instead of the entry action row");
+    const QPoint previousCursor = QCursor::pos();
+    const auto restoreCursor = qScopeGuard([previousCursor] { QCursor::setPos(previousCursor); });
+    more->click();
+    flushEvents();
+    QPointer<adqt::widgets::AdContextMenu> menu = entry->findChild<adqt::widgets::AdContextMenu*>(
+        QStringLiteral("screenshotHistoryEntryMoreMenu"));
+    require(menu && menu->isPopupVisible(), "More opens the history stitching menu");
+    auto* stitch = menu->findChild<QAction*>(QStringLiteral("screenshotHistoryEntryStitch"));
+    require(stitch && stitch->isEnabled() && stitch->text() == QStringLiteral("Stitch Image") &&
+                !stitch->icon().isNull() && menu->actionGeometry(stitch).isValid(),
+            "More exposes the labeled stitching action with its icon");
+    activateMenuAction(menu, stitch);
+    flushEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    require(requests == 1 && requested == QVector<storage::CaptureHistoryRecord>{records[0]} &&
+                selection->isChecked() && dataSource.removedIds.isEmpty() && !menu,
+            "entry stitching imports only that record, preserves selection, and closes More");
+    auto* unavailableEntry =
+        page.findChild<QWidget*>(QStringLiteral("screenshotHistoryEntry-record-1"));
+    unavailableEntry
+        ->findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistoryEntryMore"))
+        ->click();
+    flushEvents();
+    auto* unavailableMenu = unavailableEntry->findChild<adqt::widgets::AdContextMenu*>(
+        QStringLiteral("screenshotHistoryEntryMoreMenu"));
+    require(unavailableMenu && unavailableMenu->isPopupVisible(),
+            "entries without a final image still expose More");
+    auto* unavailable =
+        unavailableMenu->findChild<QAction*>(QStringLiteral("screenshotHistoryEntryStitch"));
+    require(unavailable && !unavailable->isEnabled(),
+            "a history record without a final image cannot start stitching");
+    activateMenuAction(unavailableMenu, unavailable);
+    flushEvents();
+    require(requests == 1, "disabled stitching must not dispatch an import");
+    unavailableMenu->dismissPopup();
+    flushEvents();
+
+    more->click();
+    flushEvents();
+    menu = entry->findChild<adqt::widgets::AdContextMenu*>(
+        QStringLiteral("screenshotHistoryEntryMoreMenu"));
+    require(menu && menu->isPopupVisible(), "More reopens the history stitching menu");
+    stitch = menu->findChild<QAction*>(QStringLiteral("screenshotHistoryEntryStitch"));
+    require(stitch != nullptr, "reopening More recreates the stitching action");
+
+    QTranslator translator;
+    require(translator.load(QStringLiteral(":/i18n/snow_shot_zh_CN.qm")),
+            "load translations for the history stitching action");
+    QCoreApplication::installTranslator(&translator);
+    QEvent language(QEvent::LanguageChange);
+    QApplication::sendEvent(entry, &language);
+    const QString translated = translator.translate("HistoryEntryWidget", "Stitch Image");
+    require(!translated.isEmpty() && translated != QStringLiteral("Stitch Image") &&
+                stitch->text() == translated && stitch->toolTip() == translated,
+            "language changes translate the stitching action in an open More menu");
+    QCoreApplication::removeTranslator(&translator);
+}
+
+void entrySplitActionUsesOnlyItsRecord() {
+    MutableHistoryDataSource dataSource;
+    auto records = historyRecords(3);
+    storage::CaptureHistoryResultRecord result;
+    result.imageSize = QSize(32, 18);
+    records[0].result = result;
+    records[2].result = result;
+    dataSource.setRecords(records);
+    ScreenshotHistoryPageWidget page(&dataSource, nullptr);
+    page.resize(900, 720);
+    page.show();
+    page.setActive(true);
+    flushEvents();
+    int requests = 0;
+    storage::CaptureHistoryRecord requested;
+    QObject::connect(&page, &ScreenshotHistoryPageWidget::splitRequested, &page,
+                     [&](const auto& record) {
+                         requested = record;
+                         ++requests;
+                     });
+    auto* entry = page.findChild<QWidget*>(QStringLiteral("screenshotHistoryEntry-record-0"));
+    auto* other = page.findChild<QWidget*>(QStringLiteral("screenshotHistoryEntry-record-2"));
+    require(entry && other, "split fixtures retain their record identities");
+    auto* selection = other->findChild<adqt::widgets::AdCheckbox*>();
+    selection->setChecked(true);
+    auto* more =
+        entry->findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistoryEntryMore"));
+    more->click();
+    flushEvents();
+    QPointer<adqt::widgets::AdContextMenu> menu = entry->findChild<adqt::widgets::AdContextMenu*>(
+        QStringLiteral("screenshotHistoryEntryMoreMenu"));
+    require(menu && menu->isPopupVisible(), "More opens the history split menu");
+    auto* split = menu->findChild<QAction*>(QStringLiteral("screenshotHistoryEntrySplit"));
+    auto* stitch = menu->findChild<QAction*>(QStringLiteral("screenshotHistoryEntryStitch"));
+    require(split && stitch && split->isEnabled() &&
+                split->text() == QStringLiteral("Image Splitting") && !split->icon().isNull() &&
+                menu->actions().indexOf(split) == menu->actions().indexOf(stitch) + 1,
+            "Image Splitting follows Stitch Image with a themed icon");
+    class SplitTranslator final : public QTranslator {
+      public:
+        QString translate(const char* context, const char* source, const char*,
+                          int) const override {
+            return QByteArray(context) == "ImageSplitWindow" &&
+                           QByteArray(source) == "Image Splitting"
+                       ? QStringLiteral("Translated Image Splitting")
+                       : QString();
+        }
+    } translator;
+    QCoreApplication::installTranslator(&translator);
+    const auto removeTranslator =
+        qScopeGuard([&] { QCoreApplication::removeTranslator(&translator); });
+    QEvent language(QEvent::LanguageChange);
+    QApplication::sendEvent(entry, &language);
+    require(split->text() == QStringLiteral("Translated Image Splitting") &&
+                split->toolTip() == split->text(),
+            "open history Image Splitting action uses the shared translation context");
+    activateMenuAction(menu, split);
+    flushEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    require(requests == 1 && requested == records[0] && selection->isChecked() &&
+                dataSource.removedIds.isEmpty() && !menu,
+            "splitting dispatches only its source record and preserves history selection");
+    auto* unavailableEntry =
+        page.findChild<QWidget*>(QStringLiteral("screenshotHistoryEntry-record-1"));
+    unavailableEntry
+        ->findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistoryEntryMore"))
+        ->click();
+    flushEvents();
+    auto* unavailableMenu = unavailableEntry->findChild<adqt::widgets::AdContextMenu*>(
+        QStringLiteral("screenshotHistoryEntryMoreMenu"));
+    require(unavailableMenu, "record without a result retains its More menu");
+    auto* unavailable =
+        unavailableMenu->findChild<QAction*>(QStringLiteral("screenshotHistoryEntrySplit"));
+    require(unavailable && !unavailable->isEnabled(), "missing history result disables splitting");
+    activateMenuAction(unavailableMenu, unavailable);
+    require(requests == 1, "disabled split entry cannot dispatch");
+}
+
+void moreMenuOffersPinStitchAndDelete() {
     MutableHistoryDataSource dataSource;
     QVector<storage::CaptureHistoryRecord> records = historyRecords(2);
     storage::CaptureHistoryResultRecord result;
@@ -792,43 +1003,36 @@ void moreMenuOffersPinAndDelete() {
         return nullptr;
     };
     auto hover = [](QWidget* widget) {
-        const QPoint local = widget->rect().center();
+        const QPoint local(widget->width() / 2, 0);
         const QPoint global = widget->mapToGlobal(local);
         QCursor::setPos(global);
         SnowEnterEvent event(local, local, global);
         QApplication::sendEvent(widget, &event);
     };
-    auto activate = [](QMenu* menu, QAction* action) {
-        const QRect geometry = menu->actionGeometry(action);
-        const QPoint local = geometry.center();
-        const QPoint global = menu->mapToGlobal(local);
-        QCursor::setPos(global);
-        QMouseEvent press(QEvent::MouseButtonPress, local, global, Qt::LeftButton, Qt::LeftButton,
-                          Qt::NoModifier);
-        QMouseEvent release(QEvent::MouseButtonRelease, local, global, Qt::LeftButton, Qt::NoButton,
-                            Qt::NoModifier);
-        QApplication::sendEvent(menu, &press);
-        QApplication::sendEvent(menu, &release);
-    };
     hover(more);
     flushEvents();
     QPointer<adqt::widgets::AdContextMenu> menu = visibleMenu(pinnableEntry);
-    require(menu != nullptr && menu->actions().size() == 2 && !menu->nativeMenuEnabled(),
+    require(menu != nullptr && menu->actions().size() == 4 && !menu->nativeMenuEnabled(),
             "hovering More must show the shared widget action menu");
     QAction* pin = menu->actions().at(0);
-    QAction* remove = menu->actions().at(1);
+    QAction* stitch = menu->actions().at(1);
+    QAction* split = menu->actions().at(2);
+    QAction* remove = menu->actions().at(3);
     require(pin->text() == QStringLiteral("Pin to screen") && pin->isEnabled() &&
+                stitch->text() == QStringLiteral("Stitch Image") && stitch->isEnabled() &&
+                split->text() == QStringLiteral("Image Splitting") && split->isEnabled() &&
                 remove->text() == QStringLiteral("Delete") && menu->actionDanger(remove) &&
                 menu->actionGeometry(pin).isValid(),
-            "the More menu must offer Pin to screen and a danger Delete action");
+            "the More menu offers Pin to screen, Stitch Image, Image Splitting, and danger Delete");
     QEvent languageChange(QEvent::LanguageChange);
     QApplication::sendEvent(pinnableEntry, &languageChange);
     flushEvents();
     require(pin->text() == QStringLiteral("Pin to screen") &&
                 pin->toolTip() == QStringLiteral("Pin this screenshot to the screen") &&
+                stitch->text() == QStringLiteral("Stitch Image") &&
                 remove->text() == QStringLiteral("Delete"),
             "an open More menu must keep its own action labels when the language changes");
-    activate(menu, pin);
+    activateMenuAction(menu, pin);
     flushEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     require(pinnedId == QStringLiteral("record-0") && !menu,
@@ -851,7 +1055,7 @@ void moreMenuOffersPinAndDelete() {
     flushEvents();
     menu = visibleMenu(pinnableEntry);
     require(menu != nullptr, "More must reopen its action menu");
-    activate(menu, menu->actions().at(1));
+    activateMenuAction(menu, menu->actions().last());
     flushEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     adqt::widgets::AdButton* confirmDelete =
@@ -863,6 +1067,108 @@ void moreMenuOffersPinAndDelete() {
     require(dataSource.removedIds.size() == 1 &&
                 dataSource.removedIds.front() == QStringLiteral("record-0"),
             "confirming Delete must remove that history entry");
+}
+
+void historyHoverMovementDoesNotRequireSelectionOrEnter() {
+    MutableHistoryDataSource dataSource;
+    dataSource.setRecords(historyRecords(2));
+    ScreenshotHistoryPageWidget page(&dataSource, nullptr);
+    page.resize(900, 720);
+    page.show();
+    page.setActive(true);
+    flushEvents();
+    const QPoint previousCursor = QCursor::pos();
+    const auto restoreCursor = qScopeGuard([previousCursor] { QCursor::setPos(previousCursor); });
+    QCursor::setPos(page.mapToGlobal(QPoint(10, 10)));
+    auto* first = page.findChild<QWidget*>(QStringLiteral("screenshotHistoryEntry-record-0"));
+    auto* selection = first->findChild<adqt::widgets::AdCheckbox*>();
+    for (const bool selected : {false, true, false}) {
+        selection->setChecked(selected);
+        flushEvents();
+        for (int index = 0; index < 2; ++index) {
+            auto* row = page.findChild<QWidget*>(
+                QStringLiteral("screenshotHistoryEntry-record-%1").arg(index));
+            auto* more = row->findChild<adqt::widgets::AdButton*>(
+                QStringLiteral("screenshotHistoryEntryMore"));
+            // The failing native stream contains HoverMove alone, including on
+            // repeated visits to the first row before its selection bar opens.
+            for (int visit = 0; visit < 2; ++visit) {
+                const QPoint local(more->width() / 2, 0);
+                QHoverEvent move(QEvent::HoverMove, local, more->mapToGlobal(local),
+                                 QPointF(local.x(), -1), Qt::NoModifier);
+                QApplication::sendEvent(more, &move);
+                auto* menu = row->findChild<adqt::widgets::AdContextMenu*>(
+                    QStringLiteral("screenshotHistoryEntryMoreMenu"));
+                require(menu && menu->isPopupVisible(), "each row must open More immediately on "
+                                                        "hover movement with or without selection");
+                menu->dismissPopup();
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            }
+        }
+    }
+    require(dataSource.removedIds.isEmpty(), "hovering More must preserve every history entry");
+}
+
+void moreButtonClicksDoNotRequestDeletion() {
+    MutableHistoryDataSource dataSource;
+    dataSource.setRecords(historyRecords(1));
+    int confirmationOpenings = 0;
+    ScreenshotHistoryPageWidget page(&dataSource, nullptr);
+    page.resize(900, 720);
+    page.show();
+    page.setActive(true);
+    flushEvents();
+    auto* more =
+        page.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotHistoryEntryMore"));
+    auto* confirmation = page.findChild<adqt::widgets::AdPopconfirm*>(
+        QStringLiteral("screenshotHistoryEntryDeleteConfirm"));
+    require(more && confirmation, "the click regression needs More and its delete confirmation");
+    QObject::connect(confirmation, &adqt::widgets::AdPopconfirm::visibleChanged, &page,
+                     [&](bool visible) {
+                         if (visible)
+                             ++confirmationOpenings;
+                     });
+    const QPoint previousCursor = QCursor::pos();
+    const auto restoreCursor = qScopeGuard([previousCursor] { QCursor::setPos(previousCursor); });
+    const QPoint local = more->rect().center();
+    const QPoint global = more->mapToGlobal(local);
+    QCursor::setPos(global);
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        // QAbstractButton::click() bypasses the popconfirm's input event filter.
+        QMouseEvent press(QEvent::MouseButtonPress, local, global, Qt::LeftButton, Qt::LeftButton,
+                          Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, local, global, Qt::LeftButton, Qt::NoButton,
+                            Qt::NoModifier);
+        QApplication::sendEvent(more, &press);
+        QApplication::sendEvent(more, &release);
+        flushEvents();
+        require(!confirmation->isVisible() && confirmationOpenings == 0,
+                "clicking More must never open Delete confirmation");
+        QPointer<adqt::widgets::AdContextMenu> menu = page.findChild<adqt::widgets::AdContextMenu*>(
+            QStringLiteral("screenshotHistoryEntryMoreMenu"));
+        require(menu && menu->isPopupVisible(), "clicking More must open the action menu");
+        menu->dismissPopup();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        flushEvents();
+    }
+    for (const Qt::Key key : {Qt::Key_Return, Qt::Key_Space}) {
+        QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
+        QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier);
+        QApplication::sendEvent(more, &press);
+        QApplication::sendEvent(more, &release);
+        flushEvents();
+        require(!confirmation->isVisible() && confirmationOpenings == 0,
+                "keyboard activation of More must never open Delete confirmation");
+        auto* menu = page.findChild<adqt::widgets::AdContextMenu*>(
+            QStringLiteral("screenshotHistoryEntryMoreMenu"));
+        require(menu && menu->isPopupVisible() && menu->activeAction(),
+                "keyboard activation must open More with an active action");
+        menu->dismissPopup();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        flushEvents();
+    }
+    require(dataSource.removedIds.isEmpty(), "opening More must preserve its history entry");
 }
 
 void moreMenuRetirementKeepsIdleHistoryUsable() {
@@ -1169,8 +1475,18 @@ int main(int argc, char** argv) {
                 .initialize({temporary.path(), temporary.path(), 8000})
                 .success,
             "isolated application storage must initialize");
+    entryStitchActionUsesOnlyItsRecord();
+    entrySplitActionUsesOnlyItsRecord();
+    if (application.arguments().contains(QStringLiteral("--collage-only"))) {
+        entriesUseBordersAndSupportCrossPageSelection();
+        storage::ApplicationStorage::instance().shutdown();
+        QCoreApplication::removeTranslator(&englishTranslator);
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--context-menu-only"))) {
-        moreMenuOffersPinAndDelete();
+        historyHoverMovementDoesNotRequireSelectionOrEnter();
+        moreButtonClicksDoNotRequestDeletion();
+        moreMenuOffersPinStitchAndDelete();
         moreMenuRetirementKeepsIdleHistoryUsable();
         storage::ApplicationStorage::instance().shutdown();
         QCoreApplication::removeTranslator(&englishTranslator);
@@ -1187,7 +1503,9 @@ int main(int argc, char** argv) {
         QCoreApplication::removeTranslator(&englishTranslator);
         return 0;
     }
-    moreMenuOffersPinAndDelete();
+    historyHoverMovementDoesNotRequireSelectionOrEnter();
+    moreButtonClicksDoNotRequestDeletion();
+    moreMenuOffersPinStitchAndDelete();
     moreMenuRetirementKeepsIdleHistoryUsable();
     entriesUseBordersAndSupportCrossPageSelection();
     historyCopiesPreservePositionAndAppearance();

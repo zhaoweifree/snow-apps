@@ -1,6 +1,7 @@
 #include "snow_shot/presentation/screenshotselectorcoordinator.h"
 
 #include "../capture/screenshotcaptureperfinstrumentation.h"
+#include "screenshotselectordisplaygeometry.h"
 #include "screenshotselectorserviceclient.h"
 #include "snow_shot/storage/applicationstorage.h"
 
@@ -36,13 +37,13 @@ ScreenshotSelectorCoordinator::ScreenshotSelectorCoordinator(QObject* parent,
                     }
                     const bool refreshRequired = m_ready || m_refreshInFlight;
                     const QVector<std::uintptr_t> excludedHwnds = m_lastExcludedHwnds;
+                    const QVector<CapturedDisplayModel> displays = m_lastDisplays;
                     releaseCache();
                     if (refreshRequired) {
-                        if (m_lastDisplays.isEmpty())
+                        if (displays.isEmpty())
                             static_cast<void>(startRefresh(excludedHwnds));
                         else
-                            static_cast<void>(
-                                startRefreshWithDisplays(excludedHwnds, m_lastDisplays));
+                            static_cast<void>(startRefreshWithDisplays(excludedHwnds, displays));
                     }
                 });
     }
@@ -92,6 +93,8 @@ void ScreenshotSelectorCoordinator::resetHitTestState() {
 
 void ScreenshotSelectorCoordinator::releaseCache() {
     resetRequests();
+    m_lastExcludedHwnds.clear();
+    m_lastDisplays.clear();
     if (!m_serviceClient->releaseCache()) {
         // A closed worker leaves the service handle unusable. Drop it so the
         // next capture can create a fresh worker instead of reusing a dead one.
@@ -101,6 +104,8 @@ void ScreenshotSelectorCoordinator::releaseCache() {
 
 void ScreenshotSelectorCoordinator::destroyService() {
     resetRequests();
+    m_lastExcludedHwnds.clear();
+    m_lastDisplays.clear();
     m_ready = false;
     m_serviceClient->destroyService();
 }
@@ -111,13 +116,14 @@ bool ScreenshotSelectorCoordinator::dispatchRefresh(const QVector<std::uintptr_t
         return false;
     resetHitTestState();
     m_lastExcludedHwnds = excludedHwnds;
-    m_lastDisplays = displays != nullptr ? *displays : QVector<CapturedDisplayModel>{};
+    m_lastDisplays = displays != nullptr ? screenshotSelectorDisplayGeometry(*displays)
+                                         : QVector<CapturedDisplayModel>{};
     const quint64 requestId = ++m_refreshRequestId;
     m_refreshInFlight = true;
     m_ready = false;
     const bool started =
         displays != nullptr
-            ? m_serviceClient->startRefreshWithDisplays(requestId, excludedHwnds, *displays)
+            ? m_serviceClient->startRefreshWithDisplays(requestId, excludedHwnds, m_lastDisplays)
             : m_serviceClient->startRefresh(requestId, excludedHwnds);
     if (!started) {
         m_refreshInFlight = false;

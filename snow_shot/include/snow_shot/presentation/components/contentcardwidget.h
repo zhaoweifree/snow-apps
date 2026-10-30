@@ -3,10 +3,12 @@
 
 #include "snow_shot/presentation/settings/settingsregistry.h"
 #include "snow_shot/presentation/styles/themecolorscheme.h"
+#include "snow_shot/storage/capturehistorytypes.h"
 
 #include <QFrame>
 #include <QPointer>
 #include <QBrush>
+#include <QStringList>
 
 #include <memory>
 
@@ -55,6 +57,11 @@ class ContentCardWidget final : public QFrame {
     globalMouseDragRequested(snow_shot::presentation::settings::SettingsGlobalMouseAction action);
     void screenshotHistoryEditRequested(const QString& recordId);
     void screenshotHistoryPinRequested(const QString& recordId);
+    void screenshotHistoryCollageRequested(
+        const QVector<snow_shot::storage::CaptureHistoryRecord>& records);
+    void screenshotHistorySplitRequested(const snow_shot::storage::CaptureHistoryRecord& record);
+    void pinnedWindowCollageRequested(const QStringList& recordIds);
+    void pinnedWindowSplitRequested(const QString& recordId);
 
   protected:
     void paintEvent(QPaintEvent* event) override;

@@ -18,6 +18,8 @@ pub(super) fn pointer(
         .process_input_with_viewport_changes(
             viewport,
             InputEvent::Pointer(PointerEvent {
+                pressure: None,
+                timestamp_ms: 0,
                 pointer_id: 1,
                 event_type: kind,
                 device: PointerDevice::Mouse,
@@ -1106,6 +1108,8 @@ fn shift_alt_toggles_selection_and_empty_canvas_does_not_duplicate() {
         .process_input_with_viewport_changes(
             viewport,
             InputEvent::Pointer(PointerEvent {
+                pressure: None,
+                timestamp_ms: 0,
                 pointer_id: 1,
                 event_type: PointerEventType::Down,
                 device: PointerDevice::Mouse,

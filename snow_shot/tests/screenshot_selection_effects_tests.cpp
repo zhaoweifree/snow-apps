@@ -5,6 +5,8 @@
 #include "snow_shot/presentation/screenshotselectioneditworkflow.h"
 #include "snow_shot/presentation/screenshotselectionmodel.h"
 #include "snow_shot/presentation/screenshotselectionsettingsstore.h"
+#include "snow_shot/storage/capturehistoryrepository.h"
+#include "snow_shot/storage/persistedselectioncodec.h"
 #include "snow_shot/storage/applicationstorage.h"
 
 #include <QCoreApplication>
@@ -39,6 +41,24 @@ void selectionEffectsPersistAcrossRestarts() {
             "new installations must default to an unlocked selection aspect ratio");
     require(settings.selectionTarget() == ScreenshotIntelligentSelectionTarget::WindowSubElement,
             "new installations must default to the existing child-element selection mode");
+    require(settings.layoutCompaction() == ScreenshotLayoutCompaction{}, "compaction defaults");
+    settings.setLayoutCompaction({true, 1000});
+    require(settings.layoutCompaction() == ScreenshotLayoutCompaction{true, 100},
+            "saved spacing must clamp to 100 canvas units");
+    require(storage.configuration().setValue(
+                QStringLiteral("screenshot_selection/layout_compaction_spacing"), 500) &&
+                settings.layoutCompaction().spacing == 100,
+            "legacy configuration spacing must clamp to the shared maximum");
+    require(!storage.configuration().setValue(
+                QStringLiteral("screenshot_selection/layout_compaction_spacing"), 1001),
+            "configuration spacing outside the legacy range must be rejected");
+    settings.setLayoutCompaction({true, 17});
+    require(settings.backgroundOpacityPercent() == 0, "background opacity defaults to zero");
+    settings.setBackgroundOpacityPercent(37);
+    ScreenshotSelectionParams presetParams;
+    presetParams.selection = QRect(10, 20, 80, 60);
+    presetParams.backgroundOpacityPercent = 61;
+    settings.setPresets({{QStringLiteral("Background"), presetParams}});
     settings.setSelectionTarget(ScreenshotIntelligentSelectionTarget::Window);
     require(settings.selectionTarget() == ScreenshotIntelligentSelectionTarget::Window,
             "selection target preference must be writable");
@@ -85,15 +105,26 @@ void selectionEffectsPersistAcrossRestarts() {
     workflow.toggleSelectionAspectRatioLockFromToolbar();
     require(settings.cornerRadius() == 24 && settings.shadowWidth() == 12,
             "toolbar edits must persist both effects without exporting a screenshot");
+    workflow.adjustSelectionEffectsFromWheel(3, -2);
+    require(settings.cornerRadius() == 27 && settings.shadowWidth() == 10,
+            "wheel values must persist before their deferred preview is presented");
+    workflow.adjustSelectionEffectsFromWheel(-3, 2);
     require(settings.aspectRatioLocked(),
             "the toolbar aspect-ratio toggle must persist without exporting a screenshot");
-    require(!settings.hasPreviousSelectionParams(),
+    require(storage.captureHistory().records().isEmpty(),
             "editing effects must not create a previous selection rectangle");
 
     // Shutdown flushes the debounced writes, just as a normal application exit does.
     storage.shutdown();
     require(storage.initialize(options).success, "storage must reopen after shutdown");
     ScreenshotSelectionSettingsStore restartedSettings;
+    require(restartedSettings.backgroundOpacityPercent() == 37,
+            "background opacity survives restart");
+    require(restartedSettings.presets().size() == 1 &&
+                restartedSettings.presets().first().params.backgroundOpacityPercent == 61,
+            "named presets preserve their own background opacity across restarts");
+    require(restartedSettings.layoutCompaction() == ScreenshotLayoutCompaction{true, 17},
+            "compaction settings must survive a restart");
     require(restartedSettings.cornerRadius() == 24 && restartedSettings.shadowWidth() == 12,
             "selection effects must survive a storage restart");
     require(restartedSettings.aspectRatioLocked(),
@@ -126,7 +157,7 @@ void selectionEffectsPersistAcrossRestarts() {
             "confirmed resize parameters must persist the shadow color without exporting");
     require(settings.cornerRadius() == 32 && settings.shadowWidth() == 16,
             "confirmed resize parameters must update the persistent effects");
-    require(!settings.hasPreviousSelectionParams(),
+    require(storage.captureHistory().records().isEmpty(),
             "persisting the shadow color must not require a previous screenshot");
 
     storage.shutdown();
@@ -179,6 +210,8 @@ void selectionEffectsPersistAcrossRestarts() {
     settings.setSelectionEffects(20, 10, QColor(12, 34, 56));
     settings.setAspectRatioLocked(true);
     settings.clear();
+    require(settings.backgroundOpacityPercent() == 0,
+            "clearing selection preferences resets background opacity");
     require(settings.cornerRadius() == 0 && settings.shadowWidth() == 0,
             "clearing selection settings must reset the persistent effects");
     require(settings.shadowColor() == QColor(0x33, 0x33, 0x33),
@@ -314,7 +347,7 @@ void selectionAspectRatioWorkflowPersistsOnlyUserPreferences() {
     require(storage.initialize(options).success, "aspect ratio preferences must reopen");
     require(settings.aspectRatioPreset() == Preset::Portrait2x3 && settings.aspectRatioLocked(),
             "a chosen preset and its lock must survive storage restart before export");
-    require(!settings.hasPreviousSelectionParams(),
+    require(storage.captureHistory().records().isEmpty(),
             "aspect ratio choices must not create a previous exported selection");
 
     workflow.openSelectionResizeModalFromToolbar();
@@ -399,10 +432,112 @@ void selectionAspectRatioWorkflowPersistsOnlyUserPreferences() {
             "clearing selection preferences must reset both the saved preset and lock");
     storage.shutdown();
 }
+void backgroundOpacitySelectionState() {
+    ScreenshotSelectionModel selection;
+    selection.setSelectionRect(QRectF(10, 20, 80, 60));
+    require(selection.backgroundOpacityPercent() == 0, "selection opacity defaults to zero");
+    const auto revision = selection.changeRevision();
+    require(selection.setBackgroundOpacityPercent(37) && selection.changeRevision() == revision + 1,
+            "opacity changes invalidate selection state once");
+    require(!selection.setBackgroundOpacityPercent(37) &&
+                selection.changeRevision() == revision + 1,
+            "identical opacity must not invalidate state");
+    const auto params = selection.params(QRect(0, 0, 200, 200));
+    ScreenshotSelectionModel restored;
+    require(restored.applyParams(params, QRect(0, 0, 200, 200)) &&
+                restored.backgroundOpacityPercent() == 37 &&
+                restored.resultStyle().backgroundOpacityPercent == 37,
+            "history and preset restoration must carry opacity into the result style");
+    snow_shot::storage::PersistedSelection persisted{
+        params.selection,   params.radius,           params.shadowWidth,
+        params.shadowColor, params.lockAspectRatio,  params.lockDragAspectRatio,
+        params.region,      params.layoutCompaction, params.backgroundOpacityPercent};
+    auto json = snow_shot::storage::persistedSelectionToJson(persisted);
+    require(snow_shot::storage::normalizePersistedSelection(json).value == persisted,
+            "persisted selection opacity must round trip");
+    json.remove(QStringLiteral("background_opacity_percent"));
+    require(snow_shot::storage::normalizePersistedSelection(json).value.backgroundOpacityPercent ==
+                0,
+            "legacy selections default to zero background opacity");
+    for (double invalid : {-1.0, .5, 101.0}) {
+        json.insert(QStringLiteral("background_opacity_percent"), invalid);
+        require(!snow_shot::storage::normalizePersistedSelection(json).valid,
+                "invalid persisted opacity must be rejected");
+    }
+    require(restored.setBackgroundOpacityPercent(200) && restored.backgroundOpacityPercent() == 100,
+            "opacity clamps at 100 percent");
+    ScreenshotSelectionModel copied;
+    copied = restored;
+    require(copied.backgroundOpacityPercent() == 100, "selection assignment preserves opacity");
+    copied.reset();
+    require(copied.backgroundOpacityPercent() == 0, "selection reset clears opacity");
+}
+
+void compactionSelectionState() {
+    ScreenshotSelectionModel selection;
+    selection.setSelectionRect(QRectF(0, 0, 20, 20));
+    selection.setLayoutCompaction({true, 8});
+    require(!selection.layoutCompactionAvailable() && !selection.exportLayoutCompaction().enabled,
+            "single rectangles must not compact");
+    selection.beginRegionOperation(ScreenshotSelectionModel::RegionOperation::Add);
+    selection.setSelectionRect(QRectF(50, 0, 20, 20));
+    require(!selection.layoutCompactionAvailable(),
+            "unfinished multi-region operations are unavailable");
+    selection.commitRegionOperation();
+    require(selection.layoutCompactionAvailable() && selection.exportLayoutCompaction().enabled,
+            "committed regions enable compaction");
+    auto reduced = selection;
+    reduced.beginRegionOperation(ScreenshotSelectionModel::RegionOperation::Subtract);
+    reduced.setSelectionRect(QRectF(50, 0, 20, 20));
+    reduced.commitRegionOperation();
+    require(!reduced.layoutCompactionAvailable(), "removed regions must not retain eligibility");
+    const auto params = selection.params(QRect(0, 0, 100, 100));
+    ScreenshotSelectionModel restored;
+    require(restored.applyParams(params, QRect(0, 0, 100, 100)) &&
+                restored.layoutCompactionAvailable() &&
+                restored.layoutCompaction() == params.layoutCompaction,
+            "history restoration must retain compaction and multi-region eligibility");
+    const auto revision = restored.changeRevision();
+    require(!restored.setLayoutCompaction(params.layoutCompaction) &&
+                restored.changeRevision() == revision,
+            "identical settings must not invalidate selection presentation");
+    snow_shot::storage::PersistedSelection persisted{
+        params.selection,   params.radius,          params.shadowWidth,
+        params.shadowColor, params.lockAspectRatio, params.lockDragAspectRatio,
+        params.region,      params.layoutCompaction};
+    auto json = snow_shot::storage::persistedSelectionToJson(persisted);
+    require(snow_shot::storage::normalizePersistedSelection(json).value == persisted,
+            "compaction history JSON must round trip");
+    json.insert(QStringLiteral("layout_compaction_spacing"), 1000);
+    const auto clamped = snow_shot::storage::normalizePersistedSelection(json);
+    require(clamped.valid && clamped.changed &&
+                clamped.value.layoutCompaction == ScreenshotLayoutCompaction{true, 100} &&
+                clamped.value.rectangle == persisted.rectangle &&
+                clamped.value.region == persisted.region,
+            "legacy spacing above 100 must clamp without discarding the saved selection");
+    json.remove(QStringLiteral("layout_compaction_enabled"));
+    json.remove(QStringLiteral("layout_compaction_spacing"));
+    const auto legacy = snow_shot::storage::normalizePersistedSelection(json);
+    require(legacy.valid && legacy.value.layoutCompaction == ScreenshotLayoutCompaction{},
+            "legacy history must default to disabled compaction");
+    json.insert(QStringLiteral("layout_compaction_spacing"), 1.5);
+    require(!snow_shot::storage::normalizePersistedSelection(json).valid,
+            "fractional persisted spacing rejected");
+    restored.reset();
+    require(restored.layoutCompaction() == ScreenshotLayoutCompaction{},
+            "capture reset clears local settings");
+    QRegion ring(QRect(0, 0, 40, 40));
+    ring -= QRect(10, 10, 20, 20);
+    restored.setSelectionRegion(ring);
+    require(!restored.layoutCompactionAvailable(),
+            "scanline partitions and holes are not multiple selections");
+}
 } // namespace
 
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
+    backgroundOpacitySelectionState();
+    compactionSelectionState();
     selectionEffectsPersistAcrossRestarts();
     selectionAspectRatioWorkflowPersistsOnlyUserPreferences();
     return 0;

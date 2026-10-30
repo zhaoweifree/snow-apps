@@ -1,6 +1,6 @@
 use snow_draw_engine_core::{
-    Camera, ColorRgba8, CornerRadii, PathGeometry, Point, SnapGuideAxis, SnapGuideKind,
-    SurfaceSize,
+    Camera, ColorRgba8, CornerRadii, PathGeometry, Point, SnapConfig, SnapGuide, SnapGuideAxis,
+    SnapGuideKind, SurfaceSize,
     arrow::{ArrowPathCommand, ArrowType, Arrowhead, StrokeStyle},
 };
 use std::sync::Arc;
@@ -160,6 +160,7 @@ pub enum DisplayBlendMode {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RectangleDisplayItem {
     pub id: DisplayItemId,
+    pub bound_text_id: Option<DisplayItemId>,
     pub center_x: f64,
     pub center_y: f64,
     pub width: f64,
@@ -170,6 +171,8 @@ pub struct RectangleDisplayItem {
     pub stroke: ColorRgba8,
     pub stroke_width: f64,
     pub stroke_style: StrokeStyle,
+    pub stroke_rendering_style: snow_draw_engine_core::arrow::StrokeRenderingStyle,
+    pub stroke_rendering_seed: u32,
     pub corner_radii: CornerRadii,
     pub opacity: f64,
     pub shape: DisplayRectangleShape,
@@ -221,8 +224,10 @@ impl FilterRenderSpec {
             | DisplayFilterType::Emboss
             | DisplayFilterType::Brightness => normalized_strength,
         };
-        let mosaic_block_size = 2.0 + 10.0 * strength;
-        let blur_sigma = 0.5 + 18.0 * strength;
+        // Preserve the 50% defaults while giving the upper half a stronger effect range.
+        let spatial_strength = strength * strength;
+        let mosaic_block_size = 2.0 + 20.0 * spatial_strength;
+        let blur_sigma = 0.5 + 36.0 * spatial_strength;
         let sampling_radius = match filter_type {
             DisplayFilterType::Mosaic => (mosaic_block_size + 1.0) / 2.0,
             DisplayFilterType::GaussianBlur => 3.0 * blur_sigma + 1.0,
@@ -277,8 +282,8 @@ mod filter_render_spec_tests {
         assert_eq!(mosaic.sampling_radius, 4.0);
 
         let blur = FilterRenderSpec::resolve(DisplayFilterType::GaussianBlur, 1.0);
-        assert_eq!(blur.blur_sigma, 18.5);
-        assert_eq!(blur.sampling_radius, 56.5);
+        assert_eq!(blur.blur_sigma, 36.5);
+        assert_eq!(blur.sampling_radius, 110.5);
 
         let brightness = FilterRenderSpec::resolve(DisplayFilterType::Brightness, 0.5);
         assert_eq!(DisplayFilterType::Brightness as u32, 6);
@@ -292,6 +297,50 @@ mod filter_render_spec_tests {
     }
 
     #[test]
+    fn spatial_filters_preserve_midpoint_and_expand_the_upper_range() {
+        for (strength, block_size, sigma) in [
+            (0.0, 2.0, 0.5),
+            (0.25, 3.25, 2.75),
+            (0.5, 7.0, 9.5),
+            (0.75, 13.25, 20.75),
+            (1.0, 22.0, 36.5),
+        ] {
+            let mosaic = FilterRenderSpec::resolve(DisplayFilterType::Mosaic, strength);
+            assert_eq!(mosaic.strength, strength);
+            assert_eq!(mosaic.mosaic_block_size, block_size);
+            assert_eq!(mosaic.sampling_radius, (block_size + 1.0) / 2.0);
+
+            let blur = FilterRenderSpec::resolve(DisplayFilterType::GaussianBlur, strength);
+            assert_eq!(blur.strength, strength);
+            assert_eq!(blur.blur_sigma, sigma);
+            assert_eq!(blur.sampling_radius, 3.0 * sigma + 1.0);
+        }
+    }
+
+    #[test]
+    fn spatial_filter_values_increase_at_every_slider_step_with_accelerating_increments() {
+        let mut previous_mosaic = FilterRenderSpec::resolve(DisplayFilterType::Mosaic, 0.0);
+        let mut previous_blur = FilterRenderSpec::resolve(DisplayFilterType::GaussianBlur, 0.0);
+        let mut previous_block_increment = 0.0;
+        let mut previous_sigma_increment = 0.0;
+        for percent in 1..=100 {
+            let strength = f64::from(percent) / 100.0;
+            let mosaic = FilterRenderSpec::resolve(DisplayFilterType::Mosaic, strength);
+            let blur = FilterRenderSpec::resolve(DisplayFilterType::GaussianBlur, strength);
+            let block_increment = mosaic.mosaic_block_size - previous_mosaic.mosaic_block_size;
+            let sigma_increment = blur.blur_sigma - previous_blur.blur_sigma;
+            assert!(block_increment > previous_block_increment);
+            assert!(sigma_increment > previous_sigma_increment);
+            assert!(mosaic.sampling_radius > previous_mosaic.sampling_radius);
+            assert!(blur.sampling_radius > previous_blur.sampling_radius);
+            previous_mosaic = mosaic;
+            previous_blur = blur;
+            previous_block_increment = block_increment;
+            previous_sigma_increment = sigma_increment;
+        }
+    }
+
+    #[test]
     fn normalizes_non_finite_and_out_of_range_strengths_for_strength_based_filters() {
         for filter_type in [
             DisplayFilterType::Mosaic,
@@ -299,20 +348,19 @@ mod filter_render_spec_tests {
             DisplayFilterType::Emboss,
             DisplayFilterType::Brightness,
         ] {
+            let minimum = FilterRenderSpec::resolve(filter_type, 0.0);
+            let maximum = FilterRenderSpec::resolve(filter_type, 1.0);
+            assert_eq!(FilterRenderSpec::resolve(filter_type, f64::NAN), maximum);
             assert_eq!(
-                FilterRenderSpec::resolve(filter_type, f64::NAN).strength,
-                1.0
+                FilterRenderSpec::resolve(filter_type, f64::NEG_INFINITY),
+                minimum
             );
             assert_eq!(
-                FilterRenderSpec::resolve(filter_type, f64::NEG_INFINITY).strength,
-                0.0
+                FilterRenderSpec::resolve(filter_type, f64::INFINITY),
+                maximum
             );
-            assert_eq!(
-                FilterRenderSpec::resolve(filter_type, f64::INFINITY).strength,
-                1.0
-            );
-            assert_eq!(FilterRenderSpec::resolve(filter_type, -2.0).strength, 0.0);
-            assert_eq!(FilterRenderSpec::resolve(filter_type, 2.0).strength, 1.0);
+            assert_eq!(FilterRenderSpec::resolve(filter_type, -2.0), minimum);
+            assert_eq!(FilterRenderSpec::resolve(filter_type, 2.0), maximum);
         }
     }
 
@@ -362,17 +410,22 @@ pub struct ArrowheadDisplayPrimitive {
     pub points: Vec<[f64; 2]>,
     pub center: [f64; 2],
     pub diameter: f64,
+    pub roughness_cap: Option<f64>,
     pub fill_mode: ArrowheadDisplayFillMode,
     pub dash_mode: ArrowheadDisplayDashMode,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ArrowDisplayItem {
+    pub brush_mode: snow_draw_engine_core::BrushMode,
+    pub pressure_geometry: Option<Arc<PathGeometry>>,
     pub id: DisplayItemId,
     pub bound_text_id: Option<DisplayItemId>,
     pub label_bounds: Option<snow_draw_engine_core::DrawRect>,
     pub bound_text_overlay: bool,
     pub points: Vec<[f64; 2]>,
+    // Legacy fallback commands. Chunked free-draw previews keep only `geometry`
+    // rather than copying the complete stroke for every input batch.
     pub path_commands: Vec<ArrowPathCommand>,
     pub geometry: Arc<PathGeometry>,
     pub arrow_type: ArrowType,
@@ -383,6 +436,8 @@ pub struct ArrowDisplayItem {
     pub stroke: ColorRgba8,
     pub stroke_width: f64,
     pub stroke_style: StrokeStyle,
+    pub stroke_rendering_style: snow_draw_engine_core::arrow::StrokeRenderingStyle,
+    pub stroke_rendering_seed: u32,
     pub fill: ColorRgba8,
     pub fill_style: DisplayFillStyle,
     pub arrowhead_primitives: Vec<ArrowheadDisplayPrimitive>,
@@ -413,6 +468,13 @@ pub enum DisplayFillStyle {
     CrossLine,
     #[default]
     Solid,
+    Border = 3,
+}
+
+impl DisplayFillStyle {
+    pub fn is_visible(self, color: ColorRgba8) -> bool {
+        self != Self::Border && color.a != 0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -472,6 +534,8 @@ pub struct SerialNumberDisplayItem {
     pub font_family: Option<String>,
     pub stroke_width: f64,
     pub stroke_style: StrokeStyle,
+    pub stroke_rendering_style: snow_draw_engine_core::arrow::StrokeRenderingStyle,
+    pub stroke_rendering_seed: u32,
     pub corner_radii: CornerRadii,
     pub opacity: f64,
     pub bound_text_id: Option<DisplayItemId>,
@@ -497,6 +561,10 @@ pub struct SerialNumberConnectorDisplayItem {
 impl Default for ArrowDisplayItem {
     fn default() -> Self {
         Self {
+            stroke_rendering_seed: 0,
+            stroke_rendering_style: Default::default(),
+            brush_mode: Default::default(),
+            pressure_geometry: None,
             bound_text_id: None,
             label_bounds: None,
             bound_text_overlay: false,
@@ -525,7 +593,10 @@ impl Default for ArrowDisplayItem {
 impl Default for RectangleDisplayItem {
     fn default() -> Self {
         Self {
+            stroke_rendering_seed: 0,
+            stroke_rendering_style: Default::default(),
             id: DisplayItemId::default(),
+            bound_text_id: None,
             center_x: 0.0,
             center_y: 0.0,
             width: 0.0,
@@ -592,6 +663,8 @@ impl Default for SerialNumberDisplayItem {
             font_family: None,
             stroke_width: 0.0,
             stroke_style: StrokeStyle::Solid,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             corner_radii: CornerRadii::default(),
             opacity: 1.0,
             bound_text_id: None,
@@ -640,6 +713,7 @@ pub enum UiShapeKind {
     SpeechBubbleAddTailHandle,
     SpeechBubbleTailBaseHandle,
     SpeechBubbleTailTipHandle,
+    ShapeTextHandle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -722,6 +796,35 @@ pub struct SnapGuideDisplayItem {
     pub marker_size: f64,
     pub gap_dash_length: f64,
     pub gap_dash_gap: f64,
+}
+
+impl SnapGuideDisplayItem {
+    pub fn from_guide(guide: &SnapGuide, config: SnapConfig) -> Self {
+        let mut markers = [Point::default(), Point::default()];
+        let marker_count = guide.markers.len().min(markers.len());
+        for (index, marker) in guide.markers.iter().take(marker_count).enumerate() {
+            markers[index] = *marker;
+        }
+
+        Self {
+            kind: guide.kind,
+            axis: guide.axis,
+            start: guide.start,
+            end: guide.end,
+            marker_count: marker_count as u8,
+            markers,
+            label: if config.show_gap_size {
+                guide.label
+            } else {
+                None
+            },
+            color: config.line_color,
+            line_width: config.line_width,
+            marker_size: config.marker_size,
+            gap_dash_length: config.gap_dash_length,
+            gap_dash_gap: config.gap_dash_gap,
+        }
+    }
 }
 
 impl Default for SnapGuideDisplayItem {
@@ -843,6 +946,7 @@ pub struct PathChunkReplacement {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PathGeometryPatch {
+    pub role: PathGeometryRole,
     pub id: DisplayItemId,
     pub expected_geometry_revision: u64,
     pub resulting_geometry_revision: u64,
@@ -852,6 +956,13 @@ pub struct PathGeometryPatch {
     pub closed: bool,
     pub full_reset: bool,
     pub element_removed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PathGeometryRole {
+    #[default]
+    Centerline,
+    PressureOutline,
 }
 
 #[derive(Clone, Debug, PartialEq)]

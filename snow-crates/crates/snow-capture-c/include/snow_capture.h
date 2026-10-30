@@ -17,6 +17,23 @@ typedef struct SnowCaptureCancellationTokenImpl SnowCaptureCancellationToken;
 typedef struct SnowCaptureScreenshotResultImpl SnowCaptureScreenshotResult;
 typedef struct SnowCaptureCursorSnapshotImpl SnowCaptureCursorSnapshot;
 
+/* Immutable 32x32 RGBA crosshair artwork, with a white fill, black outline and
+ * hotspot (16,16). Pixels remain valid for the lifetime of the process. */
+typedef struct SnowCaptureCursorImageView {
+    const uint8_t* rgba;
+    size_t rgba_len;
+    uint32_t width;
+    uint32_t height;
+    uint32_t hotspot_x;
+    uint32_t hotspot_y;
+} SnowCaptureCursorImageView;
+
+/* Returns 1 and fills the view, or 0 when view is null. For physical scaling,
+ * sample source pixel (x*32/width, y*32/height) using integer division. Scale
+ * the hotspot using ceiling division, clamped to width-1/height-1, to select
+ * the first physical pixel of the white center. */
+uint8_t snow_capture_crosshair_cursor_image(SnowCaptureCursorImageView* view);
+
 /* Copies the current global cursor, including its pixels, hotspot, desktop position and
  * visibility (physical pixels on Windows, desktop points on macOS).
  * Immutable and safe to share across capture threads. Null reports a sampling error;
@@ -308,6 +325,31 @@ typedef struct SnowCaptureScreenshotRequest {
     const SnowCaptureCancellationToken* cancellation_token;
     uint8_t reserved[32];
 } SnowCaptureScreenshotRequest;
+
+/* Target-only transaction: opens and captures exactly one monitor or one window.
+ * Unlike desktop capture, a window result contains no display frames; a monitor
+ * result contains exactly one. Existing result/geometry/lease APIs apply.
+ * Exactly one of screenshot.focused_window and monitor_utf8 must select a target.
+ * Monitor identity accepts device name, stable ID, or macOS display:<native ID>.
+ * Cursor/color/cancellation flags retain desktop semantics; REFRESH_LAYOUT is invalid.
+ * Run on a worker thread. Request, string and token remain live until return. */
+#define SNOW_CAPTURE_TARGET_SCREENSHOT_REQUEST_VERSION 1u
+typedef struct SnowCaptureTargetScreenshotRequest {
+    uint32_t version;
+    uint32_t struct_size;
+    SnowCaptureScreenshotRequest screenshot;
+    const char* monitor_utf8;
+    uint8_t pixel_format;
+    uint8_t reserved[7];
+    /* Optional thread-safe callback before native/CPU raster preparation. Invoked
+     * synchronously on capture/native workers, which are joined before return.
+     * Rejection is sticky for this transaction, including backend fallback.
+     * Context must remain live until return; callbacks must not unwind. */
+    void* admission_context;
+    uint8_t (*admit_raster)(void* context, uint32_t width, uint32_t height);
+} SnowCaptureTargetScreenshotRequest;
+SnowCaptureScreenshotResult*
+snow_capture_target_screenshot(const SnowCaptureTargetScreenshotRequest* request);
 
 SnowCaptureDesktopSession*
 snow_capture_desktop_session_create(const SnowCaptureDesktopSessionConfig* config);

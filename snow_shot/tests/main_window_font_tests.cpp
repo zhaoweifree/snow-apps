@@ -2,6 +2,7 @@
 #include "snow_shot/presentation/components/actionrow.h"
 #include "snow_shot/presentation/components/contentcardwidget.h"
 #include "snow_shot/presentation/components/maincontentheaderwidget.h"
+#include "snow_shot/presentation/components/pinnedwindowmanagementpagewidget.h"
 #include "snow_shot/presentation/components/sidebarwidget.h"
 #include "snow_shot/presentation/components/titlebarwidget.h"
 #include "snow_shot/presentation/components/icons/snowshoticons.h"
@@ -17,7 +18,9 @@
 #include "snow_shot/storage/applicationstorage.h"
 #include "theme/theme_manager.h"
 #include "widgets/button.h"
+#include "widgets/checkbox.h"
 #include "widgets/message.h"
+#include "widgets/modal.h"
 #include "widgets/navigation_menu.h"
 #include "widgets/scroll_area.h"
 #include "widgets/select.h"
@@ -227,6 +230,85 @@ void customTitleBarUsesPlatformWindowControls() {
 #endif
 #endif
 }
+
+#ifdef Q_OS_WIN
+void modalWindowSizeIconsMatchMainTitleBar() {
+    QWidget host;
+    host.resize(360, 80);
+    TitleBarWidget titleBar(styles::ThemeManager::instance().themeColorScheme().metricAlias, &host);
+    titleBar.resize(host.width(), titleBar.height());
+    host.show();
+    auto* mainButton = titleBar.findChild<QAbstractButton*>(QStringLiteral("maximizeWindowButton"));
+    require(mainButton != nullptr, "main caption exposes its size control");
+
+    adqt::widgets::AdModal modal;
+    modal.setMode(adqt::widgets::AdModal::Mode::Window);
+    modal.setWindowModeDetached(true);
+    modal.setWindowModality(Qt::NonModal);
+    modal.setWindowResizable(true);
+    modal.setWindowMaximizeButtonVisible(true);
+    auto* content = new QWidget;
+    modal.setContentWidget(content);
+    modal.open();
+    flushEvents();
+    auto* surface = content->window();
+    auto* modalButton = surface->findChild<QAbstractButton*>(QStringLiteral("ad-modal-maximize"));
+    require(modalButton != nullptr, "collage-style window exposes its size control");
+
+    // Compare the visible silhouettes, independent of each header's background,
+    // foreground color, button dimensions, and active-window state.
+    const auto silhouette = [](QAbstractButton* button) {
+        const QImage pixels = button->grab().toImage();
+        const QColor background = pixels.pixelColor(0, 0);
+        const auto contrast = [&](int x, int y) {
+            const QColor pixel = pixels.pixelColor(x, y);
+            return std::max({std::abs(pixel.red() - background.red()),
+                             std::abs(pixel.green() - background.green()),
+                             std::abs(pixel.blue() - background.blue())});
+        };
+        int maximum = 0;
+        for (int y = 0; y < pixels.height(); ++y)
+            for (int x = 0; x < pixels.width(); ++x)
+                maximum = std::max(maximum, contrast(x, y));
+        require(maximum > 0, "window size glyph must be visible");
+        QImage mask(pixels.size(), QImage::Format_RGB32);
+        mask.fill(Qt::white);
+        QRect bounds;
+        for (int y = 0; y < pixels.height(); ++y) {
+            for (int x = 0; x < pixels.width(); ++x) {
+                if (contrast(x, y) > maximum / 2) {
+                    mask.setPixelColor(x, y, Qt::black);
+                    bounds |= QRect(x, y, 1, 1);
+                }
+            }
+        }
+        return mask.copy(bounds);
+    };
+
+    for (const auto appearance : {styles::ThemeAppearance::Light, styles::ThemeAppearance::Dark}) {
+        styles::ThemeManager::instance().setThemeAppearance(appearance);
+        flushEvents();
+        QImage maximize;
+        for (const bool maximized : {false, true, false}) {
+            titleBar.setMaximized(maximized);
+            if (surface->isMaximized() != maximized)
+                modalButton->click();
+            flushEvents();
+            require(surface->isMaximized() == maximized,
+                    "modal caption click must toggle maximize and restore");
+            const QImage mainGlyph = silhouette(mainButton);
+            require(silhouette(modalButton) == mainGlyph,
+                    "modal maximize and restore glyphs must match the main interface");
+            if (maximized)
+                require(mainGlyph != maximize, "restore must show overlapping windows");
+            else
+                maximize = mainGlyph;
+        }
+    }
+    modal.close();
+    styles::ThemeManager::instance().setThemeAppearance(styles::ThemeAppearance::Light);
+}
+#endif
 
 void titleBarBackgroundMatchesNavigationMenu() {
     auto& themeManager = styles::ThemeManager::instance();
@@ -970,6 +1052,41 @@ void permissionRedirectShowsMainInterfacePrompt() {
 }
 #endif
 
+void pinnedCollageRequestReachesMainWindow() {
+    const auto& registry = settings::builtInSettingsRegistry();
+    snow_shot::presentation::GlobalShortcutManager shortcuts;
+    settings::BuiltInSettingsBackend backend(shortcuts);
+    settings::SettingsRuntimeSession session(registry, backend);
+    snow_shot::storage::PinnedWindowRecord record;
+    record.id = QStringLiteral("11111111-1111-4111-8111-111111111111");
+    record.image = QImage(120, 60, QImage::Format_RGB32);
+    record.image.fill(Qt::green);
+    record.nativeGeometry = QRect(QPoint(), record.image.size());
+    record.canvasSourceRect = QRectF(record.nativeGeometry);
+    record.contentCanvasRect = record.canvasSourceRect;
+    record.surfaceCanvasRect = record.canvasSourceRect;
+    record.initialWindowSize = record.image.size();
+    auto& repository = snow_shot::storage::ApplicationStorage::instance().pinnedWindows();
+    require(repository.upsert(record).success, "save the pinned navigation fixture");
+    MainWindow window(registry, session);
+    QStringList requested;
+    QObject::connect(&window, &MainWindow::pinnedWindowCollageRequested, &window,
+                     [&](const QStringList& ids) { requested = ids; });
+    window.showPinToScreenManagement();
+    flushEvents();
+    auto* page = window.findChild<PinnedWindowManagementPageWidget*>();
+    require(page != nullptr, "main window creates the pinned management page");
+    auto* checkbox = page->findChild<adqt::widgets::AdCheckbox*>();
+    auto* collage =
+        page->findChild<adqt::widgets::AdButton*>(QStringLiteral("pinnedManagementCollage"));
+    require(checkbox && collage, "pinned navigation exposes selection and collage controls");
+    checkbox->setChecked(true);
+    collage->click();
+    require(requested == QStringList{record.id},
+            "pinned collage selection reaches MainWindow through ContentCardWidget");
+    require(repository.remove(record.id).success, "remove the pinned navigation fixture");
+}
+
 void applicationTypographyCoversUnownedSurfaces() {
     // The theme owns application-wide typography: tooltips, message boxes, native menus,
     // and ownerless overlay-style windows all resolve unhinted outlines at fractional DPI.
@@ -1004,8 +1121,25 @@ int main(int argc, char** argv) {
     require(storage.initialize({directory.path(), directory.path(), 8000}).success,
             "initialize isolated font test storage");
     styles::ThemeManager::instance().initialize(application);
+    if (QApplication::arguments().contains(QStringLiteral("--pinned-collage-only"))) {
+        pinnedCollageRequestReachesMainWindow();
+        storage.shutdown();
+        return 0;
+    }
+#ifdef Q_OS_WIN
+    if (QApplication::arguments().contains(QStringLiteral("--window-icons-only"))) {
+        customTitleBarUsesPlatformWindowControls();
+        modalWindowSizeIconsMatchMainTitleBar();
+        storage.shutdown();
+        return 0;
+    }
+#endif
     applicationTypographyCoversUnownedSurfaces();
+    pinnedCollageRequestReachesMainWindow();
     customTitleBarUsesPlatformWindowControls();
+#ifdef Q_OS_WIN
+    modalWindowSizeIconsMatchMainTitleBar();
+#endif
     titleBarBackgroundMatchesNavigationMenu();
     skinMasksCompositeOnceAndSurviveThemeChanges();
     mainWindowTitlesKeepSmoothRendering();

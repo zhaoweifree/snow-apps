@@ -3,6 +3,7 @@
 
 #include "snow_recording.h"
 #include "snow_shot/runtime/runtimeactivitytracker.h"
+#include "snow_shot/storage/screenshotexportvariables.h"
 #include <QObject>
 #include <QPointer>
 #include <QTimer>
@@ -23,7 +24,8 @@ class RecordingTrimSession final : public QObject {
                          QObject* parent);
     ~RecordingTrimSession() override;
     void open(const QString& sourcePath, const QString& outputPath,
-              const SnowRecordingClipOptions& options, bool deferred, bool saveWhenReady);
+              const SnowRecordingClipOptions& options, bool deferred, bool saveWhenReady,
+              snow_shot::storage::ScreenshotWindowNames windowNames);
     void exportClip(bool save);
     void detach();
     [[nodiscard]] bool ready() const;
@@ -82,6 +84,7 @@ class RecordingTrimSession final : public QObject {
     Selection m_pendingSelection;
     QString m_sourcePath;
     QString m_outputPath;
+    snow_shot::storage::ScreenshotWindowNames m_windowNames;
     QString m_cachePath;
     QString m_pendingPath;
     QString m_destination;

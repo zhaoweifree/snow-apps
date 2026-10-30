@@ -31,6 +31,7 @@ fn run(size: (u32, u32), moving: bool, enabled: bool) -> Result<(), String> {
         trail: if enabled { [255, 40, 60, 180] } else { [0; 4] },
         trail_duration_ms: 500,
         click: if enabled { [40, 180, 255, 160] } else { [0; 4] },
+        highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
         highlight: [0; 4],
         record_mouse_clicks: false,
         show_keyboard: enabled,

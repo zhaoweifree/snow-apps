@@ -105,6 +105,9 @@ impl MagnifierData {
         corner_radii: CornerRadii,
     ) -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_seed: 0,
+            stroke_rendering_style: Default::default(),
             rectangle_kind: RectangleElementKind::Rectangle,
             highlight_shape: self.shape,
             center,
@@ -352,7 +355,7 @@ pub fn magnifier_hit_test(value: &MagnifierData, point: Point<f64>, tolerance: f
         || crate::rectangle_hit_test(&value.magnified_rect(), point, tolerance)
 }
 
-fn contour_distance(
+pub(crate) fn contour_distance(
     shape: HighlightShape,
     a: f64,
     b: f64,

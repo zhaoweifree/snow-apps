@@ -319,6 +319,8 @@ void uploadContracts() {
         config.publicBaseUrl = QStringLiteral("https://cdn.test/");
         ScreenshotCloudUploadOptions options;
         options.format = format;
+        if (format == ScreenshotImageFileFormat::Png)
+            options.filenameFormat = QString::fromUtf8("文😀").repeated(100);
         auto* job = ScreenshotCloudUploadService::upload(
             std::make_shared<ScreenshotExportArtifact>(ScreenshotExportSource::fromImage(image)),
             config, options, &receiver);
@@ -361,6 +363,12 @@ void uploadContracts() {
         flushEvents();
         require(!path.isEmpty() && !QFileInfo::exists(path),
                 "remove temporary file after successful upload");
+        if (format == ScreenshotImageFileFormat::Png) {
+            const QFileInfo file(path);
+            require(file.fileName().toUtf8().size() <= 255 &&
+                        !QUuid(file.completeBaseName().right(36)).isNull(),
+                    "long cloud filenames must leave room for the complete unique suffix");
+        }
     }
     for (const int status : {403, 307}) {
         S3Server server;

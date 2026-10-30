@@ -957,6 +957,7 @@ fn run_sample(
         audio_mode: Default::default(),
         system_audio_gain_db: 0,
         microphone_gain_db: 0,
+        mouse_highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
         mouse_highlight_rgba: [0; 4],
         record_mouse_clicks: false,
         show_keyboard: true,

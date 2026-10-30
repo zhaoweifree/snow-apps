@@ -99,24 +99,67 @@ impl ClipSource {
         if metadata.is_none() {
             config.width = width;
             config.height = height;
+            let recorded_rates: Vec<_> = input
+                .metadata()
+                .get(crate::codec::AUDIO_BITRATES_METADATA)
+                .map(|rates| {
+                    rates
+                        .split(',')
+                        .take(input.nb_streams() as usize)
+                        .map(|rate| {
+                            rate.parse::<u16>()
+                                .ok()
+                                .filter(|value| (8..=192).contains(value))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             config.audio = input
                 .streams()
                 .filter(|s| s.parameters().medium() == ffmpeg::media::Type::Audio)
                 .enumerate()
-                .map(|(index, stream)| crate::StreamingAudioConfig {
-                    track_id: format!("clip-audio-{index}"),
-                    title: {
-                        let metadata = stream.metadata();
-                        metadata
-                            .get("title")
-                            .or_else(|| metadata.get("handler_name"))
-                            .unwrap_or("Audio")
-                            .into()
-                    },
-                    default: stream
-                        .disposition()
-                        .contains(ffmpeg::format::stream::Disposition::DEFAULT),
-                    ..Default::default()
+                .map(|(index, stream)| {
+                    let parameters = stream.parameters();
+                    // Prefer the recorded target; average bitrate underestimates sparse
+                    // speech. Legacy files fall back to their container bitrate.
+                    let (bitrate, channels) = unsafe {
+                        let audio = &*parameters.as_ptr();
+                        (audio.bit_rate, audio.ch_layout.nb_channels)
+                    };
+                    crate::StreamingAudioConfig {
+                        track_id: format!("clip-audio-{index}"),
+                        bitrate_kbps: recorded_rates
+                            .get(index)
+                            .copied()
+                            .flatten()
+                            .or_else(|| {
+                                config.audio.get(index).map(|track| {
+                                    crate::codec::effective_audio_bitrate_kbps(track.bitrate_kbps)
+                                })
+                            })
+                            .unwrap_or_else(|| {
+                                if bitrate > 0 {
+                                    ((bitrate.saturating_add(500) / 1000).clamp(8, 192)) as u16
+                                } else {
+                                    crate::StreamingAudioConfig::default().bitrate_kbps
+                                }
+                            }),
+                        // Replay normalizes multichannel material to stereo, but a mono
+                        // recording must not become a larger stereo encode after trimming.
+                        channels: if channels == 1 { 1 } else { 2 },
+                        title: {
+                            let metadata = stream.metadata();
+                            metadata
+                                .get("title")
+                                .or_else(|| metadata.get("handler_name"))
+                                .unwrap_or("Audio")
+                                .into()
+                        },
+                        default: stream
+                            .disposition()
+                            .contains(ffmpeg::format::stream::Disposition::DEFAULT),
+                        ..Default::default()
+                    }
                 })
                 .collect();
         }
@@ -327,12 +370,18 @@ impl ClipSource {
         }
         let mut reader = VideoReader::open(self.clone(), true)?;
         let mut audio = crate::tempo::RetimedAudioReader::open(self, range, speed)?;
-        let mut builder = StreamingEncoder::builder(config.clone());
+        let mut builder = StreamingEncoder::builder(config.clone())
+            .offline_output()
+            .audio_input_channels(2);
         let hdr_output = crate::preserves_hdr_output(self.hdr, config.format, config.codec);
         if hdr_output {
             builder = builder.hdr10_cpu_input();
         }
         let mut encoder = builder.create()?;
+        let sparse_trim = unity && config.format == crate::ExportFormat::Mp4;
+        if sparse_trim {
+            encoder.set_frame_reuse(crate::VideoFrameReuse::Coalesce);
+        }
         let prepared_sdr = !unity && !animated && !hdr_output;
         let first = self.frame_at(range.start_us);
         let end = if range.end_us == self.duration_us {
@@ -348,6 +397,7 @@ impl ClipSource {
         let mut prepared_frame = None;
         let mut next_audio = 0;
         let mut previous_source = None;
+        let mut previous_picture = None;
         let total = if animated {
             end - first
         } else {
@@ -386,9 +436,15 @@ impl ClipSource {
                 // A sub-tick initial delay must not replace the selected first picture.
                 continue;
             }
+            let mut submit_video = true;
             if unity || animated || previous_source != Some(index) {
                 reader.read(at, token)?;
-                if hdr_output {
+                let picture = reader.current.as_ref().map(|(pts, _)| *pts);
+                // The same decoded picture can cover many slots, including HDR.
+                // Audio still advances on every slot and finalization closes the hold.
+                submit_video = !sparse_trim || previous_picture != picture;
+                previous_picture = picture;
+                if submit_video && hdr_output {
                     let decoded = reader.current_frame()?;
                     if hdr_conversion.is_none() {
                         let mut scaler = ffmpeg::software::scaling::Context::get(
@@ -412,25 +468,25 @@ impl ClipSource {
                         .run(decoded, hdr_frame)
                         .map_err(media_error)?;
                     crate::hdr::frame(hdr_frame, true);
-                } else if prepared_sdr {
+                } else if submit_video && prepared_sdr {
                     reader.prepare_rgba()?;
                     // Release our previous lease before requesting writable storage.
                     // Encoder leases remain immutable until their packets are drained.
                     drop(prepared_frame.take());
                     prepared_frame = Some(encoder.prepare_rgba_video_frame(&reader.converted)?);
-                } else {
+                } else if submit_video {
                     reader.copy_rgba_buffer(&mut pixels)?;
                 }
                 previous_source = Some(index);
             }
             // A slow export repeats pictures on the original FPS grid. Reuse
             // their prepared pixels, but retain every presentation timestamp.
-            if hdr_output {
+            if submit_video && hdr_output {
                 encoder.push_prepared_video_frame_ref_at_pts(pts, hdr_frame.as_ref().unwrap())?;
-            } else if prepared_sdr {
+            } else if submit_video && prepared_sdr {
                 encoder
                     .push_prepared_video_frame_ref_at_pts(pts, prepared_frame.as_ref().unwrap())?;
-            } else {
+            } else if submit_video {
                 encoder.push_rgba_frame_at_pts(pts, &pixels)?;
             }
             let audio_end = if unity {
@@ -779,6 +835,193 @@ mod tests {
             encode_threads: 1,
             audio: Vec::new(),
             loop_animated_images: true,
+        }
+    }
+
+    #[test]
+    fn partial_mp4_trim_preserves_sparse_pictures_and_endpoint() {
+        for codec in [VideoCodec::H264, VideoCodec::H265] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut config = fixture(directory.path(), ExportFormat::Mp4);
+            config.codec = codec;
+            config.fps = 30;
+            config.video.speed = VideoEncodingSpeed::Medium;
+            let colors = [[220, 20, 20, 255], [20, 220, 20, 255], [20, 20, 220, 255]];
+            let mut encoder = StreamingEncoder::create(config.clone()).unwrap();
+            for (index, color) in colors.iter().enumerate() {
+                encoder
+                    .push_rgba_frame_at_pts(index as u64 * 30, &color.repeat(32 * 24))
+                    .unwrap();
+            }
+            encoder.finish_at_pts(90).unwrap();
+            let original = std::fs::read(&config.output_path).unwrap();
+            let source = ClipSource::open(&config.output_path, Some(config.clone())).unwrap();
+            let destination = directory.path().join("sparse-trim.mp4");
+            let token = CancellationToken::default();
+            source
+                .export(source.range(15, 75).unwrap(), &destination, &token, |_| {})
+                .unwrap();
+            let mut input = ffmpeg::format::input(&destination).unwrap();
+            let stream = input.streams().best(ffmpeg::media::Type::Video).unwrap();
+            let time_base = stream.time_base();
+            let mut timestamps: Vec<_> = input
+                .packets()
+                .map(|(_, packet)| packet.pts().unwrap().rescale(time_base, (1, 30)))
+                .collect();
+            timestamps.sort_unstable();
+            assert_eq!(
+                timestamps,
+                [0, 15, 45],
+                "{codec:?}: trim must retain sparse picture holds"
+            );
+            let trimmed = ClipSource::open(&destination, Some(config.clone())).unwrap();
+            assert_eq!(trimmed.duration_us, 2_000_000);
+            assert_eq!(
+                trimmed.frame_count(),
+                60,
+                "presentation slots remain seekable"
+            );
+            let mut reader = VideoReader::open(trimmed, false).unwrap();
+            let mut pixels = Vec::new();
+            for (at, color) in [
+                (0, colors[0]),
+                (499_999, colors[0]),
+                (500_000, colors[1]),
+                (1_499_999, colors[1]),
+                (1_500_000, colors[2]),
+                (1_999_999, colors[2]),
+            ] {
+                reader.read(at, &token).unwrap();
+                reader.copy_rgba(&mut pixels).unwrap();
+                assert!(
+                    pixels[..3]
+                        .iter()
+                        .zip(color)
+                        .all(|(a, b)| a.abs_diff(b) <= 15),
+                    "{codec:?}: wrong picture at {at}: {:?}",
+                    &pixels[..4]
+                );
+            }
+            assert_eq!(std::fs::read(&config.output_path).unwrap(), original);
+        }
+    }
+
+    #[test]
+    fn partial_mp4_trim_preserves_audio_encoding_budget_and_mono() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = fixture(directory.path(), ExportFormat::Mp4);
+        config.audio = [("System", 2, 160), ("Speech", 1, 96)]
+            .into_iter()
+            .map(|(id, channels, bitrate_kbps)| crate::StreamingAudioConfig {
+                track_id: id.into(),
+                title: id.into(),
+                channels,
+                bitrate_kbps,
+                default: id == "System",
+                ..Default::default()
+            })
+            .collect();
+        let mut encoder = StreamingEncoder::create(config.clone()).unwrap();
+        encoder
+            .push_rgba_frame_at_pts(0, &[80; 32 * 24 * 4])
+            .unwrap();
+        for index in 0..150 {
+            for track in &config.audio {
+                let samples: Vec<_> = (index * 960..(index + 1) * 960)
+                    .flat_map(|sample| {
+                        let value = if (25..75).contains(&index) {
+                            ((sample as f64 * std::f64::consts::TAU * 440.0 / 48_000.0).sin()
+                                * 6000.0) as i16
+                        } else {
+                            0
+                        };
+                        std::iter::repeat_n(value, usize::from(track.channels))
+                    })
+                    .collect();
+                encoder
+                    .push_audio_track_pcm_i16_at_frame(&track.track_id, index * 960, &samples)
+                    .unwrap();
+            }
+        }
+        encoder.finish_at_duration_ms(3000).unwrap();
+        let mut replay_config = config.clone();
+        replay_config.audio.clear(); // Match the C API, which receives video options only.
+        let source = ClipSource::open(&config.output_path, Some(replay_config.clone())).unwrap();
+        let mut input = ffmpeg::format::input(&config.output_path).unwrap();
+        let expected_rates: Vec<_> = input
+            .streams()
+            .filter(|s| s.parameters().medium() == ffmpeg::media::Type::Audio)
+            .map(|s| unsafe { ((*s.parameters().as_ptr()).bit_rate + 500) / 1000 })
+            .collect();
+        for (track, original) in source.config.audio.iter().zip(&config.audio) {
+            assert_eq!(track.bitrate_kbps, original.bitrate_kbps);
+        }
+        assert!(
+            expected_rates[1] < 64,
+            "silence must not lower the next encode target"
+        );
+        // Legacy recordings lack target metadata. Preserve their measured budget.
+        let legacy_path = directory.path().join("legacy-audio.mp4");
+        let mut legacy = ffmpeg::format::output(&legacy_path).unwrap();
+        for stream in input.streams() {
+            let mut target = legacy
+                .add_stream(ffmpeg::encoder::find(ffmpeg::codec::Id::None))
+                .unwrap();
+            target.set_parameters(stream.parameters());
+            target.set_time_base(stream.time_base());
+        }
+        legacy.write_header().unwrap();
+        for (stream, mut packet) in input.packets() {
+            packet.rescale_ts(
+                stream.time_base(),
+                legacy.stream(stream.index()).unwrap().time_base(),
+            );
+            packet.set_position(-1);
+            packet.write_interleaved(&mut legacy).unwrap();
+        }
+        legacy.write_trailer().unwrap();
+        drop(legacy);
+        let legacy_source = ClipSource::open(&legacy_path, Some(replay_config)).unwrap();
+        for (track, rate) in legacy_source.config.audio.iter().zip(expected_rates) {
+            assert_eq!(i64::from(track.bitrate_kbps), rate.clamp(8, 192));
+        }
+        assert_eq!(source.config.audio[1].channels, 1);
+        assert!(
+            source.config.audio[1].bitrate_kbps < 128,
+            "speech bitrate must not be raised to 128 kbps"
+        );
+        for percent in [100, 200] {
+            let destination = directory.path().join(format!("audio-trim-{percent}.mp4"));
+            source
+                .export_with_speed(
+                    source.range(5, 25).unwrap(),
+                    PlaybackSpeed::from_percent(percent).unwrap(),
+                    &destination,
+                    &CancellationToken::default(),
+                    |_| {},
+                )
+                .unwrap();
+            let mut output_config = config.clone();
+            output_config.audio.clear();
+            let trimmed = ClipSource::open(&destination, Some(output_config)).unwrap();
+            assert_eq!(trimmed.config.audio[1].channels, 1);
+            assert_eq!(trimmed.config.audio[1].title, "Speech");
+            assert!(trimmed.config.audio[0].default);
+            assert!(!trimmed.config.audio[1].default);
+            assert_eq!(trimmed.duration_us, 2_000_000 * 100 / u64::from(percent));
+            for (original, output) in source.config.audio.iter().zip(&trimmed.config.audio) {
+                assert_eq!(output.bitrate_kbps, original.bitrate_kbps);
+            }
+            let mut reader = AudioReader::open(&trimmed).unwrap();
+            let audio = reader
+                .read(4800, 960, &CancellationToken::default())
+                .unwrap();
+            assert!(
+                audio
+                    .iter()
+                    .all(|track| track.iter().any(|sample| sample.abs() > 1000)),
+                "audio must survive trim and tempo conversion"
+            );
         }
     }
 
@@ -1154,12 +1397,15 @@ mod tests {
                         })
                         .collect();
                     let expected_frames = ((end - first) * 100).div_ceil(u64::from(percent));
-                    assert_eq!(
-                        packets.len() as u64,
-                        expected_frames,
-                        "{fps} FPS [{first}, {end}) at {percent}% must not gain rounded slots"
-                    );
-                    assert_eq!(packets, (0..expected_frames as i64).collect::<Vec<_>>());
+                    if percent == 100 && (first != 0 || end != 12) {
+                        assert_eq!(packets, vec![0], "unchanged pictures share one sample");
+                    } else {
+                        assert_eq!(
+                            packets,
+                            (0..expected_frames as i64).collect::<Vec<_>>(),
+                            "{fps} FPS [{first}, {end}) at {percent}% must not gain rounded slots"
+                        );
+                    }
                     let expected_us = ((end - first) * 100 * 1_000_000)
                         .div_ceil(u64::from(fps) * u64::from(percent));
                     assert!(duration.abs_diff(expected_us as i64) <= 100);
@@ -1262,6 +1508,79 @@ mod tests {
                     "prepared frame changed SDR color at {percent}%"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn partial_hdr_trim_preserves_sparse_pictures_depth_and_color() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = fixture(directory.path(), ExportFormat::Mp4);
+        config.codec = crate::VideoCodec::H265;
+        config.fps = 30;
+        let mut encoder = StreamingEncoder::builder(config.clone())
+            .hdr10_cpu_input()
+            .software_only()
+            .create()
+            .unwrap();
+        assert_eq!(
+            encoder.input_pixel_format(),
+            ffmpeg::format::Pixel::YUV420P10LE
+        );
+        for (pts, luma) in [(0, 256u16), (30, 512), (60, 768)] {
+            let mut frame = ffmpeg::frame::Video::new(encoder.input_pixel_format(), 32, 24);
+            for plane in 0..3 {
+                let value = if plane == 0 { luma } else { 512 };
+                for sample in frame.data_mut(plane).chunks_exact_mut(2) {
+                    sample.copy_from_slice(&value.to_le_bytes());
+                }
+            }
+            crate::hdr::frame(&mut frame, true);
+            encoder
+                .push_prepared_video_frame_ref_at_pts(pts, &frame)
+                .unwrap();
+        }
+        encoder.finish_at_pts(90).unwrap();
+        let source = ClipSource::open(&config.output_path, Some(config.clone())).unwrap();
+        assert!(source.hdr);
+        let destination = directory.path().join("sparse-hdr-trim.mp4");
+        let token = CancellationToken::default();
+        source
+            .export(source.range(15, 75).unwrap(), &destination, &token, |_| {})
+            .unwrap();
+        let mut input = open_input(&destination).unwrap();
+        let video = input.streams().best(ffmpeg::media::Type::Video).unwrap();
+        let index = video.index();
+        let time_base = video.time_base();
+        let mut timestamps: Vec<_> = input
+            .packets()
+            .filter(|(stream, _)| stream.index() == index)
+            .map(|(_, packet)| packet.pts().unwrap().rescale(time_base, (1, 30)))
+            .collect();
+        timestamps.sort_unstable();
+        assert_eq!(timestamps, [0, 15, 45]);
+        let output = ClipSource::open(&destination, Some(config)).unwrap();
+        assert!(output.hdr);
+        assert_eq!(output.duration_us, 2_000_000);
+        assert_eq!(output.frame_count(), 60);
+        let mut reader = VideoReader::open(output, false).unwrap();
+        for (at, expected) in [
+            (0, 256u16),
+            (500_000, 512),
+            (1_500_000, 768),
+            (1_999_999, 768),
+        ] {
+            reader.read(at, &token).unwrap();
+            let frame = reader.current_frame().unwrap();
+            assert_eq!(frame.format(), ffmpeg::format::Pixel::YUV420P10LE);
+            assert_eq!(
+                frame.color_transfer_characteristic(),
+                ffmpeg::color::TransferCharacteristic::SMPTE2084
+            );
+            let actual = u16::from_le_bytes(frame.data(0)[..2].try_into().unwrap());
+            assert!(
+                actual.abs_diff(expected) <= 4,
+                "{at}: {actual} vs {expected}"
+            );
         }
     }
 

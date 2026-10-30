@@ -229,6 +229,22 @@ fn resize_rgba_with_plan(
 fn resize_half_row(source: &[u8], output: &mut [u8]) {
     debug_assert_eq!(source.len(), output.len() * 2);
     let mut offset = 0;
+    #[cfg(target_arch = "aarch64")]
+    {
+        use std::arch::aarch64::*;
+        while offset + 16 <= output.len() {
+            // SAFETY: AArch64 provides NEON. Four selected pixels come from
+            // eight complete source pixels; deinterleaving selects even ones.
+            unsafe {
+                let pairs = vld2q_u32(source.as_ptr().add(offset * 2).cast());
+                vst1q_u8(
+                    output.as_mut_ptr().add(offset),
+                    vreinterpretq_u8_u32(pairs.0),
+                );
+            }
+            offset += 16;
+        }
+    }
     #[cfg(target_arch = "x86_64")]
     {
         use std::arch::x86_64::*;

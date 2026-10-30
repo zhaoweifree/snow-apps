@@ -139,13 +139,17 @@ void boundedExportRowsTests() {
     for (const QString& kind : {QStringLiteral("premul"), QStringLiteral("p3")}) {
         QImage image = fixtureImage(QSize(1031, 517), kind);
         const QImage reference = image.copy();
-        const QImage expected =
-            reference.colorSpace() == QColorSpace(QColorSpace::SRgb)
-                ? reference.convertToFormat(QImage::Format_RGBA8888)
-                : reference.convertedToColorSpace(QColorSpace::SRgb, QImage::Format_RGBA8888);
+        const QImage expected = reference.colorSpace() == QColorSpace(QColorSpace::SRgb)
+                                    ? reference.convertToFormat(QImage::Format_RGBA8888)
+                                    : reference.convertedToColorSpace(QColorSpace::SRgb)
+                                          .convertToFormat(QImage::Format_RGBA8888);
         const uchar* original = image.constBits();
         const uchar* middle = original + image.sizeInBytes() / 2;
-        auto rows = snow_shot::image_codec::srgbRowSource(image);
+        // Exercise the private reader's copy/cache contract directly. The public
+        // factory shares one reader between row, region and copied callbacks.
+        ScreenshotImageRowSource rows;
+        rows.size = image.size();
+        rows.readRows = BoundedSrgbRowReader(image);
         const qsizetype stride = qsizetype(image.width()) * 4 + 17;
         constexpr uchar sentinel = 0xad;
         std::vector<uchar> output(static_cast<std::size_t>(stride * 41), sentinel);
@@ -184,11 +188,15 @@ void boundedExportRowsTests() {
                 "reader copies must own independent converted cache pixels");
 
         std::atomic<bool> correct{true};
-        const auto concurrent = [&](int first) {
-            std::vector<uchar> pixels(static_cast<std::size_t>(image.width()) * 4);
+        const auto concurrent = [&, width = image.width(), height = image.height()](int first) {
+            if (width <= 0 || height <= 0) {
+                correct.store(false);
+                return;
+            }
+            std::vector<uchar> pixels(static_cast<std::size_t>(width) * 4);
             for (int step = 0; step < 15; ++step) {
-                const int row = (first + step * 29) % image.height();
-                if (!rows.readRows(row, 1, image.width() * 4, pixels.data(),
+                const int row = (first + step * 29) % height;
+                if (!rows.readRows(row, 1, width * 4, pixels.data(),
                                    static_cast<qsizetype>(pixels.size())) ||
                     std::memcmp(pixels.data(), expected.constScanLine(row), pixels.size()) != 0)
                     correct.store(false);
@@ -242,7 +250,9 @@ void boundedExportRowsTests() {
     const int wide = static_cast<int>(BoundedSrgbRowReader::maximumCacheBytes / 4) + 1;
     const QImage image = fixtureImage(QSize(wide, 1), QStringLiteral("premul"));
     const QImage expected = image.copy().convertToFormat(QImage::Format_RGBA8888);
-    const auto rows = snow_shot::image_codec::srgbRowSource(image);
+    ScreenshotImageRowSource rows;
+    rows.size = image.size();
+    rows.readRows = BoundedSrgbRowReader(image);
     const auto* reader = rows.readRows.target<BoundedSrgbRowReader>();
     const qsizetype stride = qsizetype(wide) * 4 + 13;
     std::vector<uchar> pixels(static_cast<std::size_t>(stride), 0xad);

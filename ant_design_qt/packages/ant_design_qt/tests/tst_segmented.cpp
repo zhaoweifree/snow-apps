@@ -49,6 +49,7 @@ class SegmentedTest final : public QObject {
   void disabledOptionsAreSkippedByKeyboard();
   void focusFollowsSelectionChanges();
   void mouseActivationAndGlobalDisable();
+  void mouseActivationUsesEntireOption();
   void activationSurvivesOptionMutation();
   void activationSurvivesOwnerDeletion();
   void optionMutationSurvivesOwnerDeletion();
@@ -280,6 +281,58 @@ void SegmentedTest::mouseActivationAndGlobalDisable() {
   QTest::mouseClick(buttons.at(0), Qt::LeftButton);
   QCOMPARE(segmented.currentIndex(), 1);
   QCOMPARE(activated.count(), 1);
+}
+
+void SegmentedTest::mouseActivationUsesEntireOption() {
+  for (const auto orientation : {Qt::Horizontal, Qt::Vertical}) {
+    for (const auto direction : {Qt::LeftToRight, Qt::RightToLeft}) {
+      for (const bool iconOnly : {false, true}) {
+        AdSegmented segmented;
+        segmented.setDistribution(AdSegmented::Distribution::Fill);
+        segmented.setOrientation(orientation);
+        segmented.setLayoutDirection(direction);
+        auto first = makeOption(QStringLiteral("first"), QStringLiteral("A"));
+        auto second = makeOption(QStringLiteral("second"), QStringLiteral("B"));
+        if (iconOnly) {
+          first.label.clear();
+          second.label.clear();
+          first.icon = adqt::icons::antd::outlined::Bars();
+          second.icon = adqt::icons::antd::outlined::Appstore();
+        }
+        segmented.setOptions({first, second});
+        segmented.resize(480, 160);
+        segmented.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&segmented));
+        const auto buttons = optionButtons(&segmented);
+        auto* target = buttons.at(1);
+        const QRect bounds = target->rect();
+        const QList<QPoint> points{bounds.center(), QPoint(1, bounds.center().y()),
+                                   QPoint(bounds.right() - 1, bounds.center().y()),
+                                   QPoint(bounds.center().x(), 1),
+                                   QPoint(bounds.center().x(), bounds.bottom() - 1)};
+        QSignalSpy activated(&segmented, &AdSegmented::activated);
+        for (const auto& point : points) {
+          segmented.setCurrentIndex(0);
+          const auto count = activated.count();
+          QTest::mouseClick(target, Qt::LeftButton, Qt::NoModifier, point);
+          QCOMPARE(segmented.currentValue(), QVariant(QStringLiteral("second")));
+          QCOMPARE(activated.count(), count + 1);
+        }
+
+        segmented.setCurrentIndex(0);
+        const auto count = activated.count();
+        QTest::mousePress(target, Qt::LeftButton, Qt::NoModifier, bounds.center());
+        QTest::mouseRelease(target, Qt::LeftButton, Qt::NoModifier,
+                            QPoint(bounds.right() + 5, bounds.center().y()));
+        QCOMPARE(segmented.currentIndex(), 0);
+        QCOMPARE(activated.count(), count);
+        segmented.setOptionEnabled(1, false);
+        QTest::mouseClick(target, Qt::LeftButton, Qt::NoModifier, bounds.center());
+        QCOMPARE(segmented.currentIndex(), 0);
+        QCOMPARE(activated.count(), count);
+      }
+    }
+  }
 }
 
 void SegmentedTest::activationSurvivesOptionMutation() {

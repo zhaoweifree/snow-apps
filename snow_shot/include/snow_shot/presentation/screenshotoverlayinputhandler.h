@@ -1,7 +1,6 @@
 #ifndef SNOW_SHOT_PRESENTATION_SCREENSHOTOVERLAYINPUTHANDLER_H
 #define SNOW_SHOT_PRESENTATION_SCREENSHOTOVERLAYINPUTHANDLER_H
 
-#include "snow_shot/platform/physicalcursor.h"
 #include "snow_shot/presentation/screenshotoverlayeventsink.h"
 #include "snow_shot/presentation/screenshotselectionaspectratio.h"
 #include "snow_shot/presentation/screenshotselectiongeometry.h"
@@ -75,8 +74,9 @@ struct ScreenshotOverlayInputActions {
     std::function<bool()> copyColorPickerColorToClipboard = []() { return false; };
     std::function<bool()> cycleColorPickerFormat = []() { return false; };
     std::function<bool()> toggleColorPickerCoordinateMode = []() { return false; };
-    std::function<bool(snow_shot::platform::PhysicalCursorDirection direction)> moveCursorOnePixel =
-        [](snow_shot::platform::PhysicalCursorDirection) { return false; };
+    std::function<bool(const QPoint& direction)> moveCursorOnePixel = [](const QPoint&) {
+        return false;
+    };
 
     // Called after a valid selection transitions the interaction into editing.
     // This is intentionally separate from showToolbar so callers can schedule
@@ -84,7 +84,7 @@ struct ScreenshotOverlayInputActions {
     // the input handler to a concrete controller.
     std::function<void()> selectionConfirmed = []() {};
 
-    // Applies the persisted selection rectangle from the preceding screenshot.
+    // Applies the next older screenshot history selection to the current image.
     std::function<bool()> selectPreviousSelection = []() { return false; };
 
     // Performs the same lasting tool activation as a direct toolbar command.
@@ -141,6 +141,7 @@ struct ScreenshotOverlayInputActions {
     std::function<void()> requestSelectionDragPresentation = {};
     std::function<void(int minDx, int minDy, int maxDx, int maxDy)> adjustSelectionFromToolbar =
         [](int, int, int, int) {};
+    std::function<bool()> selectNextPreviousSelection = [] { return false; };
 };
 
 struct ScreenshotOverlayInputHandlerContext {
@@ -190,6 +191,8 @@ class ScreenshotOverlayInputHandler final {
                                               bool leftButtonActive) const;
     void handleMouseMove(ScreenshotOverlayWindow* overlay, const QPointF& localPosition);
     void handleMouseRelease(ScreenshotOverlayWindow* overlay, const QPointF& localPosition);
+    void updateRegionSnapModifiers(Qt::KeyboardModifiers modifiers, bool recompute = true);
+    void clearRegionSnapping();
     void completeRightClickCancellation();
     [[nodiscard]] ScreenshotOverlayRightClickResult
     handleRightClick(ScreenshotOverlayWindow* overlay, const QPointF& localPosition);
@@ -213,11 +216,15 @@ class ScreenshotOverlayInputHandler final {
     void cancelSelectionAspectRatioSnapShortcut();
     [[nodiscard]] bool toggleIntelligentSelectionTargetShortcut();
     void resetTransientShortcuts();
+    // Session termination releases construction state even while its draft is still active.
+    void endCaptureSession();
     [[nodiscard]] bool canvasColorSamplingActive() const;
     void armCanvasColorSampling();
     void cancelCanvasColorSampling();
 
   private:
+    friend struct ScreenshotSessionInputCleanupTestAccess;
+
     ScreenshotSelectionEffectLayout effectLayout(const ScreenshotOverlayWindow* overlay) const;
     ScreenshotSelectionEffectHandle effectHandleAt(const ScreenshotOverlayWindow* overlay,
                                                    const QPointF& localPosition) const;
@@ -253,6 +260,7 @@ class ScreenshotOverlayInputHandler final {
     // Restore persisted geometry through the same confirmation lifecycle as a mouse selection.
     [[nodiscard]] bool restorePreviousSelection(const ScreenshotSelectionParams& params);
     [[nodiscard]] bool canSelectCurrentScreen() const;
+    // Select the current display, expanding an already confirmed whole display to all displays.
     [[nodiscard]] bool selectCurrentScreen();
     [[nodiscard]] bool canPrepareSelectionForToolbarShortcut() const;
     // Commit the region, activate the command, then present its resulting tool.
@@ -260,6 +268,10 @@ class ScreenshotOverlayInputHandler final {
     void beginRegionOperation(bool subtract);
     bool cancelRegionOperation();
     [[nodiscard]] bool regionOperationActive() const;
+    [[nodiscard]] bool multiRegionEditing() const;
+    [[nodiscard]] bool canDuplicateLatestRegion() const;
+    bool duplicateLatestRegion();
+    bool duplicateLatestRegionAt(const QPointF& canvasPosition);
 
   private:
     enum class AspectRatioSnapShortcutState { Released, Snapping, Unlocking };
@@ -305,6 +317,7 @@ class ScreenshotOverlayInputHandler final {
     AspectRatioSnapShortcutState m_selectionAspectRatioSnapShortcut =
         AspectRatioSnapShortcutState::Released;
     bool m_snappedDuringSelectionDrag = false;
+    bool m_regionSnapCtrl = false;
     bool m_aspectShortcutUsedForSelectionDrag = false;
     bool m_cycleColorFormatIfAspectShortcutUnused = false;
     ScreenshotSelectionDragMode m_moveDragModeBeforeShortcut = ScreenshotSelectionDragMode::None;

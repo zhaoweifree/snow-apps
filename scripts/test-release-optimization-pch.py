@@ -61,7 +61,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--generator", default="Visual Studio 18 2026")
     parser.add_argument("--architecture", default="x64")
-    parser.add_argument("--toolset", default="host=x64,version=14.51")
+    parser.add_argument("--toolset", default="host=x64")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="snow-release-pch-") as temporary:
         source = Path(temporary) / "source"

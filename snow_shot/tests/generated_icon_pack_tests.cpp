@@ -97,8 +97,8 @@ void everySnowShotEntryRenders() {
     const auto registered = icons::registerWith(renderer);
     require(registered.ok(), "Snow Shot pack registration should succeed");
     const adqt::icons::IconPack* staticPack = icons::pack().staticPack();
-    require(staticPack != nullptr && staticPack->entryCount == 181,
-            "Snow Shot pack should contain all 181 project-owned assets");
+    require(staticPack != nullptr && staticPack->entryCount == 191,
+            "Snow Shot pack should contain all 191 project-owned assets");
 
     adqt::icons::IconRenderRequest request;
     request.logicalSize = QSize(32, 32);
@@ -451,6 +451,225 @@ void indentedTriangleCornersAreSymmetric() {
     }
 }
 
+void imageStitchingIconFollowsAntDesign() {
+    namespace icons = snow_shot::presentation::icons::custom;
+    const auto icon = icons::outlined::ImageStitching();
+    const auto* descriptor = icon.descriptor();
+    require(descriptor && descriptor->colorModel == adqt::icons::IconColorModel::Monochrome,
+            "stitching icon belongs to the themed monochrome icon pack");
+    const QByteArray svg(descriptor->svg.data(), static_cast<qsizetype>(descriptor->svg.size()));
+    require(svg.contains("viewBox=\"0 0 1024 1024\"") && svg.contains("stroke-width=\"72\"") &&
+                svg.contains("rx=\"72\"") && !svg.contains("<text") && !svg.contains("<image"),
+            "stitching icon uses the Ant Design grid, weight and rounded vector geometry");
+    QImage preview(384, 128, QImage::Format_ARGB32_Premultiplied);
+    preview.fill(Qt::transparent);
+    QPainter painter(&preview);
+    for (int row = 0; row < 2; ++row) {
+        const QColor color = row ? QColor("#f0f0f0") : QColor("#262626");
+        painter.fillRect(QRect(0, row * 64, 384, 64), row ? QColor("#141414") : Qt::white);
+        int column = 0;
+        for (int size : {16, 20, 32}) {
+            for (qreal dpr : {1.0, 1.25, 2.0}) {
+                const QImage pixels =
+                    render(icons::outlined::ImageStitching(adqt::icons::IconColors::primary(color)),
+                           QSize(size, size), dpr)
+                        .toImage();
+                const QRect bounds = alphaBounds(pixels);
+                require(!bounds.isEmpty() && bounds.left() > 0 &&
+                            bounds.right() < pixels.width() - 1 &&
+                            containsOpaqueColor(pixels, color),
+                        "stitching icon stays legible, padded and themed at menu sizes and "
+                        "fractional DPI");
+            }
+            painter.drawPixmap(
+                column++ * 128 + 24, row * 64 + (64 - size) / 2,
+                render(icons::outlined::ImageStitching(adqt::icons::IconColors::primary(color)),
+                       QSize(size, size)));
+        }
+    }
+    painter.end();
+    if (const auto path = qEnvironmentVariable("SNOW_STITCHING_ICON_PREVIEW"); !path.isEmpty())
+        require(preview.save(path), "save stitching icon light/dark inspection sheet");
+}
+
+void imageSplittingIconFollowsAntDesign() {
+    namespace icons = snow_shot::presentation::icons::custom;
+    const auto ref = icons::outlined::ImageSplitting();
+    const auto* descriptor = ref.descriptor();
+    require(descriptor && descriptor->colorModel == adqt::icons::IconColorModel::Monochrome,
+            "splitting icon uses the shared monochrome theme pipeline");
+    const QByteArray svg(descriptor->svg.data(), static_cast<qsizetype>(descriptor->svg.size()));
+    require(svg.contains("viewBox=\"0 0 1024 1024\"") && svg.contains("stroke-width=\"72\"") &&
+                svg.contains("__ADQT_SLOT_PRIMARY__") && !svg.contains("<text") &&
+                !svg.contains("<image"),
+            "splitting uses the Ant Design canvas, outline weight and themed vector geometry");
+    const QImage geometry = render(ref, QSize(1024, 1024)).toImage();
+    require(alphaBounds(geometry) == QRect(64, 176, 896, 672),
+            "splitting respects the 64-unit bleed and horizontal image proportions");
+    require(opaquePixelCount(geometry, QRect(448, 0, 128, 1024)) == 0,
+            "a clear central cut separates the two image panels");
+    QImage preview(384, 192, QImage::Format_ARGB32_Premultiplied);
+    preview.fill(Qt::transparent);
+    QPainter painter(&preview);
+    for (int row = 0; row < 3; ++row) {
+        const QColor color = row == 0   ? QColor("#262626")
+                             : row == 1 ? QColor("#f0f0f0")
+                                        : QColor("#bfbfbf");
+        painter.fillRect(QRect(0, row * 64, 384, 64), row == 1 ? QColor("#141414") : Qt::white);
+        int column = 0;
+        for (int size : {16, 20, 32}) {
+            for (qreal dpr : {1.0, 1.25, 2.0}) {
+                const auto colors = adqt::icons::IconColors::primary(color);
+                const QImage pixels =
+                    render(icons::outlined::ImageSplitting(colors), QSize(size, size), dpr)
+                        .toImage();
+                const QRect bounds = alphaBounds(pixels);
+                require(!pixels.isNull() && !bounds.isEmpty() && bounds.left() > 0 &&
+                            bounds.right() < pixels.width() - 1 &&
+                            containsOpaqueColor(pixels, color),
+                        "splitting stays padded and themed at menu sizes and fractional DPI");
+                require(
+                    opaquePixelCount(pixels, QRect(pixels.width() / 2, 0, 1, pixels.height())) == 0,
+                    "the split remains visible at menu sizes and fractional DPI");
+            }
+            painter.drawPixmap(
+                column++ * 128 + 24, row * 64 + (64 - size) / 2,
+                render(icons::outlined::ImageSplitting(adqt::icons::IconColors::primary(color)),
+                       QSize(size, size)));
+        }
+    }
+    painter.end();
+    adqt::icons::IconRenderRequest disabled;
+    disabled.logicalSize = QSize(20, 20);
+    disabled.mode = QIcon::Disabled;
+    const QColor disabledColor(QStringLiteral("#bfbfbf"));
+    adqt::icons::IconStatePalette palette;
+    palette.set(QIcon::Disabled, QIcon::Off, adqt::icons::IconColors::primary(disabledColor));
+    const QImage disabledPixels = adqt::icons::renderIconPixmap(ref, disabled, palette).toImage();
+    require(!disabledPixels.isNull() && containsOpaqueColor(disabledPixels, disabledColor),
+            "splitting icon supports the supplied disabled-state palette");
+    if (const auto path = qEnvironmentVariable("SNOW_SPLITTING_ICON_PREVIEW"); !path.isEmpty())
+        require(preview.save(path),
+                "save splitting icon light, dark and disabled inspection sheet");
+}
+
+void brushModeIconsRenderWithDistinctPressureAndThemeColors() {
+    namespace icons = snow_shot::presentation::icons::custom;
+    const QList<adqt::icons::IconRef> refs{icons::outlined::BrushRegular(),
+                                           icons::outlined::BrushPressureSensitive()};
+    for (const auto& ref : refs) {
+        require(adqt::icons::describeIcon(ref).colorModel ==
+                    adqt::icons::IconColorModel::Monochrome,
+                "brush mode icons use the shared monochrome theme-color pipeline");
+        const QRect bounds = alphaBounds(render(ref, QSize(1024, 1024)).toImage());
+        require(bounds.left() >= 64 && bounds.top() >= 64 && bounds.right() < 960 &&
+                    bounds.bottom() < 960,
+                "brush mode artwork preserves the Ant Design 64-unit safe margin");
+    }
+    const QImage regular = render(refs[0], QSize(1024, 1024)).toImage();
+    const QImage pressure = render(refs[1], QSize(1024, 1024)).toImage();
+    // At each wave extremum the tangent is horizontal, so a vertical sample
+    // measures brush width without including the stroke's diagonal projection.
+    const auto widthAt = [](const QImage& image, int x) {
+        int width = 0;
+        for (int y = 0; y < image.height(); ++y)
+            if (image.pixelColor(x, y).alpha() >= 128)
+                ++width;
+        return width;
+    };
+    const int regularFirst = widthAt(regular, 320);
+    require(std::abs(widthAt(regular, 704) - regularFirst) <= 2,
+            "the regular brush keeps a constant width across the wave");
+    require(widthAt(pressure, 320) < regularFirst,
+            "the pressure-sensitive brush starts lighter than the regular brush");
+    require(widthAt(pressure, 704) > regularFirst * 1.5,
+            "the pressure-sensitive brush ends with a visibly heavier stroke");
+    for (const QColor color :
+         {QColor("#262626"), QColor("#f0f0f0"), QColor("#1677ff"), QColor("#bfbfbf")}) {
+        for (int size : {16, 20, 24, 32}) {
+            for (qreal dpr : {1.0, 1.25, 1.5, 2.0}) {
+                QList<QImage> images;
+                for (const auto& ref : refs) {
+                    const QImage image =
+                        render(ref.withColors(adqt::icons::IconColors::primary(color)),
+                               QSize(size, size), dpr)
+                            .toImage();
+                    const QRect bounds = alphaBounds(image);
+                    require(!bounds.isEmpty() && bounds.left() > 0 &&
+                                bounds.right() < image.width() - 1,
+                            "both brush modes stay visible and unclipped at toolbar sizes");
+                    for (int y = 0; y < image.height(); ++y)
+                        for (int x = 0; x < image.width(); ++x) {
+                            const QColor pixel = image.pixelColor(x, y);
+                            if (pixel.alpha() >= 128)
+                                require(
+                                    std::abs(pixel.red() - color.red()) <= 2 &&
+                                        std::abs(pixel.green() - color.green()) <= 2 &&
+                                        std::abs(pixel.blue() - color.blue()) <= 2,
+                                    "brush icons respect light, dark, active and disabled tints");
+                        }
+                    images.append(image);
+                }
+                require(images[0] != images[1],
+                        "regular and pressure-sensitive modes remain distinct at every scale");
+            }
+        }
+    }
+    if (const auto path = qEnvironmentVariable("SNOW_BRUSH_ICON_PREVIEW"); !path.isEmpty()) {
+        QImage preview(960, 520, QImage::Format_ARGB32_Premultiplied);
+        preview.fill(QColor("#ffffff"));
+        QPainter painter(&preview);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QColor("#595959"));
+        painter.setFont(QFont(QStringLiteral("Segoe UI"), 11));
+        painter.drawText(QPoint(40, 36), QStringLiteral("SNOW SHOT  /  BRUSH MODES"));
+        painter.setPen(QColor("#f0f0f0"));
+        painter.drawLine(480, 68, 480, 360);
+        for (int mode = 0; mode < 2; ++mode) {
+            const int x = mode * 480;
+            painter.drawPixmap(
+                x + 128, 72,
+                render(refs[mode].withColors(adqt::icons::IconColors::primary(QColor("#262626"))),
+                       QSize(224, 224)));
+            painter.setPen(QColor("#262626"));
+            painter.setFont(QFont(QStringLiteral("Segoe UI"), 16, QFont::DemiBold));
+            painter.drawText(QRect(x, 276, 480, 36), Qt::AlignCenter,
+                             mode ? QStringLiteral("Pressure-sensitive brush")
+                                  : QStringLiteral("Regular brush"));
+            painter.setPen(QColor("#8c8c8c"));
+            painter.setFont(QFont(QStringLiteral("Segoe UI"), 10));
+            painter.drawText(QRect(x, 316, 480, 24), Qt::AlignCenter,
+                             mode ? QStringLiteral("Smoothly increasing stroke width")
+                                  : QStringLiteral("Consistent 72-unit stroke width"));
+        }
+        for (int row = 0; row < 2; ++row) {
+            const int y = 376 + row * 72;
+            const QColor background = row ? QColor("#141414") : QColor("#f5f5f5");
+            const QColor foreground = row ? QColor("#f0f0f0") : QColor("#262626");
+            painter.fillRect(QRect(0, y, 960, 72), background);
+            painter.setPen(QColor("#8c8c8c"));
+            painter.setFont(QFont(QStringLiteral("Segoe UI"), 9));
+            painter.drawText(QPoint(40, y + 41),
+                             row ? QStringLiteral("DARK") : QStringLiteral("LIGHT"));
+            for (int mode = 0; mode < 2; ++mode) {
+                int column = 0;
+                for (int size : {16, 20, 24, 32}) {
+                    painter.drawPixmap(
+                        mode * 480 + 140 + column++ * 56, y + (72 - size) / 2,
+                        render(refs[mode].withColors(adqt::icons::IconColors::primary(foreground)),
+                               QSize(size, size)));
+                }
+                painter.drawPixmap(mode * 480 + 390, y + 24,
+                                   render(refs[mode].withColors(
+                                              adqt::icons::IconColors::primary(QColor("#1677ff"))),
+                                          QSize(24, 24)));
+            }
+        }
+        painter.end();
+        require(preview.save(path), "save the brush icon light/dark inspection sheet");
+    }
+}
+
 void numericFormatIconsRenderAtToolbarSizes() {
     namespace icons = snow_shot::presentation::icons::custom;
     QImage preview(600, 240, QImage::Format_ARGB32_Premultiplied);
@@ -492,11 +711,60 @@ void numericFormatIconsRenderAtToolbarSizes() {
         require(preview.save(path), "save numeric icon inspection sheet");
 }
 
+void borderFillIconMatchesToolbarGeometry() {
+    namespace icons = snow_shot::presentation::icons::custom;
+    QImage preview(480, 144, QImage::Format_ARGB32_Premultiplied);
+    QPainter painter(&preview);
+    for (int row = 0; row < 2; ++row) {
+        const QColor foreground(row ? "#f0f0f0" : "#595959");
+        painter.fillRect(0, row * 72, 480, 72, QColor(row ? "#141414" : "#ffffff"));
+        int column = 0;
+        for (int size : {16, 20, 32}) {
+            for (double dpr : {1.0, 1.25, 2.0}) {
+                const auto ref =
+                    icons::outlined::FillBorder(adqt::icons::IconColors::primary(foreground));
+                const auto pixmap = render(ref, QSize(size, size), dpr);
+                const auto image = pixmap.toImage();
+                require(!pixmap.isNull() && opaquePixelCount(image, image.rect()) > 0,
+                        "Border icon paints at toolbar sizes and fractional DPI");
+                require(image.pixelColor(image.width() / 2, image.height() / 2).alpha() == 0,
+                        "Border icon has an empty center");
+                const QRect bounds = alphaBounds(image);
+                require(qAbs(bounds.width() - bounds.height()) <= 1,
+                        "Border uses a balanced square silhouette");
+                painter.drawPixmap(12 + column++ * 52, row * 72 + (72 - size) / 2, pixmap);
+            }
+        }
+    }
+    painter.end();
+    if (const auto path = qEnvironmentVariable("SNOW_BORDER_FILL_ICON_PREVIEW"); !path.isEmpty())
+        require(preview.save(path), "save Border icon inspection sheet");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
     try {
+        borderFillIconMatchesToolbarGeometry();
+        if (application.arguments().contains(QStringLiteral("--border-fill-only"))) {
+            return 0;
+        }
+        imageSplittingIconFollowsAntDesign();
+        if (application.arguments().contains(QStringLiteral("--image-splitting-only"))) {
+            everySnowShotEntryRenders();
+            return 0;
+        }
+        brushModeIconsRenderWithDistinctPressureAndThemeColors();
+        if (application.arguments().contains(QStringLiteral("--brush-icons-only"))) {
+            everySnowShotEntryRenders();
+            return 0;
+        }
+        imageStitchingIconFollowsAntDesign();
+        if (application.arguments().contains(QStringLiteral("--image-stitching-only"))) {
+            everySnowShotEntryRenders();
+            return 0;
+        }
         magnifierDecorationIconsFollowThemeAndToolbarMetrics();
         numericFormatIconsRenderAtToolbarSizes();
         if (application.arguments().contains(QStringLiteral("--recapture-only"))) {

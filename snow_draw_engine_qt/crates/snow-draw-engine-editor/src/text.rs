@@ -101,6 +101,8 @@ pub struct SerialNumberStyle {
     pub font_family: Option<String>,
     pub stroke_width: f64,
     pub stroke_style: StrokeStyle,
+    #[serde(default)]
+    pub stroke_rendering_style: snow_draw_engine_core::arrow::StrokeRenderingStyle,
     pub opacity: f64,
 }
 

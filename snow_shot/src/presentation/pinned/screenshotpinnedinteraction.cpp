@@ -2,6 +2,7 @@
 #include "snow_shot/presentation/pinnedgeometry.h"
 #include "snow_shot/presentation/screenshotwheelinput.h"
 #include "snow_shot/presentation/screenshotpinnedwindow.h"
+#include "snow_shot/storage/settingsadapters.h"
 #include "snow_shot/presentation/pinnedwindowselectioncontroller.h"
 #include "pinnedwindowplatform.h"
 #include "screenshotpinnednativegeometrycontroller.h"
@@ -571,7 +572,8 @@ bool ScreenshotPinnedWindow::handlePinnedGesture(QObject* watched, QEvent* event
         }
         if (m_scrollOpacity == 0)
             m_scrollOpacity = m_opacityPercent;
-        m_scrollOpacity = std::clamp(m_scrollOpacity + delta * 5. / 120., 25., 100.);
+        const int step = snow_shot::storage::PinToScreenSettings().mouseWheelOpacityStep();
+        m_scrollOpacity = std::clamp(m_scrollOpacity + delta * (step / 120.), 25., 100.);
         setOpacityPercent(qRound(m_scrollOpacity));
     } else if (delta != 0) {
         m_scrollOpacity = 0;

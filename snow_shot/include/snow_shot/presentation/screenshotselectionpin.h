@@ -9,8 +9,18 @@ class ScreenshotDisplaySession;
 
 // The image already contains its effects. Retain their outline independently.
 [[nodiscard]] inline snow_shot::storage::PinnedBorderAppearance
-screenshotSelectionBorderAppearance(const QSize& contentSize, const ScreenshotResultStyle& style) {
+screenshotSelectionBorderAppearance(const QSize& contentSize, const ScreenshotResultStyle& style,
+                                    ScreenshotLayoutCompaction compaction = {}) {
     const auto normalized = ScreenshotResultCompositor::normalizedStyle(style);
+    if (compaction.enabled && style.region) {
+        const auto plan = screenshotLayoutCompactionPlan(
+            *style.region, contentSize, style.regionScale, compaction, normalized.shadowWidth);
+        if (!plan->isValid())
+            return {};
+        if (plan->changed)
+            return screenshotSelectionBorderAppearance(
+                plan->outputSize, compactedScreenshotResultStyle(style, *plan));
+    }
     const auto layout = ScreenshotResultCompositor::layoutForContent(contentSize, normalized);
     return {layout.outputRect.size(), QRectF(layout.contentRect),
             static_cast<qreal>(normalized.cornerRadius), normalized.shadowWidth > 0,
@@ -28,10 +38,10 @@ screenshotSelectionBorderAppearance(const QSize& contentSize, const ScreenshotRe
 // Snapshot the presentation of an already composited selection. Raster size is
 // finalized by the export worker, independently of the platform window units.
 [[nodiscard]] inline ScreenshotClipboardAppearance
-screenshotSelectionClipboardAppearance(const QSize& contentSize,
-                                       const ScreenshotResultStyle& style) {
+screenshotSelectionClipboardAppearance(const QSize& contentSize, const ScreenshotResultStyle& style,
+                                       ScreenshotLayoutCompaction compaction = {}) {
     ScreenshotClipboardAppearance result;
-    result.borderAppearance = screenshotSelectionBorderAppearance(contentSize, style);
+    result.borderAppearance = screenshotSelectionBorderAppearance(contentSize, style, compaction);
     result.rasterSize = result.borderAppearance->sourceSize;
     result.checkerboardEnabled = screenshotSelectionNeedsCheckerboard(result.borderAppearance);
     return result;
@@ -42,6 +52,7 @@ screenshotSelectionClipboardAppearance(const QSize& contentSize,
 [[nodiscard]] ScreenshotPinnedSelectionRequest
 screenshotSelectionPinRequest(const ScreenshotDisplaySession& displays,
                               const ScreenshotGeometryMapper& geometry, const QRect& selection,
-                              const ScreenshotResultStyle& style);
+                              const ScreenshotResultStyle& style,
+                              ScreenshotLayoutCompaction compaction = {});
 
 #endif // SNOW_SHOT_PRESENTATION_SCREENSHOTSELECTIONPIN_H

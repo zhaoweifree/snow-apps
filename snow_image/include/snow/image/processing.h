@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <array>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stop_token>
 
@@ -45,6 +46,13 @@ SNOW_IMAGE_API Result<void> resize_raster_into(const RasterSource& source,
                                                const ResizeOptions& options,
                                                MutablePlaneView destination,
                                                std::stop_token stop = {});
+
+// Prepares immutable full-image filter tables once. Reads produce only the requested output rows
+// with bounded scratch; coefficients and alpha/color math match resize_raster_into(). The source
+// must retain one full-canvas packed plane and support random rows.
+[[nodiscard]] SNOW_IMAGE_API Result<std::shared_ptr<const RasterSource>>
+prepare_resized_raster(std::shared_ptr<const RasterSource> source, const ResizeOptions& options,
+                       std::stop_token stop = {});
 
 struct PaletteOptions final {
     std::uint16_t maximum_colors = 256;

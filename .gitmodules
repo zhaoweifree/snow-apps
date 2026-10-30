@@ -1,0 +1,4 @@
+[submodule "simd-paddle-ocr-rs"]
+	path = snow-crates/crates/simd-paddle-ocr-rs
+	url = https://github.com/mg-chao/simd-paddle-ocr-rs.git
+	branch = main

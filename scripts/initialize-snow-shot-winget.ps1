@@ -21,7 +21,9 @@ if ([version]$installedVersion -lt $requiredVersion) {
     $dependencyPaths = @(Get-ChildItem (Join-Path $ToolDirectory "dependencies/$architecture") -Filter '*.appx' |
         Select-Object -ExpandProperty FullName)
     if ($dependencyPaths.Count -eq 0) { throw "The WinGet release has no $architecture dependencies." }
-    Add-AppxPackage -Path $bundle -DependencyPath $dependencyPaths
+    # Hosted images can run Widgets against frameworks upgraded by this bundle.
+    $forceApplicationShutdown = $env:RUNNER_ENVIRONMENT -eq 'github-hosted' -and $env:RUNNER_OS -eq 'Windows'
+    Add-AppxPackage -Path $bundle -DependencyPath $dependencyPaths -ForceApplicationShutdown:$forceApplicationShutdown
 }
 $package = Get-AppxPackage Microsoft.DesktopAppInstaller | Sort-Object Version -Descending | Select-Object -First 1
 $executable = if ($package) { Join-Path $package.InstallLocation 'winget.exe' } else { $command.Source }

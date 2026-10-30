@@ -6,9 +6,13 @@
 #include <QRectF>
 
 #include <cstddef>
+#include <memory>
 
 class QPainter;
+class QRegion;
+class QTransform;
 class QWidget;
+class ScreenshotRegionGeometry;
 
 struct ScreenshotSelectionShadowDiagnostics {
     std::size_t cacheHits = 0;
@@ -18,6 +22,7 @@ struct ScreenshotSelectionShadowDiagnostics {
     std::size_t selectionSizedTransientAllocations = 0;
     std::size_t regionMaskBuilds = 0;
     std::size_t regionShadowBuilds = 0;
+    std::size_t regionStripBuilds = 0;
     std::size_t regionScratchPeakBytes = 0;
     std::size_t regionCacheRetainedBytes = 0;
     std::size_t regionPathCacheElements = 0;
@@ -41,6 +46,26 @@ class ScreenshotSelectionShadowRenderer final {
     // Clears rectangle shadow assets, rounded region contours, and export masks/shadows.
     // Must run on each owning thread after its session/export work has finished.
     static void resetCacheForCurrentThread();
+};
+
+// Session-owned, canvas-resolution shadow tiles. Raster sampling matches the
+// export compositor; view transforms only position/scale those source pixels.
+class ScreenshotRegionShadowRenderer final {
+  public:
+    ScreenshotRegionShadowRenderer();
+    ~ScreenshotRegionShadowRenderer();
+    ScreenshotRegionShadowRenderer(const ScreenshotRegionShadowRenderer&) = delete;
+    ScreenshotRegionShadowRenderer& operator=(const ScreenshotRegionShadowRenderer&) = delete;
+
+    void render(QPainter& painter, const ScreenshotRegionGeometry& region, int cornerRadius,
+                int shadowWidth, const QColor& shadowColor, const QTransform& canvasToView,
+                const QRegion& exposedView);
+    void reset();
+    [[nodiscard]] std::size_t retainedBytes() const;
+
+  private:
+    struct Cache;
+    std::unique_ptr<Cache> m_cache;
 };
 
 #endif // SNOW_SHOT_PRESENTATION_SCREENSHOTSELECTIONSHADOWRENDERER_H

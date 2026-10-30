@@ -1,0 +1,51 @@
+--- a/modules/dnn/CMakeLists.txt
++++ b/modules/dnn/CMakeLists.txt
+@@ -15,6 +15,11 @@
+ 
+ 
+ include(${CMAKE_CURRENT_LIST_DIR}/cmake/plugin.cmake)
++
++ocv_option(OPENCV_DNN_SNOW_SHOT_QR "Register only layers used by Snow Shot's bundled QR models" OFF)
++if(OPENCV_DNN_SNOW_SHOT_QR)
++  ocv_target_compile_definitions(${the_module} PRIVATE OPENCV_DNN_SNOW_SHOT_QR=1)
++endif()
+ 
+ 
+ ocv_option(OPENCV_DNN_OPENCL "Build with OpenCL support" HAVE_OPENCL AND NOT APPLE)
+--- a/modules/dnn/src/init.cpp
++++ b/modules/dnn/src/init.cpp
+@@ -84,6 +84,26 @@
+     static ProtobufShutdown protobufShutdown; CV_UNUSED(protobufShutdown);
+ #endif
+ 
++#ifdef OPENCV_DNN_SNOW_SHOT_QR
++    // Only the bundled WeChat detector and super-resolution Caffe graphs are consumed.
++    // Input is handled by the importer; Identity is also used by Net::registerOutput.
++    CV_DNN_REGISTER_LAYER_CLASS(Identity,        BlankLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(BatchNorm,       BatchNormLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Concat,          ConcatLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Convolution,     ConvolutionLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Crop,            CropLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Deconvolution,   DeconvolutionLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(DetectionOutput, DetectionOutputLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Eltwise,         EltwiseLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Flatten,         FlattenLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Permute,         PermuteLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Pooling,         PoolingLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(PriorBox,        PriorBoxLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(ReLU,            ReLULayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Reshape,         ReshapeLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Scale,           ScaleLayer);
++    CV_DNN_REGISTER_LAYER_CLASS(Softmax,         SoftmaxLayer);
++#else
+     CV_DNN_REGISTER_LAYER_CLASS(Slice,          SliceLayer);
+     CV_DNN_REGISTER_LAYER_CLASS(Split,          SplitLayer);
+     CV_DNN_REGISTER_LAYER_CLASS(Concat,         ConcatLayer);
+@@ -241,6 +261,7 @@
+     CV_DNN_REGISTER_LAYER_CLASS(PermuteInt8,      PermuteLayer);
+     CV_DNN_REGISTER_LAYER_CLASS(ReorgInt8,        ReorgLayer);
+     CV_DNN_REGISTER_LAYER_CLASS(ShuffleChannelInt8, ShuffleChannelLayer);
++#endif
+ }
+ 
+ CV__DNN_INLINE_NS_END

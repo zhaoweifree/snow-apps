@@ -443,9 +443,13 @@ pub(crate) fn blend_keycap_to<S: Surface>(
 
 fn blend_span<const OPAQUE: bool>(destination: &mut [u8], source: &[u8], opacity: u32) {
     assert_eq!(destination.len(), source.len());
+    #[cfg(target_arch = "aarch64")]
+    // SAFETY: AArch64 provides baseline NEON. The helper processes only full
+    // vectors in the equal-sized, non-overlapping pixel slices.
+    let offset = unsafe { blend_span_neon::<OPAQUE>(destination, source, opacity) };
     #[cfg(target_arch = "x86_64")]
     let mut offset = 0;
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     let offset = 0;
     // SSE2 is part of the x86-64 baseline. Process four premultiplied pixels together;
     // use unaligned loads because rounded keycap widths need not be multiples of four.
@@ -502,6 +506,58 @@ fn blend_span<const OPAQUE: bool>(destination: &mut [u8], source: &[u8], opacity
     {
         blend_faded_pixel::<OPAQUE>(dst, src, opacity);
     }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn blend_span_neon<const OPAQUE: bool>(
+    destination: &mut [u8],
+    source: &[u8],
+    opacity: u32,
+) -> usize {
+    use std::arch::aarch64::*;
+    let mut offset = 0;
+    let fade = vdup_n_u8(opacity as u8);
+    let full = vdupq_n_u8(255);
+    let round = vdupq_n_u16(127);
+    let one = vdupq_n_u16(1);
+    let divide =
+        |value| vshrq_n_u16::<8>(vaddq_u16(vaddq_u16(value, one), vshrq_n_u16::<8>(value)));
+    let indices = [3, 3, 3, 3, 7, 7, 7, 7, 11, 11, 11, 11, 15, 15, 15, 15];
+    let alpha_mask = [0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255];
+    // SAFETY: both tables own sixteen initialized bytes.
+    let indices = unsafe { vld1q_u8(indices.as_ptr()) };
+    let alpha_mask = unsafe { vld1q_u8(alpha_mask.as_ptr()) };
+    while offset + 16 <= destination.len() {
+        // SAFETY: both slices have the same length and each iteration reads
+        // and writes exactly four complete, potentially unaligned pixels.
+        unsafe {
+            let src = vld1q_u8(source.as_ptr().add(offset));
+            let dst = vld1q_u8(destination.as_ptr().add(offset));
+            let alpha = vqtbl1q_u8(src, indices);
+            let low_alpha = divide(vaddq_u16(vmull_u8(vget_low_u8(alpha), fade), round));
+            let high_alpha = divide(vaddq_u16(vmull_u8(vget_high_u8(alpha), fade), round));
+            let inverse = vsubq_u8(
+                full,
+                vcombine_u8(vmovn_u16(low_alpha), vmovn_u16(high_alpha)),
+            );
+            let blend = |src, dst, inverse| {
+                let numerator = vmlal_u8(vmull_u8(src, fade), dst, inverse);
+                vqmovn_u16(divide(vaddq_u16(numerator, round)))
+            };
+            let low = blend(vget_low_u8(src), vget_low_u8(dst), vget_low_u8(inverse));
+            let high = blend(vget_high_u8(src), vget_high_u8(dst), vget_high_u8(inverse));
+            let pixels = vcombine_u8(low, high);
+            let pixels = if OPAQUE {
+                vbslq_u8(alpha_mask, dst, pixels)
+            } else {
+                pixels
+            };
+            vst1q_u8(destination.as_mut_ptr().add(offset), pixels);
+        }
+        offset += 16;
+    }
+    offset
 }
 
 fn blend_faded_pixel<const OPAQUE: bool>(dst: &mut [u8], src: &[u8], opacity: u32) {
@@ -977,6 +1033,112 @@ mod tests {
             }
             blend_span::<false>(&mut pixels, &src, opacity);
             assert_eq!(pixels, expected);
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn neon_blending_executes_unaligned_vectors_and_preserves_bounds() {
+        fn check<const OPAQUE: bool>() {
+            for offset in 0..16 {
+                for count in [0, 1, 3, 4, 5, 7, 8, 9, 31, 32, 33] {
+                    for opacity in [0, 1, 63, 127, 128, 254, 255] {
+                        let mut source = vec![0; offset];
+                        for i in 0..count {
+                            let alpha = (i * 71 % 256) as u8;
+                            source.extend_from_slice(&[alpha, alpha / 2, alpha / 3, alpha]);
+                        }
+                        let mut actual = vec![0xa5; offset + count * 4 + 17];
+                        for (i, pixel) in actual[offset..offset + count * 4]
+                            .chunks_exact_mut(4)
+                            .enumerate()
+                        {
+                            pixel.copy_from_slice(&[17, 230, 91, (i * 37 % 256) as u8]);
+                        }
+                        let mut expected = actual.clone();
+                        let end = unsafe {
+                            blend_span_neon::<OPAQUE>(
+                                &mut actual[offset..offset + count * 4],
+                                &source[offset..],
+                                opacity,
+                            )
+                        };
+                        assert_eq!(end, count / 4 * 16);
+                        for (dst, src) in expected[offset..offset + end]
+                            .chunks_exact_mut(4)
+                            .zip(source[offset..offset + end].chunks_exact(4))
+                        {
+                            blend_faded_pixel::<OPAQUE>(dst, src, opacity);
+                        }
+                        assert_eq!(
+                            actual, expected,
+                            "offset {offset}, count {count}, opacity {opacity}"
+                        );
+                    }
+                }
+            }
+        }
+        check::<false>();
+        check::<true>();
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    #[ignore = "run explicitly in the performance Release build"]
+    fn keycap_simd_performance_comparison() {
+        use std::hint::black_box;
+        use std::time::{Duration, Instant};
+        if cfg!(debug_assertions) {
+            panic!("use the performance Release build");
+        }
+        println!("pair,kernel,width,opacity,nanoseconds_per_span");
+        for width in [65, 325] {
+            let source: Vec<_> = (0..width)
+                .flat_map(|i| {
+                    let alpha = (i * 71 % 256) as u8;
+                    [alpha, alpha / 2, alpha / 3, alpha]
+                })
+                .collect();
+            for opacity in [127, 255] {
+                let original = [17, 230, 91, 255].repeat(width);
+                let mut expected = original.clone();
+                let scalar = |destination: &mut [u8]| {
+                    for (dst, src) in destination.chunks_exact_mut(4).zip(source.chunks_exact(4)) {
+                        blend_faded_pixel::<true>(dst, src, opacity);
+                    }
+                };
+                scalar(&mut expected);
+                let mut selected = original.clone();
+                blend_span::<true>(&mut selected, &source, opacity);
+                assert_eq!(selected, expected);
+                for pair in 0..5 {
+                    for position in 0..2 {
+                        let neon = (position + pair) % 2 != 0;
+                        let mut pixels = original.clone();
+                        let started = Instant::now();
+                        let mut count = 0;
+                        while started.elapsed() < Duration::from_millis(100) {
+                            if neon {
+                                blend_span::<true>(
+                                    black_box(&mut pixels),
+                                    black_box(&source),
+                                    black_box(opacity),
+                                );
+                            } else {
+                                scalar(black_box(&mut pixels));
+                            }
+                            black_box(&pixels);
+                            count += 1;
+                        }
+                        let kernel = if neon { "neon" } else { "portable" };
+                        println!(
+                            "{},{kernel},{width},{opacity},{}",
+                            pair + 1,
+                            started.elapsed().as_nanos() / count
+                        );
+                    }
+                }
+            }
         }
     }
     #[test]

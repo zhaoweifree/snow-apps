@@ -28,6 +28,9 @@ void main(uint3 id : SV_DispatchThreadID) {
         int2 source = position * shapeSize / scaledSize;
         uint4 pixel = (uint4)round(saturate(cursorImage.Load(int3(source, 0))) * 255.0);
         if (masked != 0 && (pixel.a == 0 || pixel.a == 255)) {
+            // Windows masked-color alpha is an AND mask, not opacity. Preserve
+            // bytewise XOR, including #7f -> #80; there is no documented gray clamp.
+            // https://learn.microsoft.com/windows-hardware/drivers/ddi/d3dkmddi/ns-d3dkmddi-_dxgkarg_setpointershape
             background.rgb = (background.rgb & pixel.aaa) ^ pixel.rgb;
         } else {
             background.rgb = (pixel.rgb * pixel.a + background.rgb * (255 - pixel.a) + 127) / 255;

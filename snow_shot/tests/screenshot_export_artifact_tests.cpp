@@ -25,15 +25,32 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 #if defined(Q_OS_WIN) || defined(_WIN32)
 #include <windows.h>
+struct ScreenshotClipboardPayloadTestAccess {
+    static QByteArray dib(const ScreenshotClipboardPayload& payload) {
+        auto handle = static_cast<HGLOBAL>(payload.m_dibHandle);
+        const auto* memory = static_cast<const char*>(GlobalLock(handle));
+        QByteArray result = memory ? QByteArray(memory, GlobalSize(handle)) : QByteArray{};
+        if (memory)
+            GlobalUnlock(handle);
+        return result;
+    }
+    static bool independent(const ScreenshotClipboardPayload& first,
+                            const ScreenshotClipboardPayload& second) {
+        return first.m_dibHandle != second.m_dibHandle && first.m_pngHandle != second.m_pngHandle;
+    }
+};
 #endif
 
 namespace {
@@ -225,6 +242,225 @@ void clipboardReusesConfiguredPng() {
                 "clipboard reuse request rejected");
         processUntil([&] { return copied; });
     }
+}
+
+void clipboardPreparationFusesRowsAndClonesNativeOwnership() {
+    auto image = testImage();
+    image.setPixelColor(0, 0, QColor(255, 0, 0, 0));
+    image.setPixelColor(1, 0, QColor(255, 0, 0, 127));
+    image.setPixelColor(2, 0, QColor(0, 255, 0, 255));
+    auto rows = snow_shot::image_codec::srgbRowSource(image);
+    const auto read = rows.readRows;
+    int readRows = 0;
+    rows.readRows = [read, &readRows](int first, int count, qsizetype stride, uchar* target,
+                                      qsizetype capacity) {
+        readRows += count;
+        return read(first, count, stride, target, capacity);
+    };
+    auto payload = ScreenshotClipboardService::prepare(rows);
+    require(payload.isValid() && readRows == image.height() &&
+                hasSamePixels(QImage::fromData(payload.pngBytes(), "PNG"), image),
+            "clipboard PNG and native bitmap preparation consume every source row exactly once");
+    auto clone = ScreenshotClipboardService::clonePrepared(payload);
+    require(clone.isValid() && readRows == image.height() &&
+                clone.pngBytes().constData() == payload.pngBytes().constData(),
+            "native clipboard cloning shares immutable PNG bytes without reading image rows");
+#if defined(Q_OS_WIN) || defined(_WIN32)
+    require(ScreenshotClipboardPayloadTestAccess::independent(payload, clone),
+            "cloned native clipboard handles have independent publication ownership");
+    const auto dib = ScreenshotClipboardPayloadTestAccess::dib(payload);
+    require(dib == ScreenshotClipboardPayloadTestAccess::dib(clone),
+            "native cloning preserves DIB header, pixels and initialized allocation padding");
+    const auto* header = reinterpret_cast<const BITMAPINFOHEADER*>(dib.constData());
+    const auto stride = (image.width() * 3 + 3) & ~3;
+    const auto* top = reinterpret_cast<const uchar*>(dib.constData() + sizeof(*header)) +
+                      (image.height() - 1) * stride;
+    require(header->biWidth == image.width() && header->biHeight == image.height() &&
+                header->biBitCount == 24 && top[0] == 255 && top[1] == 255 && top[2] == 255 &&
+                top[3] == 128 && top[4] == 128 && top[5] == 255 && top[6] == 0 && top[7] == 255 &&
+                top[8] == 0,
+            "fused DIB retains bottom-up BGR order and white-flattened alpha");
+#endif
+    payload = {};
+    require(clone.isValid(), "cloned clipboard ownership outlives its prototype");
+    bool cancelled = false;
+    rows.cancellationRequested = [&] { return cancelled; };
+    rows.readRows = [read, &cancelled](int first, int count, qsizetype stride, uchar* target,
+                                       qsizetype capacity) {
+        const bool result = read(first, count, stride, target, capacity);
+        cancelled = true;
+        return result;
+    };
+    require(!ScreenshotClipboardService::prepare(rows).isValid(),
+            "cancellation during fused row preparation releases partial native allocations");
+}
+
+void coldClipboardRequestsShareCanonicalRowsAndRetryFailures() {
+    const auto image = testImage();
+    std::atomic_int rowsRead{0};
+    std::atomic_int encodings{0};
+    bool fail = false;
+    auto rows = snow_shot::image_codec::srgbRowSource(image);
+    const auto read = rows.readRows;
+    rows.readRows = [read, &rowsRead, &fail](int first, int count, qsizetype stride, uchar* target,
+                                             qsizetype capacity) {
+        rowsRead.fetch_add(count);
+        return !fail && read(first, count, stride, target, capacity);
+    };
+    ScreenshotExportArtifact artifact(
+        ScreenshotExportSource::fromProducer({},
+                                             [rows](std::function<bool()> cancellation) {
+                                                 auto source = rows;
+                                                 source.cancellationRequested =
+                                                     std::move(cancellation);
+                                                 return source;
+                                             }),
+        ScreenshotCompressionLevel::Low, {64 * 1024 * 1024, [&] { encodings.fetch_add(1); }});
+    QObject receiver;
+    ScreenshotClipboardPayload first;
+    ScreenshotClipboardPayload second;
+    QByteArray png;
+    require(artifact.requestClipboard(&receiver,
+                                      [&](ScreenshotExportClipboardResult result) {
+                                          require(result.succeeded(),
+                                                  "cold fused clipboard request");
+                                          first = std::move(result.payload);
+                                      }) &&
+                artifact.requestClipboard(&receiver,
+                                          [&](ScreenshotExportClipboardResult result) {
+                                              require(result.succeeded(),
+                                                      "concurrent fused clipboard request");
+                                              second = std::move(result.payload);
+                                          }) &&
+                artifact.requestCanonicalPng(&receiver,
+                                             [&](ScreenshotExportEncodingResult result) {
+                                                 require(result.succeeded(),
+                                                         "concurrent canonical PNG request");
+                                                 png = result.image.bytes();
+                                             }),
+            "cold clipboard and canonical subscribers are admitted together");
+    processUntil([&] { return first.isValid() && second.isValid() && !png.isEmpty(); });
+    require(
+        rowsRead == image.height() && encodings == 1 &&
+            first.pngBytes().constData() == png.constData() &&
+            second.pngBytes().constData() == png.constData(),
+        "concurrent cold clipboard consumers share one source pass and the canonical PNG cache");
+    artifact.cancel();
+    require(first.isValid() && second.isValid(),
+            "consumer-owned native payloads survive artifact cancellation");
+
+    fail = true;
+    ScreenshotExportArtifact retry(
+        ScreenshotExportSource::fromProducer({}, [rows](auto cancellation) {
+            auto source = rows;
+            source.cancellationRequested = std::move(cancellation);
+            return source;
+        }));
+    bool failed = false;
+    require(retry.requestClipboard(
+                &receiver,
+                [&](ScreenshotExportClipboardResult result) {
+                    require(!result.succeeded() && !result.error.isEmpty(),
+                            "failed cold clipboard preparation reports its actual failure");
+                    failed = true;
+                }),
+            "failed cold clipboard request admission");
+    processUntil([&] { return failed; });
+    fail = false;
+    bool succeeded = false;
+    require(retry.requestClipboard(
+                &receiver,
+                [&](ScreenshotExportClipboardResult result) {
+                    require(result.succeeded(),
+                            "cold clipboard can retry after a transient row failure");
+                    succeeded = true;
+                }),
+            "retry cold clipboard request admission");
+    processUntil([&] { return succeeded; });
+}
+
+void cancelledColdClipboardRetainsConsumerLeaseUntilWorkerRetires() {
+    auto entered = std::make_shared<std::atomic_bool>(false);
+    auto released = std::make_shared<std::atomic_bool>(false);
+    const auto unblock = qScopeGuard([released] { released->store(true); });
+    auto rows = snow_shot::image_codec::srgbRowSource(testImage());
+    const auto read = rows.readRows;
+    rows.readRows = [entered, released, read](int first, int count, qsizetype stride,
+                                              uchar* destination, qsizetype capacity) {
+        entered->store(true);
+        while (!released->load())
+            QThread::msleep(1);
+        return read(first, count, stride, destination, capacity);
+    };
+    ScreenshotExportArtifact artifact(
+        ScreenshotExportSource::fromProducer({}, [rows](std::function<bool()> cancellation) {
+            auto source = rows;
+            source.cancellationRequested = std::move(cancellation);
+            return source;
+        }));
+    QObject receiver;
+    auto lease = std::make_shared<int>(1);
+    const std::weak_ptr<int> weak = lease;
+    int callbacks = 0;
+    require(artifact.requestClipboard(&receiver,
+                                      [lease, &callbacks](ScreenshotExportClipboardResult) {
+                                          Q_UNUSED(lease);
+                                          ++callbacks;
+                                      }),
+            "cold clipboard cancellation fixture admission");
+    lease.reset();
+    processUntil([&] { return entered->load(); });
+    artifact.cancel();
+    require(!weak.expired(), "cancelling fused clipboard work retains the consumer resource lease "
+                             "while rows are in use");
+    released->store(true);
+    processUntil([&] { return weak.expired(); });
+    require(callbacks == 0, "cancelled fused clipboard work suppresses its pending callback");
+}
+
+void latePngSubscriberRetainsLeaseDuringFusedClipboardCancellation() {
+    auto entered = std::make_shared<std::atomic_bool>(false);
+    auto released = std::make_shared<std::atomic_bool>(false);
+    const auto unblock = qScopeGuard([released] { released->store(true); });
+    auto rows = snow_shot::image_codec::srgbRowSource(testImage());
+    const auto read = rows.readRows;
+    rows.readRows = [entered, released, read](int first, int count, qsizetype stride,
+                                              uchar* destination, qsizetype capacity) {
+        entered->store(true);
+        while (!released->load())
+            QThread::msleep(1);
+        return read(first, count, stride, destination, capacity);
+    };
+    ScreenshotExportArtifact artifact(
+        ScreenshotExportSource::fromProducer({}, [rows](std::function<bool()> cancellation) {
+            auto source = rows;
+            source.cancellationRequested = std::move(cancellation);
+            return source;
+        }));
+    QObject receiver;
+    int callbacks = 0;
+    require(
+        artifact.requestClipboard(&receiver, [&](ScreenshotExportClipboardResult) { ++callbacks; }),
+        "late canonical PNG lease fixture clipboard admission");
+    processUntil([&] { return entered->load(); });
+
+    // The clipboard worker has already captured its mode and started reading. A PNG
+    // consumer joining now must share the lease holder retained by that same worker.
+    auto lease = std::make_shared<int>(1);
+    const std::weak_ptr<int> weak = lease;
+    require(artifact.requestCanonicalPng(&receiver,
+                                         [lease, &callbacks](ScreenshotExportEncodingResult) {
+                                             Q_UNUSED(lease);
+                                             ++callbacks;
+                                         }),
+            "late canonical PNG subscriber joins the running fused clipboard encode");
+    lease.reset();
+    artifact.cancel();
+    require(!weak.expired(), "cancellation retains a late PNG consumer lease while the fused "
+                             "clipboard worker is still reading");
+    released->store(true);
+    processUntil([&] { return weak.expired(); });
+    require(callbacks == 0, "cancelled fused encoding suppresses clipboard and late PNG callbacks");
 }
 
 void clipboardIgnoresCachedPngWithDifferentCompression() {
@@ -498,10 +734,138 @@ void clipboardFilesUseTemporaryStorageAndKeepExportOptions() {
                 require(QFile::remove(reference), "reference file cleanup failed");
             }
             mime.reset();
-            require(!QFileInfo::exists(path) && !QFileInfo::exists(QFileInfo(path).path()),
-                    "discarded clipboard payloads must remove their temporary directory");
+            require(QFileInfo::exists(path),
+                    "discarding a clipboard payload must preserve the exported file");
+            require(QDir(QFileInfo(path).path()).removeRecursively(),
+                    "clipboard file fixture cleanup failed");
         }
     }
+}
+
+void windowNamesSurviveAsynchronousFileExports() {
+    QTemporaryDir directory;
+    auto& storage = snow_shot::storage::ApplicationStorage::instance();
+    require(directory.isValid() &&
+                storage.initialize({directory.path(), directory.path(), 60000}).success,
+            "window variable settings must initialize");
+    const auto shutdown = qScopeGuard([&] { storage.shutdown(); });
+    const snow_shot::storage::ScreenshotSettings settings;
+    const QString folder = directory.filePath(QStringLiteral("{AN}/{YYYY}"));
+    const QString filename = QStringLiteral("{WN}_{HH-mm-ss}");
+    require(settings.setImageSaveDirectory(folder) && settings.setAutoSaveFilenameFormat(filename),
+            "window templates must persist");
+    const QDateTime timestamp =
+        QDateTime::fromString(QStringLiteral("2026-10-16T12:34:56"), Qt::ISODate);
+    QObject receiver;
+    for (const bool quick : {false, true}) {
+        std::function<void(QImage)> deliver;
+        ScreenshotExportArtifact artifact(
+            ScreenshotExportSource::fromImageLoader([&](QObject*, auto callback) {
+                deliver = std::move(callback);
+                return true;
+            }));
+        artifact.setWindowNames({QStringLiteral("Browser"), QStringLiteral("Tab {YYYY}/A")});
+        std::optional<ScreenshotExportTaskResult> result;
+        const auto complete = [&](ScreenshotExportTaskResult value) { result = std::move(value); };
+        require(quick ? artifact.requestQuickSave(&receiver, complete, timestamp)
+                      : artifact.requestAutomaticSaveToConfiguredDirectory(
+                            &receiver, folder, ScreenshotImageFileFormat::Png, filename, {},
+                            complete, {}, timestamp),
+                "window metadata export must be accepted");
+        // A pending save owns its names even if its artifact is reused before image delivery.
+        artifact.setWindowNames({QStringLiteral("Changed"), QStringLiteral("Changed")});
+        processUntil([&] { return static_cast<bool>(deliver); });
+        deliver(testImage());
+        processUntil([&] { return result.has_value(); });
+        require(result->succeeded() &&
+                    result->savedPath.contains(QStringLiteral("/Browser/2026/")) &&
+                    QFileInfo(result->savedPath)
+                        .fileName()
+                        .startsWith(QStringLiteral("Tab {YYYY}_A_12-34-56")),
+                "automatic and quick saves must keep request metadata and literal title braces");
+    }
+    ScreenshotExportArtifact clipboard(ScreenshotExportSource::fromImage(testImage()));
+    clipboard.setWindowNames({QStringLiteral("App"), QStringLiteral("Window")});
+    bool copied = false;
+    require(clipboard.requestClipboardFile(
+                &receiver, ScreenshotImageFileFormat::Png, QStringLiteral("{AN}_{WN}"), {},
+                [&](std::unique_ptr<QMimeData> mime, QString error) {
+                    require(mime && error.isEmpty(), "clipboard file export must succeed");
+                    const QString path = mime->urls().constFirst().toLocalFile();
+                    require(QFileInfo(path).fileName() == QStringLiteral("App_Window.png"),
+                            "clipboard files must use the same naming context");
+                    require(QDir(QFileInfo(path).path()).removeRecursively(),
+                            "clipboard fixture cleanup failed");
+                    copied = true;
+                }),
+            "clipboard request must be accepted");
+    processUntil([&] { return copied; });
+    ScreenshotExportArtifact later(ScreenshotExportSource::fromImage(testImage()));
+    std::optional<ScreenshotExportTaskResult> result;
+    require(later.requestQuickSave(
+                &receiver, [&](ScreenshotExportTaskResult value) { result = std::move(value); },
+                timestamp),
+            "an export without live metadata must still save");
+    processUntil([&] { return result.has_value(); });
+    require(result->succeeded() &&
+                result->savedPath.endsWith(QStringLiteral("/Unknown/2026/Unknown_12-34-56.png")),
+            "later exports must use Unknown rather than current desktop names");
+}
+
+void saveDirectoryTemplatesUseRequestTime() {
+    QTemporaryDir directory;
+    require(directory.isValid(), "time-directory fixture unavailable");
+    auto& storage = snow_shot::storage::ApplicationStorage::instance();
+    require(storage.initialize({directory.path(), directory.path(), 60000}).success,
+            "time-directory settings unavailable");
+    const auto shutdown = qScopeGuard([&] { storage.shutdown(); });
+    const snow_shot::storage::ScreenshotSettings settings;
+    const QString pattern = directory.filePath(QStringLiteral("output/{YYYY}"));
+    require(settings.setImageSaveDirectory(pattern) &&
+                settings.setAutoSaveFilenameFormat(QStringLiteral("{YYYY-MM-DD_HH-mm-ss}")),
+            "time-directory settings must persist");
+    const QDateTime before =
+        QDateTime::fromString(QStringLiteral("2026-12-31T23:59:59"), Qt::ISODate);
+    QObject receiver;
+    for (const bool quick : {false, true}) {
+        ScreenshotExportArtifact artifact(ScreenshotExportSource::fromImage(testImage()));
+        for (const auto& timestamp : {before, before.addSecs(1)}) {
+            std::optional<ScreenshotExportTaskResult> result;
+            const auto completed = [&](ScreenshotExportTaskResult saved) {
+                result = std::move(saved);
+            };
+            require(quick ? artifact.requestQuickSave(&receiver, completed, timestamp)
+                          : artifact.requestAutomaticSaveToConfiguredDirectory(
+                                &receiver, pattern, ScreenshotImageFileFormat::Png,
+                                QStringLiteral("{YYYY-MM-DD_HH-mm-ss}"), {}, completed, {},
+                                timestamp),
+                    "dated save must be accepted");
+            processUntil([&] { return result.has_value(); });
+            const QString expectedDirectory = directory.filePath(
+                QStringLiteral("output/") + timestamp.toString(QStringLiteral("yyyy")));
+            require(
+                result->succeeded() &&
+                    QFileInfo(result->savedPath).absolutePath() == expectedDirectory &&
+                    QFileInfo(result->savedPath)
+                        .baseName()
+                        .startsWith(timestamp.toString(QStringLiteral("yyyy-MM-dd_HH-mm-ss"))),
+                "worker and quick saves must use the captured time for both folder and filename");
+        }
+    }
+    QFile blocker(directory.filePath(QStringLiteral("blocked")));
+    require(blocker.open(QIODevice::WriteOnly), "dated quick-save blocker must open");
+    blocker.close();
+    require(settings.setImageSaveDirectory(blocker.fileName() + QStringLiteral("/{YYYY}")),
+            "blocked template must persist");
+    ScreenshotExportArtifact artifact(ScreenshotExportSource::fromImage(testImage()));
+    std::optional<ScreenshotExportTaskResult> failed;
+    require(artifact.requestQuickSave(
+                &receiver, [&](ScreenshotExportTaskResult saved) { failed = std::move(saved); },
+                before),
+            "blocked dated quick save must be accepted for processing");
+    processUntil([&] { return failed.has_value(); });
+    require(!failed->succeeded() && failed->savedPath.isEmpty(),
+            "dated quick saves must fail without falling back to another folder");
 }
 
 void automaticSavesUseRequestedEncoding() {
@@ -1180,8 +1544,9 @@ void convertedRowSourcesRetainOriginalPixelsWithoutMaterializing() {
         image.setPixelColor(0, 0, QColor(249, 3, 61, 0));
         image.setPixelColor(1030, 516, QColor(7, 247, 81, 253));
         image.setColorSpace(QColorSpace::DisplayP3);
-        const QImage expected =
-            image.convertedToColorSpace(QColorSpace::SRgb, QImage::Format_RGBA8888);
+        const QImage expected = image.copy()
+                                    .convertedToColorSpace(QColorSpace::SRgb)
+                                    .convertToFormat(QImage::Format_RGBA8888);
         const uchar* middle = image.constBits() + image.sizeInBytes() / 2;
         auto rows = snow_shot::image_codec::srgbRowSource(image);
         require(rows.isValid() && rows.backingImage.isNull(),
@@ -1222,6 +1587,228 @@ void convertedRowSourcesRetainOriginalPixelsWithoutMaterializing() {
             "untagged compatible rows must preserve every source pixel");
     require(!snow_shot::image_codec::srgbRowSource({}).isValid(),
             "null images must not create valid lazy row sources");
+}
+
+void lazyResizeRowsAndRegionsPreserveFullImagePixels() {
+    for (const auto format : {QImage::Format_RGBA8888, QImage::Format_ARGB32_Premultiplied,
+                              QImage::Format_RGBA64_Premultiplied, QImage::Format_Mono}) {
+        QImage original(QSize(33, 257), format);
+        if (format == QImage::Format_Mono)
+            original.setColorTable({qRgb(30, 20, 80), qRgb(210, 220, 100)});
+        for (int y = 0; y < original.height(); ++y)
+            for (int x = 0; x < original.width(); ++x) {
+                if (format == QImage::Format_Mono)
+                    original.setPixel(x, y, (x + y) & 1);
+                else
+                    original.setPixelColor(x, y,
+                                           QColor((x * 31 + y) % 256, (y * 17 + x) % 256,
+                                                  (x * 7 + y * 11) % 256,
+                                                  (x + y) % 5 == 0 ? 79 : 255));
+            }
+        original.setColorSpace(QColorSpace::DisplayP3);
+        const auto originalPalette = original.colorTable();
+        const auto source = snow_shot::image_codec::srgbRowSource(original);
+        // Qt's const indexed color transform mutates its shallow source palette.
+        // Give the full-image reference independent metadata and retain its
+        // precision/alpha representation through color conversion.
+        const QImage converted = original.copy()
+                                     .convertedToColorSpace(QColorSpace::SRgb)
+                                     .convertToFormat(QImage::Format_RGBA8888);
+        const QRect sourceRegion(7, 13, 19, 9);
+        QImage cropped(sourceRegion.size(), QImage::Format_RGBA8888);
+        const bool regionRead =
+            source.readRegion && source.readRegion(sourceRegion, cropped.bytesPerLine(),
+                                                   cropped.bits(), cropped.sizeInBytes());
+        const auto expectedCrop = converted.copy(sourceRegion);
+        if (!regionRead || !hasSamePixels(cropped, expectedCrop)) {
+            std::cerr << "sRGB ROI mismatch: format=" << int(format) << " read=" << regionRead
+                      << " converted=" << converted.width() << 'x' << converted.height()
+                      << " expectedCrop=" << expectedCrop.width() << 'x' << expectedCrop.height()
+                      << '\n';
+            for (int y = 0; regionRead && y < cropped.height() && y < expectedCrop.height(); ++y) {
+                bool found = false;
+                for (int x = 0; x < cropped.width() && x < expectedCrop.width(); ++x) {
+                    const auto actual = cropped.pixelColor(x, y);
+                    const auto expected = expectedCrop.pixelColor(x, y);
+                    if (actual == expected)
+                        continue;
+                    std::cerr << "source=" << sourceRegion.x() + x << ',' << sourceRegion.y() + y
+                              << " actual=" << actual.red() << ',' << actual.green() << ','
+                              << actual.blue() << ',' << actual.alpha()
+                              << " expected=" << expected.red() << ',' << expected.green() << ','
+                              << expected.blue() << ',' << expected.alpha() << '\n';
+                    found = true;
+                    break;
+                }
+                if (found)
+                    break;
+            }
+        }
+        require(regionRead && hasSamePixels(cropped, expectedCrop),
+                "sRGB ROI rows preserve ICC/alpha/mono rounding and nonzero crop coordinates");
+        require(!source.readRegion(QRect(-1, 0, 1, 1), 4, cropped.bits(), cropped.sizeInBytes()) &&
+                    !source.readRegion(sourceRegion, 1, cropped.bits(), cropped.sizeInBytes()) &&
+                    !source.readRegion(sourceRegion, sourceRegion.width() * 4,
+                                       const_cast<uchar*>(original.constBits()),
+                                       original.sizeInBytes()),
+                "sRGB ROI callbacks reject invalid ranges, stride and source overlap");
+
+        std::atomic_bool concurrentPixelsMatch = true;
+        const auto copiedSource = source;
+        const auto readConcurrently = [&](bool regions) {
+            QImage tile(QSize(19, 1), QImage::Format_RGBA8888);
+            QImage row(QSize(33, 1), QImage::Format_RGBA8888);
+            if (tile.isNull() || row.isNull()) {
+                concurrentPixelsMatch = false;
+                return;
+            }
+            for (int index = 0; index < 12; ++index) {
+                const int y = index * 17;
+                if (regions) {
+                    if (!copiedSource.readRegion(QRect(7, y, 19, 1), tile.bytesPerLine(),
+                                                 tile.bits(), tile.sizeInBytes()) ||
+                        std::memcmp(tile.constBits(), converted.constScanLine(y) + 7 * 4, 19 * 4) !=
+                            0)
+                        concurrentPixelsMatch = false;
+                } else if (!source.readRows(y, 1, row.bytesPerLine(), row.bits(),
+                                            row.sizeInBytes()) ||
+                           std::memcmp(row.constBits(), converted.constScanLine(y), 33 * 4) != 0)
+                    concurrentPixelsMatch = false;
+            }
+        };
+        std::thread rowsThread(readConcurrently, false);
+        std::thread regionsThread(readConcurrently, true);
+        rowsThread.join();
+        regionsThread.join();
+        require(concurrentPixelsMatch,
+                "copied row and ROI callbacks share a synchronized bounded conversion reader");
+
+        const QSize output(13, 193);
+        QImage reference(output, QImage::Format_RGBA8888);
+        QString error;
+        require(snow_shot::image_codec::resizeToRgba8(source, output, reference.bits(),
+                                                      reference.bytesPerLine(),
+                                                      reference.sizeInBytes(), &error),
+                "produce full resize reference");
+        auto lazy = snow_shot::image_codec::resizedRowSource(source, output, &error);
+        require(lazy.isValid() && lazy.backingImage.isNull() && lazy.readRegion && error.isEmpty(),
+                "lazy resizing prepares row filters without a complete output raster");
+        require(original.colorTable() == originalPalette,
+                "reference and sRGB ROI/resize reads must preserve immutable source palettes");
+        original.fill(Qt::red);
+        QImage actual(output, QImage::Format_RGBA8888);
+        for (int first = output.height() - 1; first >= 0; --first)
+            require(lazy.readRows(first, 1, actual.bytesPerLine(), actual.scanLine(first),
+                                  actual.sizeInBytes() - first * actual.bytesPerLine()),
+                    "lazy resize supports reverse-order reads through its bounded tile cache");
+        require(
+            hasSamePixels(actual, reference),
+            "lazy resize rows must be bit-identical to full-image resize after caller mutation");
+        const QRect region(3, 71, 7, 11);
+        QImage tile(region.size(), QImage::Format_RGBA8888);
+        require(lazy.readRegion(region, tile.bytesPerLine(), tile.bits(), tile.sizeInBytes()) &&
+                    hasSamePixels(tile, reference.copy(region)),
+                "lazy resize ROI uses global filter coordinates");
+        const auto resources = snow_shot::image_codec::resizeResources(source.size, output);
+        const auto synchronous = snow_shot::image_codec::resizeWorkingBytes(source.size, output);
+        require(resources && synchronous && resources->retainedBytes > 0 &&
+                    *synchronous <= resources->retainedBytes + resources->scratchBytes,
+                "resize admission separates retained plan/cache bytes from shared read scratch");
+    }
+    QImage opaque(QSize(19, 17), QImage::Format_RGB32);
+    opaque.fill(Qt::green);
+    auto source = snow_shot::image_codec::srgbRowSource(opaque);
+    require(source.isKnownOpaque &&
+                !snow_shot::image_codec::srgbRowSource(testImage()).isKnownOpaque,
+            "source opacity hints follow structural alpha rather than assuming RGBA is opaque");
+    bool cancelled = false;
+    source.cancellationRequested = [&] { return cancelled; };
+    int reservations = 0;
+    source.reserveResources = [&](qint64, qint64, QString*) -> std::shared_ptr<void> {
+        ++reservations;
+        return std::make_shared<int>(1);
+    };
+    auto lazy = snow_shot::image_codec::resizedRowSource(source, QSize(11, 9));
+    require(lazy.isValid() && lazy.isKnownOpaque && lazy.reserveResources && reservations == 0,
+            "lazy rows propagate admission/opacity contracts without double reservation");
+    auto rowOnly = source;
+    rowOnly.backingImage = {};
+    auto rowOnlyResize = snow_shot::image_codec::resizedRowSource(rowOnly, QSize(11, 9));
+    auto* wrappedDestination =
+        reinterpret_cast<uchar*>(std::numeric_limits<std::uintptr_t>::max() - 7U);
+    require(rowOnlyResize.isValid() && !rowOnlyResize.readRows(0, 1, 44, wrappedDestination, 44),
+            "row-only lazy resize rejects a wrapped destination before reading source pixels");
+    cancelled = true;
+    QImage output(lazy.size, QImage::Format_RGBA8888);
+    require(!lazy.readRows(0, output.height(), output.bytesPerLine(), output.bits(),
+                           output.sizeInBytes()) &&
+                !snow_shot::image_codec::resizedRowSource(source, QSize(7, 5)).isValid(),
+            "lazy resize honors cancellation during both reads and preparation");
+}
+
+void translucentWideGamutRowsKeepStraightAlphaThroughResizeAndEncoding() {
+    for (const auto format :
+         {QImage::Format_ARGB32_Premultiplied, QImage::Format_RGBA64_Premultiplied}) {
+        QImage original(QSize(19, 11), format);
+        original.fill(QColor(190, 40, 20, 110));
+        original.setColorSpace(QColorSpace::DisplayP3);
+        const QImage reference = original.copy()
+                                     .convertedToColorSpace(QColorSpace::SRgb)
+                                     .convertToFormat(QImage::Format_RGBA8888);
+        const QColor expected = reference.pixelColor(0, 0);
+        require(expected.alpha() == 110 && expected.red() > expected.alpha(),
+                "translucent P3 fixture distinguishes straight red from premultiplied red");
+        const auto source = snow_shot::image_codec::srgbRowSource(original);
+        QImage rows(source.size, QImage::Format_RGBA8888);
+        require(
+            source.readRows(0, rows.height(), rows.bytesPerLine(), rows.bits(),
+                            rows.sizeInBytes()) &&
+                hasSamePixels(rows, reference),
+            "P3 row conversion publishes straight alpha channels without double premultiplication");
+        const auto png = snow_shot::image_codec::encodePng(source, 0);
+        require(!png.isEmpty() && hasSamePixels(QImage::fromData(png, "PNG"), reference),
+                "P3 row encoding preserves straight translucent RGB and alpha");
+
+        const QSize target(7, 5);
+        QImage expectedResize(target, QImage::Format_RGBA8888);
+        expectedResize.fill(expected);
+        QImage actual(target, QImage::Format_RGBA8888);
+        require(snow_shot::image_codec::resizeToRgba8(
+                    source, target, actual.bits(), actual.bytesPerLine(), actual.sizeInBytes()) &&
+                    hasSamePixels(actual, expectedResize),
+                "native P3 resize keeps a flat translucent field's straight channels");
+        const auto lazy = snow_shot::image_codec::resizedRowSource(source, target);
+        require(lazy.isValid() &&
+                    lazy.readRegion(QRect(QPoint(), target), actual.bytesPerLine(), actual.bits(),
+                                    actual.sizeInBytes()) &&
+                    hasSamePixels(actual, expectedResize),
+                "lazy P3 resize ROI keeps straight alpha throughout filtering");
+    }
+}
+
+void croppedRowsDoNotRejectDestinationsAfterTheirLastPixel() {
+    for (const auto format : {QImage::Format_RGBA8888, QImage::Format_RGBA64_Premultiplied}) {
+        constexpr int width = 7;
+        constexpr int height = 3;
+        constexpr qsizetype sourceStride = 128;
+        QByteArray storage(sourceStride * height + width * height * 4, char(0));
+        QImage source(reinterpret_cast<uchar*>(storage.data()), width, height, sourceStride,
+                      format);
+        source.setColorSpace(QColorSpace::SRgb);
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x)
+                source.setPixelColor(x, y, QColor(20 + x * 10, 40 + y * 20, 80, 127));
+        const auto expected = source.convertToFormat(QImage::Format_RGBA8888).copy();
+        const qsizetype lastPixel = (height - 1) * sourceStride + width * source.depth() / 8;
+        auto* destination = reinterpret_cast<uchar*>(storage.data()) + lastPixel;
+        auto rows = snow_shot::image_codec::srgbRowSource(source);
+        require(rows.readRows(0, height, width * 4, destination, width * height * 4),
+                "cropped strided rows permit output after their last source pixel");
+        QImage actual(destination, width, height, width * 4, QImage::Format_RGBA8888);
+        require(hasSamePixels(actual, expected) &&
+                    hasSamePixels(source.convertToFormat(QImage::Format_RGBA8888), expected),
+                "adjacent output writes preserve every crop pixel and correct RGBA conversion");
+    }
 }
 
 void pngCacheBudgetEvictsLeastRecentlyUsedResults() {
@@ -1956,6 +2543,11 @@ int main(int argc, char** argv) {
         logging.mirrorToConsole = false;
         auto& diagnostics = snow_shot::diagnostics::DiagnosticsService::instance();
         require(diagnostics.initialize(logging), "export diagnostics must initialize");
+        if (application.arguments().contains(QStringLiteral("--window-variables-only"))) {
+            windowNamesSurviveAsynchronousFileExports();
+            diagnostics.shutdown();
+            return EXIT_SUCCESS;
+        }
         clipboardPlacementIsAnImmutableArtifactProperty();
         {
             QObject receiver;
@@ -2028,22 +2620,46 @@ int main(int argc, char** argv) {
         }
         if (application.arguments().contains(QStringLiteral("--configured-directory-only"))) {
             configuredAutomaticDirectoryResolvesInTheSaveWorker();
+            saveDirectoryTemplatesUseRequestTime();
+            windowNamesSurviveAsynchronousFileExports();
             return EXIT_SUCCESS;
         }
         if (application.arguments().contains(QStringLiteral("--row-source-only"))) {
             rowRequestsCoalesceAndReuseBackingImage();
             convertedRowSourcesRetainOriginalPixelsWithoutMaterializing();
+            lazyResizeRowsAndRegionsPreserveFullImagePixels();
+            translucentWideGamutRowsKeepStraightAlphaThroughResizeAndEncoding();
+            croppedRowsDoNotRejectDestinationsAfterTheirLastPixel();
             boundedExportRowsTests();
+            return EXIT_SUCCESS;
+        }
+        if (application.arguments().contains(QStringLiteral("--clipboard-fusion-only"))) {
+            clipboardPreparationFusesRowsAndClonesNativeOwnership();
+            coldClipboardRequestsShareCanonicalRowsAndRetryFailures();
+            cancelledColdClipboardRetainsConsumerLeaseUntilWorkerRetires();
+            latePngSubscriberRetainsLeaseDuringFusedClipboardCancellation();
+            clipboardSharesPendingConfiguredEncoding();
+            clipboardReusesConfiguredPng();
+            cancellationSuppressesPendingCallbacks();
+            return EXIT_SUCCESS;
+        }
+        if (application.arguments().contains(QStringLiteral("--clipboard-files-only"))) {
+            clipboardFilesUseTemporaryStorageAndKeepExportOptions();
             return EXIT_SUCCESS;
         }
         quickSaveUsesOnlyConfiguredOutput();
         clipboardFilesUseTemporaryStorageAndKeepExportOptions();
         automaticSavesUseRequestedEncoding();
         configuredAutomaticDirectoryResolvesInTheSaveWorker();
+        saveDirectoryTemplatesUseRequestTime();
         clipboardUsesConfiguredCompression();
         manualPngSavesUseTheirRequestedCompression();
         clipboardSharesPendingConfiguredEncoding();
         clipboardReusesConfiguredPng();
+        clipboardPreparationFusesRowsAndClonesNativeOwnership();
+        coldClipboardRequestsShareCanonicalRowsAndRetryFailures();
+        cancelledColdClipboardRetainsConsumerLeaseUntilWorkerRetires();
+        latePngSubscriberRetainsLeaseDuringFusedClipboardCancellation();
         clipboardIgnoresCachedPngWithDifferentCompression();
         failedPngRequestsCanRetryWithoutInvalidatingOtherLevels();
         matchingRequestsSurviveSubscriberDestruction();
@@ -2063,6 +2679,9 @@ int main(int argc, char** argv) {
         encodingFailureFansOutOnce();
         rowRequestsCoalesceAndReuseBackingImage();
         convertedRowSourcesRetainOriginalPixelsWithoutMaterializing();
+        lazyResizeRowsAndRegionsPreserveFullImagePixels();
+        translucentWideGamutRowsKeepStraightAlphaThroughResizeAndEncoding();
+        croppedRowsDoNotRejectDestinationsAfterTheirLastPixel();
         boundedExportRowsTests();
         pngCacheBudgetEvictsLeastRecentlyUsedResults();
         oversizedPngStillFansOutWithoutRetention();

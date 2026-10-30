@@ -347,6 +347,8 @@ mod tests {
 
     fn pointer(event_type: PointerEventType, position: Point<f64>) -> PointerEvent {
         PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 7,
             event_type,
             device: PointerDevice::Pen,

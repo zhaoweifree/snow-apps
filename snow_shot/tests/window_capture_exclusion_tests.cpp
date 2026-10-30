@@ -2,6 +2,9 @@
 #include "presentation/capture/windowinputtransparency.h"
 
 #include <QApplication>
+#ifdef Q_OS_WIN
+#include "platform/windows/captureexclusioncomposition.h"
+#endif
 
 #include <cstdlib>
 #include <iostream>
@@ -322,10 +325,70 @@ void inputTransparencyDoesNotRestoreAnObsoleteNativeWindow() {
     guard.restore();
     require(calls == 1, "cleanup must not recreate or modify an obsolete native window");
 }
+
+#ifdef Q_OS_WIN
+void compositionFallbackOnlyRetriesTheAffectedFailure() {
+    using namespace snow_shot::platform::windows::detail;
+    for (const int build :
+         {18363, 19041, 19044, 19045, 22000, 22621, 22631, 26099, 26100, 26200, 26300}) {
+        for (const bool excluded : {false, true}) {
+            for (const DWORD error :
+                 {ERROR_SUCCESS, ERROR_NOT_ENOUGH_MEMORY, ERROR_ACCESS_DENIED}) {
+                for (const bool fallbackAvailable : {false, true}) {
+                    for (const bool retrySucceeds : {false, true}) {
+                        int attempts = 0;
+                        int fallbacks = 0;
+                        bool compositionApplied = false;
+                        const bool actual = setCaptureExclusionWithCompositionFallback(
+                            excluded, 10, build,
+                            [&]() -> CaptureExclusionResult {
+                                ++attempts;
+                                if (attempts == 1)
+                                    return {error == ERROR_SUCCESS, error};
+                                require(compositionApplied,
+                                        "affinity retry must follow the rendering upgrade");
+                                return {retrySucceeds, ERROR_NOT_ENOUGH_MEMORY};
+                            },
+                            [&]() {
+                                ++fallbacks;
+                                compositionApplied = fallbackAvailable;
+                                return fallbackAvailable;
+                            });
+                        const bool affected = build >= 19041 && build < 26100 && excluded &&
+                                              error == ERROR_NOT_ENOUGH_MEMORY;
+                        const bool retried = affected && fallbackAvailable;
+                        require(fallbacks == (affected ? 1 : 0),
+                                "only error 8 in the compatibility range may request fallback");
+                        require(attempts == (retried ? 2 : 1),
+                                "affinity must retry once only after an available fallback");
+                        require(actual == (error == ERROR_SUCCESS || (retried && retrySucceeds)),
+                                "result must reflect native success or the single retry result");
+                    }
+                }
+            }
+        }
+    }
+    require(!supportsCaptureExclusionCompositionFallback(6, 19041) &&
+                !supportsCaptureExclusionCompositionFallback(11, 19041),
+            "unrelated OS major versions must not enter the compatibility path");
+
+    QWidget offscreenWindow(nullptr, Qt::Tool | Qt::FramelessWindowHint);
+    offscreenWindow.setAttribute(Qt::WA_TranslucentBackground);
+    enableCaptureExclusionCompositionFallback(&offscreenWindow);
+    require(!applyCaptureExclusionCompositionFallback(&offscreenWindow),
+            "offscreen Qt platforms cannot apply native composition");
+    require(offscreenWindow.internalWinId() == 0 && !offscreenWindow.isVisible() &&
+                offscreenWindow.children().isEmpty(),
+            "fallback registration must not create native or GPU surfaces");
+}
+#endif
 } // namespace
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
+#ifdef Q_OS_WIN
+    compositionFallbackOnlyRetriesTheAffectedFailure();
+#endif
     for (bool overlaySucceeds : {false, true}) {
         for (bool toolbarSucceeds : {false, true}) {
             scrollingExclusionAttemptsAreIndependent(overlaySucceeds, toolbarSucceeds);

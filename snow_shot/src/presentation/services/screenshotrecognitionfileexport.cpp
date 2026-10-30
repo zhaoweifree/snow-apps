@@ -1,4 +1,5 @@
 #include "snow_shot/presentation/screenshotrecognitionfileexport.h"
+#include "snow_shot/storage/exportfilename.h"
 
 #include <QAbstractButton>
 #include <QCoreApplication>
@@ -7,11 +8,260 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QTemporaryFile>
+#if SNOW_SHOT_ENABLE_TABLE_RECOGNITION
+#include <QScopeGuard>
+#include <QXmlStreamWriter>
+#include <mz.h>
+#include <mz_strm.h>
+#include <mz_strm_mem.h>
+#include <mz_zip.h>
+#include <mz_zip_rw.h>
+#include <algorithm>
+#endif
 
 namespace {
 QString message(const char* source) {
     return QCoreApplication::translate("ScreenshotRecognitionFileExport", source);
 }
+
+#if SNOW_SHOT_ENABLE_TABLE_RECOGNITION
+QString cellReference(int row, int column) {
+    QString reference;
+    for (++column; column > 0; column = (column - 1) / 26)
+        reference.prepend(QChar(u'A' + (column - 1) % 26));
+    return reference + QString::number(row + 1);
+}
+
+QString spreadsheetText(const QString& text) {
+    QString result;
+    for (qsizetype index = 0; index < text.size(); ++index) {
+        const QChar character = text.at(index);
+        // SpreadsheetML escapes control characters and literal escape sequences separately.
+        const bool escapePrefix =
+            character == u'_' && index + 6 < text.size() && text.at(index + 1) == u'x' &&
+            text.at(index + 6) == u'_' &&
+            std::all_of(text.cbegin() + index + 2, text.cbegin() + index + 6, [](QChar value) {
+                return (value >= u'0' && value <= u'9') || (value >= u'a' && value <= u'f') ||
+                       (value >= u'A' && value <= u'F');
+            });
+        if (escapePrefix ||
+            (character.unicode() < 0x20 && character != u'\n' && character != u'\t') ||
+            character == QChar(0xfffe) || character == QChar(0xffff)) {
+            result += QStringLiteral("_x%1_").arg(
+                QString::number(static_cast<uint>(character.unicode()), 16)
+                    .rightJustified(4, QLatin1Char('0'))
+                    .toUpper());
+        } else {
+            result += character;
+        }
+    }
+    return result;
+}
+
+QByteArray tableWorkbook(const ScreenshotTableDocument& document) {
+    if (document.empty() || document.rowCount() > 1048576 || document.columnCount() > 16384)
+        return {};
+    void* stream = mz_stream_mem_create();
+    if (!stream)
+        return {};
+    const auto streamGuard = qScopeGuard([&] { mz_stream_mem_delete(&stream); });
+    if (mz_stream_mem_open(stream, nullptr, MZ_OPEN_MODE_CREATE | MZ_OPEN_MODE_READWRITE) != MZ_OK)
+        return {};
+    void* writer = mz_zip_writer_create();
+    if (!writer)
+        return {};
+    const auto writerGuard = qScopeGuard([&] { mz_zip_writer_delete(&writer); });
+    if (mz_zip_writer_open(writer, stream, 0) != MZ_OK)
+        return {};
+    const auto addXml = [writer](const char* name, QStringView root, QStringView nameSpace,
+                                 const auto& fill) {
+        QByteArray bytes;
+        QXmlStreamWriter xml(&bytes);
+        xml.writeStartDocument();
+        xml.writeStartElement(root);
+        xml.writeDefaultNamespace(nameSpace);
+        fill(xml);
+        xml.writeEndElement();
+        xml.writeEndDocument();
+        if (xml.hasError())
+            return false;
+        mz_zip_file entry{};
+        entry.filename = name;
+        entry.compression_method = MZ_COMPRESS_METHOD_DEFLATE;
+        return mz_zip_writer_add_buffer(writer, bytes.constData(),
+                                        static_cast<int32_t>(bytes.size()), &entry) == MZ_OK;
+    };
+    constexpr auto spreadsheetNamespace =
+        u"http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    constexpr auto relationshipNamespace =
+        u"http://schemas.openxmlformats.org/package/2006/relationships";
+    const auto relationship = [](QXmlStreamWriter& xml, QStringView id, QStringView type,
+                                 QStringView target) {
+        xml.writeEmptyElement(u"Relationship");
+        xml.writeAttribute(u"Id", id);
+        xml.writeAttribute(u"Type", QStringLiteral("http://schemas.openxmlformats.org/"
+                                                   "officeDocument/2006/relationships/") +
+                                        type);
+        xml.writeAttribute(u"Target", target);
+    };
+    if (!addXml(
+            "[Content_Types].xml", u"Types",
+            u"http://schemas.openxmlformats.org/package/2006/content-types",
+            [](QXmlStreamWriter& xml) {
+                xml.writeEmptyElement(u"Default");
+                xml.writeAttribute(u"Extension", u"rels");
+                xml.writeAttribute(u"ContentType",
+                                   u"application/vnd.openxmlformats-package.relationships+xml");
+                xml.writeEmptyElement(u"Default");
+                xml.writeAttribute(u"Extension", u"xml");
+                xml.writeAttribute(u"ContentType", u"application/xml");
+                const auto part = [&](QStringView name, QStringView type) {
+                    xml.writeEmptyElement(u"Override");
+                    xml.writeAttribute(u"PartName", name);
+                    xml.writeAttribute(u"ContentType", type);
+                };
+                part(u"/xl/workbook.xml",
+                     u"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml");
+                part(u"/xl/worksheets/sheet1.xml",
+                     u"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml");
+                part(u"/xl/styles.xml",
+                     u"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml");
+            }) ||
+        !addXml("_rels/.rels", u"Relationships", relationshipNamespace,
+                [&](QXmlStreamWriter& xml) {
+                    relationship(xml, u"rId1", u"officeDocument", u"xl/workbook.xml");
+                }) ||
+        !addXml("xl/workbook.xml", u"workbook", spreadsheetNamespace,
+                [](QXmlStreamWriter& xml) {
+                    xml.writeNamespace(
+                        u"http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                        u"r");
+                    xml.writeStartElement(u"sheets");
+                    xml.writeEmptyElement(u"sheet");
+                    xml.writeAttribute(u"name", message(QT_TRANSLATE_NOOP(
+                                                    "ScreenshotRecognitionFileExport", "Table")));
+                    xml.writeAttribute(u"sheetId", u"1");
+                    xml.writeAttribute(u"r:id", u"rId1");
+                    xml.writeEndElement();
+                }) ||
+        !addXml("xl/_rels/workbook.xml.rels", u"Relationships", relationshipNamespace,
+                [&](QXmlStreamWriter& xml) {
+                    relationship(xml, u"rId1", u"worksheet", u"worksheets/sheet1.xml");
+                    relationship(xml, u"rId2", u"styles", u"styles.xml");
+                }) ||
+        !addXml("xl/styles.xml", u"styleSheet", spreadsheetNamespace, [](QXmlStreamWriter& xml) {
+            xml.writeStartElement(u"fonts");
+            xml.writeAttribute(u"count", u"2");
+            xml.writeEmptyElement(u"font");
+            xml.writeStartElement(u"font");
+            xml.writeEmptyElement(u"b");
+            xml.writeEndElement();
+            xml.writeEndElement();
+            xml.writeStartElement(u"fills");
+            xml.writeAttribute(u"count", u"2");
+            for (const auto pattern : {u"none", u"gray125"}) {
+                xml.writeStartElement(u"fill");
+                xml.writeEmptyElement(u"patternFill");
+                xml.writeAttribute(u"patternType", pattern);
+                xml.writeEndElement();
+            }
+            xml.writeEndElement();
+            xml.writeStartElement(u"borders");
+            xml.writeAttribute(u"count", u"1");
+            xml.writeEmptyElement(u"border");
+            xml.writeEndElement();
+            for (const auto group : {u"cellStyleXfs", u"cellXfs"}) {
+                const bool cells = QStringView(group) == u"cellXfs";
+                xml.writeStartElement(group);
+                xml.writeAttribute(u"count", cells ? u"2" : u"1");
+                for (int index = 0; index < (cells ? 2 : 1); ++index) {
+                    xml.writeStartElement(u"xf");
+                    xml.writeAttribute(u"numFmtId", u"49");
+                    xml.writeAttribute(u"fontId", QString::number(index));
+                    xml.writeAttribute(u"fillId", u"0");
+                    xml.writeAttribute(u"borderId", u"0");
+                    if (cells) {
+                        xml.writeAttribute(u"xfId", u"0");
+                        xml.writeAttribute(u"applyNumberFormat", u"1");
+                        xml.writeAttribute(u"applyFont", u"1");
+                        xml.writeAttribute(u"applyAlignment", u"1");
+                        xml.writeEmptyElement(u"alignment");
+                        xml.writeAttribute(u"wrapText", u"1");
+                        xml.writeAttribute(u"vertical", u"top");
+                    }
+                    xml.writeEndElement();
+                }
+                xml.writeEndElement();
+            }
+            xml.writeStartElement(u"cellStyles");
+            xml.writeAttribute(u"count", u"1");
+            xml.writeEmptyElement(u"cellStyle");
+            xml.writeAttribute(u"name", u"Normal");
+            xml.writeAttribute(u"xfId", u"0");
+            xml.writeAttribute(u"builtinId", u"0");
+            xml.writeEndElement();
+        }))
+        return {};
+    bool validCells = true;
+    if (!addXml("xl/worksheets/sheet1.xml", u"worksheet", spreadsheetNamespace,
+                [&](QXmlStreamWriter& xml) {
+                    xml.writeEmptyElement(u"dimension");
+                    xml.writeAttribute(u"ref", QStringLiteral("A1:") +
+                                                   cellReference(document.rowCount() - 1,
+                                                                 document.columnCount() - 1));
+                    xml.writeStartElement(u"sheetData");
+                    QStringList merges;
+                    for (int row = 0; row < document.rowCount(); ++row) {
+                        xml.writeStartElement(u"row");
+                        xml.writeAttribute(u"r", QString::number(row + 1));
+                        for (int column = 0; column < document.columnCount(); ++column) {
+                            const auto* cell = document.anchorCellAt(row, column);
+                            if (!cell)
+                                continue;
+                            if (cell->text.size() > 32767) {
+                                validCells = false;
+                                return;
+                            }
+                            const QString reference = cellReference(row, column);
+                            xml.writeStartElement(u"c");
+                            xml.writeAttribute(u"r", reference);
+                            xml.writeAttribute(u"t", u"inlineStr");
+                            xml.writeAttribute(u"s", cell->header ? u"1" : u"0");
+                            xml.writeStartElement(u"is");
+                            xml.writeStartElement(u"t");
+                            xml.writeAttribute(u"xml:space", u"preserve");
+                            xml.writeCharacters(spreadsheetText(cell->text));
+                            xml.writeEndElement();
+                            xml.writeEndElement();
+                            xml.writeEndElement();
+                            if (cell->rowSpan > 1 || cell->columnSpan > 1)
+                                merges.append(reference + u':' +
+                                              cellReference(row + cell->rowSpan - 1,
+                                                            column + cell->columnSpan - 1));
+                        }
+                        xml.writeEndElement();
+                    }
+                    xml.writeEndElement();
+                    if (!merges.isEmpty()) {
+                        xml.writeStartElement(u"mergeCells");
+                        xml.writeAttribute(u"count", QString::number(merges.size()));
+                        for (const auto& range : merges) {
+                            xml.writeEmptyElement(u"mergeCell");
+                            xml.writeAttribute(u"ref", range);
+                        }
+                        xml.writeEndElement();
+                    }
+                }) ||
+        !validCells || mz_zip_writer_close(writer) != MZ_OK)
+        return {};
+    const void* buffer = nullptr;
+    int32_t length = 0;
+    if (mz_stream_mem_get_buffer(stream, &buffer) != MZ_OK)
+        return {};
+    mz_stream_mem_get_buffer_length(stream, &length);
+    return QByteArray(static_cast<const char*>(buffer), length);
+}
+#endif
 
 QString reserveTemporaryPath(const QString& directory) {
     QTemporaryFile temporary(QDir(directory).filePath(QStringLiteral(".snow-shot-XXXXXX")));
@@ -39,6 +289,8 @@ QString ScreenshotRecognitionFileExport::extension(ScreenshotRecognitionFileKind
         return QStringLiteral("html");
     case ScreenshotRecognitionFileKind::Markdown:
         return QStringLiteral("md");
+    case ScreenshotRecognitionFileKind::Table:
+        return QStringLiteral("xlsx");
     case ScreenshotRecognitionFileKind::Latex:
     case ScreenshotRecognitionFileKind::Qr:
         return QStringLiteral("txt");
@@ -54,6 +306,9 @@ QString ScreenshotRecognitionFileExport::dialogFilter(ScreenshotRecognitionFileK
     case ScreenshotRecognitionFileKind::Markdown:
         return message(
             QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport", "Markdown document (*.md)"));
+    case ScreenshotRecognitionFileKind::Table:
+        return message(
+            QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport", "Excel workbook (*.xlsx)"));
     case ScreenshotRecognitionFileKind::Latex:
     case ScreenshotRecognitionFileKind::Qr:
         return message(
@@ -81,7 +336,8 @@ QStringList ScreenshotRecognitionFileExport::outputPaths(const QString& primaryP
     if (primaryPath.isEmpty())
         return {};
     QStringList paths{primaryPath};
-    if (kind != ScreenshotRecognitionFileKind::Qr && kind != ScreenshotRecognitionFileKind::Latex) {
+    if (kind == ScreenshotRecognitionFileKind::Html ||
+        kind == ScreenshotRecognitionFileKind::Markdown) {
         QString companion = primaryPath;
         companion.chop(extension(kind).size());
         companion += QStringLiteral("txt");
@@ -113,10 +369,10 @@ bool ScreenshotRecognitionFileExport::confirmOverwrite(QWidget* owner, const QSt
 ScreenshotRecognitionFileSaveResult
 ScreenshotRecognitionFileExport::saveToPath(const ScreenshotRecognitionFileSnapshot& snapshot,
                                             const QString& path, bool allowOverwrite) {
-    if (snapshot.source.isEmpty())
+    if (!snapshot.hasContent())
         return {{},
                 message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",
-                                          "No recognition text is available to save"))};
+                                          "No recognition result is available to save"))};
     const QString primary = normalizedPath(path, snapshot.kind);
     if (primary.isEmpty())
         return {{},
@@ -140,7 +396,17 @@ ScreenshotRecognitionFileExport::saveToPath(const ScreenshotRecognitionFileSnaps
                 message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",
                                           "An output file already exists"))};
 
-    const QByteArray bytes = snapshot.source.toUtf8();
+    QByteArray bytes;
+#if SNOW_SHOT_ENABLE_TABLE_RECOGNITION
+    if (snapshot.kind == ScreenshotRecognitionFileKind::Table) {
+        bytes = tableWorkbook(*snapshot.table);
+        if (bytes.isEmpty())
+            return {{},
+                    message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",
+                                              "The Excel workbook could not be created"))};
+    } else
+#endif
+        bytes = snapshot.source.toUtf8();
     QStringList staged;
     // QVector<QString>, not QStringList: Qt5's QStringList (a QList<QString>)
     // has neither a size constructor nor resize() (QtCore/qlist.h only offers
@@ -164,7 +430,7 @@ ScreenshotRecognitionFileExport::saveToPath(const ScreenshotRecognitionFileSnaps
             rollback();
             return {{},
                     message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",
-                                              "The text file could not be staged"))};
+                                              "The result file could not be staged"))};
         }
         staged.push_back(temporary);
         QFile file(temporary);
@@ -214,7 +480,7 @@ ScreenshotRecognitionFileExport::saveToPath(const ScreenshotRecognitionFileSnaps
             rollback();
             return {{},
                     message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",
-                                              "The text file could not be published"))};
+                                              "The result file could not be published"))};
         }
         published.push_back(paths.at(index));
     }
@@ -228,10 +494,10 @@ ScreenshotRecognitionFileExport::saveToPath(const ScreenshotRecognitionFileSnaps
 ScreenshotRecognitionFileSaveResult
 ScreenshotRecognitionFileExport::quickSave(const ScreenshotRecognitionFileSnapshot& snapshot,
                                            const QString& directory, const QString& baseName) {
-    if (snapshot.source.isEmpty())
+    if (!snapshot.hasContent())
         return {{},
                 message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",
-                                          "No recognition text is available to save"))};
+                                          "No recognition result is available to save"))};
     if (directory.trimmed().isEmpty())
         return {{},
                 message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",
@@ -247,10 +513,18 @@ ScreenshotRecognitionFileExport::quickSave(const ScreenshotRecognitionFileSnapsh
                 message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",
                                           "The output directory could not be created"))};
     for (int suffix = 0; suffix < 1000000; ++suffix) {
-        const QString candidateBase =
-            suffix == 0 ? baseName : QStringLiteral("%1_%2").arg(baseName).arg(suffix);
-        const QString path =
-            QDir(target).filePath(candidateBase + QLatin1Char('.') + extension(snapshot.kind));
+        const QString ending = (suffix == 0 ? QString() : QStringLiteral("_%1").arg(suffix)) +
+                               QLatin1Char('.') + extension(snapshot.kind);
+        // A Markdown companion has a longer extension than its primary file. Reserve enough
+        // space for every output so the pair always shares the same bounded stem.
+        QString longestEnding = ending;
+        for (const QString& output : outputPaths(ending, snapshot.kind)) {
+            if (output.toUtf8().size() > longestEnding.toUtf8().size())
+                longestEnding = output;
+        }
+        QString stem = snow_shot::storage::composeExportFileName(baseName, longestEnding);
+        stem.chop(longestEnding.size());
+        const QString path = QDir(target).filePath(stem + ending);
         if (existingPaths(outputPaths(path, snapshot.kind)).isEmpty()) {
             const auto result = saveToPath(snapshot, path);
             if (result.error != message(QT_TRANSLATE_NOOP("ScreenshotRecognitionFileExport",

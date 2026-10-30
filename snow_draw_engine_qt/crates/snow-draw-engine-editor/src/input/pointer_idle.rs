@@ -25,6 +25,7 @@ impl Editor {
         match self.state.active_tool {
             ActiveTool::Select | ActiveTool::Text => true,
             ActiveTool::SerialNumber => document.is_text_bound_to_serial_number(id),
+            ActiveTool::Shape => !document.shapes_for_text(id).is_empty(),
             _ => false,
         }
     }
@@ -351,6 +352,10 @@ impl Editor {
                     self.snap_creation_start_position(canvas_point, event.modifiers);
                 self.state.interaction =
                     InteractionState::CreatingRectangle(CreateRectangleState {
+                        stroke_rendering_seed: snow_draw_engine_core::arrow::stroke_rendering_seed(
+                            document.peek_next_element_id().index,
+                            document.peek_next_element_id().generation,
+                        ),
                         pointer_id: event.pointer_id,
                         start_canvas_position,
                     });
@@ -364,7 +369,12 @@ impl Editor {
             ToolEmptyCanvasAction::CreateArrow => {
                 let start_canvas_position =
                     self.snap_creation_start_position(canvas_point, event.modifiers);
-                self.begin_arrow_creation(event.pointer_id, start_canvas_position, event.position);
+                self.begin_arrow_creation(
+                    document,
+                    event.pointer_id,
+                    start_canvas_position,
+                    event.position,
+                );
                 Ok(InteractionOutput {
                     consumed: true,
                     capture: self.capture_command_for_start(event.pointer_id),
@@ -376,6 +386,10 @@ impl Editor {
                     self.snap_creation_start_position(canvas_point, event.modifiers);
                 self.state.interaction =
                     InteractionState::CreatingRectangle(CreateRectangleState {
+                        stroke_rendering_seed: snow_draw_engine_core::arrow::stroke_rendering_seed(
+                            document.peek_next_element_id().index,
+                            document.peek_next_element_id().generation,
+                        ),
                         pointer_id: event.pointer_id,
                         start_canvas_position,
                     });
@@ -391,6 +405,7 @@ impl Editor {
                     self.snap_creation_start_position(canvas_point, event.modifiers);
                 self.state.interaction =
                     InteractionState::CreatingPenHighlight(CreateRectangleState {
+                        stroke_rendering_seed: 0,
                         pointer_id: event.pointer_id,
                         start_canvas_position,
                     });
@@ -404,7 +419,7 @@ impl Editor {
             ToolEmptyCanvasAction::CreateFreeDraw => {
                 let start_canvas_position =
                     self.snap_creation_start_position(canvas_point, event.modifiers);
-                self.begin_free_draw_creation(event.pointer_id, start_canvas_position);
+                self.begin_free_draw_creation(event, start_canvas_position);
                 Ok(InteractionOutput {
                     consumed: true,
                     capture: self.capture_command_for_start(event.pointer_id),
@@ -640,6 +655,9 @@ mod empty_canvas_selection_tests {
             id,
             ElementMeta::default(),
             RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 rectangle_kind: RectangleElementKind::Rectangle,
                 highlight_shape: HighlightShape::Rectangle,
                 center: Point::new(0.0, 0.0),
@@ -697,6 +715,8 @@ mod empty_canvas_selection_tests {
 
     fn pointer(event_type: PointerEventType, position: Point<f64>) -> InputEvent {
         InputEvent::Pointer(PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 1,
             event_type,
             device: PointerDevice::Mouse,

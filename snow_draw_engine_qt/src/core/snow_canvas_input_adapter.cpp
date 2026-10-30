@@ -9,6 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <QMouseEvent>
+#include <QTabletEvent>
 #include <QWheelEvent>
 
 QCursor snowCanvasCornerRadiusCursor(qreal devicePixelRatio) {
@@ -101,11 +102,43 @@ SnowInputEvent makePointerInput(const QMouseEvent& event, SnowPointerEventType e
     // Qt6 renamed `localPos()` to `position()`; both are the event position in the
     // widget's own coordinates, which is what the adapter wants.
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    return makePointerInput(event.position(), event.button(), event.buttons(), event.modifiers(),
-                            eventType);
+    auto input = makePointerInput(event.position(), event.button(), event.buttons(),
+                                  event.modifiers(), eventType);
 #else
-    return makePointerInput(event.localPos(), event.button(), event.buttons(), event.modifiers(),
-                            eventType);
+    auto input = makePointerInput(event.localPos(), event.button(), event.buttons(),
+                                  event.modifiers(), eventType);
+#endif
+    input.pointer.timestamp_ms = event.timestamp();
+    return input;
+}
+
+SnowInputEvent makePointerInput(const QTabletEvent& event, SnowPointerEventType eventType) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    auto input = makePointerInput(event.position(), event.button(), event.buttons(),
+                                  event.modifiers(), eventType);
+#else
+    // Qt5 exposes the same logical position as posF().
+    auto input = makePointerInput(event.posF(), event.button(), event.buttons(),
+                                  event.modifiers(), eventType);
+#endif
+    input.pointer.pointer_id = 2;
+    input.pointer.device = SNOW_POINTER_DEVICE_PEN;
+    input.pointer.timestamp_ms = event.timestamp();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    if (event.pointingDevice() != nullptr &&
+        event.pointingDevice()->capabilities().testFlag(QInputDevice::Capability::Pressure) &&
+        std::isfinite(event.pressure())) {
+        input.pointer.has_pressure = 1;
+        input.pointer.pressure = std::clamp(event.pressure(), 0.0, 1.0);
+    }
+#else
+    // Qt5 has no QTabletEvent::pointingDevice(), so there is no capability query to
+    // gate on: pressure() is already normalised to 0..1 and stays 0 for a stylus
+    // without a pressure axis, which is exactly "no pressure to report".
+    if (std::isfinite(event.pressure()) && event.pressure() > 0.0) {
+        input.pointer.has_pressure = 1;
+        input.pointer.pressure = std::clamp(event.pressure(), 0.0, 1.0);
+    }
 #endif
 }
 

@@ -1,4 +1,4 @@
-"""Publish audited local release files directly to Gitee, without GitHub downloads."""
+"""Publish only audited update and installer downloads to Gitee."""
 
 import argparse
 import base64
@@ -21,6 +21,8 @@ from urllib.request import urlopen
 GITEE_REPOSITORY = "mg-chao/snow-apps"
 GITEE_API = f"https://gitee.com/api/v5/repos/{GITEE_REPOSITORY}/releases"
 GITEE_GIT = f"https://gitee.com/{GITEE_REPOSITORY}.git"
+# Use decimal GB so the publication fits either a GB or GiB quota.
+GITEE_ATTACHMENT_LIMIT = 1_000_000_000
 TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
                  r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?_snow-shot$")
 
@@ -87,19 +89,48 @@ def git_with_gitee_auth(token: str, username: str, *args: str) -> str:
     return subprocess.check_output(("git", *args), text=True, env=environment).strip()
 
 
-def sync_tag(tag: str, commit: str, token: str, username: str) -> None:
+def release_marker(tag: str, commit: str, directory: Path) -> str:
+    """Create a deterministic root commit without application source or history."""
+    run("git", "init", "--bare", "--quiet", "--object-format=sha1", str(directory))
+    record = json.dumps({"schema": 1, "tag": tag, "sourceCommit": commit,
+                         "sourceRepository": f"https://github.com/{GITEE_REPOSITORY}"},
+                        sort_keys=True, indent=2) + "\n"
+    blob = subprocess.check_output(("git", "-C", str(directory), "hash-object", "-w", "--stdin"),
+                                   input=record.encode('utf-8')).decode('ascii').strip()
+    tree = subprocess.check_output(("git", "-C", str(directory), "mktree"),
+                                   input=f"100644 blob {blob}\trelease.json\n".encode('ascii')).decode('ascii').strip()
+    environment = dict(os.environ,
+                       GIT_AUTHOR_NAME="Snow Shot releases", GIT_COMMITTER_NAME="Snow Shot releases",
+                       GIT_AUTHOR_EMAIL="releases@snowshot.top", GIT_COMMITTER_EMAIL="releases@snowshot.top",
+                       GIT_AUTHOR_DATE="2000-01-01T00:00:00+00:00",
+                       GIT_COMMITTER_DATE="2000-01-01T00:00:00+00:00")
+    return subprocess.check_output(("git", "-C", str(directory), "-c", "commit.gpgSign=false",
+                                    "-c", "i18n.commitEncoding=UTF-8",
+                                    "commit-tree", tree), input=f"Snow Shot {tag}\n".encode('ascii'),
+                                   env=environment).decode('ascii').strip()
+
+
+def sync_tag(tag: str, commit: str, token: str, username: str) -> str:
     refs = git_with_gitee_auth(token, username, "ls-remote", "--tags", GITEE_GIT,
                                f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
     hashes = {line.split()[0] for line in refs.splitlines() if line}
-    if hashes:
-        if commit not in hashes:
-            raise ValueError("Gitee tag points to a different source commit")
-        return
-    git_with_gitee_auth(token, username, "push", GITEE_GIT, f"refs/tags/{tag}:refs/tags/{tag}")
-    refs = git_with_gitee_auth(token, username, "ls-remote", "--tags", GITEE_GIT,
-                               f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
-    if commit not in {line.split()[0] for line in refs.splitlines() if line}:
-        raise ValueError("Gitee tag verification failed")
+    # Preserve historical tags that already reference the audited source commit.
+    if commit in hashes:
+        return commit
+    with tempfile.TemporaryDirectory(prefix="snow-gitee-tag-") as temporary:
+        directory = Path(temporary)
+        marker = release_marker(tag, commit, directory)
+        if hashes:
+            if marker not in hashes:
+                raise ValueError("Gitee tag points to a different source commit")
+            return marker
+        git_with_gitee_auth(token, username, "-C", str(directory), "push", GITEE_GIT,
+                            f"{marker}:refs/tags/{tag}")
+        refs = git_with_gitee_auth(token, username, "ls-remote", "--tags", GITEE_GIT,
+                                   f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
+        if marker not in {line.split()[0] for line in refs.splitlines() if line}:
+            raise ValueError("Gitee tag verification failed")
+        return marker
 
 
 def post_form(url: str, fields: dict[str, str], token: str, file: Path | None = None):
@@ -146,6 +177,41 @@ def delete_release(release_id: int, token: str) -> None:
             raise
     if api_json(f"{GITEE_API}/{release_id}", token) is not None:
         raise ValueError("Gitee release deletion was not confirmed")
+
+
+def prune_excluded_attachments(release_id: int, tag: str, files: list[dict],
+                               local: dict[str, Path], selected: dict[str, Path], token: str) -> int:
+    if type(release_id) is not int or release_id <= 0:
+        raise ValueError('Invalid Gitee release id for attachment deletion')
+    candidates = []
+    for file in files:
+        name = file['name']
+        if name in selected:
+            continue
+        asset_url(file, tag, name)
+        attachment_id = file.get('id')
+        if (name not in local or type(attachment_id) is not int or attachment_id <= 0 or
+                file.get('size') != local[name].stat().st_size):
+            raise ValueError(f"Excluded Gitee attachment differs from local release: {name}")
+        candidates.append((attachment_id, name))
+    if len({item[0] for item in candidates}) != len(candidates):
+        raise ValueError('Duplicate excluded Gitee attachment ids')
+    if candidates and not re.fullmatch(r"[A-Za-z0-9._-]+", token):
+        raise ValueError('Invalid Gitee token syntax')
+    for attachment_id, name in candidates:
+        url = f"{GITEE_API}/{release_id}/attach_files/{attachment_id}"
+        command = ["curl", "--fail", "--silent", "--show-error", "--max-time", "120",
+                   "--request", "DELETE", "--config", "-"]
+        config = f'url = "{url}?access_token={token}"\n'
+        try:
+            subprocess.check_output(command, input=config, text=True, encoding="utf-8")
+        except (OSError, subprocess.CalledProcessError):
+            if api_json(url, token) is not None:
+                raise
+        if api_json(url, token) is not None:
+            raise ValueError(f"Gitee attachment deletion was not confirmed: {name}")
+        print(f"Removed GitHub-only Gitee attachment {name}", flush=True)
+    return len(candidates)
 
 
 def attachments(release_id: int, token: str = "") -> list[dict]:
@@ -285,6 +351,27 @@ def check_local_asset(descriptor: dict, path: Path) -> None:
         raise ValueError(f"Local release asset differs from its audit: {descriptor['name']}")
 
 
+def gitee_assets(release: dict, assets: dict[str, Path]) -> dict[str, Path]:
+    """Select the download channel independently of GitHub/package-manager assets."""
+    version = re.escape(checked_tag(release['tag'])[1:-len('_snow-shot')])
+    package = re.compile(
+        rf"snow-shot(?:-mini)?-{version}-(?:"
+        r"windows-(?:x64|arm64)-(?:online\.exe|offline\.exe|"
+        r"online-update\.zip|offline-update\.zip|portable\.zip)|"
+        r"macos-(?:arm64|x86_64|x64)\.dmg)(?:\.sha256)?")
+    feed = re.compile(r"latest-version(?:-mini)?(?:-windows-arm64)?\.json")
+    selected = {name: path for name, path in assets.items()
+                if package.fullmatch(name) or feed.fullmatch(name) or
+                name == 'install-snow-shot-macos.sh'}
+    total = sum(path.stat().st_size for path in selected.values())
+    if total > GITEE_ATTACHMENT_LIMIT:
+        raise ValueError(f"Gitee update and installer assets total {total} bytes, exceeding the "
+                         f"{GITEE_ATTACHMENT_LIMIT}-byte (1 GB) attachment budget")
+    print(f"Gitee download assets: {len(selected)} files, {total} bytes; "
+          f"{len(assets) - len(selected)} GitHub-only assets excluded", flush=True)
+    return selected
+
+
 def prepare_homebrew(release: dict, assets: dict[str, Path], output: Path) -> None:
     """Reproduce the distribution archive from local audited bytes and tagged source."""
     if not any(re.search(r"-macos-(?:arm64|x86_64|x64)\.dmg(?:\.sha256)?$", name)
@@ -345,7 +432,8 @@ def prepare_homebrew(release: dict, assets: dict[str, Path], output: Path) -> No
 
 
 def verify_local_release(release: dict, assets: dict[str, Path], auditor: Path,
-                         mini_auditor: Path | None = None, *, require_complete: bool = False) -> None:
+                         mini_auditor: Path | None = None, *, require_complete: bool = False,
+                         skip_arm64_native_validation: bool = False) -> None:
     tag = release["tag"]
     version = tag[1:-len("_snow-shot")]
     paired = any(name.startswith('snow-shot-mini-') or name == 'latest-version-mini.json' for name in assets)
@@ -403,8 +491,10 @@ def verify_local_release(release: dict, assets: dict[str, Path], auditor: Path,
                 suffix = '.exe' if package['kind'] == 'installer' else '-update.zip' if package['kind'] == 'update' else '.zip'
                 name = f"{product}-{version}-{platform}-{package['variant']}{suffix}"
                 matches = [item for proof in proofs
-                           if proof.get('Passed') is True and proof.get('Platform') == platform
-                           and proof.get('HostPlatform') == platform
+                           if proof.get('Platform') == platform
+                           and ((proof.get('Passed') is True and proof.get('HostPlatform') == platform)
+                                or (skip_arm64_native_validation and platform == 'windows-arm64'
+                                    and proof.get('Waived') is True and proof.get('Passed') is False))
                            for item in proof.get('Artifacts', []) if item.get('Name') == name
                            and item.get('Bytes') == package['size'] and item.get('Sha256') == package['sha256']]
                 if not matches:
@@ -421,12 +511,14 @@ def verify_local_release(release: dict, assets: dict[str, Path], auditor: Path,
 
 def publish(release: dict, assets: dict[str, Path], token: str, username: str,
             verify_only: bool = False) -> None:
+    local = assets
+    assets = gitee_assets(release, assets)
     tag = release["tag"]
     prerelease = "-" in tag[1:-len("_snow-shot")]
     if not verify_only:
         if not token:
             raise ValueError("Configure GITEE_TOKEN with release write access")
-        sync_tag(tag, release["sourceCommit"], token, username)
+        target_commit = sync_tag(tag, release["sourceCommit"], token, username)
     remote = existing_release(tag, token)
     if remote is None:
         if verify_only:
@@ -435,7 +527,7 @@ def publish(release: dict, assets: dict[str, Path], token: str, username: str,
             "tag_name": tag,
             "name": release["title"], "body": release["body"],
             "prerelease": str(prerelease).lower(),
-            "target_commitish": release["sourceCommit"],
+            "target_commitish": target_commit,
         }, token)
     if remote.get("tag_name") != tag:
         raise ValueError("Gitee release tag differs")
@@ -445,21 +537,23 @@ def publish(release: dict, assets: dict[str, Path], token: str, username: str,
     if remote.get("name") != release["title"] or remote.get("body", "").strip() != release["body"].strip():
         raise ValueError("Published Gitee title or notes differ from the local release")
     release_id = remote.get("id")
-    if not isinstance(release_id, int):
+    if type(release_id) is not int or release_id <= 0:
         raise ValueError("Gitee release has no id")
     with tempfile.TemporaryDirectory(prefix="snow-gitee-release-") as temporary:
         directory = Path(temporary)
         files = attachments(release_id, token)
         names = [file.get("name") for file in files]
-        if len(names) != len(set(names)) or set(names) - set(assets):
+        if len(names) != len(set(names)) or set(names) - set(local):
             raise ValueError("Gitee has duplicate or unexpected release assets")
-        # Check all published bytes before making any new upload. A retry may fill
+        # Check all published download bytes before making any new upload. A retry may fill
         # missing files, but cannot silently replace an existing version's bytes.
         for file in files:
             name = file["name"]
+            if name not in assets:
+                continue
             print(f"Verifying existing {name}", flush=True)
             verify_attachment(file, tag, name, assets[name], directory)
-        if verify_only and set(names) != set(assets):
+        if verify_only and set(assets) - set(names):
             raise ValueError("Published Gitee release is missing local assets")
         descriptors = {item["name"]: item for item in release["assets"]}
         for name in sorted(set(assets) - set(names),
@@ -472,10 +566,13 @@ def publish(release: dict, assets: dict[str, Path], token: str, username: str,
                 post_form(f"{GITEE_API}/{release_id}/attach_files", {}, token, assets[name])
             except GiteeQuotaError:
                 # The new published entry and all existing bytes are already validated.
-                # Reclaim previous versions only for a definite quota rejection.
+                # Reclaim excluded assets and previous versions only for a definite quota rejection.
                 uploaded = [file for file in attachments(release_id, token) if file.get("name") == name]
                 if not uploaded:
-                    if not prune_old_releases(tag, token):
+                    removed = prune_excluded_attachments(release_id, tag, attachments(release_id, token),
+                                                         local, assets, token)
+                    removed += prune_old_releases(tag, token)
+                    if not removed:
                         raise
                     post_form(f"{GITEE_API}/{release_id}/attach_files", {}, token, assets[name])
             existing = [file for file in attachments(release_id, token) if file.get("name") == name]
@@ -485,10 +582,16 @@ def publish(release: dict, assets: dict[str, Path], token: str, username: str,
             verify_attachment(existing[0], tag, name, assets[name], directory)
             print(f"Verified {name}", flush=True)
         final_files = attachments(release_id, token)
-        if (len(final_files) != len(assets) or
-                {file.get("name") for file in final_files} != set(assets)):
+        final_names = [file.get("name") for file in final_files]
+        if (len(final_names) != len(set(final_names)) or set(final_names) - set(local) or
+                set(assets) - set(final_names)):
             raise ValueError("Final Gitee asset listing differs from local release")
         local_assets(release)
+        if not verify_only:
+            prune_excluded_attachments(release_id, tag, final_files, local, assets, token)
+            remaining = attachments(release_id, token)
+            if len(remaining) != len(assets) or {file.get('name') for file in remaining} != set(assets):
+                raise ValueError('Final Gitee asset listing differs from download assets')
     if not verify_only:
         prune_old_releases(tag, token)
     print(f"Published and verified local release {tag} on Gitee")
@@ -501,6 +604,8 @@ if __name__ == "__main__":
     parser.add_argument("--mini-auditor", type=Path)
     parser.add_argument("--check-auth", action="store_true")
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--skip-arm64-native-validation", action="store_true",
+                        help="Explicitly accept byte-bound ARM64 waivers; retain x64 validation")
     parser.add_argument("--prepare-homebrew", action="store_true",
                         help="Prepare local distribution archive and manifest without publishing")
     arguments = parser.parse_args()
@@ -513,9 +618,12 @@ if __name__ == "__main__":
             release = json.loads(arguments.manifest.read_text(encoding="utf-8-sig"))
             assets = local_assets(release)
             verify_local_release(release, assets, arguments.auditor, arguments.mini_auditor,
-                                 require_complete=not arguments.verify_only)
+                                 require_complete=not arguments.verify_only,
+                                 skip_arm64_native_validation=arguments.skip_arm64_native_validation)
             if arguments.prepare_homebrew:
                 prepare_homebrew(release, assets, arguments.manifest.parent / "homebrew-local")
+                # Check the Gitee budget before the orchestration publishes GitHub.
+                gitee_assets(release, local_assets(release))
                 arguments.manifest.write_text(json.dumps(release, ensure_ascii=False, indent=2) + "\n",
                                                encoding="utf-8")
             else:

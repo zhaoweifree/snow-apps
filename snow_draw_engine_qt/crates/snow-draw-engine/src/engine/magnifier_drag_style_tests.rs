@@ -47,6 +47,8 @@ fn pointer(engine: &mut Engine, viewport: ViewportId, kind: PointerEventType, po
         .process_input(
             viewport,
             InputEvent::Pointer(PointerEvent {
+                pressure: None,
+                timestamp_ms: 0,
                 pointer_id: 1,
                 event_type: kind,
                 device: PointerDevice::Mouse,

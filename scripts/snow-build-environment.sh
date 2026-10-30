@@ -3,6 +3,20 @@
 set -euo pipefail
 snow_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 snow_die() { printf '%s\n' "$*" >&2; exit 1; }
+snow_require_rust() {
+    local minimum version
+    minimum="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["rustMinimum"])' \
+        "$snow_repo_root/scripts/build-toolchain.json")"
+    version="$(cd "$snow_repo_root" && rustc --version)" || snow_die 'Unable to determine the active Rust version.'
+    python3 - "$version" "$minimum" <<'PY' || snow_die "Rust $minimum or newer is required; found: $version"
+import re
+import sys
+
+match = re.match(r"rustc (\d+)\.(\d+)\.(\d+)", sys.argv[1])
+minimum = tuple(map(int, sys.argv[2].split(".")))
+sys.exit(0 if match and tuple(map(int, match.groups())) >= minimum else 1)
+PY
+}
 snow_load_qt_policy() {
     snow_qt_version="$(python3 "$snow_repo_root/scripts/validate-static-qt.py" --print-version)" || snow_die 'The Qt toolchain policy is invalid.'
     snow_qt_source_sha256="$(python3 "$snow_repo_root/scripts/validate-static-qt.py" --print-source-sha256)" || snow_die 'The Qt source archive policy is invalid.'
@@ -74,9 +88,10 @@ snow_select_preset() {
 }
 snow_setup_tools() {
     export PATH="$snow_repo_root/.tools/macos-dev/bin:$snow_repo_root/.tools/macos-media/host/bin:$PATH"
-    for tool in cmake ninja cargo rustup pkg-config python3; do
+    for tool in cmake ninja cargo rustc rustup pkg-config python3; do
         command -v "$tool" >/dev/null || snow_die "Missing $tool. Install the prerequisites listed in docs-macos-build.md."
     done
+    snow_require_rust
     snow_require_target_tools "$snow_arch"
     snow_load_qt_policy
     export MACOSX_DEPLOYMENT_TARGET=15.0

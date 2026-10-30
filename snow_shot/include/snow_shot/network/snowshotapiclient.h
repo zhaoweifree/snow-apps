@@ -70,7 +70,6 @@ struct SnowShotTranslationRequest {
     QString targetLanguage;
     QString text;
     QString translationMode = QStringLiteral("default");
-    QString secondaryTargetLanguage = {};
 };
 
 struct SnowShotTranslationResult {
@@ -176,9 +175,13 @@ class SnowShotApiClient final : public QObject {
     int m_tableTimeoutMs = 35000;
     int m_visionTimeoutMs = 120000;
     struct Request;
-    void startLatexUpload(RequestToken token, const QByteArray& webp);
+    enum class ImageExtractionKind { Table, Latex };
+    struct ImageExtractionResult;
+    RequestToken extractImage(ImageExtractionKind kind, const QImage& image, QObject* receiver,
+                              Completion completion, LatexCompletion latexCompletion);
+    void startImageUpload(RequestToken token, const QByteArray& webp);
+    void finishImageExtraction(RequestToken token, ImageExtractionResult result);
     void finishLatex(RequestToken token, SnowShotLatexResult result);
-    void startTableUpload(RequestToken token, const QByteArray& webp);
     void cleanupRequest(Request* request);
     [[nodiscard]] QNetworkAccessManager* networkAccessManager();
     void finish(RequestToken token, SnowShotTableResult result);

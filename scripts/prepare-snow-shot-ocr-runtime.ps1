@@ -40,7 +40,7 @@ $nativeProbePassed = $false
 if ($nativeTarget) {
     $version = (& $executable --version 2>$null)
     $workerArchitecture = if ($Architecture -eq 'arm64') { 'aarch64' } else { 'x86_64' }
-    if ($LASTEXITCODE -ne 0 -or $version -cne "snow-ocr-process $runtimeVersion windows-$workerArchitecture protocol 5") {
+    if ($LASTEXITCODE -ne 0 -or $version -cne "snow-ocr-process $runtimeVersion windows-$workerArchitecture protocol 6") {
         throw "Unexpected OCR runtime identity: $version"
     }
     $nativeProbePassed = $true
@@ -54,20 +54,17 @@ if (-not ($cache -cmatch "^SNOW_WINDOWS_ARCHITECTURE:(?:STRING|INTERNAL)=$Archit
     -not ($cache -cmatch "^VCPKG_TARGET_TRIPLET:(?:STRING|INTERNAL)=$([regex]::Escape($target.Triplet))$")) {
     throw 'Configured OCR target architecture/triplet differs.'
 }
-$installed = @($cache | Where-Object { $_ -cmatch '^VCPKG_INSTALLED_DIR:PATH=' })
-if ($installed.Count -ne 1) { throw 'The configured vcpkg dependency directory is missing.' }
-$directMl = Join-Path ($installed[0] -replace '^VCPKG_INSTALLED_DIR:PATH=', '') "$($target.Triplet)/bin/DirectML.dll"
 $dumpbin = (Get-Command dumpbin.exe -ErrorAction Stop).Source
-foreach ($binary in @($executable, $directMl)) {
+foreach ($binary in @($executable)) {
     Assert-SnowPeArchitecture -Path $binary -Architecture $Architecture
     $imports = @(& $dumpbin /nologo /dependents $binary 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Cannot inspect OCR runtime dependencies: $binary" }
     foreach ($line in $imports) {
         if ($line -notmatch '^\s+([A-Za-z0-9_.-]+\.dll)\s*$') { continue }
         $dependency = $Matches[1]
-        if ($dependency -match '^(?:api|ext)-ms-' -or $dependency -ieq 'DirectML.dll') { continue }
+        if ($dependency -match '^(?:api|ext)-ms-') { continue }
         if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32/$dependency") -PathType Leaf) -or
-            $dependency -match '^(?:onnxruntime|Qt\d|vcruntime|msvcp)') {
+            $dependency -match '^(?:directml|onnxruntime|Qt\d|vcruntime|msvcp)') {
             throw "Unbundled OCR runtime dependency: $dependency"
         }
     }
@@ -81,13 +78,11 @@ function Get-RuntimeFile([string]$Path, [string]$Name) {
 $stage = Join-Path $buildRoot "ocr-runtime-prepare-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item -LiteralPath $executable -Destination (Join-Path $stage $runtimeName)
-Copy-Item -LiteralPath $directMl -Destination (Join-Path $stage 'DirectML.dll')
 $payload = @(
-    (Get-RuntimeFile (Join-Path $stage $runtimeName) $runtimeName),
-    (Get-RuntimeFile (Join-Path $stage 'DirectML.dll') 'DirectML.dll')
+    (Get-RuntimeFile (Join-Path $stage $runtimeName) $runtimeName)
 )
 $runtimeManifest = Join-Path $stage 'runtime-manifest.json'
-[ordered]@{ schema = 1; version = $runtimeVersion; platform = $platform; protocol = 5; files = $payload } |
+[ordered]@{ schema = 1; version = $runtimeVersion; platform = $platform; protocol = 6; files = $payload } |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $runtimeManifest -Encoding utf8
 $files = @($payload) + @((Get-RuntimeFile $runtimeManifest 'runtime-manifest.json'))
 $stagedArchive = Join-Path $buildRoot "$archiveName.pending"

@@ -26,6 +26,7 @@ use snow_recording_export::{
 };
 use snow_recording_model::{VideoEncodeConfig, VideoEncodingSpeed};
 
+use crate::RecordingState;
 use crate::adapter::video::resolve_capture_target;
 #[cfg(any(feature = "bench-stage-timing", feature = "bench-compositor-timing"))]
 use crate::bench_timing::StageHistogram;
@@ -43,7 +44,6 @@ use crate::mouse_hook::MouseClickObservation;
 use crate::mouse_hook::MouseHookObserver;
 #[cfg(feature = "bench-synthetic-input")]
 use crate::mouse_hook::ObservedMouseButton;
-use crate::recording::RecordingState;
 use snow_recording_effects::InputEffectsState;
 
 use snow_recording_effects::mouse_effects::{
@@ -159,6 +159,7 @@ pub struct DirectRecordingConfig {
     pub mouse_trail_rgba: [u8; 4],
     pub mouse_trail_duration_ms: u64,
     pub mouse_click_rgba: [u8; 4],
+    pub mouse_highlight_radius: u32,
     pub mouse_highlight_rgba: [u8; 4],
     pub record_mouse_clicks: bool,
     pub show_keyboard: bool,
@@ -185,6 +186,7 @@ impl DirectRecordingConfig {
                 mouse_trail_rgba: self.mouse_trail_rgba,
                 mouse_trail_duration_ms: self.mouse_trail_duration_ms,
                 mouse_click_rgba: self.mouse_click_rgba,
+                mouse_highlight_radius: self.mouse_highlight_radius,
                 mouse_highlight_rgba: self.mouse_highlight_rgba,
             },
         }
@@ -195,6 +197,11 @@ impl DirectRecordingConfig {
     }
 
     pub fn validate(&self) -> std::result::Result<(), String> {
+        if !snow_recording_model::render::MOUSE_HIGHLIGHT_RADIUS_RANGE
+            .contains(&self.mouse_highlight_radius)
+        {
+            return Err("mouse highlight radius must be between 8 and 128 pixels".into());
+        }
         if !(-24..=24).contains(&self.system_audio_gain_db)
             || !(-24..=24).contains(&self.microphone_gain_db)
         {
@@ -2883,6 +2890,7 @@ impl VisualCompositor {
                     center,
                     effects.mouse_highlight_rgba,
                     true,
+                    effects.mouse_highlight_radius,
                 );
             } else {
                 snow_recording_effects::mouse_effects::draw_highlight_to(
@@ -2893,6 +2901,7 @@ impl VisualCompositor {
                     center,
                     effects.mouse_highlight_rgba,
                     true,
+                    effects.mouse_highlight_radius,
                 );
             }
         }
@@ -3230,6 +3239,136 @@ mod tests {
     use snow_cursor::CursorShapeId;
 
     #[test]
+    fn custom_crosshair_keeps_opaque_colors_when_scaled_clipped_cached_and_hidden() {
+        use snow_recording_effects::{
+            EffectsConfig, PlaybackOverlay, RecordedEffects, RenderConfig, RenderFrame,
+        };
+        use snow_recording_model::{
+            CursorFrameRecord, CursorShapeCompositionMode, CursorShapeRecord, RecordedInput,
+            RecordedInputEvent,
+        };
+
+        let shape = snow_cursor::crosshair_cursor_shape(32, 32).unwrap();
+        assert_eq!(shape.composition_mode, CursorCompositionMode::AlphaBlend);
+        for background in [
+            [0, 0, 0, 255],
+            [255; 4],
+            [127, 127, 127, 255],
+            [37, 91, 163, 255],
+        ] {
+            for scale in [1, 2] {
+                let output = (64 * scale, 48 * scale);
+                for (x, y) in [(0, 0), (32, 24), (63, 47)] {
+                    let mut retained = None;
+                    for state in [
+                        CursorShapeState::Embedded(shape.clone()),
+                        CursorShapeState::Cached(shape.shape_id),
+                    ] {
+                        let cursor = AttachedCursorSample {
+                            x,
+                            y,
+                            visible: true,
+                            shape: state,
+                        };
+                        let mut rgba = background.repeat((output.0 * output.1) as usize);
+                        draw_cursor(&mut rgba, output, (64, 48), &cursor, &mut retained);
+                        let mut replay = RecordedEffects::new(
+                            RenderConfig {
+                                output_width: output.0,
+                                output_height: output.1,
+                                output_fps: 30,
+                                effects: EffectsConfig::default(),
+                                playback_overlay: PlaybackOverlay::None,
+                            },
+                            (64, 48),
+                            None,
+                        )
+                        .unwrap();
+                        replay
+                            .observe(&RecordedInputEvent {
+                                timestamp_ms: 0,
+                                sequence: 0,
+                                event: RecordedInput::CursorShape(CursorShapeRecord {
+                                    shape_id: shape.shape_id.get(),
+                                    hotspot_x: shape.hotspot_x,
+                                    hotspot_y: shape.hotspot_y,
+                                    width: shape.width,
+                                    height: shape.height,
+                                    mode: CursorShapeCompositionMode::AlphaBlend,
+                                    shape_rgba: shape.shape_rgba.to_vec(),
+                                }),
+                            })
+                            .unwrap();
+                        replay
+                            .observe(&RecordedInputEvent {
+                                timestamp_ms: 0,
+                                sequence: 1,
+                                event: RecordedInput::Cursor(CursorFrameRecord {
+                                    timestamp_ms: 0,
+                                    x,
+                                    y,
+                                    visible: true,
+                                    shape_id: Some(shape.shape_id.get()),
+                                }),
+                            })
+                            .unwrap();
+                        let mut replay_pixels = background.repeat((output.0 * output.1) as usize);
+                        replay
+                            .apply_rgba(
+                                &mut replay_pixels,
+                                RenderFrame {
+                                    index: 0,
+                                    pts: 0,
+                                    timestamp_ms: 0,
+                                    progress: 0.0,
+                                },
+                            )
+                            .unwrap();
+                        assert_eq!(replay_pixels, rgba, "direct and export replay must agree");
+                        let left = (x - shape.hotspot_x as i32) * scale as i32;
+                        let top = (y - shape.hotspot_y as i32) * scale as i32;
+                        let mut black = 0;
+                        let mut white = 0;
+                        for py in 0..output.1 as i32 {
+                            for px in 0..output.0 as i32 {
+                                let local_x = px - left;
+                                let local_y = py - top;
+                                let expected = if (0..32 * scale as i32).contains(&local_x)
+                                    && (0..32 * scale as i32).contains(&local_y)
+                                {
+                                    let sx = local_x as u32 / scale;
+                                    let sy = local_y as u32 / scale;
+                                    let offset = ((sy * 32 + sx) * 4) as usize;
+                                    let pixel = &shape.shape_rgba[offset..offset + 4];
+                                    if pixel[3] == 255 {
+                                        black += usize::from(pixel[0] == 0);
+                                        white += usize::from(pixel[0] == 255);
+                                        [pixel[0], pixel[1], pixel[2], pixel[3]]
+                                    } else {
+                                        background
+                                    }
+                                } else {
+                                    background
+                                };
+                                let offset = ((py as u32 * output.0 + px as u32) * 4) as usize;
+                                assert_eq!(&rgba[offset..offset + 4], &expected);
+                            }
+                        }
+                        assert!(black > 0 && white > 0);
+                        let hidden = AttachedCursorSample {
+                            visible: false,
+                            ..cursor
+                        };
+                        let mut rgba = background.repeat((output.0 * output.1) as usize);
+                        draw_cursor(&mut rgba, output, (64, 48), &hidden, &mut retained);
+                        assert_eq!(rgba, background.repeat((output.0 * output.1) as usize));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn hidden_cursor_retains_shape_without_drawing_it() {
         let shape =
             CursorShape::from_rgba(0, 0, 1, 1, CursorCompositionMode::AlphaBlend, vec![255; 4]);
@@ -3395,6 +3534,7 @@ mod tests {
             mouse_trail_rgba: [0, 0, 0, 0],
             mouse_trail_duration_ms: 500,
             mouse_click_rgba: [0, 0, 0, 0],
+            mouse_highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
             mouse_highlight_rgba: [0; 4],
             record_mouse_clicks: false,
             show_keyboard: true,
@@ -4091,6 +4231,18 @@ mod tests {
             &pixels[(40 * 100 + 92) * 4..(40 * 100 + 92) * 4 + 4],
             &[255; 4]
         );
+        config.mouse_highlight_radius = 8;
+        let pixels = compositor
+            .compose_with_cursor(&config, &frame, 0, Some(&cursor))
+            .unwrap();
+        assert_eq!(
+            &pixels[(40 * 100 + 56) * 4..(40 * 100 + 56) * 4 + 4],
+            &[255, 255, 127, 255]
+        );
+        assert_eq!(
+            &pixels[(40 * 100 + 58) * 4..(40 * 100 + 58) * 4 + 4],
+            &[255; 4]
+        );
         config.show_cursor = false;
         assert!(
             compositor
@@ -4268,7 +4420,13 @@ mod tests {
             (CursorCompositionMode::AlphaBlend, [53, 170, 204, 128]),
             (CursorCompositionMode::AlphaBlend, [53, 170, 204, 255]),
         ];
-        for background in [[37, 91, 163, 255], [255, 255, 255, 255], [0, 0, 0, 255]] {
+        for background in [
+            [37, 91, 163, 255],
+            [255, 255, 255, 255],
+            [0, 0, 0, 255],
+            [0x7f, 0x7f, 0x7f, 255],
+            [0x80, 0x80, 0x80, 255],
+        ] {
             for (mode, pixel) in cases {
                 let mut expected = background;
                 if mode == CursorCompositionMode::MaskedColor && matches!(pixel[3], 0 | 255) {

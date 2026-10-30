@@ -17,6 +17,44 @@ class SelectedTextLinkContract(unittest.TestCase):
     def test_apple_native_dependencies_follow_each_selected_archive(self):
         self.run_link_fixture(mock_apple_native=True)
 
+    def test_standalone_build_keeps_detection_in_selected_text_archive(self):
+        with tempfile.TemporaryDirectory(prefix='snow-translation-standalone-link-') as directory:
+            fixture = Path(directory)
+            (fixture / 'entries.cpp').write_text(
+                'int selected_entry() { return 7; }\n'
+                'int language_entry() { return 11; }\n', encoding='utf-8')
+            (fixture / 'main.cpp').write_text(
+                'int selected_entry();\nint language_entry();\n'
+                'int main() { return selected_entry() + language_entry() == 18 ? 0 : 1; }\n',
+                encoding='utf-8')
+            (fixture / 'CMakeLists.txt').write_text(f'''
+cmake_minimum_required(VERSION 4.2)
+project(StandaloneTranslationLink LANGUAGES CXX)
+function(snow_add_rust_static_library target)
+    cmake_parse_arguments(MOCK "STRIP_MSVC_DIRECTIVES"
+        "PACKAGE;MANIFEST_DIR;OUTPUT_NAME" "FEATURES" ${{ARGN}})
+    if(NOT target STREQUAL "snow_selected_text_c" OR
+            NOT "language-detection" IN_LIST MOCK_FEATURES)
+        message(FATAL_ERROR "Standalone detection must use the selected-text archive")
+    endif()
+    add_library(${{target}} STATIC entries.cpp)
+endfunction()
+set(SNOW_SHOT_CAPTURE_CRATES_DIR "{ROOT.as_posix()}/snow-crates")
+include("{ROOT.as_posix()}/cmake/SnowSelectedText.cmake")
+add_executable(link_contract main.cpp)
+target_link_libraries(link_contract PRIVATE snow_selected_text_c snow_language_detection_c)
+''', encoding='utf-8')
+            build = fixture / 'build'
+            for command in (['cmake', '-S', str(fixture), '-B', str(build)],
+                            ['cmake', '--build', str(build), '--config', 'Release',
+                             '--target', 'link_contract']):
+                result = subprocess.run(command, capture_output=True, text=True,
+                                        encoding='utf-8', errors='replace')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            executable = build / ('Release/link_contract.exe' if sys.platform == 'win32'
+                                  else 'link_contract')
+            self.assertEqual(subprocess.run([str(executable)]).returncode, 0)
+
     def run_link_fixture(self, mock_apple_native):
         with tempfile.TemporaryDirectory(prefix='snow-selected-text-link-') as directory:
             fixture = Path(directory)
@@ -31,11 +69,14 @@ class SelectedTextLinkContract(unittest.TestCase):
                 'full.cpp': runtime +
                             'int extra_runtime_value() { return 0; }\n'
                             'int shared_entry() { return 11; }\n'
+                            'int language_entry() { return runtime_value() + extra_runtime_value(); }\n'
                             'int selected_entry() { return runtime_value() + extra_runtime_value(); }\n',
                 'wrapper.cpp': 'int wrapper_entry() { return 0; }\n',
                 'main.cpp': 'int shared_entry();\nint selected_entry();\n'
                             'int main() { return shared_entry() + selected_entry() == 18 ? 0 : 1; }\n',
                 'mini.cpp': 'int shared_entry();\nint main() { return shared_entry() == 11 ? 0 : 1; }\n',
+                'detector.cpp': 'int shared_entry();\nint language_entry();\n'
+                                'int main() { return shared_entry() + language_entry() == 18 ? 0 : 1; }\n',
                 'native.cpp': 'int native_value() { return 7; }\n',
             }
             for name, source in sources.items():
@@ -79,6 +120,11 @@ include("{ROOT.as_posix()}/cmake/RustStaticLibrary.cmake")
 add_library(snow_shot_rust_ffi_bundle STATIC bundle.cpp)
 snow_add_rust_bundle_selector(snow_shot_rust_ffi_selector snow_shot_rust_ffi_bundle)
 function(snow_add_rust_static_library target)
+    cmake_parse_arguments(MOCK "STRIP_MSVC_DIRECTIVES"
+        "PACKAGE;MANIFEST_DIR;OUTPUT_NAME" "FEATURES" ${{ARGN}})
+    if(NOT "language-detection" IN_LIST MOCK_FEATURES)
+        message(FATAL_ERROR "Full translation requires language detection")
+    endif()
     if(target STREQUAL "snow_shot_full_rust_ffi_bundle")
         add_library(${{target}} STATIC EXCLUDE_FROM_ALL full.cpp)
     else()
@@ -97,6 +143,10 @@ add_executable(link_contract main.cpp)
 target_link_libraries(link_contract PRIVATE translation shared_consumer)
 add_executable(reverse_link_contract main.cpp)
 target_link_libraries(reverse_link_contract PRIVATE shared_consumer translation)
+add_executable(detector_link_contract detector.cpp)
+target_link_libraries(detector_link_contract PRIVATE snow_language_detection_c shared_consumer)
+add_executable(reverse_detector_link_contract detector.cpp)
+target_link_libraries(reverse_detector_link_contract PRIVATE shared_consumer snow_language_detection_c)
 add_executable(mini_contract mini.cpp)
 target_link_libraries(mini_contract PRIVATE shared_consumer)
 include("{ROOT.as_posix()}/cmake/SnowShotMiniBuildContract.cmake")
@@ -105,13 +155,17 @@ snow_shot_assert_mini_build_contract(mini_contract)
             build = fixture / 'build'
             for command in (['cmake', '-S', str(fixture), '-B', str(build)],
                             ['cmake', '--build', str(build), '--config', 'Release',
-                             '--target', 'link_contract', 'reverse_link_contract', 'mini_contract']):
+                             '--target', 'link_contract', 'reverse_link_contract',
+                             'detector_link_contract', 'reverse_detector_link_contract',
+                             'mini_contract']):
                 result = subprocess.run(command, capture_output=True, text=True,
                                         encoding='utf-8', errors='replace')
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             for target, expected in (
                     ('link_contract', 'snow_shot_full_rust_ffi_bundle'),
                     ('reverse_link_contract', 'snow_shot_full_rust_ffi_bundle'),
+                    ('detector_link_contract', 'snow_shot_full_rust_ffi_bundle'),
+                    ('reverse_detector_link_contract', 'snow_shot_full_rust_ffi_bundle'),
                     ('mini_contract', 'snow_shot_rust_ffi_bundle')):
                 project = build / (target + '.vcxproj')
                 if project.exists():
@@ -137,6 +191,9 @@ snow_shot_assert_mini_build_contract(mini_contract)
             reverse = build / ('Release/reverse_link_contract.exe' if sys.platform == 'win32'
                                else 'reverse_link_contract')
             self.assertEqual(subprocess.run([str(reverse)]).returncode, 0)
+            for name in ('detector_link_contract', 'reverse_detector_link_contract'):
+                detector = build / ('Release/' + name + '.exe' if sys.platform == 'win32' else name)
+                self.assertEqual(subprocess.run([str(detector)]).returncode, 0)
             mini = build / ('Release/mini_contract.exe' if sys.platform == 'win32'
                             else 'mini_contract')
             self.assertEqual(subprocess.run([str(mini)]).returncode, 0)

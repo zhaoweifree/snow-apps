@@ -1,7 +1,7 @@
 #include "snow_shot/presentation/styles/themecolorscheme.h"
 #include "snow_shot/presentation/styles/thememanager.h"
 
-#include "theme/theme_types.h"
+#include "themeconfig_p.h"
 
 #include <QtGlobal>
 
@@ -15,21 +15,6 @@ constexpr int DEFAULT_CONTROL_PADDING_HORIZONTAL_SM = 8;
 ThemeAppearance toThemeAppearance(adqt::theme::ThemeScheme scheme) {
     return scheme == adqt::theme::ThemeScheme::Dark ? ThemeAppearance::Dark
                                                     : ThemeAppearance::Light;
-}
-
-ThemePreset toThemePreset(adqt::theme::ThemeDensity density) {
-    return density == adqt::theme::ThemeDensity::Compact ? ThemePreset::Compact
-                                                         : ThemePreset::Default;
-}
-
-adqt::theme::ThemeScheme toAdqtScheme(ThemeAppearance appearance) {
-    return appearance == ThemeAppearance::Dark ? adqt::theme::ThemeScheme::Dark
-                                               : adqt::theme::ThemeScheme::Light;
-}
-
-adqt::theme::ThemeDensity toAdqtDensity(ThemePreset preset) {
-    return preset == ThemePreset::Compact ? adqt::theme::ThemeDensity::Compact
-                                          : adqt::theme::ThemeDensity::Comfortable;
 }
 
 int roundMetric(double value) {
@@ -131,68 +116,6 @@ ThemePresetColorMap buildPresetColorMap(const adqt::theme::ThemeAccents& accents
     presetColors.insert(QStringLiteral("gold"), accents.gold);
     presetColors.insert(QStringLiteral("lime"), accents.lime);
     return presetColors;
-}
-
-adqt::theme::ThemeConfig toAdqtThemeConfig(const ThemeStyleConfig& config) {
-    adqt::theme::ThemeConfig adqtConfig = adqt::theme::defaultThemeConfig(
-        toAdqtScheme(config.appearance), toAdqtDensity(config.preset));
-
-    if (config.colorPrimary.isValid()) {
-        adqtConfig.primary = config.colorPrimary;
-    }
-    if (config.colorSuccess.isValid()) {
-        adqtConfig.success = config.colorSuccess;
-    }
-    if (config.colorWarning.isValid()) {
-        adqtConfig.warning = config.colorWarning;
-    }
-    if (config.colorError.isValid()) {
-        adqtConfig.error = config.colorError;
-    }
-    if (config.colorInfo.isValid()) {
-        adqtConfig.info = config.colorInfo;
-    }
-    if (config.colorLink.isValid()) {
-        adqtConfig.link = config.colorLink;
-    }
-
-    adqtConfig.appFont = config.appFont;
-    adqtConfig.fontSize = static_cast<double>(config.fontSize);
-    adqtConfig.lineWidth = static_cast<double>(config.lineWidth);
-    adqtConfig.borderRadius = static_cast<double>(config.borderRadius);
-    adqtConfig.sizeUnit = static_cast<double>(config.sizeUnit);
-    adqtConfig.sizeStep = static_cast<double>(config.sizeStep);
-    adqtConfig.controlHeight = static_cast<double>(config.controlHeight);
-    adqtConfig.motion = config.motionUnit > 0.0;
-
-    applyPresetColors(&adqtConfig, config.presetColors);
-    return adqtConfig;
-}
-
-ThemeStyleConfig toThemeStyleConfig(const adqt::theme::ResolvedTheme& resolvedTheme) {
-    ThemeStyleConfig config;
-    config.preset = toThemePreset(resolvedTheme.config.density);
-    config.appearance = toThemeAppearance(resolvedTheme.config.scheme);
-    config.colorPrimary = resolvedTheme.config.primary;
-    config.colorSuccess = resolvedTheme.config.success;
-    config.colorWarning = resolvedTheme.config.warning;
-    config.colorError = resolvedTheme.config.error;
-    config.colorInfo = resolvedTheme.config.info;
-    config.colorLink = resolvedTheme.config.link;
-    config.colorTextBase = resolvedTheme.values.colorTextBase;
-    config.colorBgBase = resolvedTheme.values.colorBgBase;
-    config.presetColors =
-        buildPresetColorMap(static_cast<const adqt::theme::ThemeAccents&>(resolvedTheme.values));
-
-    config.appFont = resolvedTheme.config.appFont;
-    config.fontSize = roundMetric(resolvedTheme.config.fontSize);
-    config.lineWidth = roundLineWidth(resolvedTheme.config.lineWidth);
-    config.borderRadius = roundMetric(resolvedTheme.config.borderRadius);
-    config.sizeUnit = roundMetric(resolvedTheme.config.sizeUnit);
-    config.sizeStep = roundMetric(resolvedTheme.config.sizeStep);
-    config.controlHeight = roundMetric(resolvedTheme.config.controlHeight);
-    config.motionUnit = resolvedTheme.config.motion ? 0.1 : 0.0;
-    return config;
 }
 
 ThemeMapColorToken buildColorMapToken(const adqt::theme::ResolvedTheme& resolvedTheme) {
@@ -445,13 +368,50 @@ ThemeAliasMetricToken buildAliasMetricToken(const ThemeMetricMapToken& metricMap
 }
 } // namespace
 
+namespace detail {
+adqt::theme::ThemeConfig toAdqtThemeConfig(const ThemeStyleConfig& config) {
+    adqt::theme::ThemeConfig adqtConfig = adqt::theme::defaultThemeConfig(
+        toAdqtScheme(config.appearance), toAdqtDensity(config.preset));
+
+    if (config.colorPrimary.isValid()) {
+        adqtConfig.primary = config.colorPrimary;
+    }
+    if (config.colorSuccess.isValid()) {
+        adqtConfig.success = config.colorSuccess;
+    }
+    if (config.colorWarning.isValid()) {
+        adqtConfig.warning = config.colorWarning;
+    }
+    if (config.colorError.isValid()) {
+        adqtConfig.error = config.colorError;
+    }
+    if (config.colorInfo.isValid()) {
+        adqtConfig.info = config.colorInfo;
+    }
+    if (config.colorLink.isValid()) {
+        adqtConfig.link = config.colorLink;
+    }
+
+    adqtConfig.appFont = config.appFont;
+    adqtConfig.fontSize = static_cast<double>(config.fontSize);
+    adqtConfig.lineWidth = static_cast<double>(config.lineWidth);
+    adqtConfig.borderRadius = static_cast<double>(config.borderRadius);
+    adqtConfig.sizeUnit = static_cast<double>(config.sizeUnit);
+    adqtConfig.sizeStep = static_cast<double>(config.sizeStep);
+    adqtConfig.controlHeight = static_cast<double>(config.controlHeight);
+    adqtConfig.motion = config.motionUnit > 0.0;
+
+    applyPresetColors(&adqtConfig, config.presetColors);
+    return adqtConfig;
+}
+} // namespace detail
+
 ThemeColorScheme generateThemeColorScheme(const ThemeStyleConfig& config) {
     const adqt::theme::ResolvedTheme resolvedTheme =
-        adqt::theme::makeResolvedTheme(toAdqtThemeConfig(config));
-    const ThemeStyleConfig normalizedConfig = toThemeStyleConfig(resolvedTheme);
+        adqt::theme::makeResolvedTheme(detail::toAdqtThemeConfig(config));
 
     ThemeColorScheme scheme;
-    scheme.appearance = normalizedConfig.appearance;
+    scheme.appearance = toThemeAppearance(resolvedTheme.config.scheme);
     scheme.map = buildColorMapToken(resolvedTheme);
     scheme.metricMap = buildMetricMapToken(resolvedTheme);
     scheme.alias = buildAliasColorToken(scheme.map);

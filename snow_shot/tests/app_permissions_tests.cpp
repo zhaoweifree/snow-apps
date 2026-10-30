@@ -273,8 +273,8 @@ void routingPolicy() {
     using A = GlobalShortcutAction;
     for (auto action :
          {A::Screenshot, A::ScreenshotDelay, A::ScreenshotFixed, A::ScreenshotOcr,
-          A::ScreenshotTranslation, A::ScreenshotCopy, A::ScreenshotSave, A::ScreenshotQuickSave,
-          A::ScreenshotFullScreen, A::ScreenshotFocusedWindow})
+          A::ScreenshotOcrCopy, A::ScreenshotTranslation, A::ScreenshotCopy, A::ScreenshotSave,
+          A::ScreenshotQuickSave, A::ScreenshotFullScreen, A::ScreenshotFocusedWindow})
         require(requiredPermissions(action, true) == AppPermissions{P::ScreenRecording},
                 "capture must not require optional smart-selection access");
     for (auto action : {A::ScreenRecord, A::ScreenRecordCopy}) {
@@ -286,15 +286,16 @@ void routingPolicy() {
     require(requiredPermissions(A::TranslateSelectedText, false) ==
                 AppPermissions{P::Accessibility},
             "selected text needs Accessibility");
-    for (auto action : {A::OpenScreenRecordingFolder, A::OpenCaptureHistory,
-                        A::OpenPinToScreenManagement, A::GlobalCanvas, A::OpenSettings,
-                        A::PinClipboardContent, A::PinSelectedFiles, A::HideShowAllWindows})
+    for (auto action :
+         {A::OpenScreenRecordingFolder, A::OpenCaptureHistory, A::OpenPinToScreenManagement,
+          A::GlobalCanvas, A::StitchSelectedImages, A::SplitSelectedImages, A::OpenSettings,
+          A::PinClipboardContent, A::PinSelectedFiles, A::HideShowAllWindows})
         require(requiredPermissions(action, true).isEmpty(),
                 "permission-free actions must remain usable");
     using M = settings::SettingsGlobalMouseAction;
-    for (auto action :
-         {M::ScreenshotCopy, M::ScreenshotFixed, M::ScreenshotOcr, M::ScreenshotTranslation,
-          M::ScreenshotQuickSave, M::ScreenshotSave, M::ScreenRecording}) {
+    for (auto action : {M::ScreenshotCopy, M::ScreenshotFixed, M::ScreenshotOcr,
+                        M::ScreenshotOcrCopy, M::ScreenshotTranslation, M::ScreenshotQuickSave,
+                        M::ScreenshotSave, M::ScreenRecording}) {
         const auto required = requiredPermissions(action, true);
         require(required.contains(P::ScreenRecording) && required.contains(P::Accessibility) &&
                     required.contains(P::InputMonitoring),

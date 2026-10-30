@@ -66,7 +66,7 @@ class ScreenshotToolCommandWorkflow final {
     [[nodiscard]] bool stepStrokeWidth(int delta);
 
   private:
-    void setCanvasTool(ScreenshotActiveTool activeTool, SnowCanvasTool canvasTool);
+    void setCanvasTool(SnowCanvasTool canvasTool);
 
     ScreenshotToolCommandWorkflowContext m_context;
 };

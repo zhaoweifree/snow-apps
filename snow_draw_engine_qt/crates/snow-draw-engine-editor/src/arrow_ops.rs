@@ -48,6 +48,7 @@ pub(crate) fn arrow_with_style(
     next.start_arrowhead = style.start_arrowhead;
     next.end_arrowhead = style.end_arrowhead;
     next.stroke_style = style.stroke_style;
+    next.stroke_rendering_style = style.stroke_rendering_style;
     next.arrow_type = style.arrow_type;
     next.arrow_shaft_type = style.arrow_shaft_type;
     next.arrow_ratio = snow_draw_engine_core::arrow::normalize_arrow_ratio(style.arrow_ratio);
@@ -75,6 +76,7 @@ pub(crate) fn arrow_with_style(
         return next;
     };
     updated.inherit_linear_metadata_from(arrow);
+    updated.stroke_rendering_style = style.stroke_rendering_style;
     updated.arrow_shaft_type = style.arrow_shaft_type;
     updated.arrow_ratio = snow_draw_engine_core::arrow::normalize_arrow_ratio(style.arrow_ratio);
     updated.rotation = arrow.rotation;
@@ -101,6 +103,7 @@ pub(crate) fn preview_arrow_from_points(
         style.start_arrowhead,
         style.end_arrowhead,
     )?;
+    arrow.stroke_rendering_style = style.stroke_rendering_style;
     arrow.arrow_shaft_type = style.arrow_shaft_type;
     arrow.arrow_ratio = snow_draw_engine_core::arrow::normalize_arrow_ratio(style.arrow_ratio);
     (arrow_length(&arrow) > 1e-6).then_some(arrow)

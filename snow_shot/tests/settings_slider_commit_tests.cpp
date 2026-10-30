@@ -76,6 +76,13 @@ void settingsSlidersCommitOnCompletion() {
             std::get<settings::SettingsSliderDefinition>(descriptor.definition->payload);
         const int minimum = static_cast<int>(slider->minimum());
         const int maximum = static_cast<int>(slider->maximum());
+        if (descriptor.pageId == QStringLiteral("pinned-windows")) {
+            require(minimum == 1 && maximum == 20 && slider->singleStep() == 1,
+                    "pinned wheel step sliders range from one to twenty in integer steps");
+            require(label->text() ==
+                        QStringLiteral("%1%").arg(backend.sliderValue(definition.binding)),
+                    "pinned wheel step sliders display a percentage");
+        }
         require(session.applySliderValue(definition.binding, minimum),
                 "initialize the slider through the runtime session");
         QCoreApplication::processEvents();
@@ -160,7 +167,7 @@ void settingsSlidersCommitOnCompletion() {
         QObject::disconnect(commitConnection);
         ++tested;
     }
-    require(tested == 8, "cover all eight settings sliders");
+    require(tested == 10, "cover all ten settings sliders");
 }
 } // namespace
 

@@ -158,6 +158,31 @@ QTransform orientationTransform(uint32_t orientation) {
 
 class AnimationDecoder::Impl final {
   public:
+    static std::unique_ptr<Impl> openEncoded(const QByteArray& encoded, QString* error,
+                                             AnimationCancellationCheck cancelled,
+                                             AnimationAllocationCheck allocationCheck) {
+        if (error)
+            error->clear();
+        if (!couldBeAnimation(encoded))
+            return {};
+        if (snow_shot_animation_abi_version() != SNOW_SHOT_ANIMATION_CODEC_ABI_VERSION) {
+            reportError(error, "Animation codec ABI is incompatible.");
+            return {};
+        }
+        auto impl = std::make_unique<Impl>();
+        impl->encoded = encoded;
+        std::array<char, kErrorCapacity> detail{};
+        impl->decoder = snow_shot_animation_open(
+            reinterpret_cast<const uint8_t*>(impl->encoded.constData()),
+            static_cast<uint64_t>(impl->encoded.size()), animationCancelledCallback, &cancelled,
+            admissionCallback, &allocationCheck, &impl->info, detail.data(), detail.size());
+        if (!impl->decoder) {
+            reportError(error, detail.data());
+            return {};
+        }
+        impl->frameColorSpace = colorSpace(impl->info.color);
+        return impl;
+    }
     ~Impl() {
         snow_shot_animation_destroy(decoder);
     }
@@ -245,26 +270,9 @@ std::shared_ptr<const ScreenshotAnimationSource>
 decodeAnimationSource(const QByteArray& encoded, QString* error,
                       AnimationCancellationCheck cancelled,
                       AnimationAllocationCheck allocationCheck) {
-    if (error)
-        error->clear();
-    if (!couldBeAnimation(encoded))
+    auto impl = AnimationDecoder::Impl::openEncoded(encoded, error, cancelled, allocationCheck);
+    if (!impl)
         return {};
-    if (snow_shot_animation_abi_version() != SNOW_SHOT_ANIMATION_CODEC_ABI_VERSION) {
-        reportError(error, "Animation codec ABI is incompatible.");
-        return {};
-    }
-    auto impl = std::make_unique<AnimationDecoder::Impl>();
-    impl->encoded = encoded;
-    std::array<char, kErrorCapacity> detail{};
-    impl->decoder = snow_shot_animation_open(
-        reinterpret_cast<const uint8_t*>(impl->encoded.constData()),
-        static_cast<uint64_t>(impl->encoded.size()), animationCancelledCallback, &cancelled,
-        admissionCallback, &allocationCheck, &impl->info, detail.data(), detail.size());
-    if (!impl->decoder) {
-        reportError(error, detail.data());
-        return {};
-    }
-    impl->frameColorSpace = colorSpace(impl->info.color);
     auto source = std::make_shared<ScreenshotAnimationSource>();
     source->encoded = encoded;
     source->format = impl->info.format == SNOW_SHOT_IMAGE_CODEC_FORMAT_GIF ? QStringLiteral("gif")
@@ -310,6 +318,23 @@ decodeAnimationSource(const QByteArray& encoded, QString* error,
     if (source->firstDisplayFrame.devicePixelRatio() != 1.0)
         source->firstDisplayFrame.setDevicePixelRatio(1.0);
     return source;
+}
+
+QImage decodeAnimationFirstFrame(const QByteArray& encoded, QString* error,
+                                 AnimationCancellationCheck cancelled,
+                                 AnimationAllocationCheck allocationCheck) {
+    auto impl = AnimationDecoder::Impl::openEncoded(encoded, error, cancelled, allocationCheck);
+    if (!impl)
+        return {};
+    AnimationDecoder decoder(std::move(impl));
+    if (!decoder.advance(error, cancelled))
+        return {};
+    auto image = decoder.snapshot(error);
+    if (animationCancelledCallback(&cancelled) != 0) {
+        reportError(error, "Animation decoding was cancelled.");
+        return {};
+    }
+    return image;
 }
 
 std::unique_ptr<AnimationDecoder>

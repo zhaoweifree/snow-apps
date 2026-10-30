@@ -482,7 +482,8 @@ void defaultsAndTypedRoundTrip() {
                     QStringLiteral("medium") &&
                 screenshotUi.value(QStringLiteral("toolbar_size")).toString() ==
                     QStringLiteral("normal") &&
-                screenshotUi.value(QStringLiteral("selection_transition_animation")).toBool() &&
+                screenshotUi.value(QStringLiteral("selection_transition_animation")).toInt() ==
+                    32 &&
                 screenshotUi.value(QStringLiteral("selection_border_color")).toString() ==
                     QStringLiteral("#4096FFFF") &&
                 screenshotUi.value(QStringLiteral("selection_mask_color")).toString() ==
@@ -529,6 +530,57 @@ void defaultsAndTypedRoundTrip() {
             reloaded.value(QStringLiteral("screenshot_ui/shortcut_hint_opacity")).toInt() == 42 &&
             reloaded.value(QStringLiteral("tray/icon")).toString() == QStringLiteral("snow-dark"),
         "typed values did not normalize and round-trip");
+}
+
+void selectionTransitionAnimationMigratesAndPersists() {
+    QTemporaryDir temporary;
+    require(temporary.isValid(), "selection animation requires isolated storage");
+    const QString key = QStringLiteral("screenshot_ui/selection_transition_animation");
+    require(storage::ConfigurationSchema::defaultValue(key) == QJsonValue(32),
+            "selection animation must default to Soft");
+    for (const int value : {0, 32, 72}) {
+        const auto normalized = storage::ConfigurationSchema::normalize(key, value);
+        require(normalized.valid && !normalized.changed && normalized.value == QJsonValue(value),
+                "all three animation values must be canonical integers");
+    }
+    for (const QJsonValue& invalid :
+         {QJsonValue(-1), QJsonValue(42), QJsonValue(72.5), QJsonValue(QStringLiteral("Fast")),
+          QJsonValue(QJsonValue::Null)}) {
+        require(!storage::ConfigurationSchema::normalize(key, invalid).valid,
+                "unsupported animation values must be rejected");
+    }
+    const QString path = temporary.filePath(QStringLiteral("config.json"));
+    for (const bool enabled : {false, true}) {
+        QJsonObject root = storage::ConfigurationSchema::completeDefaultDocument();
+        auto screenshotUi = root.value(QStringLiteral("screenshot_ui")).toObject();
+        screenshotUi.insert(QStringLiteral("selection_transition_animation"), enabled);
+        root.insert(QStringLiteral("screenshot_ui"), screenshotUi);
+        writeBytes(path, QJsonDocument(root).toJson());
+        const int expected = enabled ? 32 : 0;
+        {
+            storage::ConfigurationStore migrated(path, true, true, 60000);
+            require(migrated.value(key) == QJsonValue(expected) && migrated.isDirty() &&
+                        migrated.flushNow().success,
+                    "legacy animation switches must migrate On to Soft and Off to Disabled");
+        }
+        require(readObject(path)
+                        .value(QStringLiteral("screenshot_ui"))
+                        .toObject()
+                        .value(QStringLiteral("selection_transition_animation")) ==
+                    QJsonValue(expected),
+                "legacy animation migration must write the canonical integer to disk");
+        storage::ConfigurationStore reloaded(path, true, true, 60000);
+        require(reloaded.value(key) == QJsonValue(expected) && !reloaded.isDirty(),
+                "animation migration must be idempotent across reloads");
+    }
+    writeBytes(path, QJsonDocument(
+                         QJsonObject{
+                             {QStringLiteral("screenshot_ui"),
+                              QJsonObject{{QStringLiteral("selection_transition_animation"), 42}}}})
+                         .toJson());
+    storage::ConfigurationStore repaired(path, true, true, 60000);
+    require(repaired.value(key) == QJsonValue(32),
+            "unsupported stored animation values must recover to Soft");
 }
 
 void settingsSchemaDefaultsAndValidationAreComplete() {
@@ -608,7 +660,7 @@ void settingsSchemaDefaultsAndValidationAreComplete() {
             !defaultValue("screen_recording/show_keyboard").toBool() &&
             storage::ConfigurationSchema::entry(
                 QStringLiteral("screen_recording/animated_image_format")) == nullptr &&
-            defaultValue("screen_recording/encoder").toString() == QStringLiteral("h264_hw") &&
+            defaultValue("screen_recording/encoder").toString() == QStringLiteral("h264") &&
             defaultValue("screen_recording/video_quality").toInt() == 80 &&
             defaultValue("screen_recording/encoding_preset").toString() ==
                 QStringLiteral("veryfast") &&
@@ -641,6 +693,7 @@ void settingsSchemaDefaultsAndValidationAreComplete() {
         {QStringLiteral("spotlight"), QJsonArray()},
         {QStringLiteral("select"), QJsonArray{QStringLiteral("V")}},
         {QStringLiteral("shape"), QJsonArray{QStringLiteral("1")}},
+        {QStringLiteral("speech_bubble"), QJsonArray{}},
         {QStringLiteral("arrow"), QJsonArray{QStringLiteral("2")}},
         {QStringLiteral("brush"), QJsonArray{QStringLiteral("3"), QStringLiteral("P")}},
         {QStringLiteral("highlight"), QJsonArray{QStringLiteral("4"), QStringLiteral("H")}},
@@ -676,7 +729,10 @@ void settingsSchemaDefaultsAndValidationAreComplete() {
          QJsonArray{QStringLiteral("Tab")}},
         {QStringLiteral("previous_screenshot_history"), QJsonArray{QStringLiteral(",")}},
         {QStringLiteral("next_screenshot_history"), QJsonArray{QStringLiteral(".")}},
+        {QStringLiteral("duplicate_latest_region"), QJsonArray{QStringLiteral("R")}},
         {QStringLiteral("select_previously_selected_area"), QJsonArray{QStringLiteral("R")}},
+        {QStringLiteral("select_next_previously_selected_area"),
+         QJsonArray{QStringLiteral("Shift+R")}},
         {QStringLiteral("recapture"), QJsonArray{QStringLiteral("Alt+R")}},
         {QStringLiteral("toggle_cursor_visibility"), QJsonArray{QStringLiteral("`")}},
         {QStringLiteral("copy_color"), QJsonArray{QStringLiteral("C")}},
@@ -692,7 +748,8 @@ void settingsSchemaDefaultsAndValidationAreComplete() {
         {QStringLiteral("save_as_file"), QJsonArray{QStringLiteral("Ctrl+S")}},
         {QStringLiteral("pin_to_screen"), QJsonArray{QStringLiteral("Ctrl+F")}},
         {QStringLiteral("cancel_screenshot"), QJsonArray{QStringLiteral("Esc")}},
-        {QStringLiteral("copy_to_clipboard"), QJsonArray{QStringLiteral("Ctrl+C")}},
+        {QStringLiteral("copy_to_clipboard"),
+         QJsonArray{QStringLiteral("Ctrl+C"), QStringLiteral("Return")}},
         {QStringLiteral("undo"), QJsonArray{QStringLiteral("Ctrl+Z")}},
         {QStringLiteral("redo"), QJsonArray{QStringLiteral("Ctrl+Y")}},
     };
@@ -725,6 +782,12 @@ void settingsSchemaDefaultsAndValidationAreComplete() {
         {QStringLiteral("save_as_file"), QJsonArray{QStringLiteral("Ctrl+S")}},
         {QStringLiteral("show_text_recognition_results"), QJsonArray{QStringLiteral("Ctrl+D")}},
         {QStringLiteral("drawing_mode"), QJsonArray{QStringLiteral("Space")}},
+        {QStringLiteral("toggle_playback"), QJsonArray{QStringLiteral("Space")}},
+        {QStringLiteral("next_frame"), QJsonArray{}},
+        {QStringLiteral("previous_frame"), QJsonArray{}},
+        {QStringLiteral("decrease_playback_speed"), QJsonArray{}},
+        {QStringLiteral("increase_playback_speed"), QJsonArray{}},
+        {QStringLiteral("reset_playback_speed"), QJsonArray{}},
         {QStringLiteral("resize_window"), QJsonArray{QStringLiteral("M")}},
         {QStringLiteral("thumbnail_mode"), QJsonArray{QStringLiteral("R")}},
         {QStringLiteral("hide_to_top"), QJsonArray{QStringLiteral("H")}},
@@ -832,16 +895,14 @@ void settingsSchemaDefaultsAndValidationAreComplete() {
     const QMap<QString, QStringList> allowedStringValues{
         {QStringLiteral("pin_to_screen/middle_mouse_button_action"),
          {QStringLiteral("none"), QStringLiteral("reset_zoom"), QStringLiteral("thumbnail_mode"),
-          QStringLiteral("hide_to_top"), QStringLiteral("close")}},
+          QStringLiteral("hide_to_top"), QStringLiteral("close"), QStringLiteral("destroy")}},
         {QStringLiteral("pin_to_screen/double_click_action"),
-         {QStringLiteral("none"), QStringLiteral("thumbnail_mode"), QStringLiteral("hide_to_top"),
-          QStringLiteral("close")}},
+         {QStringLiteral("none"), QStringLiteral("reset_zoom"), QStringLiteral("thumbnail_mode"),
+          QStringLiteral("hide_to_top"), QStringLiteral("close"), QStringLiteral("destroy")}},
         {QStringLiteral("text_recognition/fill_style"),
          {QStringLiteral("blur"), QStringLiteral("background_fill")}},
         {QStringLiteral("text_recognition/model_type"),
-         {QStringLiteral("extra_small"), QStringLiteral("small"), QStringLiteral("medium"),
-          QStringLiteral("small_v5"), QStringLiteral("medium_v5"), QStringLiteral("small_v4"),
-          QStringLiteral("medium_v4")}},
+         {QStringLiteral("extra_small"), QStringLiteral("small"), QStringLiteral("medium")}},
         {QStringLiteral("text_recognition/detector_resize_policy"),
          {QStringLiteral("max"), QStringLiteral("min")}},
         {QStringLiteral("screenshot/auto_execute_after_text_recognition"),
@@ -1514,9 +1575,11 @@ void screenshotTranslationSettingsRoundTripSupportedValues() {
     require(translation.configuration() ==
                 storage::ScreenshotTranslationConfiguration{QStringLiteral("auto"), {}, {}},
             "translation settings should default to Auto source and runtime-derived target/model");
+    require(translation.configuration().languageDetectionConfidenceThreshold == 60,
+            "language detection confidence defaults to 60 percent");
     const storage::ScreenshotTranslationConfiguration selected{
-        QStringLiteral("ja"), QStringLiteral("zh-Hant"), QStringLiteral("model-a"),
-        QStringLiteral("original")};
+        QStringLiteral("ja"),       QStringLiteral("zh-Hant"), QStringLiteral("model-a"),
+        QStringLiteral("original"), QStringLiteral("en"),      75};
     require(translation.setConfiguration(selected) && translation.configuration() == selected,
             "translation language and model selections should persist together");
     require(translation.setOriginalImageTranslationEnabled(false) &&
@@ -1531,6 +1594,25 @@ void screenshotTranslationSettingsRoundTripSupportedValues() {
             "an explicitly disabled display toggle must survive restart");
     require(conversion.visionModel() == QStringLiteral("vision-model"),
             "vision model survives storage restart independently of translation settings");
+
+    const QString confidenceKey =
+        QStringLiteral("screenshot_translation/language_detection_confidence_threshold");
+    for (const int boundary : {30, 100}) {
+        const auto normalized = storage::ConfigurationSchema::normalize(confidenceKey, boundary);
+        require(normalized.valid && normalized.value.toInt() == boundary,
+                "language detection confidence accepts both configured boundaries");
+    }
+    for (const QJsonValue& invalid : {QJsonValue(29), QJsonValue(101), QJsonValue(60.5),
+                                      QJsonValue(QStringLiteral("60")), QJsonValue(true)}) {
+        require(!storage::ConfigurationSchema::normalize(confidenceKey, invalid).valid,
+                "language detection confidence rejects invalid percentages and types");
+    }
+    auto invalidConfiguration = selected;
+    invalidConfiguration.targetLanguage = QStringLiteral("fr");
+    invalidConfiguration.languageDetectionConfidenceThreshold = 29;
+    require(!translation.setConfiguration(invalidConfiguration) &&
+                translation.configuration() == selected,
+            "invalid confidence rejects the full translation preference update atomically");
 
     const auto unsupportedTarget = storage::ConfigurationSchema::normalize(
         QStringLiteral("screenshot_translation/target_language"), QStringLiteral("auto"));
@@ -1656,7 +1738,7 @@ void verifyPinToScreenShortcutSettings() {
     const storage::PinToScreenShortcutSettings shortcutSettings;
     const shortcuts::ShortcutBindingMap defaults = shortcutSettings.allShortcuts();
     require(
-        defaults.size() == 30 &&
+        defaults.size() == 36 &&
             portable(defaults.value(QStringLiteral("copy_to_clipboard"))) ==
                 QStringList{QStringLiteral("Ctrl+C")} &&
             portable(defaults.value(QStringLiteral("copy_original_content"))) ==
@@ -1671,6 +1753,19 @@ void verifyPinToScreenShortcutSettings() {
                 QStringList{QStringLiteral("Ctrl+D")} &&
             portable(defaults.value(QStringLiteral("drawing_mode"))) ==
                 QStringList{QStringLiteral("Space")} &&
+            defaults.contains(QStringLiteral("toggle_playback")) &&
+            portable(defaults.value(QStringLiteral("toggle_playback"))) ==
+                QStringList{QStringLiteral("Space")} &&
+            defaults.contains(QStringLiteral("next_frame")) &&
+            defaults.value(QStringLiteral("next_frame")).isEmpty() &&
+            defaults.contains(QStringLiteral("previous_frame")) &&
+            defaults.value(QStringLiteral("previous_frame")).isEmpty() &&
+            defaults.contains(QStringLiteral("decrease_playback_speed")) &&
+            defaults.value(QStringLiteral("decrease_playback_speed")).isEmpty() &&
+            defaults.contains(QStringLiteral("increase_playback_speed")) &&
+            defaults.value(QStringLiteral("increase_playback_speed")).isEmpty() &&
+            defaults.contains(QStringLiteral("reset_playback_speed")) &&
+            defaults.value(QStringLiteral("reset_playback_speed")).isEmpty() &&
             portable(defaults.value(QStringLiteral("resize_window"))) ==
                 QStringList{QStringLiteral("M")} &&
             portable(defaults.value(QStringLiteral("thumbnail_mode"))) ==
@@ -1700,7 +1795,7 @@ void verifyPinToScreenShortcutSettings() {
                                            {QStringLiteral("M")}) &&
             shortcutSettings.shortcuts(QStringLiteral("unsupported")).isEmpty() &&
             !shortcutSettings.setShortcuts(QStringLiteral("unsupported"), {QStringLiteral("Q")}),
-        "pinned-window shortcut adapter must expose thirty stable actions and defaults");
+        "pinned-window shortcut adapter must expose thirty-six stable actions and defaults");
     require(portable(defaults.value(QStringLiteral("increase_opacity"))) ==
                 QStringList{QStringLiteral("]")},
             "increase_opacity must have its default binding");
@@ -1879,6 +1974,31 @@ void shortcutSchemaMigrationAndPhysicalMetadataRoundTrip() {
             "structured shortcut bindings must round-trip without losing physical metadata");
 }
 
+void duplicateShortcutDefaultsSurviveUpgrade() {
+    const QString key = QStringLiteral("screenshot_shortcuts/duplicate_latest_region");
+    const auto defaults = storage::ConfigurationSchema::defaultValue(key);
+    for (const bool conflict : {false, true}) {
+        QTemporaryDir temporary;
+        auto document = storage::ConfigurationSchema::completeDefaultDocument();
+        auto screenshot = document.value(QStringLiteral("screenshot_shortcuts")).toObject();
+        screenshot.remove(QStringLiteral("duplicate_latest_region"));
+        if (conflict)
+            screenshot.insert(QStringLiteral("quick_save"), defaults);
+        document.insert(QStringLiteral("screenshot_shortcuts"), screenshot);
+        const QString path = temporary.filePath(QStringLiteral("config.json"));
+        writeBytes(path, QJsonDocument(document).toJson());
+        const QJsonValue expected = conflict ? QJsonValue(QJsonArray{}) : defaults;
+        {
+            storage::ConfigurationStore store(path, true, true, 60000);
+            require(store.value(key) == expected && store.flushNow().success,
+                    "new duplication defaults share history R but yield to unrelated explicit R");
+        }
+        storage::ConfigurationStore reloaded(path, true, true, 60000);
+        require(reloaded.value(key) == expected && !reloaded.isDirty(),
+                "contextual shortcut upgrade survives reload without repeated migration");
+    }
+}
+
 void localShortcutDefaultsPreserveConfiguredBindings() {
     const QString nextKey = QStringLiteral("screenshot_shortcuts/next_selection_type");
     const QString previousKey = QStringLiteral("screenshot_shortcuts/previous_selection_type");
@@ -1965,8 +2085,8 @@ void localShortcutDefaultsPreserveConfiguredBindings() {
 
     QTemporaryDir temporary;
     require(temporary.isValid(), "local shortcut default variants need isolated storage");
-    storage::ConfigurationStore store(temporary.filePath(QStringLiteral("variants.json")), true,
-                                      true, 60000);
+    const QString variantsPath = temporary.filePath(QStringLiteral("variants.json"));
+    storage::ConfigurationStore store(variantsPath, true, true, 60000);
     const QString moveKey = QStringLiteral("screenshot_shortcuts/move_tool");
     const QJsonArray customNext{shortcutObject(QStringLiteral("Alt+F6"))};
     const QMap<QString, QJsonValue> variants{
@@ -1988,12 +2108,116 @@ void localShortcutDefaultsPreserveConfiguredBindings() {
     require(store.applySnapshot({{nextKey, 42}, {quickSaveKey, nextDefault}}) &&
                 store.value(nextKey) == QJsonArray{} && store.value(quickSaveKey) == nextDefault,
             "repairing an invalid shortcut must not introduce a conflicting default");
+    const QString copyKey = QStringLiteral("screenshot_shortcuts/copy_to_clipboard");
+    const QJsonArray copyDefault{shortcutObject(QStringLiteral("Ctrl+C")),
+                                 shortcutObject(QStringLiteral("Return"))};
+    require(storage::ConfigurationSchema::defaultValue(copyKey) == copyDefault &&
+                store.applySnapshot({}) && store.value(copyKey) == copyDefault,
+            "missing screenshot copy shortcuts must default to Ctrl+C and Enter");
+    for (const auto& configured :
+         {QJsonArray{shortcutObject(QStringLiteral("Ctrl+C"))},
+          QJsonArray{shortcutObject(QStringLiteral("Alt+C"))}, QJsonArray{}}) {
+        require(store.applySnapshot({{copyKey, configured}}) &&
+                    store.value(copyKey) == configured && store.flushNow().success,
+                "the new Enter default must preserve saved and disabled copy shortcuts");
+        storage::ConfigurationStore reloaded(variantsPath, true, true, 60000);
+        require(reloaded.value(copyKey) == configured,
+                "saved screenshot copy shortcuts must survive reload without appending Enter");
+    }
+    const QString previousAreaKey =
+        QStringLiteral("screenshot_shortcuts/select_previously_selected_area");
+    const QString nextAreaKey =
+        QStringLiteral("screenshot_shortcuts/select_next_previously_selected_area");
+    const QJsonArray previousAreaCustom{shortcutObject(QStringLiteral("Alt+F9"))};
+    const QJsonArray nextAreaDefault{shortcutObject(QStringLiteral("Shift+R"))};
+    require(storage::ConfigurationSchema::defaultValue(nextAreaKey) == nextAreaDefault &&
+                store.applySnapshot({{previousAreaKey, previousAreaCustom}}) &&
+                store.value(previousAreaKey) == previousAreaCustom &&
+                store.value(nextAreaKey) == nextAreaDefault,
+            "previous area bindings must survive while the new forward key defaults to Shift+R");
+    require(
+        store.applySnapshot({{previousAreaKey, QJsonArray{}}, {quickSaveKey, nextAreaDefault}}) &&
+            store.value(previousAreaKey) == QJsonArray{} &&
+            store.value(nextAreaKey) == QJsonArray{} &&
+            store.value(quickSaveKey) == nextAreaDefault,
+        "an existing Shift+R assignment must suppress only the new forward default");
+    for (const auto& configured :
+         {QJsonArray{shortcutObject(QStringLiteral("Alt+F10"))}, QJsonArray{}}) {
+        require(store.applySnapshot(
+                    {{previousAreaKey, previousAreaCustom}, {nextAreaKey, configured}}) &&
+                    store.value(previousAreaKey) == previousAreaCustom &&
+                    store.value(nextAreaKey) == configured && store.flushNow().success,
+                "custom and disabled selection area bindings must remain independent");
+        storage::ConfigurationStore reloaded(variantsPath, true, true, 60000);
+        require(reloaded.value(previousAreaKey) == previousAreaCustom &&
+                    reloaded.value(nextAreaKey) == configured,
+                "selection area shortcuts must survive configuration reload");
+    }
 #ifdef Q_OS_MACOS
     const QJsonArray physicalTab{shortcutObject(QStringLiteral("Meta+K"), 48)};
     require(store.applySnapshot({{quickSaveKey, physicalTab}}) &&
                 store.value(nextKey) == QJsonArray{} && store.value(quickSaveKey) == physicalTab,
             "default conflicts must compare physical key metadata rather than display text");
 #endif
+}
+
+void previousSelectionStorageIsRetired() {
+    const QString legacyKey = QStringLiteral("screenshot_selection/previous_selection");
+    const QString radiusKey = QStringLiteral("screenshot_selection/corner_radius");
+    const QJsonObject previousSelection{{QStringLiteral("left"), 10},
+                                        {QStringLiteral("top"), 20},
+                                        {QStringLiteral("width"), 100},
+                                        {QStringLiteral("height"), 60}};
+    require(!storage::ConfigurationSchema::contains(legacyKey),
+            "previous selection must no longer have a redundant configuration field");
+    for (const int version : {1, storage::ConfigurationSchema::currentVersion(),
+                              storage::ConfigurationSchema::currentVersion() + 1}) {
+        QTemporaryDir temporary;
+        require(temporary.isValid(), "previous selection migration needs isolated storage");
+        QJsonObject document = storage::ConfigurationSchema::completeDefaultDocument();
+        document.insert(QStringLiteral("storage"),
+                        QJsonObject{{QStringLiteral("schema_version"), version}});
+        auto selection = document.value(QStringLiteral("screenshot_selection")).toObject();
+        selection.insert(QStringLiteral("previous_selection"), previousSelection);
+        selection.insert(QStringLiteral("corner_radius"), 7);
+        selection.insert(QStringLiteral("unknown_selection_option"), true);
+        document.insert(QStringLiteral("screenshot_selection"), selection);
+        const QString path = temporary.filePath(QStringLiteral("config.json"));
+        const QByteArray bytes = QJsonDocument(document).toJson();
+        writeBytes(path, bytes);
+        storage::ConfigurationStore store(path, true, true, 60000);
+        require(!store.snapshot().contains(legacyKey) && store.value(radiusKey) == QJsonValue(7) &&
+                    !store.setValue(legacyKey, previousSelection),
+                "retired selection storage must be excluded from snapshots and mutations");
+        if (version > storage::ConfigurationSchema::currentVersion()) {
+            require(!store.isWritable() && !store.isDirty() && readBytes(path) == bytes,
+                    "future configuration files must retain retired fields unchanged");
+            continue;
+        }
+        require(store.isDirty() && store.flushNow().success,
+                "supported configurations must persist removal of redundant selection storage");
+        const auto cleaned = QJsonDocument::fromJson(readBytes(path))
+                                 .object()
+                                 .value(QStringLiteral("screenshot_selection"))
+                                 .toObject();
+        require(!cleaned.contains(QStringLiteral("previous_selection")) &&
+                    cleaned.value(QStringLiteral("corner_radius")) == QJsonValue(7) &&
+                    cleaned.value(QStringLiteral("unknown_selection_option")) == QJsonValue(true),
+                "removing redundant storage must preserve selection preferences and unknown keys");
+        storage::ConfigurationStore reloaded(path, true, true, 60000);
+        require(!reloaded.isDirty() && !reloaded.snapshot().contains(legacyKey),
+                "retired storage must remain absent after reload");
+        require(reloaded.applySnapshot({{legacyKey, previousSelection}, {radiusKey, 9}}) &&
+                    reloaded.flushNow().success && !reloaded.snapshot().contains(legacyKey),
+                "legacy snapshots must import without restoring redundant selection storage");
+        const auto imported = QJsonDocument::fromJson(readBytes(path))
+                                  .object()
+                                  .value(QStringLiteral("screenshot_selection"))
+                                  .toObject();
+        require(!imported.contains(QStringLiteral("previous_selection")) &&
+                    imported.value(QStringLiteral("corner_radius")) == QJsonValue(9),
+                "imported selection preferences must persist without the retired field");
+    }
 }
 
 void recordingPostProcessingPreferencesPersistAndValidate() {
@@ -2025,6 +2249,39 @@ void recordingPostProcessingPreferencesPersistAndValidate() {
                 recording.postProcessingEffect() == QStringLiteral("playback_time") &&
                 recording.progressBarColor() == QColor(12, 34, 56, 78),
             "post-processing preferences survive storage restart");
+    applicationStorage.shutdown();
+}
+
+void pinnedMouseActionSettingsRoundTrip() {
+    QTemporaryDir temporary;
+    require(temporary.isValid(), "failed to create pinned mouse settings directory");
+    const QString executable = QDir(temporary.path()).filePath(QStringLiteral("bin"));
+    require(QDir().mkpath(executable),
+            "failed to create pinned mouse settings executable directory");
+    auto& applicationStorage = initialize(executable, temporary.path());
+    const storage::PinToScreenSettings pin;
+    require(pin.doubleClickAction() == QStringLiteral("thumbnail_mode") &&
+                pin.middleMouseButtonAction() == QStringLiteral("reset_zoom"),
+            "pinned mouse actions must retain their defaults");
+    for (const QString& action :
+         {QStringLiteral("none"), QStringLiteral("reset_zoom"), QStringLiteral("thumbnail_mode"),
+          QStringLiteral("hide_to_top"), QStringLiteral("close"), QStringLiteral("destroy")}) {
+        require(pin.setDoubleClickAction(action) && pin.doubleClickAction() == action &&
+                    pin.setMiddleMouseButtonAction(action) &&
+                    pin.middleMouseButtonAction() == action,
+                "pinned mouse actions must round-trip through storage");
+    }
+    require(!pin.setDoubleClickAction(QStringLiteral("unsupported")) &&
+                pin.doubleClickAction() == QStringLiteral("destroy") &&
+                !pin.setMiddleMouseButtonAction(QStringLiteral("unsupported")) &&
+                pin.middleMouseButtonAction() == QStringLiteral("destroy"),
+            "invalid pinned mouse actions must preserve the saved choices");
+    require(applicationStorage.flushNow().success, "flush pinned mouse actions");
+    applicationStorage.shutdown();
+    static_cast<void>(initialize(executable, temporary.path()));
+    require(pin.doubleClickAction() == QStringLiteral("destroy") &&
+                pin.middleMouseButtonAction() == QStringLiteral("destroy"),
+            "pinned Destroy actions must survive a storage restart");
     applicationStorage.shutdown();
 }
 
@@ -2170,27 +2427,6 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
             "drawing exclusion adapter must use schema canonicalization");
 
     const storage::PinToScreenSettings pin;
-    require(pin.doubleClickAction() == QStringLiteral("thumbnail_mode"),
-            "pinned double-click must default to thumbnail mode");
-    for (const QString& action : {QStringLiteral("none"), QStringLiteral("thumbnail_mode"),
-                                  QStringLiteral("hide_to_top"), QStringLiteral("close")}) {
-        require(pin.setDoubleClickAction(action) && pin.doubleClickAction() == action,
-                "pinned double-click actions must round-trip through storage");
-    }
-    require(!pin.setDoubleClickAction(QStringLiteral("unsupported")) &&
-                pin.doubleClickAction() == QStringLiteral("close"),
-            "invalid pinned double-click actions must preserve the saved choice");
-    require(pin.middleMouseButtonAction() == QStringLiteral("reset_zoom"),
-            "pinned middle-click must default to reset zoom");
-    for (const QString& action :
-         {QStringLiteral("none"), QStringLiteral("reset_zoom"), QStringLiteral("thumbnail_mode"),
-          QStringLiteral("hide_to_top"), QStringLiteral("close")}) {
-        require(pin.setMiddleMouseButtonAction(action) && pin.middleMouseButtonAction() == action,
-                "pinned middle-click actions must round-trip through storage");
-    }
-    require(!pin.setMiddleMouseButtonAction(QStringLiteral("unsupported")) &&
-                pin.middleMouseButtonAction() == QStringLiteral("close"),
-            "invalid pinned middle-click actions must preserve the saved choice");
     require(pin.mouseWheelZoomMode() == QStringLiteral("mouse_position") &&
                 pin.automaticTextRecognition() && pin.autoResizeWindow() &&
                 pin.setMouseWheelZoomMode(QStringLiteral("bottom_right")) &&
@@ -2211,7 +2447,7 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
                 recording.outputFormat() == QStringLiteral("mp4") &&
                 recording.mouseTrailColor() == QColor(0, 0, 0, 0) &&
                 recording.mouseClickColor() == QColor(0, 0, 0, 0) && recording.showCursor() &&
-                !recording.showKeyboard() && recording.encoder() == QStringLiteral("h264_hw") &&
+                !recording.showKeyboard() && recording.encoder() == QStringLiteral("h264") &&
                 recording.videoQuality() == 80 &&
                 recording.encodingPreset() == QStringLiteral("veryfast") &&
                 recording.captureToolbarInRecording() &&
@@ -2271,18 +2507,26 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
             "recording adapters must reject unadvertised values atomically");
 
     require(!recording.mouseHighlightEnabled() && !recording.recordMouseClicks() &&
-                recording.mouseHighlightColor() == QColor(255, 255, 0, 128),
+                recording.mouseHighlightColor() == QColor(255, 255, 0, 128) &&
+                recording.mouseHighlightRadius() == 41,
             "new mouse recording settings default off with soft yellow");
     require(recording.setMouseHighlightEnabled(true) && recording.setRecordMouseClicks(true) &&
-                recording.setMouseHighlightColor(QColor(12, 34, 56, 78)),
+                recording.setMouseHighlightColor(QColor(12, 34, 56, 78)) &&
+                recording.setMouseHighlightRadius(96),
             "mouse recording settings save");
     const storage::RecordingSettings reloadedRecording;
     require(reloadedRecording.mouseHighlightEnabled() && reloadedRecording.recordMouseClicks() &&
-                reloadedRecording.mouseHighlightColor() == QColor(12, 34, 56, 78),
+                reloadedRecording.mouseHighlightColor() == QColor(12, 34, 56, 78) &&
+                reloadedRecording.mouseHighlightRadius() == 96,
             "mouse recording settings persist across adapter instances");
     require(!recording.setMouseHighlightColor(QColor()) &&
                 recording.mouseHighlightColor() == QColor(12, 34, 56, 78),
             "invalid highlight color is rejected atomically");
+    require(!recording.setMouseHighlightRadius(7) && !recording.setMouseHighlightRadius(129) &&
+                recording.mouseHighlightRadius() == 96,
+            "highlight radius rejects values outside 8..128 atomically");
+    require(recording.setMouseHighlightRadius(8) && recording.setMouseHighlightRadius(128),
+            "highlight radius accepts both bounds");
     const storage::TraySettings tray;
     const storage::NetworkSettings network;
     const storage::GlobalShortcutSettings globalShortcuts;
@@ -2314,7 +2558,9 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
     const storage::ScreenshotShortcutSettings screenshotShortcuts;
     const shortcuts::ShortcutBindingMap screenshotDefaults = screenshotShortcuts.allShortcuts();
     require(
-        screenshotDefaults.size() == 34 &&
+        screenshotDefaults.size() == 36 &&
+            portable(screenshotDefaults.value(QStringLiteral("duplicate_latest_region"))) ==
+                QStringList{QStringLiteral("R")} &&
             portable(screenshotShortcuts.moveTool()) ==
                 QStringList{QStringLiteral("M"), QStringLiteral("Ctrl+E")} &&
             portable(screenshotShortcuts.moveCursorUp()) ==
@@ -2337,6 +2583,8 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
                 QStringList{QStringLiteral(".")} &&
             portable(screenshotShortcuts.selectPreviouslySelectedArea()) ==
                 QStringList{QStringLiteral("R")} &&
+            portable(screenshotShortcuts.selectNextPreviouslySelectedArea()) ==
+                QStringList{QStringLiteral("Shift+R")} &&
             portable(screenshotShortcuts.recapture()) == QStringList{QStringLiteral("Alt+R")} &&
             portable(screenshotShortcuts.shortcuts(QStringLiteral("toggle_cursor_visibility"))) ==
                 QStringList{QStringLiteral("`")} &&
@@ -2357,7 +2605,7 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
             portable(screenshotDefaults.value(QStringLiteral("cancel_screenshot"))) ==
                 QStringList{QStringLiteral("Esc")} &&
             portable(screenshotDefaults.value(QStringLiteral("copy_to_clipboard"))) ==
-                QStringList{QStringLiteral("Ctrl+C")} &&
+                QStringList{QStringLiteral("Ctrl+C"), QStringLiteral("Return")} &&
             portable(screenshotDefaults.value(QStringLiteral("undo"))) ==
                 QStringList{QStringLiteral("Ctrl+Z")} &&
             portable(screenshotDefaults.value(QStringLiteral("redo"))) ==
@@ -2368,6 +2616,24 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
     require(portable(screenshotDefaults.value(QStringLiteral("selection_aspect_ratio_snap"))) ==
                 QStringList{QStringLiteral("Q")},
             "snap must expose Q as its configurable default");
+    const QString previousAreaId = QStringLiteral("select_previously_selected_area");
+    const QString nextAreaId = QStringLiteral("select_next_previously_selected_area");
+    require(screenshotShortcuts.setShortcuts(previousAreaId, {QStringLiteral("K")}) &&
+                screenshotShortcuts.setShortcuts(nextAreaId, {QStringLiteral("Shift+K")}) &&
+                portable(screenshotShortcuts.selectPreviouslySelectedArea()) ==
+                    QStringList{QStringLiteral("K")} &&
+                portable(screenshotShortcuts.selectNextPreviouslySelectedArea()) ==
+                    QStringList{QStringLiteral("Shift+K")},
+            "both selection area directions must support independent remapping");
+    const auto remappedAreaShortcuts = screenshotShortcuts.allShortcuts();
+    require(!screenshotShortcuts.setShortcuts(nextAreaId, {QStringLiteral("K")}) &&
+                screenshotShortcuts.allShortcuts() == remappedAreaShortcuts &&
+                screenshotShortcuts.setShortcuts(nextAreaId, {}) &&
+                screenshotShortcuts.selectNextPreviouslySelectedArea().isEmpty() &&
+                portable(screenshotShortcuts.selectPreviouslySelectedArea()) ==
+                    QStringList{QStringLiteral("K")} &&
+                screenshotShortcuts.setAllShortcutsAtomic(screenshotDefaults),
+            "selection area conflicts must be atomic and either direction can be disabled");
     require(screenshotShortcuts.setShortcuts(QStringLiteral("toggle_guides"),
                                              {QStringLiteral("Ctrl+G")}) &&
                 portable(screenshotShortcuts.toggleGuides()) ==
@@ -2417,12 +2683,14 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
 
     const shortcuts::ShortcutBindingMap defaults = drawingShortcuts.allShortcuts();
     require(
-        defaults.size() == 16 && defaults.contains(QStringLiteral("line")) &&
+        defaults.size() == 17 && defaults.contains(QStringLiteral("line")) &&
             defaults.value(QStringLiteral("line")).isEmpty() &&
             defaults.contains(QStringLiteral("spotlight")) &&
             defaults.value(QStringLiteral("spotlight")).isEmpty() &&
             defaults.contains(QStringLiteral("magnifier")) &&
             defaults.value(QStringLiteral("magnifier")).isEmpty() &&
+            defaults.contains(QStringLiteral("speech_bubble")) &&
+            defaults.value(QStringLiteral("speech_bubble")).isEmpty() &&
             portable(defaults.value(QStringLiteral("select"))) ==
                 QStringList{QStringLiteral("V")} &&
             portable(defaults.value(QStringLiteral("shape"))) == QStringList{QStringLiteral("1")} &&
@@ -2433,7 +2701,7 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
                 QStringList{QStringLiteral("Ctrl+Shift+Z")} &&
             drawingShortcuts.shortcuts(QStringLiteral("unsupported")).isEmpty() &&
             !drawingShortcuts.setShortcuts(QStringLiteral("unsupported"), {QStringLiteral("Q")}),
-        "drawing shortcut adapter must expose fifteen tools and the canvas reset default");
+        "drawing shortcut adapter must expose sixteen tools and the canvas reset default");
 
     require(drawingShortcuts.setSelect({QStringLiteral("Ctrl+Shift+V")}) &&
                 portable(drawingShortcuts.select()) == QStringList{QStringLiteral("Ctrl+Shift+V")},
@@ -2520,6 +2788,34 @@ void invalidOcrModelConfigurationFallsBackToSmallWithoutAMigration() {
                     storage::ConfigurationSchema::currentVersion() &&
                 store.isDirty() && store.flushNow().success,
             "invalid OCR model types must normalize while migrating the schema version");
+}
+
+void retiredOcrModelConfigurationsNormalizeToSmall() {
+    for (const auto* model : {"small_v4", "medium_v4", "small_v5", "medium_v5"}) {
+        QTemporaryDir temporary;
+        const QString config = QDir(temporary.path()).filePath(QStringLiteral("config.json"));
+        writeBytes(
+            config,
+            QJsonDocument(
+                QJsonObject{{QStringLiteral("storage"),
+                             QJsonObject{{QStringLiteral("schema_version"),
+                                          storage::ConfigurationStore::currentSchemaVersion()}}},
+                            {QStringLiteral("text_recognition"),
+                             QJsonObject{{QStringLiteral("model_type"), QString::fromLatin1(model)},
+                                         {QStringLiteral("direct_ml_acceleration"), true}}}})
+                .toJson());
+        storage::ConfigurationStore store(config, true, true, 60000);
+        require(
+            store.value(QStringLiteral("text_recognition/model_type")) == QStringLiteral("small") &&
+                storage::ConfigurationSchema::entry(
+                    QStringLiteral("text_recognition/direct_ml_acceleration")) == nullptr &&
+                store.flushNow().success,
+            "retired models normalize to Small and obsolete acceleration settings have no effect");
+        storage::ConfigurationStore reloaded(config, true, true, 60000);
+        require(reloaded.value(QStringLiteral("text_recognition/model_type")) ==
+                    QStringLiteral("small"),
+                "repaired V6 selection must persist");
+    }
 }
 
 void missingOcrModelConfigurationDefaultsToSmallWithoutAMigration() {
@@ -3008,6 +3304,55 @@ void applicationQuitPreservesStorageForConsumerDestruction(
             "shutdown after quit must release its application quit observer");
 }
 
+void trayDarkIconSettingsPersistAndValidate() {
+    QTemporaryDir temporary;
+    require(temporary.isValid(), "tray theme settings require isolated storage");
+    const QString config = temporary.filePath(QStringLiteral("config.json"));
+    writeBytes(config,
+               QJsonDocument(
+                   QJsonObject{{QStringLiteral("storage"),
+                                QJsonObject{{QStringLiteral("schema_version"),
+                                             storage::ConfigurationSchema::currentVersion()}}},
+                               {QStringLiteral("tray"),
+                                QJsonObject{{QStringLiteral("icon"), QStringLiteral("snow-dark")},
+                                            {QStringLiteral("custom_icon"),
+                                             QStringLiteral("regular.ico")}}}})
+                   .toJson());
+    auto& appStorage = storage::ApplicationStorage::instance();
+    const storage::StorageInitializationOptions options{temporary.path(), temporary.path(), 60000};
+    require(appStorage.initialize(options).success, "initialize legacy tray settings");
+    storage::TraySettings settings;
+    require(settings.icon() == QStringLiteral("snow-dark") &&
+                settings.customIcon() == QStringLiteral("regular.ico") &&
+                settings.darkIcon() == QStringLiteral("inherit") &&
+                settings.darkCustomIcon().isEmpty(),
+            "existing configurations must retain their icons and inherit them in dark theme");
+    require(settings.setDarkIcon(QStringLiteral("snow-light")) &&
+                settings.setDarkCustomIcon(QStringLiteral("dark.png")) &&
+                !settings.setDarkIcon(QStringLiteral("invalid")) &&
+                settings.darkIcon() == QStringLiteral("snow-light") &&
+                appStorage.flushNow().success,
+            "dark theme settings must validate and persist independently");
+    appStorage.shutdown();
+    require(appStorage.initialize(options).success &&
+                settings.icon() == QStringLiteral("snow-dark") &&
+                settings.customIcon() == QStringLiteral("regular.ico") &&
+                settings.darkIcon() == QStringLiteral("snow-light") &&
+                settings.darkCustomIcon() == QStringLiteral("dark.png"),
+            "both regular and dark icon settings must survive a storage restart");
+    appStorage.shutdown();
+    storage::ConfigurationStore imported(config, true, true, 60000);
+    require(imported.applySnapshot(
+                {{QStringLiteral("tray/icon"), QStringLiteral("light")},
+                 {QStringLiteral("tray/custom_icon"), QStringLiteral("legacy.png")}}) &&
+                imported.value(QStringLiteral("tray/dark_icon")).toString() ==
+                    QStringLiteral("inherit") &&
+                imported.value(QStringLiteral("tray/dark_custom_icon")).toString().isEmpty() &&
+                imported.value(QStringLiteral("tray/custom_icon")).toString() ==
+                    QStringLiteral("legacy.png"),
+            "importing older snapshots must restore compatible dark icon defaults");
+}
+
 void invalidTrayClickSettingsUseIndependentDefaults() {
     QTemporaryDir temporary;
     require(temporary.isValid(), "temporary invalid tray settings directory");
@@ -3340,6 +3685,11 @@ int main(int argc, char** argv) {
     }
 #endif
     LifetimeObservedApplication application(argc, argv);
+    if (application.arguments().contains(QStringLiteral("--selection-transition-animation-only"))) {
+        defaultsAndTypedRoundTrip();
+        selectionTransitionAnimationMigratesAndPersists();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--ocr-highlighting-only"))) {
         ocrHighlightingSettingsPersistAndValidate();
         return 0;
@@ -3374,12 +3724,31 @@ int main(int argc, char** argv) {
     }
     QCoreApplication::setOrganizationName(QStringLiteral("SnowShotTests"));
     QCoreApplication::setApplicationName(QStringLiteral("storage-tests"));
+    if (application.arguments().contains(QStringLiteral("--ocr-settings-only"))) {
+        ocrHighlightingSettingsPersistAndValidate();
+        invalidOcrModelConfigurationFallsBackToSmallWithoutAMigration();
+        retiredOcrModelConfigurationsNormalizeToSmall();
+        missingOcrModelConfigurationDefaultsToSmallWithoutAMigration();
+        storage::ApplicationStorage::instance().shutdown();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--tray-theme-icons-only"))) {
+        trayDarkIconSettingsPersistAndValidate();
+        return 0;
+    }
+    if (application.arguments().contains(QStringLiteral("--translation-settings-only"))) {
+        screenshotTranslationSettingsRoundTripSupportedValues();
+        storage::ApplicationStorage::instance().shutdown();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--auto-save-after-execution-only"))) {
         autoSaveAfterExecutionSettingsMigrateAndPersist();
         return 0;
     }
     if (application.arguments().contains(QStringLiteral("--local-shortcut-migration-only"))) {
+        duplicateShortcutDefaultsSurviveUpgrade();
         localShortcutDefaultsPreserveConfiguredBindings();
+        previousSelectionStorageIsRetired();
         return 0;
     }
     if (application.arguments().contains(QStringLiteral("--shortcut-settings-only"))) {
@@ -3416,6 +3785,7 @@ int main(int argc, char** argv) {
     }
     if (application.arguments().contains(QStringLiteral("--pin-shortcuts-only"))) {
         settingsSchemaDefaultsAndValidationAreComplete();
+        pinnedMouseActionSettingsRoundTrip();
         pinnedDestroyShortcutMigratesPreviousDefault();
         pinToScreenShortcutSettingsRoundTrip();
         obsoleteClickThroughShortcutIsIgnored();
@@ -3427,6 +3797,7 @@ int main(int argc, char** argv) {
     updateSettingsPersistAndValidate();
     markerResolutionAndStatus();
     defaultsAndTypedRoundTrip();
+    selectionTransitionAnimationMigratesAndPersists();
     autoSaveAfterExecutionSettingsMigrateAndPersist();
     selectionAspectRatioSettingsValidateAndPreserveLegacyLock();
     settingsSchemaDefaultsAndValidationAreComplete();
@@ -3434,7 +3805,9 @@ int main(int argc, char** argv) {
     obsoleteClickThroughShortcutIsIgnored();
     shortcutSchemaMigrationAndPhysicalMetadataRoundTrip();
     localShortcutDefaultsPreserveConfiguredBindings();
+    previousSelectionStorageIsRetired();
     invalidTrayClickSettingsUseIndependentDefaults();
+    trayDarkIconSettingsPersistAndValidate();
     legacyTrayHotkeyCommandMigratesToQuickAction();
     trayClickSettingsSurviveRestart();
     watermarkTemplateSettingsRepairAndSurviveRestart();
@@ -3446,9 +3819,11 @@ int main(int argc, char** argv) {
     recordingActionToolbarLayoutRepairsAndPersistsIndependently();
     screenshotTranslationSettingsRoundTripSupportedValues();
     settingsAdaptersRoundTripAndRejectInvalidValues();
+    pinnedMouseActionSettingsRoundTrip();
     recordingPostProcessingPreferencesPersistAndValidate();
     invalidCaptureCursorConfigurationFallsBackToDisabled();
     invalidOcrModelConfigurationFallsBackToSmallWithoutAMigration();
+    retiredOcrModelConfigurationsNormalizeToSmall();
     missingOcrModelConfigurationDefaultsToSmallWithoutAMigration();
     smartSelectionAccessorAndSignal();
     unknownFieldsArePreserved();

@@ -222,7 +222,9 @@ impl Editor {
             ToolSelectionScope::All => true,
             ToolSelectionScope::MagnifierOnly => kind == ElementKind::Magnifier,
             ToolSelectionScope::SpeechBubbleOnly => kind == ElementKind::SpeechBubble,
-            ToolSelectionScope::RectangleOnly => kind == ElementKind::Rectangle,
+            ToolSelectionScope::RectangleOnly => {
+                kind == ElementKind::Rectangle || kind == ElementKind::Text
+            }
             ToolSelectionScope::ArrowOnly => kind == ElementKind::Arrow,
             ToolSelectionScope::DistanceOnly => kind == ElementKind::Distance,
             ToolSelectionScope::AngleOnly => kind == ElementKind::Angle,
@@ -254,6 +256,10 @@ impl Editor {
             return false;
         }
         match scope {
+            ToolSelectionScope::RectangleOnly => {
+                kind == ElementKind::Rectangle
+                    || (kind == ElementKind::Text && !document.shapes_for_text(id).is_empty())
+            }
             ToolSelectionScope::SerialNumberOnly => {
                 kind == ElementKind::SerialNumber
                     || (kind == ElementKind::Text && document.is_text_bound_to_serial_number(id))

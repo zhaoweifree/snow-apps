@@ -193,6 +193,7 @@ fn spotlight_radius_patch_preserves_shape_and_clamps_small_cutouts() {
                     ShapeStylePatch {
                         kind: ShapeKind::Spotlight,
                         style: ShapeStyle {
+                            brush_mode: Default::default(),
                             corner_radii: CornerRadii::splat(radius),
                             ..style
                         },

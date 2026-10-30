@@ -133,6 +133,7 @@ class AdScrollArea final : public QScrollArea {
   bool eventFilter(QObject* watched, QEvent* event) override;
   void changeEvent(QEvent* event) override;
   void resizeEvent(QResizeEvent* event) override;
+  void wheelEvent(QWheelEvent* event) override;
 
  private:
   void applyScrollBarStyle();

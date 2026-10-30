@@ -60,8 +60,16 @@ class SnowCanvasRuntime {
     void setBaseImageSources(const QList<SnowCanvasBaseImageSource>& sources);
     SnowCanvasSmartEraseSnapshot smartEraseSnapshot() const;
     void restoreSmartEraseSnapshot(const SnowCanvasSmartEraseSnapshot& snapshot);
+    // An optional output-sized background replaces capture painting, while sources
+    // remain available to magnifiers and background restoration.
     QImage renderToImage(const QRectF& virtualSelectionRect, const QSize& outputSize,
-                         const QList<CanvasExportSource>& sources);
+                         const QList<CanvasExportSource>& sources, const QImage& background = {});
+    // Reuse one synchronized scene and the original coordinate frame while painting
+    // disjoint pixel rectangles into a compact destination. Filtering uses bounded halos.
+    QImage renderTilesToImage(const QRectF& sourceFrame, const QSize& sourcePixelSize,
+                              const QSize& outputSize, const QList<CanvasExportTile>& tiles,
+                              const QList<CanvasExportSource>& sources,
+                              const QImage& background = {});
 
   private:
     friend struct snow_canvas_runtime::Access;

@@ -7,6 +7,7 @@
 #include "snow_draw_engine.h"
 
 #include <optional>
+#include <functional>
 
 class QWidget;
 
@@ -16,14 +17,17 @@ class SnowCanvasCursorController final {
 
     void setCursor(SnowCanvasCursorLayer layer, const QCursor& cursor);
     void clearCursor(SnowCanvasCursorLayer layer);
+    using CrosshairCursorFactory = std::function<QCursor(qreal devicePixelRatio)>;
+    void setCrosshairCursorFactory(CrosshairCursorFactory factory);
     void setEngineCursor(SnowCursorStyle style);
     void configureStrokeCursor(double diameter, const std::optional<QColor>& color);
-    void refreshDevicePixelRatio();
+    void refreshDevicePixelRatio(qreal devicePixelRatio);
 
   private:
     std::optional<QCursor>& cursorForLayer(SnowCanvasCursorLayer layer);
-    void applyResolvedCursor();
-    void applyResolvedCursorToWidget(const QCursor& cursor);
+    void applyResolvedCursor(qreal devicePixelRatio);
+    void applyResolvedCursorToWidget(const QCursor& cursor, qreal devicePixelRatio);
+    void setEngineCursor(SnowCursorStyle style, qreal devicePixelRatio);
 
     QWidget& m_widget;
     std::optional<SnowCursorStyle> m_engineCursorStyle;
@@ -34,4 +38,7 @@ class SnowCanvasCursorController final {
     std::optional<QCursor> m_eraserCursor;
     std::optional<QCursor> m_canvasToolCursor;
     std::optional<QCursor> m_hostCursor;
+    CrosshairCursorFactory m_crosshairCursorFactory;
+    std::optional<QCursor> m_crosshairCursor;
+    qreal m_crosshairCursorDevicePixelRatio = 0.0;
 };

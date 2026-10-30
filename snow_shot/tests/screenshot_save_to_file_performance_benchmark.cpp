@@ -50,6 +50,9 @@ struct Sample final {
     qint64 provisionalNanoseconds = 0;
     qint64 resizeNanoseconds = 0;
     qint64 pngEncodeNanoseconds = 0;
+    qint64 exactPreviewNanoseconds = 0;
+    qint64 exactPreviewBytes = 0;
+    qint64 jpegPreviewBytes = 0;
     qint64 jpegEncodeNanoseconds = 0;
     qint64 decodeNanoseconds = 0;
     qint64 sourceReadCalls = 0;
@@ -168,16 +171,18 @@ Sample runSample(const Scenario& scenario, const QImage& image,
     require(pixels != nullptr && pixels->rows.isValid(),
             QStringLiteral("Pixel preparation failed: %1").arg(error));
     sample.mappedBytes =
-        scenario.outputSize == scenario.sourceSize
-            ? 0
-            : qint64(scenario.outputSize.width()) * scenario.outputSize.height() * 4;
-    if (sample.mappedBytes == 0) {
+        scenario.outputSize == scenario.sourceSize ? 0 : pixels->exactImage.sizeInBytes();
+    if (scenario.outputSize == scenario.sourceSize) {
         require(pixels->exactImage.constBits() == source.rows.backingImage.constBits(),
                 QStringLiteral("Source-sized pixels did not reuse the canonical backing"));
+    } else if (qint64(scenario.outputSize.width()) * scenario.outputSize.height() * 4 <=
+               pipeline::kMaximumPreparedPixelCacheBytes) {
+        require(
+            !pixels->exactImage.isNull() && pixels->exactImage.sizeInBytes() == sample.mappedBytes,
+            QStringLiteral("Cacheable resized pixels did not retain one reusable bounded raster"));
     } else {
-        require(!pixels->exactImage.isNull() &&
-                    pixels->exactImage.sizeInBytes() == sample.mappedBytes,
-                QStringLiteral("Resized pixels were not retained in one exact mapped raster"));
+        require(pixels->exactImage.isNull() && pixels->rows.backingImage.isNull(),
+                QStringLiteral("Large resized output was unexpectedly materialized"));
     }
 
     pixels->rows = countedRows(std::move(pixels->rows), encodeCounters);
@@ -188,8 +193,11 @@ Sample runSample(const Scenario& scenario, const QImage& image,
     });
     require(png != nullptr && png->codecResult.roundTrip == snow::image::PixelRoundTrip::exact,
             QStringLiteral("Exact PNG encoding failed: %1").arg(error));
-    require(!png->pixels->exactImage.isNull(),
-            QStringLiteral("PNG benchmark unexpectedly requires an encoded-file decode"));
+    QImage exactPreview;
+    sample.exactPreviewNanoseconds =
+        elapsed([&] { exactPreview = pipeline::preview(*png, source, cancellation, &error); });
+    require(!exactPreview.isNull(), QStringLiteral("Exact PNG preview failed: %1").arg(error));
+    sample.exactPreviewBytes = exactPreview.sizeInBytes();
 
     std::shared_ptr<pipeline::Encoded> jpeg;
     sample.jpegEncodeNanoseconds = elapsed([&] {
@@ -203,9 +211,10 @@ Sample runSample(const Scenario& scenario, const QImage& image,
     QImage decoded;
     sample.decodeNanoseconds = elapsed([&] {
         ++sample.decodeCount;
-        decoded = pipeline::decode(*jpeg, cancellation, &error);
+        decoded = pipeline::preview(*jpeg, source, cancellation, &error);
     });
-    require(!decoded.isNull() && decoded.size() == scenario.outputSize,
+    sample.jpegPreviewBytes = decoded.sizeInBytes();
+    require(!decoded.isNull() && decoded.width() <= 2048 && decoded.height() <= 2048,
             QStringLiteral("JPEG preview decode failed: %1").arg(error));
     require(sample.decodeCount == 1,
             QStringLiteral("Exact and codec-artifact previews used the wrong decode routes"));
@@ -279,11 +288,20 @@ void report(const Scenario& scenario, const std::vector<Sample>& samples) {
         << " png_encode_ms=" << milliseconds(median(values([](const Sample& value) {
                return value.pngEncodeNanoseconds;
            })))
+        << " exact_preview_ms=" << milliseconds(median(values([](const Sample& value) {
+               return value.exactPreviewNanoseconds;
+           })))
+        << " exact_preview_mib="
+        << double(median(values([](const Sample& value) { return value.exactPreviewBytes; }))) /
+               (1024.0 * 1024.0)
         << " jpeg_encode_ms=" << milliseconds(median(values([](const Sample& value) {
                return value.jpegEncodeNanoseconds;
            })))
         << " jpeg_decode_ms="
         << milliseconds(median(values([](const Sample& value) { return value.decodeNanoseconds; })))
+        << " jpeg_preview_mib="
+        << double(median(values([](const Sample& value) { return value.jpegPreviewBytes; }))) /
+               (1024.0 * 1024.0)
         << " source_read_calls="
         << median(values([](const Sample& value) { return value.sourceReadCalls; }))
         << " source_rows=" << median(values([](const Sample& value) { return value.sourceRows; }))
@@ -294,7 +312,7 @@ void report(const Scenario& scenario, const std::vector<Sample>& samples) {
         << median(values([](const Sample& value) { return value.maximumRowBatch; }))
         << " decode_count="
         << median(values([](const Sample& value) { return qint64(value.decodeCount); }))
-        << " mapped_mib="
+        << " retained_raster_mib="
         << double(median(values([](const Sample& value) { return value.mappedBytes; }))) /
                (1024.0 * 1024.0)
         << " extra_source_materializations=" << median(values([](const Sample& value) {
@@ -329,6 +347,7 @@ int main(int argc, char* argv[]) {
         {"4k", QSize(3840, 2160), QSize(1920, 1080), false},
         {"8k", QSize(7680, 4320), QSize(3840, 2160), false},
         {"tall", QSize(1440, 12000), QSize(720, 6000), true},
+        {"row-tall", QSize(1440, 12000), QSize(1440, 12000), true},
     };
 
     try {

@@ -52,11 +52,6 @@
         { "name": "libheif", "default-features": false, "features": ["aom"] },
         "libjxl",
         {
-          "name": "onnxruntime",
-          "default-features": false,
-          "features": [{ "name": "directml", "platform": "windows" }]
-        },
-        {
           "name": "opencv4",
           "default-features": false,
           "features": ["contrib", "dnn", "fs", "intrinsics"]

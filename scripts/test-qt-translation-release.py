@@ -54,6 +54,9 @@ function(qt_add_lrelease)
     foreach(ts IN LISTS arg_TS_FILES)
         get_filename_component(name "${{ts}}" NAME_WE)
         if(name MATCHES "_en_US$")
+            if(NOT "-removeidentical" IN_LIST arg_OPTIONS)
+                message(FATAL_ERROR "English identity translations occupy the embedded catalog")
+            endif()
             if(arg_MERGE_QT_TRANSLATIONS)
                 message(FATAL_ERROR "English incorrectly requires an external Qt catalog")
             endif()
@@ -141,7 +144,12 @@ class InstalledQtTranslationRelease(unittest.TestCase):
                     '<?xml version="1.0" encoding="utf-8"?>\n'
                     f'<TS version="2.1" language="{language}"><context>'
                     '<name>SnowTranslationFixture</name><message><source>Fixture message</source>'
-                    '<translation>Fixture translation</translation></message></context></TS>\n',
+                    '<translation>Fixture translation</translation></message>'
+                    '<message><source>Identity message</source>'
+                    '<translation>Identity message</translation></message>'
+                    '<message numerus="yes"><source>%n item(s)</source><translation>'
+                    '<numerusform>%n item</numerusform><numerusform>%n items</numerusform>'
+                    '</translation></message></context></TS>\n',
                     encoding='utf-8')
             (source / 'CMakeLists.txt').write_text(f'''
 cmake_minimum_required(VERSION 3.25)
@@ -178,6 +186,13 @@ file(GENERATE OUTPUT "${{CMAKE_CURRENT_BINARY_DIR}}/lconvert-path.txt"
                 self.assertIn('SnowTranslationFixture', contexts)
                 if language == 'en_US':
                     self.assertEqual(contexts, {'SnowTranslationFixture'})
+                    messages = {message.findtext('source'): message
+                                for message in ET.parse(catalog).findall('.//message')}
+                    self.assertNotIn('Identity message', messages)
+                    self.assertEqual(messages['Fixture message'].findtext('translation'),
+                                     'Fixture translation')
+                    self.assertEqual([form.text for form in messages['%n item(s)'].findall(
+                        'translation/numerusform')], ['%n item', '%n items'])
                 else:
                     self.assertIn('QFileDialog', contexts)
                     self.assertIn('QColorDialog', contexts)

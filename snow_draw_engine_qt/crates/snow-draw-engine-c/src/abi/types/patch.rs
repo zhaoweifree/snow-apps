@@ -58,7 +58,8 @@ pub struct SnowPathGeometryPatch {
     pub closed: u8,
     pub full_reset: u8,
     pub element_removed: u8,
-    pub reserved0: [u8; 5],
+    pub role: u8,
+    pub reserved0: [u8; 4],
 }
 
 #[repr(C)]

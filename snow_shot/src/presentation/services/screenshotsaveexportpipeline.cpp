@@ -5,7 +5,9 @@
 #include <QColorSpace>
 #include <QCoreApplication>
 #include <QStorageInfo>
+#include <QPainter>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -13,6 +15,9 @@
 namespace screenshot_save_export {
 namespace {
 constexpr qint64 kMaximumRasterBytes = qint64{8} * 1024 * 1024 * 1024;
+constexpr int kPreviewExtent = 2048;
+constexpr qint64 kMaximumPreviewBytes = qint64{kPreviewExtent} * kPreviewExtent * 4;
+constexpr qint64 kReaderCacheBytes = qint64{2} * 1024 * 1024;
 int32_t SNOW_SHOT_IMAGE_CODEC_CALL cancelled(void* context) {
     return static_cast<const ScreenshotExportCancellation*>(context)->isCancellationRequested() ? 1
                                                                                                 : 0;
@@ -56,11 +61,407 @@ ScreenshotImageRowSource withCancellation(const ScreenshotImageRowSource& source
                                           const ScreenshotExportCancellation& cancellation) {
     ScreenshotImageRowSource result = source;
     const auto sourceCancellation = source.cancellationRequested;
-    result.cancellationRequested = [sourceCancellation, &cancellation] {
+    result.cancellationRequested = [sourceCancellation, cancellation] {
         return cancellation.isCancellationRequested() ||
                (sourceCancellation && sourceCancellation());
     };
     return result;
+}
+
+bool reserveResources(const ScreenshotImageRowSource& rows, qint64 retained, qint64 scratch,
+                      std::shared_ptr<void>* owner, QString* error,
+                      std::shared_ptr<void>* temporary = nullptr) {
+    if (!rows.reserveResources)
+        return true;
+    if (temporary) {
+        if (retained > 0) {
+            *owner = rows.reserveResources(retained, 0, error);
+            if (!*owner)
+                return false;
+        }
+        if (scratch > 0) {
+            *temporary = rows.reserveResources(0, scratch, error);
+            if (!*temporary)
+                return false;
+        }
+        return true;
+    }
+    *owner = rows.reserveResources(retained, scratch, error);
+    return static_cast<bool>(*owner);
+}
+
+QImage retainResources(QImage image, std::shared_ptr<void> owner) {
+    if (image.isNull() || !owner)
+        return image;
+    struct Storage {
+        std::shared_ptr<void> owner;
+        QImage image;
+    };
+    auto storage = std::make_unique<Storage>(Storage{std::move(owner), std::move(image)});
+    const auto& pixels = storage->image;
+    QImage result(
+        pixels.constBits(), pixels.width(), pixels.height(), pixels.bytesPerLine(), pixels.format(),
+        [](void* context) { delete static_cast<Storage*>(context); }, storage.get());
+    result.setColorSpace(pixels.colorSpace());
+    result.setDevicePixelRatio(pixels.devicePixelRatio());
+    if (!result.isNull())
+        storage.release();
+    return result;
+}
+
+ScreenshotImageRowSource retainResources(ScreenshotImageRowSource rows,
+                                         const std::shared_ptr<void>& owner) {
+    if (!owner)
+        return rows;
+    struct Storage {
+        std::shared_ptr<void> owner;
+        ScreenshotImageRowSource source;
+    };
+    auto storage = std::make_shared<Storage>(Storage{owner, rows});
+    rows.readRows = [storage](int first, int count, qsizetype stride, uchar* target,
+                              qsizetype capacity) {
+        return storage->source.readRows(first, count, stride, target, capacity);
+    };
+    if (rows.readRegion)
+        rows.readRegion = [storage](QRect region, qsizetype stride, uchar* target,
+                                    qsizetype capacity) {
+            return storage->source.readRegion(region, stride, target, capacity);
+        };
+    return rows;
+}
+
+QSize previewSize(QSize size) {
+    if (size.width() > kPreviewExtent || size.height() > kPreviewExtent)
+        size.scale(kPreviewExtent, kPreviewExtent, Qt::KeepAspectRatio);
+    return size.expandedTo(QSize(1, 1));
+}
+
+QSize detailSize(QSize size) {
+    constexpr qint64 maximumPixels = kMaximumPreviewBytes / 4;
+    const qint64 pixels = qint64(size.width()) * size.height();
+    if (pixels <= maximumPixels)
+        return size;
+    const double scale = std::sqrt(double(maximumPixels) / double(pixels));
+    QSize result(qMax(1, int(size.width() * scale)), qMax(1, int(size.height() * scale)));
+    // An extremely narrow region can round its short axis up to one pixel.
+    if (qint64(result.width()) * result.height() > maximumPixels) {
+        if (result.width() >= result.height())
+            result.setWidth(int(maximumPixels / result.height()));
+        else
+            result.setHeight(int(maximumPixels / result.width()));
+    }
+    return result;
+}
+
+// Consume ordered rows without retaining the decoded frame. Alpha is averaged in
+// premultiplied space; native-size regions preserve every RGBA byte, including hidden RGB.
+class PreviewRows final {
+  public:
+    explicit PreviewRows(QRect region, snow::image::AlphaContent* alpha = nullptr,
+                         bool detail = false)
+        : m_region(region), m_alpha(alpha), m_expected(region.top()) {
+        const QSize size = detail ? detailSize(region.size()) : previewSize(region.size());
+        m_native = size == region.size();
+        m_image = snowCanvasAllocateImage(size, m_native ? QImage::Format_RGBA8888
+                                                         : QImage::Format_RGBA8888_Premultiplied);
+        if (!m_native)
+            m_sums.resize(size_t(size.width()) * 4);
+    }
+    bool valid() const {
+        return !m_image.isNull() && !m_region.isEmpty();
+    }
+    uchar* storage(QSize size) {
+        return m_native && m_region == QRect(QPoint{}, size) ? m_image.bits() : nullptr;
+    }
+    bool consume(int first, int count, qsizetype stride, const uchar* pixels) {
+        if (!valid() || !pixels)
+            return false;
+        const int start = qMax(first, m_region.top());
+        const int end = qMin(first + count, m_region.bottom() + 1);
+        if (start >= end)
+            return true;
+        if (start != m_expected)
+            return false;
+        const int stripRows =
+            int(qMax(qsizetype{1}, qsizetype{1024 * 1024} / (qsizetype(m_region.width()) * 4)));
+        for (int row = start; row < end; row += stripRows) {
+            const int rows = qMin(stripRows, end - row);
+            const uchar* input =
+                pixels + qsizetype(row - first) * stride + qsizetype(m_region.x()) * 4;
+            if (m_alpha)
+                classifyAlpha(input, m_region.width(), rows, stride, m_alpha);
+            if (m_native) {
+                for (int offset = 0; offset < rows; ++offset) {
+                    uchar* target = m_image.scanLine(row + offset - m_region.top());
+                    const uchar* source = input + qsizetype(offset) * stride;
+                    if (target != source)
+                        std::memcpy(target, source, size_t(m_region.width()) * 4);
+                }
+            } else {
+                QImage strip(input, m_region.width(), rows, stride, QImage::Format_RGBA8888);
+                strip = snowCanvasConvertImage(strip, QImage::Format_RGBA8888_Premultiplied);
+                if (strip.width() != m_image.width())
+                    strip = snowCanvasScaleImage(strip, QSize(m_image.width(), rows),
+                                                 Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+                if (strip.isNull())
+                    return false;
+                for (int offset = 0; offset < rows; ++offset) {
+                    const uchar* inputRow = strip.constScanLine(offset);
+                    for (size_t x = 0; x < m_sums.size(); ++x)
+                        m_sums[x] += inputRow[x];
+                    ++m_accumulated;
+                    const int localEnd = row + offset + 1 - m_region.top();
+                    if (localEnd ==
+                        int(qint64(m_outputRow + 1) * m_region.height() / m_image.height())) {
+                        uchar* output = m_image.scanLine(m_outputRow++);
+                        for (size_t x = 0; x < m_sums.size(); ++x) {
+                            output[x] = uchar((m_sums[x] + quint64(m_accumulated / 2)) /
+                                              quint64(m_accumulated));
+                            m_sums[x] = 0;
+                        }
+                        m_accumulated = 0;
+                    }
+                }
+            }
+        }
+        m_expected = end;
+        return true;
+    }
+    QImage finish() {
+        if (m_expected != m_region.bottom() + 1)
+            return {};
+        if (!m_native)
+            m_image = snowCanvasConvertImage(m_image, QImage::Format_RGBA8888);
+        m_image.setColorSpace(QColorSpace::SRgb);
+        return std::move(m_image);
+    }
+
+  private:
+    QRect m_region;
+    snow::image::AlphaContent* m_alpha;
+    QImage m_image;
+    std::vector<quint64> m_sums;
+    int m_expected;
+    int m_outputRow = 0;
+    int m_accumulated = 0;
+    bool m_native;
+};
+
+QImage readRegionRows(const ScreenshotImageRowSource& rows, QRect region,
+                      const ScreenshotExportCancellation& cancellation, QString* error,
+                      snow::image::AlphaContent* alpha = nullptr, bool detail = false) {
+    if (!rows.isValid() || region.isEmpty() || !QRect(QPoint{}, rows.size).contains(region) ||
+        cancellation.isCancellationRequested())
+        return {};
+    const bool backing = !rows.backingImage.isNull() && rows.backingImage.size() == rows.size &&
+                         rows.backingImage.format() == QImage::Format_RGBA8888;
+    const bool cropped = !backing && static_cast<bool>(rows.readRegion);
+    const qsizetype stride = backing ? rows.backingImage.bytesPerLine()
+                                     : qsizetype(cropped ? region.width() : rows.size.width()) * 4;
+    const QSize outputSize = detail ? detailSize(region.size()) : previewSize(region.size());
+    const qint64 outputBytes = qint64(outputSize.width()) * outputSize.height() * 4;
+    std::shared_ptr<void> owner;
+    std::shared_ptr<void> temporary;
+    if (!reserveResources(rows, outputBytes,
+                          outputBytes + 3 * qMax(qint64(stride), qint64{1024 * 1024}) +
+                              qint64{8} * 1024 * 1024 +
+                              (cropped ? qint64(rows.size.width()) * 4 : 0) +
+                              qint64(outputSize.width()) * 4 * qint64(sizeof(quint64)),
+                          &owner, error, &temporary))
+        return {};
+    PreviewRows result(cropped ? QRect(0, region.y(), region.width(), region.height()) : region,
+                       alpha, detail);
+    if (!result.valid())
+        return {};
+    const int stripRows = int(qMax(qsizetype{1}, qsizetype{1024 * 1024} / stride));
+    QImage strip;
+    if (!backing) {
+        strip = snowCanvasAllocateImage(
+            QSize(cropped ? region.width() : rows.size.width(), qMin(stripRows, region.height())),
+            QImage::Format_RGBA8888);
+        if (strip.isNull())
+            return {};
+    }
+    for (int first = region.top(); first <= region.bottom(); first += stripRows) {
+        if (cancellation.isCancellationRequested() ||
+            (rows.cancellationRequested && rows.cancellationRequested()))
+            return {};
+        const int count = qMin(stripRows, region.bottom() + 1 - first);
+        const uchar* pixels = backing ? rows.backingImage.constScanLine(first) : strip.constBits();
+        const bool read =
+            backing ||
+            (cropped ? rows.readRegion(QRect(region.x(), first, region.width(), count), stride,
+                                       strip.bits(), strip.sizeInBytes())
+                     : rows.readRows(first, count, stride, strip.bits(), strip.sizeInBytes()));
+        if (!read || !result.consume(first, count, stride, pixels)) {
+            if (error)
+                *error = QCoreApplication::translate("ScreenshotSaveAsFileDialog",
+                                                     "The screenshot pixels could not be read");
+            return {};
+        }
+    }
+    return retainResources(result.finish(), std::move(owner));
+}
+
+struct DecodePreviewContext final {
+    const ScreenshotExportCancellation& cancellation;
+    ScreenshotImageFileFormat format;
+    QRect requested;
+    bool detail;
+    QString* error;
+    QSize frameSize;
+    std::unique_ptr<PreviewRows> rows;
+    std::shared_ptr<MappedRaster> storage;
+};
+
+int32_t SNOW_SHOT_IMAGE_CODEC_CALL beginPreview(void* raw, uint32_t width, uint32_t height) {
+    auto& context = *static_cast<DecodePreviewContext*>(raw);
+    if (width > uint32_t(std::numeric_limits<int>::max() / 4) ||
+        height > uint32_t(std::numeric_limits<int>::max()))
+        return 0;
+    context.frameSize = QSize(int(width), int(height));
+    const QRect bounds(QPoint{}, context.frameSize);
+    const QRect region = context.requested.isEmpty() ? bounds : context.requested;
+    if (!bounds.contains(region))
+        return 0;
+    context.rows = std::make_unique<PreviewRows>(region, nullptr, context.detail);
+    return context.rows->valid() ? 1 : 0;
+}
+uint8_t* SNOW_SHOT_IMAGE_CODEC_CALL previewStorage(void* raw, uint64_t stride, uint64_t bytes) {
+    auto& context = *static_cast<DecodePreviewContext*>(raw);
+    if (auto* direct = context.rows->storage(context.frameSize))
+        return direct;
+    if (context.format != ScreenshotImageFileFormat::Jpeg &&
+        context.format != ScreenshotImageFileFormat::Webp &&
+        context.format != ScreenshotImageFileFormat::Jxl)
+        return nullptr;
+    if (stride != uint64_t(context.frameSize.width()) * 4 ||
+        bytes != stride * uint64_t(context.frameSize.height()))
+        return nullptr;
+    // Buffer-based decoders need complete storage during decoding, but the viewport
+    // retains only its bounded image after this synchronous call retires.
+    context.storage = MappedRaster::create(context.frameSize, context.error);
+    return context.storage ? context.storage->pixels : nullptr;
+}
+int32_t SNOW_SHOT_IMAGE_CODEC_CALL consumePreview(void* raw, uint32_t first, uint32_t count,
+                                                  uint64_t stride, const uint8_t* pixels,
+                                                  uint64_t) {
+    auto& context = *static_cast<DecodePreviewContext*>(raw);
+    if (context.cancellation.isCancellationRequested() ||
+        stride > uint64_t(std::numeric_limits<qsizetype>::max()))
+        return 0;
+    return context.rows->consume(int(first), int(count), qsizetype(stride), pixels) ? 1 : 0;
+}
+int32_t SNOW_SHOT_IMAGE_CODEC_CALL previewCancelled(void* raw) {
+    return static_cast<DecodePreviewContext*>(raw)->cancellation.isCancellationRequested() ? 1 : 0;
+}
+
+QImage decodeDisplay(const Encoded& encoded, QRect region, bool initialPreview,
+                     const ScreenshotExportCancellation& cancellation, QString* error) {
+    if (cancellation.isCancellationRequested())
+        return {};
+    const QSize dimensions = region.isEmpty() ? encoded.options.size : region.size();
+    const QSize size = initialPreview ? previewSize(dimensions) : detailSize(dimensions);
+    const qint64 outputBytes = qint64(size.width()) * size.height() * 4;
+    qint64 storageBytes = 0;
+    if (encoded.pdf) {
+        for (const auto& tile : encoded.pdf->tiles)
+            if (region.isEmpty() || tile.rect.intersects(region))
+                storageBytes =
+                    qMax(storageBytes, qint64(tile.rect.width()) * tile.rect.height() * 12);
+    } else if (encoded.options.format == ScreenshotImageFileFormat::Jpeg ||
+               encoded.options.format == ScreenshotImageFileFormat::Webp ||
+               encoded.options.format == ScreenshotImageFileFormat::Jxl ||
+               encoded.options.format == ScreenshotImageFileFormat::Avif) {
+        storageBytes = qint64(encoded.options.size.width()) * encoded.options.size.height() * 4;
+        if (initialPreview && (encoded.options.format == ScreenshotImageFileFormat::Jpeg ||
+                               encoded.options.format == ScreenshotImageFileFormat::Webp))
+            storageBytes = qMin(storageBytes, kMaximumPreviewBytes);
+        if (encoded.options.format == ScreenshotImageFileFormat::Avif)
+            storageBytes *= 2;
+    }
+    std::shared_ptr<void> owner;
+    std::shared_ptr<void> temporary;
+    const qint64 rowWorkingBytes =
+        3 * qMax(qint64(encoded.options.size.width()) * 4, qint64{1024 * 1024}) +
+        qint64(size.width()) * 4 * qint64(sizeof(quint64));
+    if (encoded.pixels &&
+        !reserveResources(encoded.pixels->rows, outputBytes,
+                          storageBytes + outputBytes + rowWorkingBytes + qint64{16} * 1024 * 1024,
+                          &owner, error, &temporary))
+        return {};
+    if (encoded.pdf) {
+        if (region.isEmpty())
+            region = QRect(QPoint{}, encoded.options.size);
+        const bool native = size == region.size();
+        QImage image = snowCanvasAllocateImage(
+            size, native ? QImage::Format_RGBA8888 : QImage::Format_RGBA8888_Premultiplied);
+        if (image.isNull())
+            return {};
+        image.fill(Qt::transparent);
+        QPainter painter;
+        if (!native) {
+            painter.begin(&image);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        }
+        const qreal scaleX = qreal(image.width()) / region.width();
+        const qreal scaleY = qreal(image.height()) / region.height();
+        const bool decoded = screenshot_pdf::decodeTiles(
+            *encoded.pdf,
+            [&](QRect rect, const QImage& tile) {
+                if (native) {
+                    const QRect intersection = rect.intersected(region);
+                    for (int row = intersection.top(); row <= intersection.bottom(); ++row)
+                        std::memcpy(image.scanLine(row - region.top()) +
+                                        qsizetype(intersection.left() - region.left()) * 4,
+                                    tile.constScanLine(row - rect.top()) +
+                                        qsizetype(intersection.left() - rect.left()) * 4,
+                                    size_t(intersection.width()) * 4);
+                } else {
+                    painter.drawImage(QRectF((rect.x() - region.x()) * scaleX,
+                                             (rect.y() - region.y()) * scaleY,
+                                             rect.width() * scaleX, rect.height() * scaleY),
+                                      tile);
+                }
+                return !cancellation.isCancellationRequested();
+            },
+            error, [&cancellation] { return cancellation.isCancellationRequested(); }, region);
+        if (painter.isActive())
+            painter.end();
+        if (!decoded)
+            return {};
+        image = snowCanvasConvertImage(image, QImage::Format_RGBA8888);
+        image.setColorSpace(QColorSpace::SRgb);
+        return retainResources(std::move(image), std::move(owner));
+    }
+    DecodePreviewContext context{
+        cancellation, encoded.options.format, region, !initialPreview, error, {}, {}, {}};
+    const SnowShotImageCodecRgba8Sink sink{sizeof(SnowShotImageCodecRgba8Sink),
+                                           SNOW_SHOT_IMAGE_CODEC_ABI_VERSION,
+                                           &context,
+                                           beginPreview,
+                                           previewStorage,
+                                           consumePreview,
+                                           previewCancelled};
+    // JPEG and WebP reduce within their decoders. JPEG XL's extent option allocates
+    // a native owning raster, so keep its native decode in temporary mapped storage.
+    const uint32_t extent =
+        initialPreview && (encoded.options.format == ScreenshotImageFileFormat::Jpeg ||
+                           encoded.options.format == ScreenshotImageFileFormat::Webp ||
+                           encoded.options.format == ScreenshotImageFileFormat::Avif)
+            ? 2048
+            : 0;
+    std::array<char, 1024> backendError{};
+    if (!snow_shot_image_codec_decode_file_rgba8_stream(
+            encoded.path.toUtf8().constData(), bridgeFormat(encoded.options.format), extent, &sink,
+            backendError.data(), backendError.size())) {
+        if (error && error->isEmpty())
+            *error = QString::fromUtf8(backendError.data());
+        return {};
+    }
+    return cancellation.isCancellationRequested() || !context.rows
+               ? QImage{}
+               : retainResources(context.rows->finish(), std::move(owner));
 }
 } // namespace
 
@@ -141,21 +542,74 @@ Source prepare(const ScreenshotImageRowSource& rows,
     snow::image::AlphaContent alpha = snow::image::AlphaContent::opaque;
     const bool hasBacking = !rows.backingImage.isNull() && rows.backingImage.size() == rows.size &&
                             rows.backingImage.format() == QImage::Format_RGBA8888;
+    if (size != rows.size && !rows.previewImage.isNull() && rows.previewImage.width() <= 2048 &&
+        rows.previewImage.height() <= 2048) {
+        if (!rows.isKnownOpaque) {
+            const qsizetype stride = qsizetype(rows.size.width()) * 4;
+            const int batch = int(qMax(qsizetype{1}, qsizetype{1024 * 1024} / stride));
+            std::shared_ptr<void> working;
+            if (!reserveResources(rows, 0,
+                                  qMax(qint64(stride), qint64{1024 * 1024}) + kReaderCacheBytes,
+                                  &working, error))
+                return {};
+            QImage scratch;
+            if (!hasBacking) {
+                scratch = snowCanvasAllocateImage(
+                    QSize(rows.size.width(), qMin(batch, rows.size.height())),
+                    QImage::Format_RGBA8888);
+                if (scratch.isNull())
+                    return {};
+            }
+            for (int first = 0; first < rows.size.height(); first += batch) {
+                if (cancellation.isCancellationRequested() ||
+                    (rows.cancellationRequested && rows.cancellationRequested()))
+                    return {};
+                const int count = qMin(batch, rows.size.height() - first);
+                if (!hasBacking && !rows.readRows(first, count, scratch.bytesPerLine(),
+                                                  scratch.bits(), scratch.sizeInBytes())) {
+                    *error = QCoreApplication::translate("ScreenshotSaveAsFileDialog",
+                                                         "The screenshot pixels could not be read");
+                    return {};
+                }
+                classifyAlpha(
+                    hasBacking ? rows.backingImage.constScanLine(first) : scratch.constBits(),
+                    rows.size.width(), count,
+                    hasBacking ? rows.backingImage.bytesPerLine() : scratch.bytesPerLine(), &alpha);
+                if (alpha == snow::image::AlphaContent::non_opaque)
+                    break;
+            }
+        }
+        return {rows, rows.previewImage, alpha};
+    }
     if (hasBacking) {
         for (int first = 0; first < rows.size.height(); first += 64) {
             if (cancellation.isCancellationRequested())
                 return {};
             const int count = qMin(64, rows.size.height() - first);
-            classifyAlpha(rows.backingImage.constScanLine(first), rows.size.width(), count,
-                          rows.backingImage.bytesPerLine(), &alpha);
+            if (!rows.isKnownOpaque)
+                classifyAlpha(rows.backingImage.constScanLine(first), rows.size.width(), count,
+                              rows.backingImage.bytesPerLine(), &alpha);
         }
+        std::shared_ptr<void> owner;
+        std::shared_ptr<void> temporary;
+        const qint64 bytes = size == rows.size ? 0 : qint64(size.width()) * size.height() * 4;
+        if (bytes && !reserveResources(rows, bytes,
+                                       rows.backingImage.sizeInBytes() + bytes + kReaderCacheBytes,
+                                       &owner, error, &temporary))
+            return {};
         QImage preview = size == rows.size
                              ? rows.backingImage
                              : snowCanvasScaleImage(rows.backingImage, size, Qt::IgnoreAspectRatio,
                                                     Qt::SmoothTransformation);
-        return preview.isNull() ? Source{} : Source{rows, std::move(preview), alpha};
+        return preview.isNull() ? Source{}
+                                : Source{rows, retainResources(std::move(preview), owner), alpha};
     }
     if (size == rows.size) {
+        std::shared_ptr<void> owner;
+        std::shared_ptr<void> temporary;
+        const qint64 bytes = qint64(size.width()) * size.height() * 4;
+        if (!reserveResources(rows, bytes, kReaderCacheBytes, &owner, error, &temporary))
+            return {};
         QImage preview = snowCanvasAllocateImage(size, QImage::Format_RGBA8888);
         if (preview.isNull() || !rows.readRows(0, size.height(), preview.bytesPerLine(),
                                                preview.bits(), preview.sizeInBytes())) {
@@ -163,64 +617,22 @@ Source prepare(const ScreenshotImageRowSource& rows,
                                                  "The screenshot pixels could not be read");
             return {};
         }
-        classifyAlpha(preview.constBits(), preview.width(), preview.height(),
-                      preview.bytesPerLine(), &alpha);
+        if (!rows.isKnownOpaque)
+            classifyAlpha(preview.constBits(), preview.width(), preview.height(),
+                          preview.bytesPerLine(), &alpha);
         preview.setColorSpace(QColorSpace::SRgb);
+        preview = retainResources(std::move(preview), owner);
         // The bounded preview already contains every source pixel. Retain it as exact storage
         // instead of reading the source again and decoding the lossless export for display.
         auto retainedRows = snow_shot::image_codec::srgbRowSource(preview);
+        retainedRows.isKnownOpaque = alpha == snow::image::AlphaContent::opaque;
         retainedRows.cancellationRequested = rows.cancellationRequested;
+        retainedRows.reserveResources = rows.reserveResources;
         return {std::move(retainedRows), preview, alpha};
     }
-    QImage preview = snowCanvasAllocateImage(size, QImage::Format_RGBA8888_Premultiplied);
-    if (preview.isNull())
-        return {};
-    // Retain the immutable row source. Downsample in bounded strips without materializing
-    // a scrolling capture or keeping a second full-resolution pixel buffer.
-    std::vector<quint64> sums(size_t(size.width()) * 4);
-    const int maximumStripRows =
-        qMin(64, int((qint64(rows.size.height()) + size.height() - 1) / size.height()));
-    QImage stripStorage = snowCanvasAllocateImage(QSize(rows.size.width(), maximumStripRows),
-                                                  QImage::Format_RGBA8888);
-    if (stripStorage.isNull())
-        return {};
-    for (int y = 0; y < size.height(); ++y) {
-        std::fill(sums.begin(), sums.end(), 0);
-        const int first = int(qint64(y) * rows.size.height() / size.height());
-        const int end = int(qint64(y + 1) * rows.size.height() / size.height());
-        for (int row = first; row < end; row += 64) {
-            if (cancellation.isCancellationRequested())
-                return {};
-            const int count = qMin(64, end - row);
-            if (!rows.readRows(row, count, stripStorage.bytesPerLine(), stripStorage.bits(),
-                               stripStorage.sizeInBytes())) {
-                *error = QCoreApplication::translate("ScreenshotSaveAsFileDialog",
-                                                     "The screenshot pixels could not be read");
-                return {};
-            }
-            // A view avoids allocating the same full-width scratch strip for every batch.
-            QImage strip(stripStorage.constBits(), stripStorage.width(), count,
-                         stripStorage.bytesPerLine(), QImage::Format_RGBA8888);
-            classifyAlpha(strip.constBits(), strip.width(), strip.height(), strip.bytesPerLine(),
-                          &alpha);
-            strip = snowCanvasConvertImage(strip, QImage::Format_RGBA8888_Premultiplied);
-            if (strip.width() != size.width())
-                strip = snowCanvasScaleImage(strip, QSize(size.width(), count),
-                                             Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            for (int line = 0; line < count; ++line) {
-                const uchar* pixels = strip.constScanLine(line);
-                for (size_t x = 0; x < sums.size(); ++x)
-                    sums[x] += pixels[x];
-            }
-        }
-        uchar* pixels = preview.scanLine(y);
-        for (size_t x = 0; x < sums.size(); ++x)
-            pixels[x] = uchar((sums[x] + static_cast<quint64>((end - first) / 2)) /
-                              static_cast<quint64>(end - first));
-    }
-    preview = snowCanvasConvertImage(preview, QImage::Format_RGBA8888);
-    preview.setColorSpace(QColorSpace::SRgb);
-    return {rows, preview, alpha};
+    QImage preview = readRegionRows(rows, QRect(QPoint{}, rows.size), cancellation, error,
+                                    rows.isKnownOpaque ? nullptr : &alpha);
+    return preview.isNull() ? Source{} : Source{rows, std::move(preview), alpha};
 }
 QSize encoderLimits(ScreenshotImageFileFormat format) {
     if (format == ScreenshotImageFileFormat::Pdf)
@@ -258,22 +670,70 @@ std::shared_ptr<PreparedPixels> preparePixels(const Source& source, QSize size,
         result->alphaContent = source.alphaContent;
         return result;
     }
-
-    auto raster = MappedRaster::create(size, error);
-    if (!raster)
+    if (size.width() > std::numeric_limits<int>::max() / 4 ||
+        qint64(size.width()) * size.height() > kMaximumRasterBytes / 4) {
+        *error = QCoreApplication::translate("ScreenshotSaveAsFileDialog",
+                                             "The image dimensions exceed the export limit");
         return {};
+    }
+    const qint64 bytes = qint64(size.width()) * size.height() * 4;
     const ScreenshotImageRowSource input = withCancellation(source.rows, cancellation);
-    const qsizetype stride = static_cast<qsizetype>(size.width()) * 4;
-    if (!snow_shot::image_codec::resizeToRgba8(input, size, raster->pixels, stride,
-                                               stride * size.height(), error)) {
-        return {};
+    if (bytes <= kMaximumPreparedPixelCacheBytes) {
+        const auto working = snow_shot::image_codec::resizeWorkingBytes(input.size, size);
+        if (!working) {
+            *error = QCoreApplication::translate("ScreenshotSaveAsFileDialog",
+                                                 "The image dimensions exceed the export limit");
+            return {};
+        }
+        std::shared_ptr<void> owner;
+        std::shared_ptr<void> temporary;
+        QString admissionError;
+        if (reserveResources(source.rows, bytes, *working + kReaderCacheBytes, &owner,
+                             &admissionError, &temporary)) {
+            QImage pixels = snowCanvasAllocateImage(size, QImage::Format_RGBA8888);
+            if (!pixels.isNull()) {
+                if (!snow_shot::image_codec::resizeToRgba8(input, size, pixels.bits(),
+                                                           pixels.bytesPerLine(),
+                                                           pixels.sizeInBytes(), error) ||
+                    cancellation.isCancellationRequested())
+                    return {};
+                result->alphaContent = snow::image::AlphaContent::opaque;
+                if (source.alphaContent != snow::image::AlphaContent::opaque)
+                    classifyAlpha(pixels.constBits(), size.width(), size.height(),
+                                  pixels.bytesPerLine(), &result->alphaContent);
+                if (cancellation.isCancellationRequested())
+                    return {};
+                pixels.setColorSpace(QColorSpace::SRgb);
+                result->exactImage = retainResources(std::move(pixels), owner);
+                result->rows = snow_shot::image_codec::srgbRowSource(result->exactImage);
+                result->rows.cancellationRequested = source.rows.cancellationRequested;
+                result->rows.reserveResources = source.rows.reserveResources;
+                result->rows.isKnownOpaque =
+                    result->alphaContent == snow::image::AlphaContent::opaque;
+                return result;
+            }
+        }
+        // A reusable raster is optional. Release partial cache admission before trying
+        // the bounded row plan, whose working set does not include the output raster.
     }
     if (cancellation.isCancellationRequested())
         return {};
-    result->alphaContent = snow::image::AlphaContent::opaque;
-    classifyAlpha(raster->pixels, size.width(), size.height(), stride, &result->alphaContent);
-    result->rows = raster->rows(source.rows.cancellationRequested);
-    result->exactImage = result->rows.backingImage;
+    const auto resources = snow_shot::image_codec::resizeResources(input.size, size);
+    if (!resources) {
+        *error = QCoreApplication::translate("ScreenshotSaveAsFileDialog",
+                                             "The image dimensions exceed the export limit");
+        return {};
+    }
+    std::shared_ptr<void> owner;
+    if (!reserveResources(source.rows, resources->retainedBytes + kReaderCacheBytes,
+                          resources->scratchBytes, &owner, error))
+        return {};
+    auto resized = snow_shot::image_codec::resizedRowSource(input, size, error);
+    if (!resized.isValid() || cancellation.isCancellationRequested())
+        return {};
+    result->alphaContent = source.alphaContent;
+    resized.isKnownOpaque = source.alphaContent == snow::image::AlphaContent::opaque;
+    result->rows = retainResources(std::move(resized), owner);
     return result;
 }
 
@@ -398,5 +858,52 @@ QImage decode(const Encoded& encoded, const ScreenshotExportCancellation& cancel
         return {};
     }
     return cancellation.isCancellationRequested() ? QImage{} : decoded->image();
+}
+
+QImage readRegion(const ScreenshotImageRowSource& rows, QRect region,
+                  const ScreenshotExportCancellation& cancellation, QString* error) {
+    return readRegionRows(rows, region, cancellation, error, nullptr, true);
+}
+
+QImage preview(const Encoded& encoded, const Source& source,
+               const ScreenshotExportCancellation& cancellation, QString* error) {
+    if (cancellation.isCancellationRequested())
+        return {};
+    if (encoded.codecResult.roundTrip == snow::image::PixelRoundTrip::exact && encoded.pixels) {
+        if (encoded.options.size == source.rows.size && !source.preview.isNull())
+            return source.preview;
+        const QImage& exact = encoded.pixels->exactImage;
+        if (!exact.isNull() && exact.width() <= kPreviewExtent && exact.height() <= kPreviewExtent)
+            return exact;
+        if (!source.preview.isNull()) {
+            const QSize size = previewSize(encoded.options.size);
+            if (source.preview.size() == size)
+                return source.preview;
+            std::shared_ptr<void> owner;
+            std::shared_ptr<void> temporary;
+            const qint64 bytes = qint64(size.width()) * size.height() * 4;
+            if (!reserveResources(encoded.pixels->rows, bytes,
+                                  source.preview.sizeInBytes() + bytes + kReaderCacheBytes, &owner,
+                                  error, &temporary))
+                return {};
+            // A fit preview is approximate; native viewport rows always come from the
+            // actual prepared pixels. Avoid another full resize solely for this image.
+            return retainResources(snowCanvasScaleImage(source.preview, size, Qt::IgnoreAspectRatio,
+                                                        Qt::SmoothTransformation),
+                                   std::move(owner));
+        }
+        return readRegionRows(encoded.pixels->rows, QRect(QPoint{}, encoded.options.size),
+                              cancellation, error);
+    }
+    return decodeDisplay(encoded, {}, true, cancellation, error);
+}
+
+QImage decodeRegion(const Encoded& encoded, QRect region,
+                    const ScreenshotExportCancellation& cancellation, QString* error) {
+    if (region.isEmpty() || !QRect(QPoint{}, encoded.options.size).contains(region))
+        return {};
+    if (encoded.codecResult.roundTrip == snow::image::PixelRoundTrip::exact && encoded.pixels)
+        return readRegion(encoded.pixels->rows, region, cancellation, error);
+    return decodeDisplay(encoded, region, false, cancellation, error);
 }
 } // namespace screenshot_save_export

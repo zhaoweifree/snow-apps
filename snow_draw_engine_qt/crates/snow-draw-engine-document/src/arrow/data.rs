@@ -96,6 +96,10 @@ pub struct ArrowData {
     pub stroke: ColorRgba8,
     pub stroke_width: f64,
     pub stroke_style: StrokeStyle,
+    #[serde(default)]
+    pub stroke_rendering_style: snow_draw_engine_core::arrow::StrokeRenderingStyle,
+    #[serde(default)]
+    pub stroke_rendering_seed: u32,
     pub fill: ColorRgba8,
     pub fill_style: FillStyle,
     pub opacity: f64,
@@ -122,6 +126,8 @@ impl ArrowData {
             DEFAULT_ARROW_MAX_COORDINATE,
         );
         Some(Self {
+            stroke_rendering_seed: 0,
+            stroke_rendering_style: Default::default(),
             linear_kind: LinearElementKind::Arrow,
             distance: None,
             angle: None,
@@ -172,6 +178,7 @@ impl ArrowData {
         self.end_arrowhead = None;
         self.arrow_type = ArrowType::Straight;
         self.stroke_style = StrokeStyle::Solid;
+        self.stroke_rendering_style = Default::default();
         self.fill = ColorRgba8::default();
         self.fill_style = FillStyle::Solid;
         self.start_binding = None;
@@ -183,6 +190,8 @@ impl ArrowData {
     }
 
     pub fn inherit_linear_metadata_from(&mut self, source: &Self) {
+        self.stroke_rendering_style = source.stroke_rendering_style;
+        self.stroke_rendering_seed = source.stroke_rendering_seed;
         self.linear_kind = source.linear_kind;
         self.distance = source.distance;
         self.angle = source.angle;
@@ -329,6 +338,8 @@ impl ArrowData {
     pub(crate) fn apply_patch(&self, patch: &ArrowPatch) -> Self {
         let points = patch.points.clone().unwrap_or_else(|| self.points.clone());
         Self {
+            stroke_rendering_seed: self.stroke_rendering_seed,
+            stroke_rendering_style: self.stroke_rendering_style,
             linear_kind: self.linear_kind,
             distance: self.distance,
             angle: self.angle,
@@ -722,6 +733,28 @@ pub fn validate_arrow(arrow: &ArrowData) -> Result<(), ErrorCode> {
     Ok(())
 }
 
+/// Ink overflow is independent of the centerline used for binding and editing.
+pub fn arrow_paint_bounds(arrow: &ArrowData) -> DrawRect {
+    let bounds = arrow_bounds(arrow);
+    let outset = arrow_stroke_rendering_outset(arrow);
+    DrawRect::new(
+        bounds.min_x - outset,
+        bounds.min_y - outset,
+        bounds.max_x + outset,
+        bounds.max_y + outset,
+    )
+}
+
+fn arrow_stroke_rendering_outset(arrow: &ArrowData) -> f64 {
+    if !(arrow.is_regular_arrow() || arrow.is_line())
+        || arrow.stroke.a == 0
+        || arrow.stroke_width <= 0.0
+    {
+        return 0.0;
+    }
+    snow_draw_engine_core::arrow::stroke_rendering_outset(arrow.stroke_rendering_style, f64::MAX)
+}
+
 pub fn arrow_bounds(arrow: &ArrowData) -> DrawRect {
     let mut global_points = arrow_visual_points(arrow);
     if let Some(shaft) = crate::tapered_arrow_geometry(arrow) {
@@ -757,13 +790,14 @@ pub fn arrow_bounds(arrow: &ArrowData) -> DrawRect {
 }
 
 pub fn arrow_hit_test(arrow: &ArrowData, point: Point<f64>, hit_tolerance: f64) -> bool {
+    let hit_tolerance = hit_tolerance.max(0.0) + arrow_stroke_rendering_outset(arrow);
     if arrow_is_degenerate(arrow) {
         return false;
     }
 
     let global_points = arrow_visual_points(arrow);
     if arrow.is_line()
-        && arrow.fill.a != 0
+        && arrow.fill_style.is_visible(arrow.fill)
         && arrow.opacity > 0.0
         && arrow.fill_path_is_closed()
         && point_in_polygon(&global_points, point)
@@ -1340,6 +1374,31 @@ fn point_in_polygon(points: &[Point<f64>], point: Point<f64>) -> bool {
 
 #[cfg(test)]
 mod line_tests {
+
+    #[test]
+    fn border_fill_keeps_closed_line_interiors_unhittable() {
+        let mut value = line(
+            &[
+                Point::new(-50.0, -40.0),
+                Point::new(50.0, -40.0),
+                Point::new(50.0, 40.0),
+                Point::new(-50.0, 40.0),
+                Point::new(-50.0, -40.0),
+            ],
+            ColorRgba8 {
+                r: 255,
+                g: 204,
+                b: 199,
+                a: 255,
+            },
+        );
+        value.arrow_type = ArrowType::Straight;
+        assert!(arrow_hit_test(&value, Point::default(), 0.0));
+        value.fill_style = FillStyle::Border;
+        assert!(!arrow_hit_test(&value, Point::default(), 0.0));
+        assert!(arrow_hit_test(&value, Point::new(0.0, -40.0), 0.0));
+    }
+
     use super::*;
 
     fn line(points: &[Point<f64>], fill: ColorRgba8) -> ArrowData {

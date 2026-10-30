@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QUrlQuery>
+#include <algorithm>
 #include <memory>
 
 using namespace translation_tests;
@@ -163,7 +164,7 @@ void protocols() {
         const QString source = QString::fromUtf8("Hello + & \xE4\xBD\xA0\xE5\xA5\xBD");
         const auto token = client.streamTranslation(
             {value.selectionId(), QStringLiteral("auto"), QStringLiteral("zh-Hant"), source,
-             QStringLiteral("default"), QStringLiteral("ja")},
+             QStringLiteral("default")},
             &receiver, [&](const QString& delta) { text += delta; },
             [&](auto response) {
                 result = response;
@@ -509,14 +510,36 @@ void errorsAndInvalidation() {
     value.concurrency = 1;
     require(settings.setValue(key, textTranslationConfigurationsToJson({value})),
             "restore provider");
-    std::unique_ptr<translation::TranslationJob> throttled(service.createJob(
-        {QStringLiteral("one"), QStringLiteral("two"), QStringLiteral("three")}, nullptr));
+    std::unique_ptr<translation::TranslationJob> throttled(
+        service.createJob({QStringLiteral("one"), QStringLiteral("two"), QStringLiteral("one"),
+                           QStringLiteral("three"), QStringLiteral("two")},
+                          nullptr));
     throttled->start();
     waitUntil([&] { return server.requests.size() == 5; }, "throttled job starts");
     server.respond(4, "{\"error_code\":\"54003\"}");
     waitUntil([&] { return !throttled->busy(); }, "throttled job stops");
     require(SnowShotApiClientTestAccess::requests(client) == 0 && server.requests.size() == 5,
             "throttling cancels remaining queued job work");
+    require(std::all_of(throttled->units().cbegin(), throttled->units().cend(),
+                        [](const auto& unit) {
+                            return unit.state == translation::TranslationJob::State::Failed;
+                        }),
+            "throttling settles all positions of the active and queued duplicate groups");
+    throttled->retry();
+    for (int index = 5; index < 8; ++index) {
+        waitUntil([&] { return server.requests.size() == index + 1; },
+                  "retry starts each unique throttled source once");
+        const QByteArray output = QByteArray::number(index);
+        server.respond(index, "{\"trans_result\":[{\"dst\":\"" + output + "\"}]}");
+    }
+    waitUntil([&] { return !throttled->busy(); }, "retry settles every throttled duplicate group");
+    require(throttled->state() == translation::TranslationJob::State::Completed &&
+                server.requests.size() == 8 && throttled->units()[0].text == QStringLiteral("5") &&
+                throttled->units()[2].text == QStringLiteral("5") &&
+                throttled->units()[1].text == QStringLiteral("6") &&
+                throttled->units()[4].text == QStringLiteral("6") &&
+                throttled->units()[3].text == QStringLiteral("7"),
+            "retry preserves original index mapping while translating each unique source once");
 }
 } // namespace
 int main(int argc, char** argv) {

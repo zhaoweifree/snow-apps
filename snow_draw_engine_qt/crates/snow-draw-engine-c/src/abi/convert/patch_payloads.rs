@@ -2,7 +2,7 @@ use std::ffi::c_char;
 
 use snow_draw_engine::{
     DirtyRegion, DisplayItemId, OverlayDisplayItem, PatchCursor, SceneDisplayItem, SnapGuideAxis,
-    SnapGuideKind, UiShapeKind as UiRectKind, ViewportPatch,
+    SnapGuideDisplayItem, SnapGuideKind, UiShapeKind as UiRectKind, ViewportPatch,
 };
 
 use crate::abi::types::*;
@@ -241,6 +241,7 @@ pub(crate) fn snow_scene_display_item_from_rust(
         SceneDisplayItem::Magnifier(_) | SceneDisplayItem::SpeechBubble(_) => unreachable!(),
         SceneDisplayItem::Rectangle(item) => {
             out.kind = SnowSceneDisplayItemKind::DrawRect;
+            encode_bound_text_id(out, item.bound_text_id);
             out.element_id = SnowElementId {
                 index: item.id.index,
                 generation: item.id.generation,
@@ -257,6 +258,9 @@ pub(crate) fn snow_scene_display_item_from_rust(
             out.fill_style = snow_fill_style_from_rust(item.fill_style);
             out.stroke_width = item.stroke_width;
             out.stroke_style = snow_stroke_style_from_rust(item.stroke_style);
+            out.stroke_rendering_style =
+                super::snow_stroke_rendering_style_from_rust(item.stroke_rendering_style);
+            out.stroke_rendering_seed = item.stroke_rendering_seed;
             out.corner_radii = item.corner_radii.into();
             out.opacity = item.opacity;
             out.rect_shape = match item.shape {
@@ -333,9 +337,13 @@ pub(crate) fn snow_scene_display_item_from_rust(
             out.arrow_shaft_type = super::snow_arrow_shaft_type_from_rust(item.arrow_shaft_type);
             out.arrow_ratio = item.arrow_ratio;
             out.is_free_draw = u8::from(item.is_free_draw);
+            out.brush_mode = item.brush_mode as u8;
             out.arrow_start_head = snow_arrowhead_from_rust(item.start_arrowhead);
             out.arrow_end_head = snow_arrowhead_from_rust(item.end_arrowhead);
             out.arrow_stroke_style = snow_stroke_style_from_rust(item.stroke_style);
+            out.stroke_rendering_style =
+                super::snow_stroke_rendering_style_from_rust(item.stroke_rendering_style);
+            out.stroke_rendering_seed = item.stroke_rendering_seed;
             out.opacity = item.opacity;
             out.blend_mode = match item.blend_mode {
                 snow_draw_engine::DisplayBlendMode::Normal => SnowBlendMode::Normal,
@@ -414,6 +422,9 @@ pub(crate) fn snow_scene_display_item_from_rust(
             out.fill_style = snow_fill_style_from_rust(item.fill_style);
             out.stroke_style = snow_stroke_style_from_rust(item.stroke_style);
             out.serial_number_type = item.serial_number_type as u8;
+            out.stroke_rendering_style =
+                super::snow_stroke_rendering_style_from_rust(item.stroke_rendering_style);
+            out.stroke_rendering_seed = item.stroke_rendering_seed;
             converted.font_family_utf8 = utf8_bytes(item.font_family.as_deref());
             out.font_family_utf8_len = converted.font_family_utf8.len() as u32;
             encode_bound_text_id(out, item.bound_text_id);
@@ -460,6 +471,39 @@ pub(crate) fn snow_scene_patch_item_from_rust(
     let omit_arrow_points =
         matches!(value, SceneDisplayItem::Filter(filter) if filter.is_pen_filter);
     snow_scene_display_item_from_rust(value, omit_arrow_points, omit_path_commands)
+}
+
+impl From<&SnapGuideDisplayItem> for SnowOverlayDisplayItem {
+    fn from(item: &SnapGuideDisplayItem) -> Self {
+        Self {
+            kind: SnowOverlayDisplayItemKind::SnapGuide,
+            snap_guide_kind: match item.kind {
+                SnapGuideKind::Point => SnowSnapGuideKind::Point,
+                SnapGuideKind::Gap => SnowSnapGuideKind::Gap,
+            },
+            snap_guide_axis: match item.axis {
+                SnapGuideAxis::Horizontal => SnowSnapGuideAxis::Horizontal,
+                SnapGuideAxis::Vertical => SnowSnapGuideAxis::Vertical,
+            },
+            snap_marker_count: item.marker_count,
+            snap_has_label: u8::from(item.label.is_some()),
+            snap_start_x: item.start.x,
+            snap_start_y: item.start.y,
+            snap_end_x: item.end.x,
+            snap_end_y: item.end.y,
+            snap_marker0_x: item.markers[0].x,
+            snap_marker0_y: item.markers[0].y,
+            snap_marker1_x: item.markers[1].x,
+            snap_marker1_y: item.markers[1].y,
+            snap_label: item.label.unwrap_or(0.0),
+            snap_color: item.color.into(),
+            snap_line_width: item.line_width,
+            snap_marker_size: item.marker_size,
+            snap_gap_dash_length: item.gap_dash_length,
+            snap_gap_dash_gap: item.gap_dash_gap,
+            ..Self::default()
+        }
+    }
 }
 
 pub(crate) fn snow_overlay_display_item_from_rust(
@@ -512,31 +556,7 @@ pub(crate) fn snow_overlay_display_item_from_rust(
             out.arrow_path_command_count = converted.arrow_path_commands.len() as u32;
         }
         OverlayDisplayItem::SnapGuide(item) => {
-            out.kind = SnowOverlayDisplayItemKind::SnapGuide;
-            out.snap_guide_kind = match item.kind {
-                SnapGuideKind::Point => SnowSnapGuideKind::Point,
-                SnapGuideKind::Gap => SnowSnapGuideKind::Gap,
-            };
-            out.snap_guide_axis = match item.axis {
-                SnapGuideAxis::Horizontal => SnowSnapGuideAxis::Horizontal,
-                SnapGuideAxis::Vertical => SnowSnapGuideAxis::Vertical,
-            };
-            out.snap_marker_count = item.marker_count;
-            out.snap_has_label = u8::from(item.label.is_some());
-            out.snap_start_x = item.start.x;
-            out.snap_start_y = item.start.y;
-            out.snap_end_x = item.end.x;
-            out.snap_end_y = item.end.y;
-            out.snap_marker0_x = item.markers[0].x;
-            out.snap_marker0_y = item.markers[0].y;
-            out.snap_marker1_x = item.markers[1].x;
-            out.snap_marker1_y = item.markers[1].y;
-            out.snap_label = item.label.unwrap_or(0.0);
-            out.snap_color = item.color.into();
-            out.snap_line_width = item.line_width;
-            out.snap_marker_size = item.marker_size;
-            out.snap_gap_dash_length = item.gap_dash_length;
-            out.snap_gap_dash_gap = item.gap_dash_gap;
+            *out = item.into();
         }
     }
     converted.refresh_pointers();
@@ -562,6 +582,7 @@ fn snow_overlay_rect_kind_from_rust(value: UiRectKind) -> SnowOverlayRectKind {
         UiRectKind::MagnifierMoveHandle => SnowOverlayRectKind::MagnifierMoveHandle,
         UiRectKind::MagnifierSelectionFrame => SnowOverlayRectKind::MagnifierSelectionFrame,
         UiRectKind::SpeechBubbleAddTailHandle => SnowOverlayRectKind::SpeechBubbleAddTailHandle,
+        UiRectKind::ShapeTextHandle => SnowOverlayRectKind::ShapeTextHandle,
         UiRectKind::SpeechBubbleTailBaseHandle => SnowOverlayRectKind::SpeechBubbleTailBaseHandle,
         UiRectKind::SpeechBubbleTailTipHandle => SnowOverlayRectKind::SpeechBubbleTailTipHandle,
     }
@@ -821,6 +842,25 @@ mod tests {
     }
 
     #[test]
+    fn shape_display_item_exports_bound_text_id() {
+        let item = snow_scene_display_item_from_rust(
+            &SceneDisplayItem::Rectangle(RectangleDisplayItem {
+                bound_text_id: Some(DisplayItemId {
+                    index: 42,
+                    generation: 7,
+                }),
+                ..RectangleDisplayItem::default()
+            }),
+            false,
+            false,
+        );
+        assert_eq!(item.view.has_bound_text_element, 1);
+        assert_eq!(item.view.bound_text_element_index, 42);
+        assert_eq!(item.view.bound_text_element_generation, 7);
+        assert_eq!(SnowOverlayRectKind::ShapeTextHandle as u32, 20);
+    }
+
+    #[test]
     fn filter_display_item_exports_effect_strength_opacity_and_geometry() {
         let item = snow_scene_display_item_from_rust(
             &SceneDisplayItem::Filter(FilterDisplayItem {
@@ -849,9 +889,9 @@ mod tests {
         assert_eq!(item.view.element_id.generation, 4);
         assert_eq!(item.view.filter.filter_type, 1);
         assert_eq!(item.view.filter.strength, 0.625);
-        assert_eq!(item.view.filter.mosaic_block_size, 8.25);
-        assert_eq!(item.view.filter.blur_sigma, 11.75);
-        assert_eq!(item.view.filter.sampling_radius, 36.25);
+        assert_eq!(item.view.filter.mosaic_block_size, 9.8125);
+        assert_eq!(item.view.filter.blur_sigma, 14.5625);
+        assert_eq!(item.view.filter.sampling_radius, 44.6875);
         assert_eq!(item.view.opacity, 0.4);
         assert_eq!((item.view.center_x, item.view.center_y), (21.0, 34.0));
         assert_eq!((item.view.width, item.view.height), (55.0, 89.0));
@@ -912,6 +952,7 @@ mod tests {
     #[test]
     fn arrow_display_view_preserves_dynamic_outer_slices() {
         let primitive = ArrowheadDisplayPrimitive {
+            roughness_cap: Some(0.5),
             kind: ArrowheadDisplayPrimitiveKind::Line,
             points: vec![[1.0, 2.0]; SNOW_ARROWHEAD_PRIMITIVE_POINT_CAPACITY + 1],
             center: [3.0, 4.0],

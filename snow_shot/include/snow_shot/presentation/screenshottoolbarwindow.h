@@ -24,6 +24,9 @@ class ScreenshotToolbarWindow final : public ScreenshotFloatingToolPaletteWindow
     void setScrollingScreenshotMode(bool enabled);
     void setActiveTool(ScreenshotToolPalette::Tool tool);
     void setScreenshotRegionType(ScreenshotRegionType type);
+    void setSelectionBackgroundOpacityState(int percent, bool available);
+    void setLayoutCompactionState(ScreenshotLayoutCompaction options, bool available,
+                                  bool canvasUsesPoints);
     void setSelectionDisplayUnit(ScreenshotSelectionDisplayUnit unit);
     void setRecaptureBusy(bool busy);
     void synchronizeCursorState();

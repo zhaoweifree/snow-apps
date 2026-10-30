@@ -6,7 +6,7 @@
 #               runs, delivering a native list variable)
 #   COPY_TO   - destination directory
 #   COPY_DIR  - directory used to resolve non-system dependencies beside the
-#               root DLLs (for example protobuf, Abseil, and DirectML).
+#               root DLLs (for example image and recording codecs).
 if(NOT DEFINED COPY_FROM OR NOT DEFINED COPY_TO)
     message(FATAL_ERROR "copy_runtime_dlls.cmake requires COPY_FROM and COPY_TO")
 endif()

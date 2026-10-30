@@ -198,6 +198,7 @@ class OverlayPopupController final : public QObject, private PopupInteractionOwn
   QWidget* popupScopeWindow() const override;
   QWidget* popupSurfaceWidget() const override;
   bool popupIsVisible() const override;
+  bool popupIsRequestedVisible() const override;
   bool popupWantsHostFrameRelayout() const override;
   bool popupContainsGlobalPos(const QPoint& globalPos) const override;
   void popupCloseFromHost(PopupCloseReason reason) override;

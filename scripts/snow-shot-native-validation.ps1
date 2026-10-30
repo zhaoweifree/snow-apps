@@ -2,7 +2,13 @@
 function Assert-SnowShotNativeValidation {
     param([Parameter(Mandatory)]$Manifest, [Parameter(Mandatory)][string]$ArtifactPath,
         [Parameter(Mandatory)][ValidateSet('windows-x64', 'windows-arm64')][string]$Platform,
-        [string]$ProofDirectory = '')
+        [string]$ProofDirectory = '', [switch]$SkipArm64NativeValidation)
+    if ($Platform -ceq 'windows-arm64' -and $SkipArm64NativeValidation) {
+        $item = Get-Item -LiteralPath $ArtifactPath
+        return [ordered]@{ Platform = $Platform; Passed = $false; Waived = $true
+            Artifacts = @([ordered]@{ Name = $item.Name; Bytes = $item.Length
+                Sha256 = (Get-FileHash -LiteralPath $ArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant() }) }
+    }
     $proof = $Manifest.PSObject.Properties['NativeValidation']
     $value = if ($proof) { $proof.Value } else { $null }
     if ($ProofDirectory) {

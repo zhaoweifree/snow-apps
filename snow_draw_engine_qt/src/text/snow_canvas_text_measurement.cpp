@@ -2,6 +2,7 @@
 #include "snow_canvas_text_measurement.h"
 
 #include "snow_canvas_text.h"
+#include "snow_canvas_fill_render.h"
 #include "snow_canvas_element_id.h"
 #include "snow_canvas_text_edit_geometry.h"
 #include "snow_canvas_text_layout.h"
@@ -83,7 +84,7 @@ withBubbleDecorationReserve(snow_canvas_text_layout::GraphemeMetrics metrics,
     if (item.stroke.a != 0) {
         metrics.inkReserve += qMax(0.0, item.stroke_width) / 2.0;
     }
-    if (item.fill.a != 0) {
+    if (snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style)) {
         const auto outset = snow_scene_text_fill_outset(&item);
         metrics.inkReserve = qMax(metrics.inkReserve, qMax(outset.x, outset.y));
     }

@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QSize>
+#include <QStringList>
 #include <QWidget>
 #include <optional>
 
@@ -62,6 +63,10 @@ class PinnedWindowManagementPageWidget final : public QWidget {
     void retranslateUi();
     void applyTheme(const snow_shot::presentation::styles::ThemeColorScheme& scheme);
 
+  signals:
+    void collageRequested(const QStringList& recordIds);
+    void splitRequested(const QString& recordId);
+
   protected:
     void changeEvent(QEvent* event) override;
     void showEvent(QShowEvent* event) override;
@@ -99,6 +104,7 @@ class PinnedWindowManagementPageWidget final : public QWidget {
     QLabel* m_selectionSummary = nullptr;
     QWidget* m_selectionActions = nullptr;
     adqt::widgets::AdButton* m_deleteSelected = nullptr;
+    adqt::widgets::AdButton* m_collageButton = nullptr;
     adqt::widgets::AdButton* m_selectPage = nullptr;
     adqt::widgets::AdButton* m_deselect = nullptr;
     adqt::widgets::AdPopconfirm* m_deleteSelectedConfirmation = nullptr;

@@ -1,3 +1,4 @@
+#include "snow_shot/presentation/screenshotcanvastoolmapping.h"
 #include "snow_shot/presentation/screenshottoolcommandworkflow.h"
 
 #include "snow_shot/presentation/screenshotcapturestate.h"
@@ -39,55 +40,55 @@ void ScreenshotToolCommandWorkflow::setMoveTool() {
 }
 
 void ScreenshotToolCommandWorkflow::setSelectTool() {
-    setCanvasTool(ScreenshotActiveTool::Select, SnowCanvasTool::Select);
+    setCanvasTool(SnowCanvasTool::Select);
 }
 
 void ScreenshotToolCommandWorkflow::setSpeechBubbleTool() {
-    setCanvasTool(ScreenshotActiveTool::SpeechBubble, SnowCanvasTool::SpeechBubble);
+    setCanvasTool(SnowCanvasTool::SpeechBubble);
 }
 
 void ScreenshotToolCommandWorkflow::setShapeTool() {
-    setCanvasTool(ScreenshotActiveTool::Shape, SnowCanvasTool::Shape);
+    setCanvasTool(SnowCanvasTool::Shape);
 }
 
 void ScreenshotToolCommandWorkflow::setArrowTool() {
-    setCanvasTool(ScreenshotActiveTool::Arrow, SnowCanvasTool::Arrow);
+    setCanvasTool(SnowCanvasTool::Arrow);
 }
 
 void ScreenshotToolCommandWorkflow::setLineTool() {
-    setCanvasTool(ScreenshotActiveTool::Line, SnowCanvasTool::Line);
+    setCanvasTool(SnowCanvasTool::Line);
 }
 
 void ScreenshotToolCommandWorkflow::setDistanceTool() {
-    setCanvasTool(ScreenshotActiveTool::Distance, SnowCanvasTool::Distance);
+    setCanvasTool(SnowCanvasTool::Distance);
 }
 
 void ScreenshotToolCommandWorkflow::setAngleTool() {
-    setCanvasTool(ScreenshotActiveTool::Angle, SnowCanvasTool::Angle);
+    setCanvasTool(SnowCanvasTool::Angle);
 }
 
 void ScreenshotToolCommandWorkflow::setFreeDrawTool() {
-    setCanvasTool(ScreenshotActiveTool::FreeDraw, SnowCanvasTool::FreeDraw);
+    setCanvasTool(SnowCanvasTool::FreeDraw);
 }
 
 void ScreenshotToolCommandWorkflow::setHighlightTool() {
-    setCanvasTool(ScreenshotActiveTool::RectangleHighlight, SnowCanvasTool::RectangleHighlight);
+    setCanvasTool(SnowCanvasTool::RectangleHighlight);
 }
 
 void ScreenshotToolCommandWorkflow::setPenHighlightTool() {
-    setCanvasTool(ScreenshotActiveTool::PenHighlight, SnowCanvasTool::PenHighlight);
+    setCanvasTool(SnowCanvasTool::PenHighlight);
 }
 
 void ScreenshotToolCommandWorkflow::setEraserTool() {
-    setCanvasTool(ScreenshotActiveTool::Eraser, SnowCanvasTool::Eraser);
+    setCanvasTool(SnowCanvasTool::Eraser);
 }
 
 void ScreenshotToolCommandWorkflow::setRectangleEraserTool() {
-    setCanvasTool(ScreenshotActiveTool::RectangleEraser, SnowCanvasTool::RectangleEraser);
+    setCanvasTool(SnowCanvasTool::RectangleEraser);
 }
 
 void ScreenshotToolCommandWorkflow::setBrushEraserTool() {
-    setCanvasTool(ScreenshotActiveTool::BrushEraser, SnowCanvasTool::BrushEraser);
+    setCanvasTool(SnowCanvasTool::BrushEraser);
 }
 
 void ScreenshotToolCommandWorkflow::setFilterTool() {
@@ -95,27 +96,27 @@ void ScreenshotToolCommandWorkflow::setFilterTool() {
 }
 
 void ScreenshotToolCommandWorkflow::setMagnifierTool() {
-    setCanvasTool(ScreenshotActiveTool::Magnifier, SnowCanvasTool::Magnifier);
+    setCanvasTool(SnowCanvasTool::Magnifier);
 }
 
 void ScreenshotToolCommandWorkflow::setSpotlightTool() {
-    setCanvasTool(ScreenshotActiveTool::Spotlight, SnowCanvasTool::Spotlight);
+    setCanvasTool(SnowCanvasTool::Spotlight);
 }
 
 void ScreenshotToolCommandWorkflow::setRectangleFilterTool() {
-    setCanvasTool(ScreenshotActiveTool::RectangleFilter, SnowCanvasTool::RectangleFilter);
+    setCanvasTool(SnowCanvasTool::RectangleFilter);
 }
 
 void ScreenshotToolCommandWorkflow::setAutoFilterTool() {
-    setCanvasTool(ScreenshotActiveTool::AutoFilter, SnowCanvasTool::AutoFilter);
+    setCanvasTool(SnowCanvasTool::AutoFilter);
 }
 
 void ScreenshotToolCommandWorkflow::setPenFilterTool() {
-    setCanvasTool(ScreenshotActiveTool::PenFilter, SnowCanvasTool::PenFilter);
+    setCanvasTool(SnowCanvasTool::PenFilter);
 }
 
 void ScreenshotToolCommandWorkflow::setWatermarkTool() {
-    setCanvasTool(ScreenshotActiveTool::Watermark, SnowCanvasTool::Watermark);
+    setCanvasTool(SnowCanvasTool::Watermark);
 }
 
 void ScreenshotToolCommandWorkflow::setWatermarkConfigFromToolbar(
@@ -134,11 +135,11 @@ void ScreenshotToolCommandWorkflow::setFilterStyleFromToolbar(const SnowCanvasFi
 }
 
 void ScreenshotToolCommandWorkflow::setTextTool() {
-    setCanvasTool(ScreenshotActiveTool::Text, SnowCanvasTool::Text);
+    setCanvasTool(SnowCanvasTool::Text);
 }
 
 void ScreenshotToolCommandWorkflow::setSerialNumberTool() {
-    setCanvasTool(ScreenshotActiveTool::SerialNumber, SnowCanvasTool::SerialNumber);
+    setCanvasTool(SnowCanvasTool::SerialNumber);
 }
 
 void ScreenshotToolCommandWorkflow::decrementSelectedSerialNumbers() {
@@ -178,9 +179,11 @@ bool ScreenshotToolCommandWorkflow::stepStrokeWidth(int delta) {
     return m_context.actions.stepToolbarStrokeWidth(delta);
 }
 
-void ScreenshotToolCommandWorkflow::setCanvasTool(ScreenshotActiveTool activeTool,
-                                                  SnowCanvasTool canvasTool) {
-    m_context.interaction.setCanvasTool(activeTool);
+void ScreenshotToolCommandWorkflow::setCanvasTool(SnowCanvasTool canvasTool) {
+    const auto activeTool = snow_shot::presentation::activeToolForCanvasTool(canvasTool);
+    if (!activeTool)
+        return;
+    m_context.interaction.setCanvasTool(*activeTool);
     m_context.captureState.sessionState = ScreenshotSessionState::Editing;
     m_context.intelligentSelection.clearPress();
     m_context.actions.setCanvasInteractionEnabled(true);

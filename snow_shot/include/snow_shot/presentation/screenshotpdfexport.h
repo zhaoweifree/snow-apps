@@ -41,13 +41,27 @@ struct Payload {
     [[nodiscard]] QString path() const;
 };
 using Cancelled = std::function<bool()>;
+using Progress = std::function<void(qreal)>;
 // verifiedOpaque may be set only after every source pixel's alpha was established as 255.
 [[nodiscard]] std::shared_ptr<Payload> prepare(const ScreenshotImageRowSource& source, int quality,
-                                               QString* error, bool verifiedOpaque = false);
+                                               QString* error, bool verifiedOpaque = false,
+                                               const Progress& progress = {});
+// The producer is invoked once per page, immediately before writing that page. Its payload
+// retires before the next invocation, keeping document working memory independent of page count.
+struct Page {
+    std::shared_ptr<const Payload> payload;
+    Layout geometry;
+};
+using PageProducer = std::function<bool(qsizetype, Page*, QString*)>;
+using DocumentProgress = std::function<void(qsizetype, qreal)>;
+[[nodiscard]] bool writeDocument(qsizetype pageCount, const PageProducer& produce,
+                                 QIODevice* output, const ScreenshotPdfOptions& options,
+                                 QString* error, const Cancelled& cancelled = {},
+                                 const DocumentProgress& progress = {});
 [[nodiscard]] bool write(const Payload& payload, QIODevice* output,
                          const ScreenshotPdfOptions& options, QString* error,
                          const Cancelled& cancelled = {});
 [[nodiscard]] bool decodeTiles(const Payload& payload,
                                const std::function<bool(QRect, const QImage&)>& consume,
-                               QString* error, const Cancelled& cancelled = {});
+                               QString* error, const Cancelled& cancelled = {}, QRect region = {});
 } // namespace screenshot_pdf

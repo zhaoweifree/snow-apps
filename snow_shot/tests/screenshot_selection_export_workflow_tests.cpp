@@ -61,14 +61,17 @@ void saveDialogOwnerFollowsSelection() {
 
 class FakeComposer final : public ScreenshotSelectionImageComposerPort {
   public:
-    bool requestSelectionResult(const QRect&, const ScreenshotResultStyle&, QObject*,
-                                ImageCallback) override {
+    bool requestSelectionResult(const QRect&, const ScreenshotResultStyle&, QObject*, ImageCallback,
+                                ScreenshotLayoutCompaction) override {
         return false;
     }
 
-    bool requestSelectionClipboard(const QRect&, const ScreenshotResultStyle&, QObject*,
-                                   ClipboardCallback callback) override {
+    bool requestSelectionClipboard(const QRect&, const ScreenshotResultStyle& style, QObject*,
+                                   ClipboardCallback callback,
+                                   ScreenshotLayoutCompaction compaction) override {
         ++requestCount;
+        requestedCompaction = compaction;
+        requestedStyle = style;
         if (!scheduleSucceeds) {
             return false;
         }
@@ -83,7 +86,8 @@ class FakeComposer final : public ScreenshotSelectionImageComposerPort {
     }
 
     std::optional<ScreenshotPinnedSelectionRequest>
-    preparePinnedSelection(const QRect&, const ScreenshotResultStyle&) const override {
+    preparePinnedSelection(const QRect&, const ScreenshotResultStyle&,
+                           ScreenshotLayoutCompaction) const override {
         return std::nullopt;
     }
 
@@ -95,6 +99,8 @@ class FakeComposer final : public ScreenshotSelectionImageComposerPort {
     bool scheduleSucceeds = true;
     bool produceValidPayload = true;
     int requestCount = 0;
+    ScreenshotLayoutCompaction requestedCompaction;
+    ScreenshotResultStyle requestedStyle;
 };
 
 class FakeDestination final : public ScreenshotSelectionExportDestinationPort {
@@ -132,27 +138,10 @@ class FakeDestination final : public ScreenshotSelectionExportDestinationPort {
     bool presentationSucceeds = true;
 };
 
-class FakeStore final : public ScreenshotSelectionParamsStorePort {
-  public:
-    void setPreviousSelectionParams(const ScreenshotSelectionParams& params) override {
-        ++writeCount;
-        lastParams = params;
-    }
-
-    int writeCount = 0;
-    std::optional<ScreenshotSelectionParams> lastParams;
-};
-
 struct Fixture {
     Fixture()
-        : workflow(ScreenshotSelectionExportWorkflowContext{captureState,
-                                                            geometry,
-                                                            selection,
-                                                            composer,
-                                                            destination,
-                                                            store,
-                                                            callbackContext,
-                                                            {}}) {
+        : workflow(ScreenshotSelectionExportWorkflowContext{
+              captureState, geometry, selection, composer, destination, callbackContext, {}}) {
         CapturedDisplayModel display;
         display.physicalRect = QRect(0, 0, 100, 80);
         display.canvasRect = display.physicalRect;
@@ -170,12 +159,11 @@ struct Fixture {
     ScreenshotSelectionModel selection;
     FakeComposer composer;
     FakeDestination destination;
-    FakeStore store;
     QObject callbackContext;
     ScreenshotSelectionExportWorkflow workflow;
 };
 
-void publicationSuccessPersistsAndCompletes() {
+void publicationSuccessCompletes() {
     Fixture fixture;
     std::optional<bool> completion;
     QImage completedImage;
@@ -192,11 +180,29 @@ void publicationSuccessPersistsAndCompletes() {
             "destination did not receive a valid prepared payload");
     require(completion == true && completedImage.size() == QSize(8, 6),
             "successful publication did not return the rendered image");
-    require(fixture.store.writeCount == 1 && fixture.store.lastParams.has_value(),
-            "selection settings were not persisted after publication");
 }
 
-void publicationFailureDoesNotPersist() {
+void clipboardCarriesEligibleCompaction() {
+    Fixture fixture;
+    fixture.selection.setLayoutCompaction({true, 7});
+    fixture.selection.setBackgroundOpacityPercent(37);
+    require(fixture.workflow.copySelectionToClipboard([] { return true; }, [](bool, QImage) {}),
+            "single-region clipboard request schedules");
+    require(fixture.composer.requestedStyle.backgroundOpacityPercent == 37,
+            "clipboard workflow must retain background opacity for single-region selections");
+    require(!fixture.composer.requestedCompaction.enabled,
+            "single-region output must not apply remembered compaction");
+    fixture.selection.setSelectionRegion(QRegion(10, 12, 10, 24).united(QRegion(50, 12, 20, 24)));
+    const auto original = fixture.selection.params(QRect(0, 0, 100, 80));
+    require(fixture.workflow.copySelectionToClipboard([] { return true; }, [](bool, QImage) {}),
+            "multi-region clipboard request schedules");
+    require(fixture.composer.requestedCompaction == ScreenshotLayoutCompaction{true, 7},
+            "clipboard composition must receive eligible canvas-unit spacing");
+    require(fixture.selection.params(QRect(0, 0, 100, 80)) == original,
+            "export must preserve the editable selection");
+}
+
+void publicationFailureCompletesWithFailure() {
     Fixture fixture;
     fixture.destination.publicationSucceeds = false;
     std::optional<bool> completion;
@@ -209,8 +215,6 @@ void publicationFailureDoesNotPersist() {
             "failing clipboard request was not scheduled");
     require(fixture.destination.publishCount == 1, "publication failure bypassed destination");
     require(completion == false, "publication failure was not propagated");
-    require(fixture.store.writeCount == 0,
-            "selection settings were persisted after publication failure");
 }
 
 void invalidPayloadDoesNotPublish() {
@@ -226,8 +230,7 @@ void invalidPayloadDoesNotPublish() {
             "invalid-payload request was not scheduled");
     require(fixture.destination.publishCount == 0,
             "invalid payload reached the clipboard destination");
-    require(completion == false && fixture.store.writeCount == 0,
-            "invalid payload was treated as a successful copy");
+    require(completion == false, "invalid payload was treated as a successful copy");
 }
 
 void staleResultHasNoSideEffects() {
@@ -240,8 +243,7 @@ void staleResultHasNoSideEffects() {
                                                                   "stale result returned an image");
                                                       }),
             "stale-result request was not scheduled");
-    require(fixture.destination.publishCount == 0 && fixture.store.writeCount == 0 &&
-                completionCalled,
+    require(fixture.destination.publishCount == 0 && completionCalled,
             "stale clipboard result did not complete with a failure");
 }
 } // namespace
@@ -250,8 +252,9 @@ int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     try {
         saveDialogOwnerFollowsSelection();
-        publicationSuccessPersistsAndCompletes();
-        publicationFailureDoesNotPersist();
+        publicationSuccessCompletes();
+        clipboardCarriesEligibleCompaction();
+        publicationFailureCompletesWithFailure();
         invalidPayloadDoesNotPublish();
         staleResultHasNoSideEffects();
     } catch (const std::exception& error) {

@@ -22,6 +22,7 @@ pub struct PreviewConfig {
     pub trail: [u8; 4],
     pub trail_duration_ms: u64,
     pub click: [u8; 4],
+    pub highlight_radius: u32,
     pub highlight: [u8; 4],
     pub record_mouse_clicks: bool,
     pub show_keyboard: bool,
@@ -37,6 +38,11 @@ impl PreviewConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if !snow_recording_model::render::MOUSE_HIGHLIGHT_RADIUS_RANGE
+            .contains(&self.highlight_radius)
+        {
+            return Err("mouse highlight radius must be between 8 and 128 pixels".into());
+        }
         if !(100..=2000).contains(&self.trail_duration_ms) {
             return Err("trail duration must be between 100 and 2000 ms".into());
         }
@@ -188,6 +194,7 @@ impl EffectsPreview {
                 center,
                 self.config.highlight,
                 false,
+                self.config.highlight_radius,
             );
         }
         self.input_effects.draw_mouse_layers_to(
@@ -546,6 +553,7 @@ mod tests {
             trail: [255, 0, 0, 128],
             trail_duration_ms: 500,
             click: [0, 255, 0, 128],
+            highlight_radius: snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
             highlight: [0; 4],
             record_mouse_clicks: false,
             show_keyboard: true,
@@ -685,6 +693,33 @@ mod tests {
         preview.config.highlight = [0; 4];
         preview.observe(Some((200, 200)), 80);
         assert!(preview.render(80).unwrap().is_empty());
+    }
+    #[test]
+    fn preview_uses_custom_radius_without_export_dimension_scaling() {
+        for radius in [8, 41, 96, 128] {
+            let mut cfg = config();
+            cfg.trail = [0; 4];
+            cfg.click = [0; 4];
+            cfg.highlight = [255, 255, 0, 255];
+            cfg.highlight_radius = radius;
+            cfg.output = (480, 270);
+            let mut preview = EffectsPreview::new(cfg, None);
+            preview.observe(Some((400, 200)), 0);
+            let frame = preview.render(0).unwrap();
+            let alpha = |x: u32, y: u32| {
+                frame
+                    .mouse
+                    .iter()
+                    .find(|tile| {
+                        tile.x == x / TILE_SIZE * TILE_SIZE && tile.y == y / TILE_SIZE * TILE_SIZE
+                    })
+                    .map_or(0, |tile| {
+                        tile.pixels[(((y - tile.y) * TILE_SIZE + x - tile.x) * 4 + 3) as usize]
+                    })
+            };
+            assert_eq!(alpha(400 + radius - 2, 200), 255);
+            assert_eq!(alpha(400 + radius, 200), 0);
+        }
     }
     struct Solid;
     impl KeycapRasterizer for Solid {

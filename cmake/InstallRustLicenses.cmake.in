@@ -1,0 +1,16 @@
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env @SNOW_LICENSE_ENVIRONMENT@
+        [==[@Python3_EXECUTABLE@]==]
+        [==[@SNOW_LICENSE_SOURCE_DIR@/collect-rust-licenses.py]==]
+        --cargo [==[@CARGO_EXECUTABLE@]==]
+        --manifest [==[@SNOW_LICENSE_MANIFEST_DIR@/Cargo.toml]==]
+        --package [==[@SNOW_LICENSE_PACKAGE@]==]
+        --target [==[@SNOW_LICENSE_TARGET@]==]
+        --features [==[@SNOW_LICENSE_FEATURES@]==]
+        @SNOW_LICENSE_DEFAULT_ARGUMENT@
+        --fallback-directory [==[@SNOW_LICENSE_FALLBACK_DIR@]==]
+        --destination "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@SNOW_LICENSE_DESTINATION@"
+    RESULT_VARIABLE _snow_license_result)
+if(NOT _snow_license_result EQUAL 0)
+    message(FATAL_ERROR "Rust license collection failed for @SNOW_LICENSE_PACKAGE@")
+endif()

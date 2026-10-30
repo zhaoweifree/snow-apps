@@ -73,7 +73,7 @@ impl BindableElementState {
             angle: self.rect.rotation,
             stroke_width: self.rect.stroke_width,
             z_index: Some(self.paint_index as f64),
-            background_opaque: Some(self.rect.fill.a != 0),
+            background_opaque: Some(self.rect.fill_style.is_visible(self.rect.fill)),
             binding_enabled: Some(!self.locked),
             interior_hit_enabled: Some(true),
             visibility_bounds: None,

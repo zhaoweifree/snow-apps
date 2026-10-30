@@ -194,6 +194,7 @@ typedef struct SnowFilterStyle {
 #define SNOW_SERIAL_NUMBER_STYLE_MIXED_OPACITY (1u << 8)
 #define SNOW_SERIAL_NUMBER_STYLE_MIXED_TYPE (1u << 9)
 #define SNOW_SERIAL_NUMBER_STYLE_MIXED_NUMERIC_TYPE (1u << 10)
+#define SNOW_SERIAL_NUMBER_STYLE_MIXED_STROKE_RENDERING_STYLE (1u << 11)
 
 typedef enum SnowSerialNumberNumericType {
     SNOW_SERIAL_NUMBER_NUMERIC_TYPE_ARABIC = 0,
@@ -393,7 +394,8 @@ typedef enum SnowTextVerticalAlign {
 typedef enum SnowFillStyle {
     SNOW_FILL_STYLE_LINE = 0,
     SNOW_FILL_STYLE_CROSS_LINE = 1,
-    SNOW_FILL_STYLE_SOLID = 2
+    SNOW_FILL_STYLE_SOLID = 2,
+    SNOW_FILL_STYLE_BORDER = 3
 } SnowFillStyle;
 
 typedef enum SnowStrokeStyle {
@@ -401,6 +403,15 @@ typedef enum SnowStrokeStyle {
     SNOW_STROKE_STYLE_DASHED = 1,
     SNOW_STROKE_STYLE_DOTTED = 2
 } SnowStrokeStyle;
+
+typedef enum SnowStrokeRenderingStyle {
+    SNOW_STROKE_RENDERING_STYLE_ARCHITECT = 0,
+    SNOW_STROKE_RENDERING_STYLE_ARTIST = 1,
+    SNOW_STROKE_RENDERING_STYLE_CARTOONIST = 2
+} SnowStrokeRenderingStyle;
+
+// Maximum canvas-space displacement; shared by paint bounds and the host renderer.
+double snow_stroke_rendering_outset(SnowStrokeRenderingStyle style, double primitive_scale);
 
 typedef enum SnowDisplayRectShape {
     SNOW_DISPLAY_RECT_SHAPE_RECTANGLE = 0,
@@ -428,7 +439,8 @@ typedef enum SnowOverlayRectKind {
     SNOW_OVERLAY_RECT_MAGNIFIER_SELECTION_FRAME = 16,
     SNOW_OVERLAY_RECT_SPEECH_BUBBLE_ADD_TAIL_HANDLE = 17,
     SNOW_OVERLAY_RECT_SPEECH_BUBBLE_TAIL_BASE_HANDLE = 18,
-    SNOW_OVERLAY_RECT_SPEECH_BUBBLE_TAIL_TIP_HANDLE = 19
+    SNOW_OVERLAY_RECT_SPEECH_BUBBLE_TAIL_TIP_HANDLE = 19,
+    SNOW_OVERLAY_RECT_SHAPE_TEXT_HANDLE = 20
 } SnowOverlayRectKind;
 
 typedef enum SnowSnapGuideKind {
@@ -498,6 +510,11 @@ typedef enum SnowRectangleShape {
     SNOW_RECTANGLE_SHAPE_DIAMOND = 2
 } SnowRectangleShape;
 
+typedef enum SnowBrushMode {
+    SNOW_BRUSH_MODE_REGULAR = 0,
+    SNOW_BRUSH_MODE_PRESSURE_SENSITIVE = 1
+} SnowBrushMode;
+
 typedef struct SnowShapeStyle {
     SnowColorRgba8 fill;
     SnowColorRgba8 stroke;
@@ -506,6 +523,7 @@ typedef struct SnowShapeStyle {
     SnowArrowhead start_arrowhead;
     SnowArrowhead end_arrowhead;
     SnowStrokeStyle stroke_style;
+    SnowStrokeRenderingStyle stroke_rendering_style;
     SnowArrowType arrow_type;
     SnowArrowShaftType arrow_shaft_type;
     double arrow_ratio;
@@ -513,6 +531,7 @@ typedef struct SnowShapeStyle {
     double opacity;
     SnowHighlightShape highlight_shape;
     SnowRectangleShape shape;
+    SnowBrushMode brush_mode;
 } SnowShapeStyle;
 
 typedef enum SnowShapeKind {
@@ -541,16 +560,21 @@ typedef enum SnowShapeKind {
 #define SNOW_SHAPE_STYLE_PROPERTY_OPACITY (1u << 9)
 #define SNOW_SHAPE_STYLE_PROPERTY_HIGHLIGHT_SHAPE (1u << 10)
 #define SNOW_SHAPE_STYLE_PROPERTY_SHAPE (1u << 11)
+#define SNOW_SHAPE_STYLE_PROPERTY_BRUSH_MODE (1u << 14)
+#define SNOW_SHAPE_STYLE_PROPERTY_STROKE_RENDERING_STYLE (1u << 15)
+#define SNOW_SHAPE_STYLE_MIXED_STROKE_RENDERING_STYLE                                              \
+    SNOW_SHAPE_STYLE_PROPERTY_STROKE_RENDERING_STYLE
 #define SNOW_SHAPE_STYLE_PROPERTY_LINE                                                             \
     (SNOW_SHAPE_STYLE_PROPERTY_FILL | SNOW_SHAPE_STYLE_PROPERTY_FILL_STYLE |                       \
      SNOW_SHAPE_STYLE_PROPERTY_STROKE | SNOW_SHAPE_STYLE_PROPERTY_STROKE_WIDTH |                   \
      SNOW_SHAPE_STYLE_PROPERTY_ARROW_RATIO | SNOW_SHAPE_STYLE_PROPERTY_ARROW_SHAFT_TYPE |          \
      SNOW_SHAPE_STYLE_PROPERTY_STROKE_STYLE | SNOW_SHAPE_STYLE_PROPERTY_ARROW_TYPE |               \
-     SNOW_SHAPE_STYLE_PROPERTY_OPACITY)
+     SNOW_SHAPE_STYLE_PROPERTY_OPACITY | SNOW_SHAPE_STYLE_PROPERTY_STROKE_RENDERING_STYLE)
 #define SNOW_SHAPE_STYLE_PROPERTY_FREE_DRAW                                                        \
     (SNOW_SHAPE_STYLE_PROPERTY_FILL | SNOW_SHAPE_STYLE_PROPERTY_FILL_STYLE |                       \
      SNOW_SHAPE_STYLE_PROPERTY_STROKE | SNOW_SHAPE_STYLE_PROPERTY_STROKE_WIDTH |                   \
-     SNOW_SHAPE_STYLE_PROPERTY_STROKE_STYLE | SNOW_SHAPE_STYLE_PROPERTY_OPACITY)
+     SNOW_SHAPE_STYLE_PROPERTY_STROKE_STYLE | SNOW_SHAPE_STYLE_PROPERTY_OPACITY |                  \
+     SNOW_SHAPE_STYLE_PROPERTY_BRUSH_MODE)
 
 typedef struct SnowRectangleShapeStyle {
     SnowColorRgba8 fill;
@@ -558,6 +582,7 @@ typedef struct SnowRectangleShapeStyle {
     SnowColorRgba8 stroke;
     double stroke_width;
     SnowStrokeStyle stroke_style;
+    SnowStrokeRenderingStyle stroke_rendering_style;
     SnowCornerRadii corner_radii;
 } SnowRectangleShapeStyle;
 
@@ -567,6 +592,7 @@ typedef struct SnowArrowStyle {
     SnowArrowhead start_arrowhead;
     SnowArrowhead end_arrowhead;
     SnowStrokeStyle stroke_style;
+    SnowStrokeRenderingStyle stroke_rendering_style;
     SnowArrowType arrow_type;
     SnowArrowShaftType arrow_shaft_type;
     double arrow_ratio;
@@ -608,6 +634,7 @@ typedef struct SnowSerialNumberStyle {
     uint8_t reserved1[3];
     char font_family_utf8[SNOW_FONT_FAMILY_UTF8_CAPACITY];
     SnowSerialNumberNumericType numeric_type;
+    SnowStrokeRenderingStyle stroke_rendering_style;
 } SnowSerialNumberStyle;
 
 typedef enum SnowDistanceUnit {
@@ -1015,6 +1042,13 @@ SnowError
 snow_viewport_apply_serial_label_layout_ex(SnowRuntime runtime, SnowViewport viewport,
                                            SnowElementId text_id, SnowTextLayoutSize layout,
                                            SnowChangedViewportList* out_changed_viewports);
+SnowError snow_viewport_get_bound_label_layout_request(SnowRuntime runtime, SnowViewport viewport,
+                                                       SnowSerialLabelLayoutRequest* out_request,
+                                                       uint8_t* out_has_request);
+SnowError snow_viewport_apply_bound_label_layout_ex(SnowRuntime runtime, SnowViewport viewport,
+                                                    SnowElementId text_id,
+                                                    SnowTextLayoutSize layout,
+                                                    SnowChangedViewportList* out_changed_viewports);
 
 typedef struct SnowPointerEvent {
     uint32_t pointer_id;
@@ -1024,8 +1058,11 @@ typedef struct SnowPointerEvent {
     double position_y;
     SnowPointerButton button;
     uint8_t buttons;
-    uint8_t reserved0[3];
+    uint8_t has_pressure;
+    uint8_t reserved0[2];
     SnowModifiers modifiers;
+    double pressure;
+    uint64_t timestamp_ms;
 } SnowPointerEvent;
 
 typedef struct SnowWheelEvent {
@@ -1095,6 +1132,11 @@ typedef struct SnowPenFilterGeometryPatch {
     uint8_t reserved0[6];
 } SnowPenFilterGeometryPatch;
 
+typedef enum SnowPathGeometryRole {
+    SNOW_PATH_GEOMETRY_ROLE_CENTERLINE = 0,
+    SNOW_PATH_GEOMETRY_ROLE_PRESSURE_OUTLINE = 1
+} SnowPathGeometryRole;
+
 typedef struct SnowPathGeometryPatch {
     SnowElementId element_id;
     uint64_t expected_geometry_revision;
@@ -1112,7 +1154,8 @@ typedef struct SnowPathGeometryPatch {
     uint8_t closed;
     uint8_t full_reset;
     uint8_t element_removed;
-    uint8_t reserved0[5];
+    uint8_t role;
+    uint8_t reserved0[4];
 } SnowPathGeometryPatch;
 
 typedef struct SnowPathChunkRange {
@@ -1214,6 +1257,8 @@ typedef struct SnowArrowheadPrimitive {
     SnowArrowPoint points[SNOW_ARROWHEAD_PRIMITIVE_POINT_CAPACITY];
     SnowArrowPoint center;
     double diameter;
+    // Negative values mean no primitive-specific roughness cap.
+    double roughness_cap;
 } SnowArrowheadPrimitive;
 
 typedef struct SnowArrowPathCommand {
@@ -1309,6 +1354,8 @@ typedef struct SnowSceneDisplayItem {
     SnowColorRgba8 stroke;
     SnowColorRgba8 text_color;
     double stroke_width;
+    SnowStrokeRenderingStyle stroke_rendering_style;
+    uint32_t stroke_rendering_seed;
     SnowCornerRadii corner_radii;
     uint32_t arrow_point_count;
     SnowArrowType arrow_type;
@@ -1317,6 +1364,7 @@ typedef struct SnowSceneDisplayItem {
     uint8_t is_free_draw;
     uint8_t text_bold;
     uint8_t text_italic;
+    uint8_t brush_mode;
     SnowArrowhead arrow_start_head;
     SnowArrowhead arrow_end_head;
     SnowStrokeStyle arrow_stroke_style;
@@ -1370,6 +1418,9 @@ SnowMagnifierPaintBounds snow_scene_magnifier_body_paint_bounds(const SnowSceneD
 uint8_t snow_scene_resolve_serial_text_connection(const SnowSceneDisplayItem* serial,
                                                   const SnowSceneDisplayItem* text,
                                                   SnowSerialTextConnection* out_connection);
+uint8_t snow_scene_resolve_shape_text_connection(const SnowSceneDisplayItem* shape,
+                                                 const SnowSceneDisplayItem* text,
+                                                 SnowSerialTextConnection* out_connection);
 
 /* Pointer fields follow the same SnowPatchHandle lifetime as scene items. */
 /* The visitor borrows each item for the duration of the call and must not reenter runtime. */
@@ -1394,6 +1445,8 @@ typedef struct SnowOverlayDisplayItem {
     SnowColorRgba8 fill;
     SnowColorRgba8 stroke;
     double stroke_width;
+    SnowStrokeRenderingStyle stroke_rendering_style;
+    uint32_t stroke_rendering_seed;
     SnowCornerRadii corner_radii;
     uint32_t arrow_point_count;
     SnowArrowType arrow_type;
@@ -1828,6 +1881,31 @@ void snow_stroke_filter_free(SnowStrokeFilter* filter);
 SnowError snow_stroke_filter_append(SnowStrokeFilter* filter, const SnowArrowPoint* points,
                                     size_t count, uint8_t finish, const SnowArrowPoint** output,
                                     size_t* output_count);
+
+typedef struct SnowSnapRect {
+    double min_x;
+    double min_y;
+    double max_x;
+    double max_y;
+} SnowSnapRect;
+
+typedef struct SnowSnapMoveConstraints {
+    SnowSnapRect bounds;
+    double position_step;
+} SnowSnapMoveConstraints;
+
+typedef struct SnowMoveSnap SnowMoveSnap;
+
+// Explicit object snapping; config.enabled is ignored. Null constraints keeps continuous geometry.
+// On success output owns a result that must be released with snow_move_snap_free.
+SnowError snow_snap_move(const SnowSnapRect* target, const SnowSnapRect* references,
+                         size_t reference_count, const SnowSnapConfig* config,
+                         double canvas_to_view_scale, const SnowSnapMoveConstraints* constraints,
+                         SnowMoveSnap** output);
+// Immutable guides are borrowed until the result is freed. Reading never repeats snapping.
+SnowError snow_move_snap_read(const SnowMoveSnap* result, SnowArrowPoint* correction,
+                              const SnowOverlayDisplayItem** guides, size_t* count);
+void snow_move_snap_free(SnowMoveSnap* result);
 
 // Stateless curve construction; null commands queries the required count.
 SnowError snow_build_catmull_rom_path(const SnowArrowPoint* vertices, size_t vertex_count,

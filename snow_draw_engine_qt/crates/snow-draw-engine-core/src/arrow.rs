@@ -92,6 +92,42 @@ pub enum StrokeStyle {
     Dotted,
 }
 
+/// The geometric character of an outline, independent of its dash pattern.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[repr(u32)]
+pub enum StrokeRenderingStyle {
+    #[default]
+    Architect = 0,
+    Artist = 1,
+    Cartoonist = 2,
+}
+
+/// Maximum canvas-space displacement of a styled outline. Every renderer offset
+/// is bounded by this radius, including Bezier control points and secondary passes.
+/// Positive infinity requests the conservative unclamped maximum.
+pub fn stroke_rendering_outset(style: StrokeRenderingStyle, primitive_scale: f64) -> f64 {
+    if primitive_scale.is_nan() || primitive_scale <= 0.0 {
+        return 0.0;
+    }
+    let maximum: f64 = match style {
+        StrokeRenderingStyle::Architect => 0.0,
+        StrokeRenderingStyle::Artist => 2.0,
+        StrokeRenderingStyle::Cartoonist => 4.0,
+    };
+    maximum.min(primitive_scale * 0.1)
+}
+
+/// Used once at creation. Stored seeds are preserved when IDs are remapped.
+pub fn stroke_rendering_seed(index: u32, generation: u32) -> u32 {
+    let mut seed = index.wrapping_add(1) ^ generation.rotate_left(16) ^ 0x9e37_79b9;
+    seed ^= seed >> 16;
+    seed = seed.wrapping_mul(0x7feb_352d);
+    seed ^= seed >> 15;
+    seed = seed.wrapping_mul(0x846c_a68b);
+    (seed ^ (seed >> 16)).max(1)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ArrowType {
@@ -366,5 +402,30 @@ mod tests {
             assert_eq!(value, name);
             assert_eq!(serde_json::from_value::<Arrowhead>(value).unwrap(), style);
         }
+    }
+}
+
+#[cfg(test)]
+mod stroke_rendering_tests {
+    use super::*;
+
+    #[test]
+    fn stroke_rendering_outset_is_bounded_and_scales_down_for_tiny_geometry() {
+        assert_eq!(
+            stroke_rendering_outset(StrokeRenderingStyle::Architect, 100.0),
+            0.0
+        );
+        for (style, maximum) in [
+            (StrokeRenderingStyle::Artist, 2.0),
+            (StrokeRenderingStyle::Cartoonist, 4.0),
+        ] {
+            assert_eq!(stroke_rendering_outset(style, f64::INFINITY), maximum);
+            assert_eq!(stroke_rendering_outset(style, 5.0), 0.5);
+            assert_eq!(stroke_rendering_outset(style, 0.0), 0.0);
+            assert_eq!(stroke_rendering_outset(style, -1.0), 0.0);
+            assert_eq!(stroke_rendering_outset(style, f64::NAN), 0.0);
+        }
+        assert_ne!(stroke_rendering_seed(1, 1), stroke_rendering_seed(2, 1));
+        assert_eq!(stroke_rendering_seed(1, 1), stroke_rendering_seed(1, 1));
     }
 }

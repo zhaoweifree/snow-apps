@@ -240,6 +240,20 @@ pub(crate) fn selection_rotation_handle_center(
     )
 }
 
+pub(crate) fn selection_bottom_control_center(rect: &RectangleData, zoom: f64) -> Point<f64> {
+    let zoom = zoom.max(0.0001);
+    rect_local_to_canvas(
+        rect.center,
+        rect.rotation,
+        Point::new(
+            0.0,
+            rect.height / 2.0
+                + selection_frame_padding_for_members(zoom, 1, 0)
+                + selection_rotation_offset(zoom),
+        ),
+    )
+}
+
 #[cfg(any())]
 pub(crate) fn selection_handle_local_from_pointer(
     bounds: &SelectionBounds,

@@ -5,7 +5,7 @@ function Get-SnowShotEdition([ValidateSet('Full', 'Mini')][string]$Edition = 'Fu
     if ($Edition -eq 'Mini') {
         return [pscustomobject]@{ Edition = 'Mini'; Product = 'snow-shot-mini'; Name = 'Snow Shot Mini';
             Executable = 'snow_shot_mini'; Registry = 'SnowShotMini'; Scoop = 'snowshot-mini';
-            Winget = 'mg-chao.snow-shot-mini'; Feed = "latest-version-mini$feedSuffix.json";
+            Feed = "latest-version-mini$feedSuffix.json";
             Variants = @('online', 'portable'); Component = 'SnowShotMini'; Marker = '__mini_data_directory' }
     }
     return [pscustomobject]@{ Edition = 'Full'; Product = 'snow-shot'; Name = 'Snow Shot';

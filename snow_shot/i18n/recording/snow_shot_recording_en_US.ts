@@ -213,4 +213,11 @@ Keep this folder to recover the recording.</translation>
             <translation>Recording settings</translation>
         </message>
     </context>
+    <context>
+        <name>ScreenRecordingToolbarWindow</name>
+        <message>
+            <source>Show recording toolbar</source>
+            <translation>Show recording toolbar</translation>
+        </message>
+    </context>
 </TS>

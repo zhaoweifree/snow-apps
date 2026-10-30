@@ -200,7 +200,8 @@ pub(crate) fn run_capture(
                                 "cursor shape identifier overflow".into(),
                             )
                         })?;
-                        shape_record = Some(super::editable_cursor::rasterize(&shape, scale, id)?);
+                        shape_record =
+                            Some(super::cursor_rasterizer::rasterize(&shape, scale, id)?);
                         shape_id = Some(id);
                         last_cursor = Some((shape, scale, id));
                     }

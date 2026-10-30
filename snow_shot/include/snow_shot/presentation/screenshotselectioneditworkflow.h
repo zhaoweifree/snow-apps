@@ -38,6 +38,7 @@ class ScreenshotSelectionEditWorkflow final {
     void adjustSelectionFromToolbar(int minDx, int minDy, int maxDx, int maxDy);
     void setSelectionCornerRadiusFromToolbar(int radius);
     void setSelectionShadowWidthFromToolbar(int shadowWidth);
+    void adjustSelectionEffectsFromWheel(int radiusDelta, int shadowDelta);
     void previewSelectionEffect(ScreenshotSelectionEffectHandle handle, int value);
     void commitSelectionEffects();
     void toggleSelectionAspectRatioLockFromToolbar();

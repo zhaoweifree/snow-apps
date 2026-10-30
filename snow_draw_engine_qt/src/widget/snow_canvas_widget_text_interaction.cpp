@@ -296,7 +296,7 @@ SnowCanvasWidgetTextInteraction::measureSerialLabelLayout(SnowRuntime runtime,
     }
     SnowSerialLabelLayoutRequest request{};
     std::uint8_t hasRequest = 0;
-    if (snow_viewport_get_serial_label_layout_request(runtime, viewport, &request, &hasRequest) !=
+    if (snow_viewport_get_bound_label_layout_request(runtime, viewport, &request, &hasRequest) !=
         SNOW_OK) {
         return result;
     }
@@ -307,8 +307,8 @@ SnowCanvasWidgetTextInteraction::measureSerialLabelLayout(SnowRuntime runtime,
     const SnowTextLayoutSize layout =
         snow_canvas_text_measurement::measureSerialLabelLayout(request, m_widget.font());
     result.success =
-        snow_viewport_apply_serial_label_layout_ex(runtime, viewport, request.text_id, layout,
-                                                   result.changedViewports.outParam()) == SNOW_OK;
+        snow_viewport_apply_bound_label_layout_ex(runtime, viewport, request.text_id, layout,
+                                                  result.changedViewports.outParam()) == SNOW_OK;
     return result;
 }
 

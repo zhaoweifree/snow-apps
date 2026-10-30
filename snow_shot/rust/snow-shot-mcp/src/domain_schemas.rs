@@ -290,17 +290,6 @@ input!(DocumentRecognitionEdit {
 choices!(OriginalContentFormat { Json, Text, Html });
 input!(OriginalContentOutput { output: RecognitionOutput, format: Option<OriginalContentFormat>, path: Option<String> });
 input!(DocumentSelection { operation: Option<RegionOperation>, r#type: Option<RegionType>, bounds: Option<[f64; 4]>, points: Option<Vec<[f64; 2]>> });
-choices!(RecognitionKind {
-    Text,
-    #[cfg(not(feature = "mini"))]
-    Table,
-    #[cfg(not(feature = "mini"))]
-    Qr,
-    #[cfg(not(feature = "mini"))]
-    Markdown,
-    #[cfg(not(feature = "mini"))]
-    Html
-});
 input!(DocumentRecognize {
     kind: RecognitionKind
 });

@@ -11,6 +11,7 @@ set(SNOW_SHOT_RELEASE_SPEED_TARGETS
     snow_shot_window_shortcuts snow_shot_global_mouse snow_shot_diagnostics
     snow_shot_image_codec snow_shot_image_codec_backend snow_shot_latex_renderer
     snow_shot_history_pin snow_shot_clipboard_placement
+    snow_shot_collage snow_shot_collage_core snow_shot_image_split snow_shot_image_split_core
     snow_shot_macos_clipboard snow_shot_macos_cursor snow_shot_macos_window_platform)
 
 # Serialization/import/export do not participate in image processing loops.
@@ -18,6 +19,7 @@ set(SNOW_SHOT_RELEASE_SIZE_STORAGE_SOURCES
     src/storage/configurationarchive.cpp
     src/storage/configurationstore.cpp
     src/storage/configurationschema.cpp
+    src/storage/exportfilename.cpp
     src/storage/persistedselectioncodec.cpp
     src/storage/persistedwindowgeometry.cpp
     src/storage/settingsadapters.cpp
@@ -46,6 +48,15 @@ set(SNOW_SHOT_RELEASE_SIZE_SHELL_SOURCES
     src/presentation/components/sidebarwidget.cpp
     src/presentation/components/titlebarwidget.cpp)
 
+# Window orchestration and settings are cold. Composition, transformed rows,
+# editor painting, image preparation and PDF/export pixel loops stay fast.
+set(SNOW_SHOT_RELEASE_SIZE_COLLAGE_SOURCES
+    src/presentation/collage/collagewindow.cpp
+    src/presentation/collage/collagewindowcoordinator.cpp
+    src/presentation/collage/collagepdfsettingswidget.cpp)
+set(SNOW_SHOT_RELEASE_SIZE_IMAGE_SPLIT_SOURCES
+    src/presentation/imagesplit/imagesplitwindow.cpp)
+
 if(SNOW_SHOT_ENABLE_AGGRESSIVE_RELEASE_OPTIMIZATION OR SNOW_SHOT_RELEASE_STATIC)
     foreach(_target IN LISTS SNOW_SHOT_RELEASE_SPEED_TARGETS SNOW_SHOT_RELEASE_SIZE_TARGETS)
         if(TARGET "${_target}")
@@ -66,6 +77,12 @@ if(SNOW_SHOT_ENABLE_AGGRESSIVE_RELEASE_OPTIMIZATION OR SNOW_SHOT_RELEASE_STATIC)
 
     snow_apply_release_size_sources(snow_shot SOURCES
         ${SNOW_SHOT_RELEASE_SIZE_SHELL_SOURCES})
+
+    snow_apply_release_size_sources(snow_shot_collage SOURCES
+        ${SNOW_SHOT_RELEASE_SIZE_COLLAGE_SOURCES})
+
+    snow_apply_release_size_sources(snow_shot_image_split SOURCES
+        ${SNOW_SHOT_RELEASE_SIZE_IMAGE_SPLIT_SOURCES})
 endif()
 
 if(SNOW_SHOT_BUILD_TESTS)

@@ -439,6 +439,22 @@
     },
     {
       "variant": "outlined",
+      "symbol": "BrushPressureSensitive",
+      "name": "brush-pressure-sensitive",
+      "source": "../src/presentation/components/icons/resources/brush-pressure-sensitive.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
+      "symbol": "BrushRegular",
+      "name": "brush-regular",
+      "source": "../src/presentation/components/icons/resources/brush-regular.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
       "symbol": "ColorPicker",
       "name": "color-picker",
       "source": "../src/presentation/components/icons/resources/color-picker.svg",
@@ -591,6 +607,14 @@
     },
     {
       "variant": "outlined",
+      "symbol": "FillBorder",
+      "name": "fill-border",
+      "source": "../src/presentation/components/icons/resources/fill-border.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
       "symbol": "FillSolid",
       "name": "fill-solid",
       "source": "../src/presentation/components/icons/resources/fill-solid.svg",
@@ -663,6 +687,22 @@
     },
     {
       "variant": "outlined",
+      "symbol": "ImageSplitting",
+      "name": "image-splitting",
+      "source": "../src/presentation/components/icons/resources/image-splitting.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
+      "symbol": "ImageStitching",
+      "name": "image-stitching",
+      "source": "../src/presentation/components/icons/resources/image-stitching.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
       "symbol": "ImportConfiguration",
       "name": "import-configuration",
       "source": "../src/presentation/components/icons/resources/import-configuration.svg",
@@ -690,6 +730,22 @@
       "symbol": "LaserPointer",
       "name": "laser-pointer",
       "source": "../src/presentation/components/icons/resources/laser-pointer.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
+      "symbol": "LayoutCompaction",
+      "name": "layout-compaction",
+      "source": "../src/presentation/components/icons/resources/layout-compaction.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
+      "symbol": "LayoutSpacing",
+      "name": "layout-spacing",
+      "source": "../src/presentation/components/icons/resources/layout-spacing.svg",
       "colorModel": "monochrome",
       "fit": "contain"
     },
@@ -911,6 +967,14 @@
     },
     {
       "variant": "outlined",
+      "symbol": "RecordingMicrophoneOff",
+      "name": "recording-microphone-off",
+      "source": "../src/presentation/components/icons/resources/recording-microphone-off.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
       "symbol": "RecordingPostProcessing",
       "name": "recording-post-processing",
       "source": "../src/presentation/components/icons/resources/recording-post-processing.svg",
@@ -946,6 +1010,14 @@
       "symbol": "RecordingResume",
       "name": "recording-resume",
       "source": "../src/presentation/components/icons/resources/recording-resume.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
+      "symbol": "RecordingSpeakerOff",
+      "name": "recording-speaker-off",
+      "source": "../src/presentation/components/icons/resources/recording-speaker-off.svg",
       "colorModel": "monochrome",
       "fit": "contain"
     },
@@ -1114,6 +1186,14 @@
       "symbol": "Select",
       "name": "select",
       "source": "../src/presentation/components/icons/resources/select.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    },
+    {
+      "variant": "outlined",
+      "symbol": "SelectionBackgroundOpacity",
+      "name": "selection-background-opacity",
+      "source": "../src/presentation/components/icons/resources/selection-background-opacity.svg",
       "colorModel": "monochrome",
       "fit": "contain"
     },

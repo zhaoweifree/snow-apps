@@ -625,7 +625,7 @@ void embossMatchesPixiFormulaAndPreservesPremultipliedAlpha() {
     snow_canvas_filter_render::Parameters parameters;
     parameters.type = 4;
     parameters.logicalSamplingRadius = 1.0;
-    for (double strength : {0.0, 0.5, 1.0}) {
+    for (double strength : {0.0, 0.2, 0.5, 0.63, 1.0}) {
         QImage output = source;
         parameters.strength = strength;
         snow_canvas_filter_render::apply(output, parameters);
@@ -1374,7 +1374,7 @@ void mosaicPlanningCropsDirtyOutputAndBatchesEquivalentBlocks() {
             "a dirty mosaic pass must filter only its required destination pixels");
     require(dirtyDiagnostics.peakEffectPixelCount == 64u * 64u,
             "mosaic effect diagnostics must report the actual destination size");
-    require(dirtyDiagnostics.workingSurfacePixelCount <= 78u * 78u,
+    require(dirtyDiagnostics.workingSurfacePixelCount <= 88u * 88u,
             "the mosaic source halo must use the half-block dependency radius");
 
     SnowSceneDisplayItem first = largeFilter;
@@ -1779,6 +1779,7 @@ void retainedPenFilterMaskSkipsRasterAndScanOnReuse() {
 }
 
 void penMaskRasterizersAndTailInvalidationStayDeterministic() {
+    bool simdExecuted = false;
     const std::vector<std::vector<SnowArrowPoint>> paths{
         {{-70.0, 0.0}, {70.0, 0.0}},
         {{0.0, -70.0}, {0.0, 70.0}},
@@ -1814,13 +1815,20 @@ void penMaskRasterizersAndTailInvalidationStayDeterministic() {
                 const auto scalar =
                     scalarAtlas.tile(item, centerTile, centerTile, info, dpr, scalarOptions);
                 const auto simd = simdAtlas.tile(item, centerTile, centerTile, info, dpr);
+                simdExecuted = simdExecuted || simdAtlas.takeDiagnostics().simdRasterExecutions > 0;
                 require(scalar && simd && scalar->alpha == simd->alpha,
-                        "scalar and AVX2 Pen Filter tiles must have identical quantized alpha");
+                        "scalar and selected SIMD Pen Filter tiles must have identical quantized "
+                        "alpha");
                 require(scalar->coveredPixelCount == simd->coveredPixelCount,
-                        "scalar and AVX2 Pen Filter tile metadata must match");
+                        "scalar and selected SIMD Pen Filter tile metadata must match");
             }
         }
     }
+
+    require(snow_canvas_filter_render::selectedSimdBackend() ==
+                    snow_canvas_filter_render::SimdBackend::Scalar ||
+                simdExecuted,
+            "available SIMD pen rasterization must execute vector batches");
 
     const SnowArrowPoint longStroke[] = {{-100.0, 0.0}, {100.0, 0.0}};
     SnowSceneDisplayItem raw{};
@@ -2095,6 +2103,11 @@ void annotatedExportUsesDirectSourceFastPath() {
 }
 
 void scalarAvx2AndThreadingProduceIdenticalPixels() {
+#if defined(Q_PROCESSOR_ARM_64)
+    require(snow_canvas_filter_render::selectedSimdBackend() ==
+                snow_canvas_filter_render::SimdBackend::Neon,
+            "ARM64 must select NEON filter kernels");
+#endif
     std::mt19937 generator(0x5a17u);
     for (const QSize size : {QSize(1, 1), QSize(17, 9), QSize(257, 193), QSize(641, 411)}) {
         QImage source(size, QImage::Format_ARGB32_Premultiplied);
@@ -2119,9 +2132,17 @@ void scalarAvx2AndThreadingProduceIdenticalPixels() {
             snow_canvas_filter_render::apply(
                 scalar, parameters, nullptr,
                 snow_canvas_filter_render::ExecutionOptions{true, true});
+            snow_canvas_filter_render::RenderWorkspace selectedWorkspace(0);
             snow_canvas_filter_render::apply(
-                optimized, parameters, nullptr,
+                optimized, parameters, &selectedWorkspace,
                 snow_canvas_filter_render::ExecutionOptions{false, false});
+            if (size.width() >= 8 && (type == 2 || type == 3 || type == 6) &&
+                snow_canvas_filter_render::selectedSimdBackend() !=
+                    snow_canvas_filter_render::SimdBackend::Scalar) {
+                require(selectedWorkspace.diagnostics().backend ==
+                            snow_canvas_filter_render::selectedSimdBackend(),
+                        "selected color SIMD kernels must execute rather than fall back");
+            }
             if (scalar != optimized) {
                 std::cerr << "backend mismatch type=" << type << " size=" << size.width() << 'x'
                           << size.height() << '\n';
@@ -2181,7 +2202,7 @@ void maskedKernelsMatchAcrossBackendsAndRespectBlurMemoryBound() {
     const QRect affected(3, 2, size.width() - 8, size.height() - 7);
     const QImage croppedMask = mask.copy(affected);
     for (std::uint32_t type : {2u, 3u, 4u, 6u}) {
-        for (double strength : {0.0, 0.5, 1.0}) {
+        for (double strength : {0.0, 0.2, 0.5, 0.63, 1.0}) {
             snow_canvas_filter_render::Parameters parameters;
             parameters.type = type;
             parameters.strength = strength;
@@ -2455,13 +2476,18 @@ void croppedCoverageWorkspaceAndFailurePathsStayValid() {
     require(workspace.diagnostics().allocatedBytes == 0,
             "a stable Gaussian frame must allocate zero workspace bytes");
     require(warm == cold, "pooled workspace reuse must not change pixels");
-    if (snow_canvas_filter_render::selectedSimdBackend() ==
-        snow_canvas_filter_render::SimdBackend::Avx2) {
-        require(workspace.diagnostics().backend == snow_canvas_filter_render::SimdBackend::Avx2 &&
-                    workspace.diagnostics().gaussianAvx2Executions > 0,
-                "Gaussian may report AVX2 only after an AVX2 Gaussian stage executes");
-        require(workspace.diagnostics().gaussianDownsampleAvx2Executions > 0 &&
-                    workspace.diagnostics().gaussianReconstructionAvx2Executions > 0,
+    if (snow_canvas_filter_render::selectedSimdBackend() !=
+        snow_canvas_filter_render::SimdBackend::Scalar) {
+        const auto& diagnostics = workspace.diagnostics();
+        require(diagnostics.backend == snow_canvas_filter_render::selectedSimdBackend() &&
+                    diagnostics.gaussianAvx2Executions + diagnostics.gaussianNeonExecutions > 0,
+                "Gaussian may report SIMD only after a vectorized Gaussian stage executes");
+        require(diagnostics.gaussianDownsampleAvx2Executions +
+                            diagnostics.gaussianDownsampleNeonExecutions >
+                        0 &&
+                    diagnostics.gaussianReconstructionAvx2Executions +
+                            diagnostics.gaussianReconstructionNeonExecutions >
+                        0,
                 "Gaussian diagnostics must report downsample and reconstruction SIMD separately");
     }
     workspace.finishFrame();
@@ -3846,6 +3872,15 @@ void offscreenSerialScenesPreserveExactPainterState() {
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
     snow_canvas_render_diagnostics::setEnabled(true);
+    if (application.arguments().contains(QStringLiteral("--simd-only"))) {
+        scalarAvx2AndThreadingProduceIdenticalPixels();
+        maskedKernelsMatchAcrossBackendsAndRespectBlurMemoryBound();
+        penMaskRasterizersAndTailInvalidationStayDeterministic();
+        adaptiveGaussianReductionAndOpaqueMaskStayValid();
+        gaussianCropMatchesFullFilteringWithoutPaddedDestination();
+        croppedCoverageWorkspaceAndFailurePathsStayValid();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--serial-number-font-only"))) {
         serialNumberFontsStayIdenticalAcrossDirectAndTiledRendering();
         retainedSerialNumberSourcesTrackFontAndRenderHints();

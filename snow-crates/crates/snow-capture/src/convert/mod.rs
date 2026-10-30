@@ -8,6 +8,8 @@ pub(crate) use parallel::{conversion_workers, pool_initialized};
 mod scalar;
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
+#[cfg(target_arch = "aarch64")]
+pub(crate) mod simd_arm;
 #[cfg(target_arch = "x86_64")]
 mod simd_x86;
 
@@ -1922,6 +1924,12 @@ fn f16_opaque_kernel_nt_nofence() -> PixelKernel {
     *KERNEL.get_or_init(select_f16_opaque_kernel_nt_nofence)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_f16_kernel() -> PixelKernel {
+    simd_arm::convert_f16
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_f16_kernel() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -1941,6 +1949,12 @@ fn select_f16_kernel() -> PixelKernel {
     f16::convert_f16_rgba_to_srgb_scalar_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_f16_opaque_kernel() -> PixelKernel {
+    simd_arm::convert_f16_opaque
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_f16_opaque_kernel() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -1960,6 +1974,12 @@ fn select_f16_opaque_kernel() -> PixelKernel {
     f16::convert_f16_rgba_to_srgb_scalar_opaque_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_f16_kernel_nt() -> PixelKernel {
+    simd_arm::convert_f16
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_f16_kernel_nt() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -1979,6 +1999,12 @@ fn select_f16_kernel_nt() -> PixelKernel {
     f16::convert_f16_rgba_to_srgb_scalar_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_f16_opaque_kernel_nt() -> PixelKernel {
+    simd_arm::convert_f16_opaque
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_f16_opaque_kernel_nt() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -1998,6 +2024,12 @@ fn select_f16_opaque_kernel_nt() -> PixelKernel {
     f16::convert_f16_rgba_to_srgb_scalar_opaque_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_f16_kernel_nt_nofence() -> PixelKernel {
+    simd_arm::convert_f16
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_f16_kernel_nt_nofence() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2017,6 +2049,12 @@ fn select_f16_kernel_nt_nofence() -> PixelKernel {
     f16::convert_f16_rgba_to_srgb_scalar_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_f16_opaque_kernel_nt_nofence() -> PixelKernel {
+    simd_arm::convert_f16_opaque
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_f16_opaque_kernel_nt_nofence() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2048,6 +2086,12 @@ fn f16_hdr_prepared_opaque_kernel() -> HdrPreparedPixelKernel {
     *KERNEL.get_or_init(select_f16_hdr_prepared_opaque_kernel)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_f16_hdr_prepared_kernel() -> HdrPreparedPixelKernel {
+    simd_arm::convert_hdr
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_f16_hdr_prepared_kernel() -> HdrPreparedPixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2074,6 +2118,12 @@ fn select_f16_hdr_prepared_kernel() -> HdrPreparedPixelKernel {
     f16::convert_f16_rgba_to_srgb_hdr_scalar_prepared_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_f16_hdr_prepared_opaque_kernel() -> HdrPreparedPixelKernel {
+    simd_arm::convert_hdr_opaque
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_f16_hdr_prepared_opaque_kernel() -> HdrPreparedPixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2100,6 +2150,12 @@ fn select_f16_hdr_prepared_opaque_kernel() -> HdrPreparedPixelKernel {
     f16::convert_f16_rgba_to_srgb_hdr_scalar_prepared_opaque_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_bgra_kernel() -> PixelKernel {
+    simd_arm::convert_bgra
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_bgra_kernel() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2126,6 +2182,12 @@ fn select_bgra_kernel() -> PixelKernel {
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_bgra_opaque_kernel() -> PixelKernel {
+    simd_arm::convert_bgra_opaque
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_bgra_opaque_kernel() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2152,6 +2214,12 @@ fn select_bgra_opaque_kernel() -> PixelKernel {
     scalar::convert_bgra_to_rgba_scalar_opaque_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_bgra_kernel_nt() -> PixelKernel {
+    simd_arm::convert_bgra
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_bgra_kernel_nt() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2178,6 +2246,12 @@ fn select_bgra_kernel_nt() -> PixelKernel {
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_bgra_opaque_kernel_nt() -> PixelKernel {
+    simd_arm::convert_bgra_opaque
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_bgra_opaque_kernel_nt() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2204,6 +2278,12 @@ fn select_bgra_opaque_kernel_nt() -> PixelKernel {
     scalar::convert_bgra_to_rgba_scalar_opaque_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_bgra_kernel_nt_nofence() -> PixelKernel {
+    simd_arm::convert_bgra
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_bgra_kernel_nt_nofence() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {
@@ -2230,6 +2310,12 @@ fn select_bgra_kernel_nt_nofence() -> PixelKernel {
     scalar::convert_bgra_to_rgba_scalar_unchecked
 }
 
+#[cfg(target_arch = "aarch64")]
+fn select_bgra_opaque_kernel_nt_nofence() -> PixelKernel {
+    simd_arm::convert_bgra_opaque
+}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn select_bgra_opaque_kernel_nt_nofence() -> PixelKernel {
     #[cfg(target_arch = "x86_64")]
     {

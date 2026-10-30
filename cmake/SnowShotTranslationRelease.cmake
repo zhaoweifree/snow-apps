@@ -90,12 +90,14 @@ function(snow_shot_release_translation_catalogs target catalog_dir output_dir ou
 
     # Qt widgets already use English source text. Merging an empty qtbase_en
     # catalog into en_US adds no strings and causes a misleading missing-catalog warning.
+    # Source-identical messages fall back to English without occupying the embedded
+    # catalog. Keep real translations, including language metadata and plural forms.
     qt_add_lrelease(
         TS_FILES "${catalog_dir}/snow_shot_en_US.ts"
         LRELEASE_TARGET ${target}_source_language
         QM_FILES_OUTPUT_VARIABLE _source_qm_files
         QM_OUTPUT_DIRECTORY "${output_dir}"
-        OPTIONS -fail-on-unfinished)
+        OPTIONS -fail-on-unfinished -removeidentical)
     qt_add_lrelease(
         TS_FILES "${catalog_dir}/snow_shot_zh_CN.ts" "${catalog_dir}/snow_shot_zh_TW.ts"
         LRELEASE_TARGET ${target}_localized

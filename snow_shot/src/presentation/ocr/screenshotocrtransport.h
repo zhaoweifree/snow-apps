@@ -84,12 +84,10 @@ class ScreenshotOcrTransport final : public QObject {
     }
 
     void start(const ScreenshotOcrResolvedAssets& assets, const QProcessEnvironment& environment) {
-        QByteArray hello;
-        appendString(hello, assets.stateDirectory);
         m_process = std::make_unique<QProcess>();
-        connect(m_process.get(), &QProcess::started, this, [this, hello]() {
+        connect(m_process.get(), &QProcess::started, this, [this]() {
             post(m_callbacks.started, m_process->processId());
-            send(makeFrame(kHello, 0, hello));
+            send(makeFrame(kHello, 0, {}));
         });
         connect(m_process.get(), &QProcess::readyReadStandardOutput, this,
                 [this]() { post(m_callbacks.output, m_process->readAllStandardOutput()); });

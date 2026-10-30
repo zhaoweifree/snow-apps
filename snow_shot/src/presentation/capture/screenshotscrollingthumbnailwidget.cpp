@@ -3,6 +3,9 @@
 #include "screenshotscrollingperfinstrumentation.h"
 
 #include "widgets/scroll_area.h"
+#ifdef Q_OS_WIN
+#include "../../platform/windows/captureexclusioncomposition.h"
+#endif
 
 #include <QEvent>
 #include <QMouseEvent>
@@ -63,6 +66,9 @@ void copyPreviewSpan(const QImage& source, int sourceStart, QImage& destination,
 ScreenshotScrollingThumbnailWidget::ScreenshotScrollingThumbnailWidget(QWidget& parent)
     : QWidget(&parent) {
     setObjectName(QStringLiteral("screenshot-scrolling-thumbnail"));
+#ifdef Q_OS_WIN
+    snow_shot::platform::windows::detail::enableCaptureExclusionCompositionFallback(this);
+#endif
     setAttribute(Qt::WA_OpaquePaintEvent, false);
     setMouseTracking(true);
     setFocusPolicy(Qt::NoFocus);

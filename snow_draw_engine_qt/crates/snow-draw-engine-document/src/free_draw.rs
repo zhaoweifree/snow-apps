@@ -8,6 +8,7 @@ use crate::{ElementKind, FillStyle, StrokeStyle};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FreeDrawStyle {
+    pub brush_mode: snow_draw_engine_core::BrushMode,
     pub stroke: ColorRgba8,
     pub stroke_width: f64,
     pub stroke_style: StrokeStyle,
@@ -18,6 +19,10 @@ pub struct FreeDrawStyle {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FreeDrawData {
+    #[serde(default)]
+    pub brush_mode: snow_draw_engine_core::BrushMode,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pressure_segments: Vec<Vec<snow_draw_engine_core::PressureKnot>>,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -72,6 +77,8 @@ impl FreeDrawData {
             }
         };
         let mut data = Self {
+            brush_mode: style.brush_mode,
+            pressure_segments: Vec::new(),
             x: min_x,
             y: min_y,
             width: max_x - min_x,
@@ -131,6 +138,24 @@ impl FreeDrawData {
         PathGeometry::from_commands(revision, self.path_commands(), self.closed)
     }
 
+    pub fn pressure_geometry(
+        &self,
+        revision: u64,
+        centerline: &PathGeometry,
+    ) -> Option<PathGeometry> {
+        (self.brush_mode == snow_draw_engine_core::BrushMode::PressureSensitive).then(|| {
+            snow_draw_engine_core::pressure_path_geometry(
+                revision,
+                centerline,
+                &self.pressure_segments,
+                self.stroke_width,
+                self.stroke_style,
+                None,
+                0,
+            )
+        })
+    }
+
     fn normalize_modes(&mut self) {
         let edge_count = if self.closed {
             self.vertices.len()
@@ -165,6 +190,7 @@ pub fn validate_free_draw(data: &FreeDrawData) -> Result<(), ErrorCode> {
         || !(0.0..=1.0).contains(&data.opacity)
         || data.vertices.len() < 2
         || data.segment_modes.len() != edge_count
+        || !snow_draw_engine_core::validate_pressure_profiles(&data.pressure_segments, edge_count)
         || data.vertices.first() == data.vertices.last()
         || data
             .vertices
@@ -178,6 +204,47 @@ pub fn validate_free_draw(data: &FreeDrawData) -> Result<(), ErrorCode> {
 }
 
 pub fn free_draw_bounds(data: &FreeDrawData) -> DrawRect {
+    if data.brush_mode == snow_draw_engine_core::BrushMode::PressureSensitive {
+        // The Bézier control hull is conservative and needs no contour construction,
+        // flattening, hashing, or arc-length work during document spatial queries.
+        let mut bounds = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        let mut include = |point: [f64; 2]| {
+            bounds[0] = bounds[0].min(point[0]);
+            bounds[1] = bounds[1].min(point[1]);
+            bounds[2] = bounds[2].max(point[0]);
+            bounds[3] = bounds[3].max(point[1]);
+        };
+        for command in data.path_commands() {
+            match command {
+                PathCommand::MoveTo { point } | PathCommand::LineTo { point } => include(point),
+                PathCommand::QuadTo { control, end } => {
+                    include(control);
+                    include(end);
+                }
+                PathCommand::CubicTo {
+                    control_1,
+                    control_2,
+                    end,
+                } => {
+                    include(control_1);
+                    include(control_2);
+                    include(end);
+                }
+            }
+        }
+        let outset = snow_draw_engine_core::pressure_radius(data.stroke_width, 1.0);
+        return DrawRect::new(
+            bounds[0] - outset,
+            bounds[1] - outset,
+            bounds[2] + outset,
+            bounds[3] + outset,
+        );
+    }
     let geometry = data.path_geometry(0);
     let outset = data.stroke_width * 0.5;
     DrawRect::new(
@@ -191,6 +258,39 @@ pub fn free_draw_bounds(data: &FreeDrawData) -> DrawRect {
 pub fn free_draw_hit_test(data: &FreeDrawData, point: Point<f64>, tolerance: f64) -> bool {
     let commands = data.path_commands();
     let mut current = None;
+    if data.brush_mode == snow_draw_engine_core::BrushMode::PressureSensitive {
+        let mut cumulative_length = 0.0;
+        for (index, command) in commands.into_iter().enumerate() {
+            if let PathCommand::MoveTo { point: p } = command {
+                current = Some(Point::new(p[0], p[1]));
+                continue;
+            }
+            if let Some(start) = current {
+                let (hit, length) = snow_draw_engine_core::pressure_segment_hit_test_styled(
+                    start,
+                    command,
+                    data.pressure_segments
+                        .get(index - 1)
+                        .map_or(&[], Vec::as_slice),
+                    data.stroke_width,
+                    point,
+                    tolerance,
+                    data.stroke_style,
+                    cumulative_length,
+                );
+                if hit {
+                    return true;
+                }
+                cumulative_length += length;
+            }
+            let p = match command {
+                PathCommand::MoveTo { point } | PathCommand::LineTo { point } => point,
+                PathCommand::QuadTo { end, .. } | PathCommand::CubicTo { end, .. } => end,
+            };
+            current = Some(Point::new(p[0], p[1]));
+        }
+        return false;
+    }
     for command in commands {
         match command {
             PathCommand::MoveTo { point } => current = Some(Point::new(point[0], point[1])),
@@ -290,6 +390,7 @@ mod tests {
             vec![PathSegmentMode::Curve, PathSegmentMode::Straight],
             false,
             FreeDrawStyle {
+                brush_mode: Default::default(),
                 stroke: ColorRgba8::default(),
                 stroke_width: 2.0,
                 stroke_style: StrokeStyle::Dashed,

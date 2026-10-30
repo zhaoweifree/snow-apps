@@ -1,6 +1,7 @@
 #include "snow_shot/presentation/floatingtoolbarcontroller.h"
 
 #include "snow_shot/presentation/floatingtoolbarplacement.h"
+#include "snow_shot/presentation/components/pointerhoverevents.h"
 #include "snow_shot/presentation/screenshottoolbarmainpanel.h"
 #include "snow_shot/presentation/screenshottoolbarlayoutmodel.h"
 #include "snow_shot/presentation/styles/thememanager.h"
@@ -147,6 +148,7 @@ class DropSurface final : public QWidget {
         setAttribute(Qt::WA_TranslucentBackground);
         setAttribute(Qt::WA_ShowWithoutActivating);
         setAttribute(Qt::WA_AlwaysShowToolTips);
+        setAttribute(Qt::WA_Hover);
 #ifdef Q_OS_MACOS
         setAttribute(Qt::WA_MacAlwaysShowToolWindow);
         platform::configureControlledWindowDragging(this);
@@ -155,6 +157,13 @@ class DropSurface final : public QWidget {
     }
     bool isHovered() const {
         return m_hovered;
+    }
+    void setHovered(bool hovered) {
+        if (m_hovered == hovered)
+            return;
+        m_hovered = hovered;
+        if (hoverChanged)
+            hoverChanged();
     }
     bool isDropReady() const {
         return m_dropReady;
@@ -225,11 +234,6 @@ class DropSurface final : public QWidget {
         m_dropReady = ready;
         if (dropReadyChanged)
             dropReadyChanged();
-    }
-    void setHovered(bool hovered) {
-        m_hovered = hovered;
-        if (hoverChanged)
-            hoverChanged();
     }
     bool m_hovered = false;
     bool m_dropReady = false;
@@ -920,13 +924,22 @@ class FloatingToolbarController::Impl {
             return false;
         }
         const bool handle = watched == icon || watched == toolbarIcon;
+        if (pointerHoverPositionWithin(qobject_cast<QWidget*>(watched), event)) {
+            if (watched == icon || watched == iconWindow.get())
+                iconWindow->setHovered(true);
+            else if (watched == toolbarIcon || watched == toolbarWindow.get())
+                toolbarWindow->setHovered(true);
+            retreat.stop();
+            if (!toolbarMode && !dragging && !pressed && !expanded && !reveal.isActive())
+                reveal.start();
+        }
         if (handle && event->type() == QEvent::UngrabMouse) {
             cancelDrag();
-        } else if (event->type() == QEvent::Enter) {
-            retreat.stop();
-            if (!toolbarMode && !dragging && !pressed && !expanded)
-                reveal.start();
-        } else if (event->type() == QEvent::Leave) {
+        } else if (event->type() == QEvent::Leave || event->type() == QEvent::HoverLeave) {
+            if (watched == iconWindow.get())
+                iconWindow->setHovered(false);
+            else if (watched == toolbarWindow.get())
+                toolbarWindow->setHovered(false);
             reveal.stop();
             if (!dragging)
                 retreat.start();

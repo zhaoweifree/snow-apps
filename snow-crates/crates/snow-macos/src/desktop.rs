@@ -795,6 +795,10 @@ impl DesktopSession {
         Ok(result)
     }
     fn compose(&mut self) -> MacResult<DesktopFrame> {
+        let size = self.plan.transform.output;
+        if !snow_core::raster_admission::allows(size.width, size.height) {
+            return Err(MacError::InvalidConfig("raster admission rejected".into()));
+        }
         let frames: Vec<_> = self
             .latest
             .iter()

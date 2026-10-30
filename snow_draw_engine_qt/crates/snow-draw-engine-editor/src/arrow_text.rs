@@ -1011,6 +1011,9 @@ mod tests {
             rectangle_id,
             ElementMeta::default(),
             RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 center: Point::new(250.0, 100.0),
                 width: 50.0,
                 height: 60.0,

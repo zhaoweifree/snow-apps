@@ -102,7 +102,9 @@ class BoundedSrgbRowReader {
             return false;
         const auto outside = [output, outputBytes](const QImage& image) {
             const auto pixels = reinterpret_cast<std::uintptr_t>(image.constBits());
-            const auto bytes = static_cast<std::uintptr_t>(image.sizeInBytes());
+            const auto bytes =
+                static_cast<std::uintptr_t>(image.sizeInBytes() - image.bytesPerLine() +
+                                            (qsizetype(image.width()) * image.depth() + 7) / 8);
             return bytes <= addressMaximum - pixels &&
                    !(pixels < output + outputBytes && output < pixels + bytes);
         };

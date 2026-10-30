@@ -12,6 +12,9 @@ pub(crate) fn rectangle_from_draw_rect(
     let width = (bounds.max_x - bounds.min_x).max(MIN_RECT_SIZE);
     let height = (bounds.max_y - bounds.min_y).max(MIN_RECT_SIZE);
     RectangleData {
+        stroke_rendering_seed: template.stroke_rendering_seed,
+        text_element_id: template.text_element_id,
+        stroke_rendering_style: template.stroke_rendering_style,
         rectangle_kind: template.rectangle_kind,
         highlight_shape: template.highlight_shape,
         center: Point::new(
@@ -132,6 +135,9 @@ pub(crate) fn selection_marquee_rectangle(
 ) -> Option<RectangleData> {
     let bounds = axis_aligned_bounds(start, end)?;
     Some(RectangleData {
+        text_element_id: None,
+        stroke_rendering_seed: 0,
+        stroke_rendering_style: Default::default(),
         rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
         highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
         center: Point {
@@ -171,6 +177,9 @@ pub(crate) fn selection_outline(rect: &RectangleData, zoom: f64) -> RectangleDat
 pub(crate) fn selection_outline_bounds(bounds: &SelectionBounds, zoom: f64) -> RectangleData {
     let padding = selection_frame_padding(zoom);
     RectangleData {
+        text_element_id: None,
+        stroke_rendering_seed: 0,
+        stroke_rendering_style: Default::default(),
         rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
         highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
         center: bounds.center,

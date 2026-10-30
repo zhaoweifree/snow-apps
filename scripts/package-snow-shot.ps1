@@ -233,13 +233,13 @@ function Get-ValidatedStaticQtStamp {
 function Get-SnowShotExpectedFfmpegComponents {
     param([ValidateSet('x64', 'arm64')][string]$Architecture = 'x64')
     $expectedFfmpegComponents = [ordered]@{
-        BSF = @("AAC_ADTSTOASC", "H264_MP4TOANNEXB", "PGS_FRAME_MERGE", "VP9_SUPERFRAME")
-        DECODER = @("AAC", "APNG", "GIF", "H264", "HEVC", "MP3", "PCM_F32LE", "PCM_S16LE", "PNG", "VP8", "WEBP", "WEBP_ANIM")
-        ENCODER = @("AAC", "APNG", "GIF", "H263", "H264_MF", "H264_AMF", "H264_NVENC", "H264_QSV", "LIBWEBP_ANIM", "LIBX264", "LIBX265", "MP3_MF", "MPEG4")
+        BSF = @("AAC_ADTSTOASC", "H264_MP4TOANNEXB", "VP9_SUPERFRAME")
+        DECODER = @("AAC", "APNG", "GIF", "H264", "HEVC", "PCM_F32LE", "PCM_S16LE", "PNG", "VP8", "WEBP", "WEBP_ANIM")
+        ENCODER = @("AAC", "APNG", "GIF", "H264_MF", "H264_AMF", "H264_NVENC", "H264_QSV", "LIBWEBP_ANIM", "LIBX264", "LIBX265")
         HWACCEL = @("H264_D3D11VA", "H264_D3D11VA2", "H264_DXVA2", "HEVC_D3D11VA", "HEVC_D3D11VA2", "HEVC_DXVA2")
-        PARSER = @("AAC", "AC3", "GIF", "H264", "HEVC", "MPEGAUDIO")
+        PARSER = @("AAC", "AC3", "GIF", "H264", "HEVC")
         DEMUXER = @("APNG", "GIF", "MATROSKA", "MOV", "WEBP_ANIM")
-        MUXER = @("APNG", "AVI", "GIF", "MATROSKA", "MOV", "MP4", "WEBP")
+        MUXER = @("APNG", "GIF", "MOV", "MP4", "WEBP")
         PROTOCOL = @("FILE")
         # Buffer sources/sinks are intrinsic libavfilter API, absent from config_components.h.
         FILTER = @("ATEMPO")
@@ -441,10 +441,10 @@ $updaterCargoManifest = Join-Path $repoRoot "snow_shot\rust\snow-shot-updater\Ca
     -QtPrefix $qtPrefix `
     -CargoManifest @((Join-Path $repoRoot "snow_rust_ffi\Cargo.toml"), $ocrCargoManifest,
         $updaterCargoManifest, (Join-Path $repoRoot "snow_shot\rust\snow-shot-mcp\Cargo.toml")) `
-    -CargoOptions @{ (Join-Path $repoRoot "snow_rust_ffi\Cargo.toml") = @('--features', 'selected-text');
-        # Runtime 1.0.9 ships the raw-pixel worker without convenience dependencies.
+    -CargoOptions @{ (Join-Path $repoRoot "snow_rust_ffi\Cargo.toml") = @('--features', 'selected-text,language-detection');
+        # Runtime 1.1.0 ships the raw-pixel worker without convenience dependencies.
         $ocrCargoManifest = @('--no-default-features', '--features',
-        'static-onnx-runtime,directml-provider,crash-diagnostics') } `
+        'crash-diagnostics') } `
     -AntDesignNotice (Join-Path $repoRoot "ant_design_qt\THIRD_PARTY_NOTICES.md") `
     -FallbackLicenseDirectory (Join-Path $repoRoot "licenses")
 if ($LASTEXITCODE -ne 0) {
@@ -509,7 +509,6 @@ $requiredStageFiles = @(
     "bin\snow_shot.exe",
     "bin\crashpad_handler.exe",
     "bin\snow-ocr-process.exe",
-    "bin\DirectML.dll",
     "share\snow-shot\licenses\LICENSE",
     "share\snow-shot\licenses\COPYRIGHT",
     "share\snow-shot\licenses\THIRD_PARTY_NOTICES.md",
@@ -576,8 +575,7 @@ $expectedBinaryPaths = @(
     "bin\snow-shot-updater.exe",
     "bin\snow-shot-mcp.exe",
     "bin\crashpad_handler.exe",
-    "bin\snow-ocr-process.exe",
-    "bin\DirectML.dll"
+    "bin\snow-ocr-process.exe"
 )
 $unexpectedBinaries = @($stagedBinaries | Where-Object {
     $relativePath = [System.IO.Path]::GetRelativePath($installDirectory, $_.FullName)
@@ -661,8 +659,7 @@ $allowedLocalImports = @{
     "snow-shot-updater.exe" = @()
     "snow-shot-mcp.exe" = @()
     "crashpad_handler.exe" = @()
-    "snow-ocr-process.exe" = @("directml.dll")
-    "directml.dll" = @()
+    "snow-ocr-process.exe" = @()
 }
 foreach ($binary in $stagedBinaries) {
     Assert-SnowPeArchitecture -Path $binary.FullName -Architecture $Architecture
@@ -859,58 +856,6 @@ $ocrModels = @(
             [ordered]@{ Name = "PP-OCRv6_rec_medium.onnx"; Bytes = [long]76629984; Sha256 = "eef444829dbbe18d7fea59a3f6eb75647518d2b3a9568d27c92e42940204894b" },
             [ordered]@{ Name = "ppocrv6_dict.txt"; Bytes = [long]74947; Sha256 = "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d" }
         )
-    },
-    [ordered]@{
-        Type = "small_v5"
-        Id = "ppocrv5-small-7b2a75a"
-        Directory = "PP-OCRv5/mobile"
-        Detector = "ch_PP-OCRv5_det_mobile.onnx"
-        Recognizer = "ch_PP-OCRv5_rec_mobile.onnx"
-        Dictionary = "ppocrv5_dict.txt"
-        Files = @(
-            [ordered]@{ Name = "ch_PP-OCRv5_det_mobile.onnx"; Bytes = [long]4819576; Sha256 = "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae" },
-            [ordered]@{ Name = "ch_PP-OCRv5_rec_mobile.onnx"; Bytes = [long]16631306; Sha256 = "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5" },
-            [ordered]@{ Name = "ppocrv5_dict.txt"; Bytes = [long]74012; Sha256 = "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b" }
-        )
-    },
-    [ordered]@{
-        Type = "medium_v5"
-        Id = "ppocrv5-medium-7b2a75a"
-        Directory = "PP-OCRv5/server"
-        Detector = "ch_PP-OCRv5_det_server.onnx"
-        Recognizer = "ch_PP-OCRv5_rec_server.onnx"
-        Dictionary = "ppocrv5_dict.txt"
-        Files = @(
-            [ordered]@{ Name = "ch_PP-OCRv5_det_server.onnx"; Bytes = [long]88118768; Sha256 = "0f8846b1d4bba223a2a2f9d9b44022fbc22cc019051a602b41a7fda9667e4cad" },
-            [ordered]@{ Name = "ch_PP-OCRv5_rec_server.onnx"; Bytes = [long]84577022; Sha256 = "e09385400eaaaef34ceff54aeb7c4f0f1fe014c27fa8b9905d4709b65746562a" },
-            [ordered]@{ Name = "ppocrv5_dict.txt"; Bytes = [long]74012; Sha256 = "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b" }
-        )
-    },
-    [ordered]@{
-        Type = "small_v4"
-        Id = "ppocrv4-small-7b2a75a"
-        Directory = "PP-OCRv4/mobile"
-        Detector = "ch_PP-OCRv4_det_mobile.onnx"
-        Recognizer = "ch_PP-OCRv4_rec_mobile.onnx"
-        Dictionary = "ppocr_keys_v1.txt"
-        Files = @(
-            [ordered]@{ Name = "ch_PP-OCRv4_det_mobile.onnx"; Bytes = [long]4745517; Sha256 = "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9" },
-            [ordered]@{ Name = "ch_PP-OCRv4_rec_mobile.onnx"; Bytes = [long]10857958; Sha256 = "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b" },
-            [ordered]@{ Name = "ppocr_keys_v1.txt"; Bytes = [long]26249; Sha256 = "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7" }
-        )
-    },
-    [ordered]@{
-        Type = "medium_v4"
-        Id = "ppocrv4-medium-7b2a75a"
-        Directory = "PP-OCRv4/server"
-        Detector = "ch_PP-OCRv4_det_server.onnx"
-        Recognizer = "ch_PP-OCRv4_rec_server.onnx"
-        Dictionary = "ppocr_keys_v1.txt"
-        Files = @(
-            [ordered]@{ Name = "ch_PP-OCRv4_det_server.onnx"; Bytes = [long]113352104; Sha256 = "cfa39a3f298f6d3fc71789834d15da36d11a6c59b489fc16ea4733728012f786" },
-            [ordered]@{ Name = "ch_PP-OCRv4_rec_server.onnx"; Bytes = [long]90530732; Sha256 = "6a2676219be9907c7fc9cf61ebaa843bf2898777def567925b78886fcd90c07a" },
-            [ordered]@{ Name = "ppocr_keys_v1.txt"; Bytes = [long]26249; Sha256 = "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7" }
-        )
     }
 )
 
@@ -1072,8 +1017,7 @@ foreach ($binary in @(Get-ChildItem -LiteralPath $runtimeWork -File | Where-Obje
     foreach ($line in $imports) {
         if ($line -notmatch '^\s+([A-Za-z0-9_.-]+\.dll)\s*$') { continue }
         $dependency = $Matches[1].ToLowerInvariant()
-        if ($dependency -match '^(?:api|ext)-ms-' -or
-            ($binary.Name -ceq $ocrRuntimeFileName -and $dependency -eq 'directml.dll')) { continue }
+        if ($dependency -match '^(?:api|ext)-ms-') { continue }
         if ($dependency -notin $allowedSystemImports -or
             -not (Test-Path -LiteralPath (Join-Path $windowsSystemDirectory $dependency) -PathType Leaf)) {
             throw "Published OCR runtime imports an unresolved or disallowed dependency: $dependency"
@@ -1086,7 +1030,7 @@ if ($nativeTarget) {
     $ocrVersionOutput = & (Join-Path $runtimeWork $ocrRuntimeFileName) --version 2>$null
     $ocrWorkerArchitecture = if ($Architecture -eq 'arm64') { 'aarch64' } else { 'x86_64' }
     if ($LASTEXITCODE -ne 0 -or $ocrVersionOutput -cne
-        "snow-ocr-process $ocrRuntimeVersion windows-$ocrWorkerArchitecture protocol 5") {
+        "snow-ocr-process $ocrRuntimeVersion windows-$ocrWorkerArchitecture protocol 6") {
         throw "The staged OCR runtime reported an unexpected version: $ocrVersionOutput"
     }
     $ocrRuntimeNativeProbePassed = $true
@@ -1109,8 +1053,7 @@ foreach ($property in $expectedOcrMetadata.Keys) {
     }
 }
 $runtimePayloadFiles = @(
-    (Get-ReleaseFileDescriptor -Path (Join-Path $runtimeWork $ocrRuntimeFileName) -Name $ocrRuntimeFileName),
-    (Get-ReleaseFileDescriptor -Path (Join-Path $runtimeWork "DirectML.dll") -Name "DirectML.dll")
+    (Get-ReleaseFileDescriptor -Path (Join-Path $runtimeWork $ocrRuntimeFileName) -Name $ocrRuntimeFileName)
 )
 $runtimeManifestPath = Join-Path $runtimeWork "runtime-manifest.json"
 $runtimeFiles = @($runtimePayloadFiles) + @(
@@ -1297,7 +1240,6 @@ foreach ($variant in $variantStages.Keys) {
     Reset-ReleaseDirectory -Path $stage
     Copy-Item -Path (Join-Path $installDirectory "*") -Destination $stage -Recurse -Force
     Remove-Item -LiteralPath (Join-Path $stage "bin\snow-ocr-process.exe") -Force
-    Remove-Item -LiteralPath (Join-Path $stage "bin\DirectML.dll") -Force
     $assetRoot = Join-Path $stage "bin\assets\ocr"
     Reset-ReleaseDirectory -Path $assetRoot
     Copy-Item -LiteralPath $assetManifestSource -Destination (Join-Path $assetRoot "asset-manifest.json")
@@ -1348,7 +1290,6 @@ $expectedOfflineFiles = @(
     "models\$ocrDefaultModelId\$($defaultOcrModel.Recognizer)",
     "models\$ocrDefaultModelId\$($defaultOcrModel.Dictionary)",
     "runtimes\$ocrRuntimeVersion\$ocrPlatform\.complete.json",
-    "runtimes\$ocrRuntimeVersion\$ocrPlatform\DirectML.dll",
     "runtimes\$ocrRuntimeVersion\$ocrPlatform\runtime-manifest.json",
     "runtimes\$ocrRuntimeVersion\$ocrPlatform\$ocrRuntimeFileName"
 ) | Sort-Object

@@ -41,6 +41,7 @@
 #include <QMouseEvent>
 #include <QLabel>
 #include <QTextDocument>
+#include <QTemporaryDir>
 
 #include <cstdlib>
 #include <functional>
@@ -1452,15 +1453,22 @@ void renderingCopyAndPersistence() {
     view.setContent(Format::Markdown, markdown + QStringLiteral("\nMore"), true, {});
     require(browser->textCursor().selectedText() == QStringLiteral("Heading"),
             "streaming preserves text selection");
-    const QString html = QStringLiteral(
-        "<h1>Title</h1><table><tr><th>A</th></tr><tr><td>42</td></tr></table>"
-        "<img src='file:///C:/Windows/win.ini'><a href='javascript:alert(1)'>Link</a>");
+    QTemporaryDir directory;
+    const auto imagePath = directory.filePath(QStringLiteral("external.png"));
+    QImage externalImage(8, 8, QImage::Format_RGB32);
+    externalImage.fill(Qt::red);
+    require(externalImage.save(imagePath), "write conversion external image fixture");
+    const auto imageUrl = QUrl::fromLocalFile(imagePath);
+    const QString html =
+        QStringLiteral("<h1>Title</h1><table><tr><th>A</th></tr><tr><td>42</td></tr></table>"
+                       "<img src='%1'><a href='javascript:alert(1)'>Link</a>")
+            .arg(imageUrl.toString(QUrl::FullyEncoded));
     view.setContent(Format::Html, html, false, {});
     require(browser->toPlainText().contains(QStringLiteral("42")) &&
-                !browser->document()
-                     ->resource(QTextDocument::ImageResource,
-                                QUrl(QStringLiteral("file:///C:/Windows/win.ini")))
-                     .isValid(),
+                browser->document()
+                    ->resource(QTextDocument::ImageResource, imageUrl)
+                    .value<QImage>()
+                    .isNull(),
             "HTML renders tables without loading local resources");
     bool opened = false;
     QObject::connect(&view, &ScreenshotImageConversionView::linkActivated, &view,

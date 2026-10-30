@@ -385,6 +385,7 @@ struct Style {
     strength: Option<f64>,
     gap: Option<f64>,
     stroke_style: Option<StrokeStyle>,
+    stroke_rendering_style: Option<StrokeRenderingStyle>,
     arrow_type: Option<ArrowType>,
     filter: Option<Filter>,
 }
@@ -405,6 +406,13 @@ enum StrokeStyle {
     Solid,
     Dashed,
     Dotted,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum StrokeRenderingStyle {
+    Architect,
+    Artist,
+    Cartoonist,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -495,6 +503,8 @@ enum RecognitionKind {
     Markdown,
     #[cfg(not(feature = "mini"))]
     Html,
+    #[cfg(not(feature = "mini"))]
+    Latex,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -749,6 +759,7 @@ enum FillStyle {
     Line,
     CrossLine,
     Solid,
+    Border,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -967,6 +978,8 @@ struct StylePatch {
     #[serde(default)]
     stroke_style: Option<StrokeStyle>,
     #[serde(default)]
+    stroke_rendering_style: Option<StrokeRenderingStyle>,
+    #[serde(default)]
     start_arrowhead: Option<Arrowhead>,
     #[serde(default)]
     end_arrowhead: Option<Arrowhead>,
@@ -1043,6 +1056,55 @@ pub fn schema(name: &str, input: Option<Value>) -> Result<Map<String, Value>, se
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn border_fill_and_legacy_modes_validate_across_canvas_domains() {
+        for target in [
+            "rectangle",
+            "line",
+            "freehand",
+            "text",
+            "serial_number",
+            "speech_bubble",
+        ] {
+            for mode in [
+                "border",
+                "solid",
+                "cross_line",
+                "line",
+                "Border",
+                "none",
+                "",
+            ] {
+                let valid = matches!(mode, "border" | "solid" | "cross_line" | "line");
+                let patch = json!({"target":target,"style":{"fill_style":mode}});
+                for (name, owner) in [
+                    ("snow_shot_screenshot_set_tool_style", "session_id"),
+                    ("snow_shot_document_set_tool_style", "document_id"),
+                ] {
+                    let mut input = patch.clone();
+                    input[owner] = json!("fixture");
+                    input["expected_revision"] = json!(1);
+                    let result = schema(name, Some(input));
+                    assert_eq!(
+                        result.is_ok(),
+                        valid,
+                        "{name}: {target}: {mode}: {result:?}"
+                    );
+                }
+                let result = schema(
+                    "snow_shot_pinned_edit",
+                    Some(json!({"id":"fixture","expected_revision":1,
+                        "action":"tool_style","payload":patch})),
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    valid,
+                    "pinned: {target}: {mode}: {result:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn eraser_tool_ids_are_accepted_for_screenshots_and_documents() {
@@ -1220,6 +1282,39 @@ mod tests {
                 };
                 arguments[field] = value;
                 assert_eq!(schema(name, Some(arguments)).is_ok(), !crate::edition::MINI);
+            }
+        }
+    }
+    #[test]
+    fn recognition_modes_share_the_screenshot_and_document_contract() {
+        for name in [
+            "snow_shot_screenshot_recognize",
+            "snow_shot_document_recognize",
+        ] {
+            let published = Value::Object(schema(name, None).unwrap());
+            let property = &published["properties"]["kind"];
+            let definition = property["$ref"].as_str().map_or(property, |reference| {
+                published
+                    .pointer(reference.trim_start_matches('#'))
+                    .unwrap()
+            });
+            let choices = definition["enum"]
+                .as_array()
+                .cloned()
+                .unwrap_or_else(|| vec![definition["const"].clone()]);
+            for kind in ["text", "table", "qr", "markdown", "html", "latex"] {
+                let enabled = kind == "text" || !crate::edition::MINI;
+                assert_eq!(choices.contains(&json!(kind)), enabled, "{name}: {kind}");
+                let arguments = if name.contains("screenshot") {
+                    json!({"session_id":"s","expected_revision":1,"kind":kind})
+                } else {
+                    json!({"document_id":"d","expected_revision":1,"kind":kind})
+                };
+                assert_eq!(
+                    schema(name, Some(arguments)).is_ok(),
+                    enabled,
+                    "{name}: {kind}"
+                );
             }
         }
     }
@@ -1709,6 +1804,46 @@ mod tests {
                         .any(|member| member == source)
                 );
             }
+        }
+    }
+
+    #[test]
+    fn stroke_rendering_styles_are_typed() {
+        for value in ["architect", "artist", "cartoonist"] {
+            for target in ["rectangle", "arrow", "line", "serial_number"] {
+                assert!(
+                    schema(
+                        "snow_shot_screenshot_set_tool_style",
+                        Some(json!({
+                            "session_id":"s", "expected_revision":1, "target":target,
+                            "style":{"stroke_rendering_style":value}
+                        }))
+                    )
+                    .is_ok()
+                );
+            }
+            assert!(
+                schema(
+                    "snow_shot_screenshot_apply_annotations",
+                    Some(json!({
+                        "session_id":"s", "expected_revision":1, "operations":[{
+                            "type":"rectangle", "bounds":[0,0,20,20],
+                            "style":{"stroke_rendering_style":value}
+                        }]
+                    }))
+                )
+                .is_ok()
+            );
+        }
+        for value in [json!("rough"), json!(1)] {
+            let result = schema(
+                "snow_shot_screenshot_set_tool_style",
+                Some(json!({
+                    "session_id":"s", "expected_revision":1, "target":"rectangle",
+                    "style":{"stroke_rendering_style":value}
+                })),
+            );
+            assert!(result.is_err());
         }
     }
 

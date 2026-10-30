@@ -12,10 +12,13 @@ endif()
 
 project(snow_apps VERSION 0.2.0 LANGUAGES CXX)
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SnowBuildToolchain.cmake")
+snow_require_msvc_version()
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SnowWindowsArchitecture.cmake")
 snow_configure_windows_architecture()
 
-set(SNOW_SHOT_VERSION "1.2.8")
+set(SNOW_SHOT_VERSION "1.3.2")
 if(NOT SNOW_SHOT_VERSION MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)(-[0-9A-Za-z.-]+)?$")
     message(FATAL_ERROR "SNOW_SHOT_VERSION must be a semantic version such as 0.8.0-dev")
 endif()
@@ -438,7 +441,7 @@ if(WIN32)
 else()
     set(_snow_format_command bash "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-cpp-format.sh")
     set(_snow_lint_command bash "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-rust.sh"
-        snow-ocr-process -- --no-default-features --features dynamic-onnx-runtime)
+        snow-ocr-process)
 endif()
 if(NOT TARGET snow-format)
     add_custom_target(snow-format COMMAND ${_snow_format_command} USES_TERMINAL)

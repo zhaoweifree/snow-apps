@@ -9,7 +9,7 @@ function Expand-PinnedSnowOcrRuntime {
     $ErrorActionPreference = 'Stop'
     if ($Runtime.version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' -or
         $Runtime.platform -cnotin @('windows-x64', 'windows-arm64')) { throw 'Invalid pinned OCR runtime identity.' }
-    $expectedNames = @("snow-ocr-process-$($Runtime.version)-$($Runtime.platform).exe", 'DirectML.dll', 'runtime-manifest.json')
+    $expectedNames = @("snow-ocr-process-$($Runtime.version)-$($Runtime.platform).exe", 'runtime-manifest.json')
     $expected = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
     foreach ($file in $Runtime.files) {
         if ($file.name -cnotin $expectedNames -or $file.size -le 0 -or $file.size -gt 134217728 -or
@@ -17,7 +17,7 @@ function Expand-PinnedSnowOcrRuntime {
             throw 'Invalid pinned OCR file inventory.'
         }
     }
-    if ($expected.Count -ne 3) { throw 'The pinned OCR inventory must contain exactly three files.' }
+    if ($expected.Count -ne 2) { throw 'The pinned OCR inventory must contain exactly two files.' }
     $directory = Get-Item -LiteralPath $Destination
     if (-not $directory.PSIsContainer -or @(Get-ChildItem -LiteralPath $Destination -Force).Count) {
         throw 'The OCR extraction destination must be an empty directory.'
@@ -96,8 +96,8 @@ function New-SnowOcrAssetManifest {
     )
     $platform = "windows-$Architecture"
     $template = Get-Content -LiteralPath $TemplatePath -Raw | ConvertFrom-Json
-    if ($template.schema -ne 2 -or $template.default_model -cne 'small' -or $template.models.Count -ne 7) {
-        throw 'The trusted model template must describe schema 2 and all seven models.'
+    if ($template.schema -ne 2 -or $template.default_model -cne 'small' -or $template.models.Count -ne 3) {
+        throw 'The trusted model template must describe schema 2 and all three V6 models.'
     }
     $archivePathResolved = (Resolve-Path -LiteralPath $ArchivePath).Path
     $zip = [IO.Compression.ZipFile]::OpenRead($archivePathResolved)
@@ -106,20 +106,20 @@ function New-SnowOcrAssetManifest {
         if (-not $entry -or $entry.Length -le 0 -or $entry.Length -gt 1MB) { throw 'Missing or oversized OCR runtime manifest.' }
         $reader = [IO.StreamReader]::new($entry.Open())
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
-        if ($manifest.schema -ne 1 -or $manifest.platform -cne $platform -or $manifest.protocol -ne 5 -or
+        if ($manifest.schema -ne 1 -or $manifest.platform -cne $platform -or $manifest.protocol -ne 6 -or
             $manifest.version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
             throw 'The OCR runtime manifest has an unexpected platform, protocol, or version.'
         }
         $version = $manifest.version
-        $names = @("snow-ocr-process-$version-$platform.exe", 'DirectML.dll', 'runtime-manifest.json')
-        if ($zip.Entries.Count -ne 3 -or $manifest.files.Count -ne 2) { throw 'Unexpected OCR runtime inventory.' }
+        $names = @("snow-ocr-process-$version-$platform.exe", 'runtime-manifest.json')
+        if ($zip.Entries.Count -ne 2 -or $manifest.files.Count -ne 1) { throw 'Unexpected OCR runtime inventory.' }
         $files = @($zip.Entries | ForEach-Object {
             $input = $_.Open()
             try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($input)).ToLowerInvariant() }
             finally { $input.Dispose() }
             [ordered]@{ name = $_.FullName; size = $_.Length; sha256 = $hash }
         })
-        foreach ($name in $names[0..1]) {
+        foreach ($name in $names[0]) {
             $declared = @($manifest.files | Where-Object { $_.name -ceq $name })
             $actual = @($files | Where-Object { $_.name -ceq $name })
             if ($declared.Count -ne 1 -or $actual.Count -ne 1 -or $declared[0].size -ne $actual[0].size -or
@@ -144,7 +144,7 @@ function New-SnowOcrAssetManifest {
     $null = New-Item -ItemType Directory -Path $verification -Force
     try {
         Expand-PinnedSnowOcrRuntime -ArchivePath $archivePathResolved -Runtime $runtime -Destination $verification
-        foreach ($name in $names[0..1]) { Assert-SnowPeArchitecture -Path (Join-Path $verification $name) -Architecture $Architecture }
+        foreach ($name in $names[0]) { Assert-SnowPeArchitecture -Path (Join-Path $verification $name) -Architecture $Architecture }
     } finally {
         $resolved = [IO.Path]::GetFullPath($verification)
         $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($OutputPath)).TrimEnd('\') + '\'

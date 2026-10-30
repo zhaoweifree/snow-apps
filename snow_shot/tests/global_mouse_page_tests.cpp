@@ -349,14 +349,14 @@ void globalMousePageRendersActionButtons() {
 
     const auto rows = page.findChildren<GlobalMouseRow*>();
     const auto dividers = page.findChildren<adqt::widgets::AdDivider*>();
-    require(rows.size() == 7, "Global mouse must render seven action rows");
+    require(rows.size() == 8, "Global mouse must render eight action rows");
     require(dividers.isEmpty(), "Global mouse action buttons must use the quick-action layout");
 
     QStringList remainingTitles{
         QStringLiteral("Copy to clipboard"), QStringLiteral("Pin to screen"),
-        QStringLiteral("Text recognition"),  QStringLiteral("Text translation"),
-        QStringLiteral("Save as file"),      QStringLiteral("Quick save"),
-        QStringLiteral("Screen recording")};
+        QStringLiteral("Text recognition"),  QStringLiteral("Copy after text recognition"),
+        QStringLiteral("Text translation"),  QStringLiteral("Save as file"),
+        QStringLiteral("Quick save"),        QStringLiteral("Screen recording")};
     for (GlobalMouseRow* row : rows) {
         auto* label = row->findChild<QLabel*>(QStringLiteral("globalMouseActionLabel"));
         auto* icon = row->findChild<QLabel*>(QStringLiteral("globalMouseActionIcon"));
@@ -939,6 +939,9 @@ void builtInGlobalMouseResetRestoresDefaults() {
         const Combination custom{{snow_shot::presentation::globalMouseActivationKeys().at(2)},
                                  QStringLiteral("side_button_1_drag")};
         require(backend.applyGlobalMouseCombination(Action::ScreenshotCopy, {}) &&
+                    backend.globalMouseCombination(Action::ScreenshotOcrCopy).isUnset() &&
+                    backend.applyGlobalMouseCombination(Action::ScreenshotOcrCopy, custom) &&
+                    backend.globalMouseCombination(Action::ScreenshotOcrCopy) == custom &&
                     backend.globalMouseCombination(Action::ScreenRecording).isUnset() &&
                     backend.applyGlobalMouseCombination(Action::ScreenRecording, custom) &&
                     backend.globalMouseCombination(Action::ScreenRecording) == custom &&
@@ -956,6 +959,7 @@ void builtInGlobalMouseResetRestoresDefaults() {
                     backend.globalMouseCombination(Action::ScreenshotOcr) ==
                         Combination{{snow_shot::presentation::globalMouseActivationKeys().at(0)},
                                     QStringLiteral("right_drag")} &&
+                    backend.globalMouseCombination(Action::ScreenshotOcrCopy).isUnset() &&
                     backend.globalMouseCombination(Action::ScreenshotTranslation).isUnset() &&
                     backend.globalMouseCombination(Action::ScreenshotSave).isUnset() &&
                     backend.globalMouseCombination(Action::ScreenshotQuickSave).isUnset() &&

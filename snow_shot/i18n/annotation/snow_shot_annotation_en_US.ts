@@ -120,6 +120,10 @@
             <translation>Arabic numerals</translation>
         </message>
         <message>
+            <source>Architect</source>
+            <translation>Architect</translation>
+        </message>
+        <message>
             <source>Arrow</source>
             <translation>Arrow</translation>
         </message>
@@ -144,6 +148,10 @@
             <translation>Arrow stroke width %1</translation>
         </message>
         <message>
+            <source>Artist</source>
+            <translation>Artist</translation>
+        </message>
+        <message>
             <source>Auto Filter</source>
             <translation>Auto Filter</translation>
         </message>
@@ -154,6 +162,10 @@
         <message>
             <source>Auto-scroll interval (scroll to adjust; click to reset to 200 ms)</source>
             <translation>Auto-scroll interval (scroll to adjust; click to reset to 200 ms)</translation>
+        </message>
+        <message>
+            <source>Available for multi-region selections</source>
+            <translation>Available for multi-region selections</translation>
         </message>
         <message>
             <source>Avatar</source>
@@ -170,6 +182,10 @@
         <message>
             <source>Bold</source>
             <translation>Bold</translation>
+        </message>
+        <message>
+            <source>Border</source>
+            <translation>Border</translation>
         </message>
         <message>
             <source>Brightness</source>
@@ -204,6 +220,10 @@
             <translation>Capture interface during scrolling screenshot</translation>
         </message>
         <message>
+            <source>Cartoonist</source>
+            <translation>Cartoonist</translation>
+        </message>
+        <message>
             <source>Center horizontally</source>
             <translation>Center horizontally</translation>
         </message>
@@ -226,6 +246,10 @@
         <message>
             <source>Close recording</source>
             <translation>Close recording</translation>
+        </message>
+        <message>
+            <source>Compact layout</source>
+            <translation>Compact layout</translation>
         </message>
         <message>
             <source>Confirm edit</source>
@@ -644,6 +668,10 @@
             <translation>Image</translation>
         </message>
         <message>
+            <source>Image Splitting</source>
+            <translation>Image Splitting</translation>
+        </message>
+        <message>
             <source>Integers</source>
             <translation>Integers</translation>
         </message>
@@ -678,6 +706,18 @@
         <message>
             <source>LaTeX-Specific Model</source>
             <translation>LaTeX-Specific Model</translation>
+        </message>
+        <message>
+            <source>Layout compaction disabled</source>
+            <translation>Layout compaction disabled</translation>
+        </message>
+        <message>
+            <source>Layout compaction enabled</source>
+            <translation>Layout compaction enabled</translation>
+        </message>
+        <message>
+            <source>Layout spacing (scroll to adjust; click to reset to 0)</source>
+            <translation>Layout spacing (scroll to adjust; click to reset to 0)</translation>
         </message>
         <message>
             <source>Leader line</source>
@@ -786,6 +826,10 @@
         <message>
             <source>Mouse highlight preview</source>
             <translation>Mouse highlight preview</translation>
+        </message>
+        <message>
+            <source>Mouse highlight radius</source>
+            <translation>Mouse highlight radius</translation>
         </message>
         <message>
             <source>Mouse trail color</source>
@@ -900,6 +944,10 @@
             <translation>Post-processing effects</translation>
         </message>
         <message>
+            <source>Pressure-sensitive brush</source>
+            <translation>Pressure-sensitive brush</translation>
+        </message>
+        <message>
             <source>Print</source>
             <translation>Print</translation>
         </message>
@@ -984,6 +1032,10 @@
             <translation>Redo</translation>
         </message>
         <message>
+            <source>Regular brush</source>
+            <translation>Regular brush</translation>
+        </message>
+        <message>
             <source>Reset</source>
             <translation>Reset</translation>
         </message>
@@ -1022,6 +1074,14 @@
         <message>
             <source>Selected model (%1)</source>
             <translation>Selected model (%1)</translation>
+        </message>
+        <message>
+            <source>Selection background opacity</source>
+            <translation>Selection background opacity</translation>
+        </message>
+        <message>
+            <source>Selection background opacity (scroll to adjust; click to reset to 0%)</source>
+            <translation>Selection background opacity (scroll to adjust; click to reset to 0%)</translation>
         </message>
         <message>
             <source>Send backward</source>

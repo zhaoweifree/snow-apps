@@ -4,6 +4,7 @@
 
 #include "snowimageqtcodec.h"
 #include "snow_shot/storage/settingsadapters.h"
+#include "snow_shot/storage/clipboardfilecache.h"
 #include "snow_shot/diagnostics/diagnostics.h"
 
 #include <QBuffer>
@@ -19,6 +20,7 @@
 #include <QTemporaryDir>
 #include <QThread>
 #include <QUuid>
+#include <QUrl>
 
 #include <snow/image/codec.h>
 #include <snow/image/format.h>
@@ -252,6 +254,10 @@ struct ScreenshotExportArtifact::Impl final {
         QPointer<QObject> receiver;
         EncodingCallback callback;
     };
+    struct ClipboardSubscriber final {
+        QPointer<QObject> receiver;
+        ClipboardCallback callback;
+    };
     struct RowSourceSubscriber final {
         QPointer<QObject> receiver;
         RowSourceCallback callback;
@@ -283,6 +289,7 @@ struct ScreenshotExportArtifact::Impl final {
     quint64 pngUseSerial = 0;
     const QString diagnosticId = QUuid::createUuid().toString(QUuid::Id128);
     mutable QMutex mutex;
+    snow_shot::storage::ScreenshotWindowNames windowNames;
     bool cancelled = false;
     RequestPhase imagePhase = RequestPhase::Empty;
     QImage image;
@@ -296,6 +303,9 @@ struct ScreenshotExportArtifact::Impl final {
         RequestPhase phase = RequestPhase::Empty;
         snow_shot::storage::PreparedPngImage image;
         std::shared_ptr<std::vector<EncodingSubscriber>> subscribers;
+        std::shared_ptr<std::vector<ClipboardSubscriber>> clipboardSubscribers;
+        bool preparesClipboard = false;
+        bool modeSealed = false;
         ScreenshotExportJobHandle job;
         quint64 lastUsed = 0;
     };
@@ -382,6 +392,16 @@ ScreenshotExportArtifact::ScreenshotExportArtifact(ScreenshotExportSource source
                                                    PngCachePolicy cachePolicy, QObject* parent)
     : QObject(parent),
       m_impl(std::make_unique<Impl>(std::move(source), compressionLevel, cachePolicy)) {}
+
+void ScreenshotExportArtifact::setWindowNames(snow_shot::storage::ScreenshotWindowNames names) {
+    QMutexLocker lock(&m_impl->mutex);
+    m_impl->windowNames = std::move(names);
+}
+
+snow_shot::storage::ScreenshotWindowNames ScreenshotExportArtifact::windowNames() const {
+    QMutexLocker lock(&m_impl->mutex);
+    return m_impl->windowNames;
+}
 
 QString ScreenshotExportArtifact::diagnosticId() const {
     return m_impl->diagnosticId;
@@ -724,6 +744,8 @@ bool ScreenshotExportArtifact::requestPng(QObject* receiver, ScreenshotCompressi
             pending.subscribers->push_back({receiver, std::move(callback)});
             if (m_impl->encodingAt(compressionLevel).phase == RequestPhase::Empty) {
                 m_impl->encodingAt(compressionLevel).phase = RequestPhase::Pending;
+                m_impl->encodingAt(compressionLevel).job = {};
+                m_impl->encodingAt(compressionLevel).modeSealed = false;
                 start = true;
             }
         }
@@ -755,22 +777,40 @@ void ScreenshotExportArtifact::startPng(int compressionLevel) {
 void ScreenshotExportArtifact::startPngFromRows(int compressionLevel,
                                                 ScreenshotImageRowSource source) {
     std::shared_ptr<std::vector<Impl::EncodingSubscriber>> subscribers;
+    std::shared_ptr<std::vector<Impl::ClipboardSubscriber>> clipboardSubscribers;
+    bool preparesClipboard = false;
     {
         QMutexLocker lock(&m_impl->mutex);
         if (m_impl->cancelled ||
             m_impl->encodingAt(compressionLevel).phase != RequestPhase::Pending)
             return;
-        subscribers = m_impl->encodingAt(compressionLevel).subscribers;
+        auto& pending = m_impl->encodingAt(compressionLevel);
+        // Late subscribers join these same lease holders while the worker reads. Seal the
+        // chosen mode before submit exposes a running job without its retained handle.
+        if (!pending.subscribers)
+            pending.subscribers = std::make_shared<std::vector<Impl::EncodingSubscriber>>();
+        if (!pending.clipboardSubscribers)
+            pending.clipboardSubscribers =
+                std::make_shared<std::vector<Impl::ClipboardSubscriber>>();
+        subscribers = pending.subscribers;
+        clipboardSubscribers = pending.clipboardSubscribers;
+        preparesClipboard = pending.preparesClipboard;
+        pending.modeSealed = true;
     }
     const QPointer<ScreenshotExportArtifact> guarded(this);
     auto encoded = std::make_shared<ScreenshotExportEncodingResult>();
+    auto clipboard = preparesClipboard ? std::make_shared<ScreenshotClipboardPayload>() : nullptr;
     const ScreenshotExportJobHandle job = ScreenshotExportCoordinator::shared().submit(
         this, ScreenshotExportCoordinator::Priority::Background,
-        [source = std::move(source), encoded, subscribers, observed = m_impl->encodingStarted,
+        [source = std::move(source), encoded, subscribers, clipboardSubscribers, clipboard,
+         observed = m_impl->encodingStarted, compression = m_impl->compressionLevel,
+         placement = m_impl->source.m_clipboardPlacement,
+         appearance = m_impl->source.m_clipboardAppearance,
          compressionLevel](const ScreenshotExportCancellation& cancellation) {
             // Subscriber callbacks own any consumer output leases. Keep them
             // alive until the encoder unwinds, even after artifact cancellation.
             Q_UNUSED(subscribers);
+            Q_UNUSED(clipboardSubscribers);
             if (cancellation.isCancellationRequested()) {
                 return ScreenshotExportTaskResult::failure(
                     ScreenshotExportFailureStage::Cancelled,
@@ -778,20 +818,37 @@ void ScreenshotExportArtifact::startPngFromRows(int compressionLevel,
             }
             if (observed)
                 observed();
-            *encoded = encodePng(
-                withCancellation(
-                    source, [&cancellation] { return cancellation.isCancellationRequested(); }),
-                compressionLevel);
+            auto rows = withCancellation(
+                source, [&cancellation] { return cancellation.isCancellationRequested(); });
+            if (clipboard) {
+                *clipboard = ScreenshotClipboardService::prepare(
+                    rows, ScreenshotImageEncodingOptions{100, compression}, placement, appearance);
+                if (!clipboard->pngBytes().isEmpty()) {
+                    auto png = snow_shot::storage::PreparedPngImage::fromBytes(
+                        rows.size, std::make_shared<const QByteArray>(clipboard->pngBytes()));
+                    if (png)
+                        encoded->image = std::move(*png);
+                }
+                if (!encoded->succeeded())
+                    encoded->error = QStringLiteral("The screenshot PNG is unavailable");
+            } else {
+                *encoded = encodePng(rows, compressionLevel);
+            }
+            if (cancellation.isCancellationRequested())
+                return ScreenshotExportTaskResult::failure(
+                    ScreenshotExportFailureStage::Cancelled,
+                    QStringLiteral("The screenshot PNG encoding was cancelled"));
             return encoded->succeeded() ? ScreenshotExportTaskResult{}
                                         : ScreenshotExportTaskResult::failure(
                                               ScreenshotExportFailureStage::Render, encoded->error);
         },
-        [guarded, encoded, compressionLevel](ScreenshotExportTaskResult result) mutable {
+        [guarded, encoded, clipboard, compressionLevel](ScreenshotExportTaskResult result) mutable {
             if (!guarded.isNull()) {
                 guarded->completePng(compressionLevel,
                                      result.succeeded()
                                          ? std::move(*encoded)
-                                         : ScreenshotExportEncodingResult{{}, result.error});
+                                         : ScreenshotExportEncodingResult{{}, result.error},
+                                     result.succeeded() ? std::move(clipboard) : nullptr);
             }
         });
     if (!job.isValid()) {
@@ -812,8 +869,11 @@ void ScreenshotExportArtifact::startPngFromRows(int compressionLevel,
 }
 
 void ScreenshotExportArtifact::completePng(int compressionLevel,
-                                           ScreenshotExportEncodingResult result) {
+                                           ScreenshotExportEncodingResult result,
+                                           std::shared_ptr<ScreenshotClipboardPayload> clipboard) {
     std::vector<Impl::EncodingSubscriber> subscribers;
+    std::vector<Impl::ClipboardSubscriber> clipboardSubscribers;
+    const QPointer<ScreenshotExportArtifact> guarded(this);
     {
         QMutexLocker lock(&m_impl->mutex);
         if (m_impl->cancelled ||
@@ -831,9 +891,103 @@ void ScreenshotExportArtifact::completePng(int compressionLevel,
         }
         if (auto pending = std::move(m_impl->encodingAt(compressionLevel).subscribers))
             subscribers = std::move(*pending);
+        if (auto pending = std::move(m_impl->encodingAt(compressionLevel).clipboardSubscribers))
+            clipboardSubscribers = std::move(*pending);
+        m_impl->encodingAt(compressionLevel).preparesClipboard = false;
+        m_impl->encodingAt(compressionLevel).modeSealed = false;
+    }
+    if (!clipboardSubscribers.empty()) {
+        if (!result.succeeded() || !clipboard || !clipboard->isValid()) {
+            const auto error = result.error.isEmpty()
+                                   ? QStringLiteral("The screenshot clipboard payload is invalid")
+                                   : result.error;
+            for (auto& subscriber : clipboardSubscribers)
+                if (guarded && !guarded->isCancelled() && subscriber.receiver)
+                    dispatchResult(subscriber.receiver, std::move(subscriber.callback),
+                                   ScreenshotExportClipboardResult{{}, error});
+        } else {
+            struct PendingNative final {
+                QPointer<ScreenshotExportArtifact> artifact;
+                Impl::ClipboardSubscriber first;
+                std::shared_ptr<ScreenshotClipboardPayload> prototype;
+                size_t remaining = 0;
+                void deliverFirst() {
+                    if (artifact && !artifact->isCancelled() && first.receiver && first.callback)
+                        dispatchResult(first.receiver, std::move(first.callback),
+                                       ScreenshotExportClipboardResult{std::move(*prototype), {}});
+                }
+            };
+            auto pending = std::make_shared<PendingNative>();
+            pending->artifact = guarded;
+            pending->first = std::move(clipboardSubscribers.front());
+            pending->prototype = std::move(clipboard);
+            pending->remaining = clipboardSubscribers.size() - 1;
+            if (pending->remaining == 0) {
+                pending->deliverFirst();
+            } else {
+                // The first consumer owns the original native allocation. Keep it immutable
+                // until clones retire, then move it; canonical PNG is the only persistent cache.
+                for (size_t index = 1; index < clipboardSubscribers.size(); ++index) {
+                    auto subscriber = std::make_shared<Impl::ClipboardSubscriber>(
+                        std::move(clipboardSubscribers[index]));
+                    auto cloned = std::make_shared<ScreenshotClipboardPayload>();
+                    const auto complete = [pending, subscriber,
+                                           cloned](ScreenshotExportTaskResult nativeResult) {
+                        if (pending->artifact && !pending->artifact->isCancelled() &&
+                            subscriber->receiver && subscriber->callback)
+                            dispatchResult(
+                                subscriber->receiver, std::move(subscriber->callback),
+                                ScreenshotExportClipboardResult{nativeResult.succeeded()
+                                                                    ? std::move(*cloned)
+                                                                    : ScreenshotClipboardPayload{},
+                                                                nativeResult.error});
+                        if (--pending->remaining == 0)
+                            pending->deliverFirst();
+                    };
+                    const auto job =
+                        guarded
+                            ? ScreenshotExportCoordinator::shared().submit(
+                                  guarded, ScreenshotExportCoordinator::Priority::Foreground,
+                                  [pending, cloned,
+                                   subscriber](const ScreenshotExportCancellation& cancellation) {
+                                      Q_UNUSED(subscriber);
+                                      if (cancellation.isCancellationRequested())
+                                          return ScreenshotExportTaskResult::failure(
+                                              ScreenshotExportFailureStage::Cancelled, {});
+                                      *cloned = ScreenshotClipboardService::clonePrepared(
+                                          *pending->prototype);
+                                      return cloned->isValid() &&
+                                                     !cancellation.isCancellationRequested()
+                                                 ? ScreenshotExportTaskResult{}
+                                                 : ScreenshotExportTaskResult::failure(
+                                                       ScreenshotExportFailureStage::Clipboard,
+                                                       QStringLiteral("The screenshot clipboard "
+                                                                      "payload is invalid"));
+                                  },
+                                  complete)
+                            : ScreenshotExportJobHandle{};
+                    if (!job.isValid()) {
+                        complete(ScreenshotExportTaskResult::failure(
+                            ScreenshotExportFailureStage::Queue,
+                            QStringLiteral("The screenshot export queue is full")));
+                        continue;
+                    }
+                    bool retained = false;
+                    if (guarded) {
+                        QMutexLocker lock(&guarded->m_impl->mutex);
+                        if (!guarded->m_impl->cancelled) {
+                            guarded->m_impl->outputJobs.push_back(job);
+                            retained = true;
+                        }
+                    }
+                    if (!retained)
+                        job.cancel();
+                }
+            }
+        }
     }
     for (auto& subscriber : subscribers) {
-        if (!subscriber.receiver.isNull()) {
+        if (guarded && !guarded->isCancelled() && !subscriber.receiver.isNull()) {
             ScreenshotExportEncodingResult delivered{result.image, result.error};
             dispatchResult(subscriber.receiver, std::move(subscriber.callback),
                            std::move(delivered));
@@ -886,6 +1040,36 @@ bool ScreenshotExportArtifact::requestClipboard(QObject* receiver, ClipboardCall
         return false;
     const QPointer<ScreenshotExportArtifact> guarded(this);
     const QPointer<QObject> target(receiver);
+    const int level = pngCompression(m_impl->compressionLevel);
+    bool fused = false;
+    bool start = false;
+    {
+        QMutexLocker lock(&m_impl->mutex);
+        if (m_impl->cancelled || !m_impl->source.isValid())
+            return false;
+        auto& encoding = m_impl->encodingAt(level);
+        if (encoding.phase == RequestPhase::Empty ||
+            (encoding.phase == RequestPhase::Pending &&
+             (encoding.preparesClipboard || !encoding.modeSealed))) {
+            if (!encoding.clipboardSubscribers)
+                encoding.clipboardSubscribers =
+                    std::make_shared<std::vector<Impl::ClipboardSubscriber>>();
+            encoding.clipboardSubscribers->push_back({receiver, std::move(callback)});
+            encoding.preparesClipboard = true;
+            fused = true;
+            if (encoding.phase == RequestPhase::Empty) {
+                encoding.phase = RequestPhase::Pending;
+                encoding.job = {};
+                encoding.modeSealed = false;
+                start = true;
+            }
+        }
+    }
+    if (fused) {
+        if (start)
+            startPng(level);
+        return true;
+    }
     return requestCanonicalPng(this, [guarded, target, callback = std::move(callback)](
                                          ScreenshotExportEncodingResult result) mutable {
         if (guarded.isNull() || guarded->isCancelled() || target.isNull())
@@ -983,7 +1167,8 @@ bool ScreenshotExportArtifact::prepareClipboard(QObject* receiver, QByteArray ca
 }
 
 bool ScreenshotExportArtifact::requestQuickSave(QObject* receiver,
-                                                ScreenshotExportCoordinator::Completion callback) {
+                                                ScreenshotExportCoordinator::Completion callback,
+                                                QDateTime requestedAt) {
     if (receiver == nullptr || !callback || isCancelled())
         return false;
     const snow_shot::storage::ScreenshotSettings settings;
@@ -1003,11 +1188,16 @@ bool ScreenshotExportArtifact::requestQuickSave(QObject* receiver,
             }),
             Qt::QueuedConnection);
     }
+    if (!requestedAt.isValid())
+        requestedAt = QDateTime::currentDateTime();
     return requestAutomaticSave(
-        receiver, {directory}, ScreenshotImageFileService::formatForKey(settings.imageFormat()),
+        receiver,
+        {snow_shot::storage::expandScreenshotExportVariables(directory, requestedAt,
+                                                             windowNames())},
+        ScreenshotImageFileService::formatForKey(settings.imageFormat()),
         settings.autoSaveFilenameFormat(),
         snow_shot::presentation::screenshotEncodingOptions(settings), std::move(callback),
-        ScreenshotPdfOptions{screenshot_pdf::pageSizeForKey(settings.pdfPageSize())});
+        ScreenshotPdfOptions{screenshot_pdf::pageSizeForKey(settings.pdfPageSize())}, requestedAt);
 }
 
 bool ScreenshotExportArtifact::requestSaveToPath(QObject* receiver, QString path,
@@ -1303,27 +1493,15 @@ bool ScreenshotExportArtifact::requestClipboardFile(
     ScreenshotPdfOptions pdf, QDateTime requestedAt) {
     if (receiver == nullptr || !callback || isCancelled())
         return false;
-    auto directory = std::make_shared<QTemporaryDir>(
-        QDir::temp().filePath(QStringLiteral("snow-shot-clipboard-XXXXXX")));
-    if (!directory->isValid()) {
-        std::function<void(QString)> completion = [callback =
-                                                       std::move(callback)](QString error) mutable {
-            callback({}, std::move(error));
-        };
-        dispatchResult(receiver, std::move(completion), directory->errorString());
-        return true;
-    }
-    const QString path = directory->path();
     return requestFileSave(
-        receiver, QStringList{path}, format, std::move(filenameFormat), encoding,
-        [this, directory = std::move(directory),
-         callback = std::move(callback)](ScreenshotExportTaskResult result) mutable {
+        receiver, ClipboardFileDestination{}, format, std::move(filenameFormat), encoding,
+        [this, callback = std::move(callback)](ScreenshotExportTaskResult result) mutable {
             if (!result.succeeded()) {
                 callback({}, std::move(result.error));
                 return;
             }
-            auto mime = ScreenshotClipboardService::temporaryFileMimeData(result.savedPath,
-                                                                          std::move(directory));
+            auto mime = std::make_unique<QMimeData>();
+            mime->setUrls({QUrl::fromLocalFile(result.savedPath)});
             setClipboardFileMetadata(*mime, result.savedPath);
             callback(std::move(mime), {});
         },
@@ -1363,8 +1541,9 @@ bool ScreenshotExportArtifact::requestFileSave(QObject* receiver, FileSaveDestin
     const QPointer<QObject> target(receiver);
     if (!requestedAt.isValid())
         requestedAt = QDateTime::currentDateTime();
+    const auto names = windowNames();
     auto schedule = [guarded, target, destination = std::move(destination), format, pdf, priority,
-                     requestedAt, filenameFormat = std::move(filenameFormat),
+                     requestedAt, names, filenameFormat = std::move(filenameFormat),
                      callback = std::move(callback)](std::shared_ptr<FileSource> source,
                                                      QString error) mutable {
         if (guarded.isNull() || guarded->isCancelled() || target.isNull())
@@ -1379,18 +1558,30 @@ bool ScreenshotExportArtifact::requestFileSave(QObject* receiver, FileSaveDestin
             std::make_shared<ScreenshotExportCoordinator::Completion>(std::move(callback));
         auto job = ScreenshotExportCoordinator::shared().submit(
             target, priority,
-            [destination, format, pdf, requestedAt, filenameFormat,
+            [destination, format, pdf, requestedAt, filenameFormat, names,
              source = std::move(source)](const ScreenshotExportCancellation& cancellation) mutable {
                 if (cancellation.isCancellationRequested()) {
                     return ScreenshotExportTaskResult::failure(
                         ScreenshotExportFailureStage::Cancelled,
                         QStringLiteral("The screenshot save was cancelled"));
                 }
-                const auto* configuredDirectory = std::get_if<QString>(&destination);
-                const QStringList directories =
-                    configuredDirectory != nullptr
-                        ? ScreenshotImageFileService::automaticDirectories(*configuredDirectory)
-                        : std::get<QStringList>(destination);
+                std::unique_ptr<snow_shot::storage::ClipboardFileCache::ExportDirectory>
+                    clipboardDirectory;
+                QStringList directories;
+                if (std::holds_alternative<ClipboardFileDestination>(destination)) {
+                    QString error;
+                    clipboardDirectory =
+                        snow_shot::storage::ClipboardFileCache::shared().createDirectory(&error);
+                    if (!clipboardDirectory)
+                        return ScreenshotExportTaskResult::failure(
+                            ScreenshotExportFailureStage::File, std::move(error));
+                    directories = {clipboardDirectory->path()};
+                } else if (const auto* configuredDirectory = std::get_if<QString>(&destination)) {
+                    directories = ScreenshotImageFileService::automaticDirectories(
+                        *configuredDirectory, requestedAt, names);
+                } else {
+                    directories = std::get<QStringList>(destination);
+                }
                 ScreenshotImageFileSaveResult saved;
                 const auto cancelled = [&cancellation] {
                     return cancellation.isCancellationRequested();
@@ -1398,24 +1589,34 @@ bool ScreenshotExportArtifact::requestFileSave(QObject* receiver, FileSaveDestin
                 if (source->png.isValid()) {
                     // Use the same cancellation-aware atomic writer as manual output.
                     saved = ScreenshotImageFileService::saveAutomatically(
-                        source->png, directories, filenameFormat, requestedAt, cancelled);
+                        source->png, directories, filenameFormat, requestedAt, cancelled, names);
                 } else if (!source->bytes.isEmpty()) {
                     saved = ScreenshotImageFileService::saveEncodedBytesAutomatically(
-                        source->bytes, directories, format, filenameFormat, requestedAt, cancelled);
+                        source->bytes, directories, format, filenameFormat, requestedAt, cancelled,
+                        names);
                 } else if (source->rows.isValid()) {
                     auto rows = withCancellation(source->rows, cancelled);
                     saved = ScreenshotImageFileService::saveAutomatically(
-                        rows, directories, format, filenameFormat, requestedAt, pdf);
+                        rows, directories, format, filenameFormat, requestedAt, pdf, {}, names);
                 } else if (source->pdf) {
                     saved = ScreenshotImageFileService::savePdfAutomatically(
-                        *source->pdf, directories, filenameFormat, requestedAt, pdf, cancelled);
+                        *source->pdf, directories, filenameFormat, requestedAt, pdf, cancelled,
+                        names);
                 } else {
                     saved = ScreenshotImageFileService::saveEncodedAutomatically(
-                        source->path, directories, format, filenameFormat, requestedAt, cancelled);
+                        source->path, directories, format, filenameFormat, requestedAt, cancelled,
+                        names);
                 }
                 if (!saved.succeeded()) {
                     return ScreenshotExportTaskResult::failure(ScreenshotExportFailureStage::File,
                                                                saved.error);
+                }
+                if (clipboardDirectory) {
+                    if (cancellation.isCancellationRequested())
+                        return ScreenshotExportTaskResult::failure(
+                            ScreenshotExportFailureStage::Cancelled,
+                            QStringLiteral("The screenshot save was cancelled"));
+                    clipboardDirectory->retain();
                 }
                 ScreenshotExportTaskResult result;
                 result.savedPath = saved.path;
@@ -1481,6 +1682,7 @@ void ScreenshotExportArtifact::cancel() {
             pending = pending || encoding.phase == RequestPhase::Pending;
             outputJobs.push_back(encoding.job);
             encoding.subscribers.reset();
+            encoding.clipboardSubscribers.reset();
         }
     }
     if (pending) {

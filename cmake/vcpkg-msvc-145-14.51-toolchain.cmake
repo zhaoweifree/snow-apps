@@ -38,37 +38,8 @@ if(_snow_msvc_target_arch STREQUAL "arm64")
     set(_snow_msvc_component Microsoft.VisualStudio.Component.VC.Tools.ARM64)
 endif()
 
-set(_snow_msvc_145_root "$ENV{VCToolsInstallDir}")
-if(_snow_msvc_145_root STREQUAL "")
-    find_program(_snow_vswhere vswhere.exe
-        PATHS
-            "$ENV{SystemDrive}/Program Files (x86)/Microsoft Visual Studio/Installer"
-            "$ENV{ProgramFiles}/Microsoft Visual Studio/Installer"
-    )
-    if(_snow_vswhere)
-        execute_process(
-            COMMAND "${_snow_vswhere}" -latest -products *
-                -requires "${_snow_msvc_component}"
-                -property installationPath
-            OUTPUT_VARIABLE _snow_vs_install
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-        )
-        file(GLOB _snow_msvc_candidates
-            "${_snow_vs_install}/VC/Tools/MSVC/14.51.*")
-        list(SORT _snow_msvc_candidates COMPARE NATURAL ORDER DESCENDING)
-        list(LENGTH _snow_msvc_candidates _snow_msvc_count)
-        if(_snow_msvc_count GREATER 0)
-            list(GET _snow_msvc_candidates 0 _snow_msvc_145_root)
-        endif()
-    endif()
-endif()
-if(_snow_msvc_145_root STREQUAL "")
-    message(FATAL_ERROR
-        "MSVC 14.51 was not found. Set VCToolsInstallDir or install ${_snow_msvc_component}.")
-endif()
-string(REGEX REPLACE "[/\\]+$" "" _snow_msvc_145_root "${_snow_msvc_145_root}")
-file(TO_CMAKE_PATH "${_snow_msvc_145_root}" _snow_msvc_145_root)
+include("${CMAKE_CURRENT_LIST_DIR}/SnowBuildToolchain.cmake")
+snow_resolve_msvc_tools_root(_snow_msvc_145_root)
 set(_snow_msvc_145_bin
     "${_snow_msvc_145_root}/bin/Host${_snow_msvc_host_arch}/${_snow_msvc_target_arch}")
 foreach(_snow_msvc_tool IN ITEMS cl.exe link.exe lib.exe)

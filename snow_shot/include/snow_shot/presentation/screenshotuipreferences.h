@@ -2,6 +2,7 @@
 #define SNOW_SHOT_PRESENTATION_SCREENSHOTUIPREFERENCES_H
 
 #include "snow_shot/presentation/screenshotselectiondisplayunit.h"
+#include "snow_shot/selectiontransitionanimation.h"
 
 #include <QColor>
 #include <QString>
@@ -17,7 +18,8 @@ enum class ScreenshotColorPickerDisplayMode {
 
 struct ScreenshotUiPreferences {
     ScreenshotSelectionDisplayUnit selectionDisplayUnit = kDefaultScreenshotSelectionDisplayUnit;
-    bool selectionTransitionAnimationEnabled = true;
+    snow_shot::SelectionTransitionAnimation selectionTransitionAnimation =
+        snow_shot::SelectionTransitionAnimation::Soft;
     ScreenshotColorPickerDisplayMode colorPickerDisplayMode =
         ScreenshotColorPickerDisplayMode::HideOutsideSelection;
     QColor selectionBorderColor = QColor(0x40, 0x96, 0xff);
@@ -33,6 +35,8 @@ struct ScreenshotUiPreferences {
 
     [[nodiscard]] ScreenshotUiPreferences normalized() const {
         ScreenshotUiPreferences result = *this;
+        result.selectionTransitionAnimation =
+            snow_shot::normalizedSelectionTransitionAnimation(result.selectionTransitionAnimation);
         if (!result.selectionBorderColor.isValid()) {
             result.selectionBorderColor = QColor(0x40, 0x96, 0xff);
         }

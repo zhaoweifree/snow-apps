@@ -66,6 +66,59 @@ impl Default for PathGeometry {
 }
 
 impl PathGeometry {
+    /// Contour chunks contain complete subpaths and may have different command counts.
+    /// Their lengths describe the underlying centerline, preserving dash phase at tail edits.
+    pub fn replace_contour_tail(
+        previous: Option<&Self>,
+        revision: u64,
+        retain_chunks: usize,
+        tail: Vec<(Vec<PathCommand>, f64, f64)>,
+    ) -> Self {
+        let mut chunks = previous
+            .map(|geometry| geometry.chunks[..retain_chunks.min(geometry.chunks.len())].to_vec())
+            .unwrap_or_default();
+        let mut command_start = chunks
+            .last()
+            .map_or(0, |chunk| chunk.command_start + chunk.commands.len() as u32);
+        let mut bounds = chunks.last().map(|chunk| {
+            DrawRect::new(
+                chunk.cumulative_bounds[0],
+                chunk.cumulative_bounds[1],
+                chunk.cumulative_bounds[2],
+                chunk.cumulative_bounds[3],
+            )
+        });
+        for (commands, start_length, end_length) in tail {
+            let mut current = None;
+            let mut local_bounds = None;
+            for command in &commands {
+                let (command_bounds, next, _) = command_metrics(*command, current);
+                if let Some(command_bounds) = command_bounds {
+                    local_bounds = Some(union_optional(local_bounds, command_bounds));
+                    bounds = Some(union_optional(bounds, command_bounds));
+                }
+                current = next;
+            }
+            chunks.push(PathChunk {
+                stable_id: stable_chunk_id(command_start, &commands),
+                command_start,
+                commands: Arc::from(commands.as_slice()),
+                start_point: [0.0; 2],
+                canvas_bounds: bounds_array(local_bounds),
+                cumulative_start_length: start_length,
+                cumulative_end_length: end_length,
+                cumulative_bounds: bounds_array(bounds),
+            });
+            command_start += commands.len() as u32;
+        }
+        Self {
+            revision,
+            chunks: chunks.into(),
+            canvas_bounds: bounds_array(bounds),
+            closed: false,
+        }
+    }
+
     pub fn from_commands(revision: u64, commands: Vec<PathCommand>, closed: bool) -> Self {
         Self::build_tail(revision, None, 0, [0.0; 2], commands, closed)
     }

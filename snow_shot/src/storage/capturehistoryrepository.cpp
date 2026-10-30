@@ -738,6 +738,22 @@ class CaptureHistoryRepositoryImpl final : public CaptureHistoryRepository {
                          record.result->imageSize);
     }
 
+    std::optional<QImage>
+    loadResultImagePreservingRecord(const CaptureHistoryRecord& record) const override {
+        std::shared_lock access(m_relocationMutex);
+        const auto stored = find(record);
+        if (!stored || !record.result || !stored->resultFileName)
+            return std::nullopt;
+        const QString path = QDir(recordPath(record.id)).filePath(*stored->resultFileName);
+        observe(CaptureHistoryOperation::PayloadRead);
+        if (!containedPath(m_root, path) || QFileInfo(path).size() != record.result->encodedBytes)
+            return std::nullopt;
+        QImage image = decodeImage(path);
+        if (image.isNull() || image.size() != record.result->imageSize)
+            return std::nullopt;
+        return image;
+    }
+
     std::optional<PreparedPngImage>
     loadResultPng(const CaptureHistoryRecord& record) const override {
         std::shared_lock access(m_relocationMutex);

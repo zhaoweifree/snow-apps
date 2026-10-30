@@ -30,12 +30,12 @@ use crate::adapter::video::resolve_capture_target;
 use crate::capture_policy::{RecordingCapturePath, recording_capture_system};
 use crate::config::{IntermediateRecordingProfile, RecordingConfig, VideoEncodeConfig};
 use crate::error::{Result, ScreenRecorderError};
-use crate::ffmpeg_util::{
-    copy_rgba_into_frame, ensure_ffmpeg_initialized, ensure_video_frame_writable, is_eagain,
-};
 use crate::processor::{CursorProcessor, VideoProcessor};
 use crate::temp::TempLayout;
-use crate::video_quality::{quality_to_h264_crf, smart_quality_bitrate_bps};
+use snow_recording_export::ffmpeg_util::{
+    copy_rgba_into_frame, ensure_ffmpeg_initialized, ensure_video_frame_writable, is_eagain,
+};
+use snow_recording_model::video_quality::{quality_to_h264_crf, smart_quality_bitrate_bps};
 
 const VIDEO_INDEX_MAGIC: &[u8] = b"SVIDX\0\0";
 
@@ -46,33 +46,7 @@ enum ControlCommand {
     Stop,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecordingState {
-    Created,
-    Running,
-    Paused,
-    Stopped,
-}
-
-impl RecordingState {
-    fn as_u8(self) -> u8 {
-        match self {
-            Self::Created => 0,
-            Self::Running => 1,
-            Self::Paused => 2,
-            Self::Stopped => 3,
-        }
-    }
-
-    fn from_u8(v: u8) -> Self {
-        match v {
-            1 => Self::Running,
-            2 => Self::Paused,
-            3 => Self::Stopped,
-            _ => Self::Created,
-        }
-    }
-}
+pub use crate::state::RecordingState;
 
 struct RuntimeHandles {
     control_tx: Sender<ControlCommand>,
@@ -479,8 +453,6 @@ pub(crate) struct LiveVideoEncoder {
     scaler: ffmpeg::software::scaling::Context,
     rgba_frame: ffmpeg::frame::Video,
     encode_frame: ffmpeg::frame::Video,
-    width: u32,
-    height: u32,
     fps: u32,
     last_pts: Option<i64>,
     index_writer: VideoIndexWriter,
@@ -670,8 +642,6 @@ impl LiveVideoEncoder {
             scaler,
             rgba_frame: ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGBA, width, height),
             encode_frame: ffmpeg::frame::Video::new(pixel_format, width, height),
-            width,
-            height,
             fps,
             last_pts: None,
             index_writer,
@@ -715,16 +685,10 @@ impl LiveVideoEncoder {
     }
 
     fn encode_frame_at_pts(&mut self, rgba: &[u8], pts: i64, timestamp_ms: u64) -> Result<()> {
-        let expected_len = self.width as usize * self.height as usize * 4;
-        if rgba.len() != expected_len {
-            return Err(ScreenRecorderError::Encode(format!(
-                "temporary video RGBA size mismatch: expected {expected_len} bytes, got {}",
-                rgba.len()
-            )));
-        }
-
-        copy_rgba_into_frame(&mut self.rgba_frame, self.width, rgba);
-        ensure_video_frame_writable(&mut self.encode_frame)?;
+        copy_rgba_into_frame(&mut self.rgba_frame, rgba)?;
+        // SAFETY: Creation allocates this frame with the scaler's output format and
+        // dimensions; encoding only changes its timestamp and retains buffer references.
+        unsafe { ensure_video_frame_writable(&mut self.encode_frame)? };
         self.scaler
             .run(&self.rgba_frame, &mut self.encode_frame)
             .map_err(|err| {
@@ -1323,6 +1287,54 @@ fn handle_source_error<E: Classify>(
 mod tests {
     use super::*;
     use std::fs;
+
+    // The macOS media profile includes the legacy Matroska muxer and software H.264.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn live_video_encoder_rejects_malformed_rgba_without_poisoning_the_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let video_path = directory.path().join("video.mkv");
+        let index_path = directory.path().join("video.idx");
+        let mut encoder = LiveVideoEncoder::create(
+            &video_path,
+            &index_path,
+            16,
+            16,
+            30,
+            IntermediateRecordingProfile::EditFast,
+            &VideoEncodeConfig::default(),
+        )
+        .unwrap();
+        let pixels = [0x11; 16 * 16 * 4];
+        encoder.encode_frame(&pixels, 0).unwrap();
+        for length in [0, pixels.len() - 1, pixels.len() + 1] {
+            let malformed = vec![0; length];
+            assert!(matches!(
+                encoder.encode_frame(&malformed, 17),
+                Err(ScreenRecorderError::Encode(_))
+            ));
+        }
+        encoder.encode_frame(&pixels, 33).unwrap();
+        encoder.finalize(67, None).unwrap();
+
+        let mut input = ffmpeg::format::input(&video_path).unwrap();
+        let video_stream = input
+            .streams()
+            .best(ffmpeg::media::Type::Video)
+            .unwrap()
+            .index();
+        assert_eq!(
+            input
+                .packets()
+                .filter(|(stream, _)| stream.index() == video_stream)
+                .count(),
+            2
+        );
+        assert_eq!(
+            fs::read(index_path).unwrap().len(),
+            VIDEO_INDEX_MAGIC.len() + 2 * 20
+        );
+    }
 
     #[test]
     fn video_index_writer_streams_expected_records() {

@@ -116,7 +116,7 @@ bool ScreenRecordingShortcutController::canActivate(
         }
     }
     return m_area != nullptr && m_toolbar != nullptr && m_area->isVisible() &&
-           m_toolbar->isVisible() && receiver != nullptr && receiver->isVisible() &&
+           m_toolbar->recordingUiPresented() && receiver != nullptr && receiver->isVisible() &&
            !ShortcutManager::focusAcceptsTextInput(context.focusWidget) &&
            !m_area->canvas()->hasActiveTextEditing();
 }

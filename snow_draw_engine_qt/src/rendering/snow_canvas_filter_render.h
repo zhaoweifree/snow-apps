@@ -38,6 +38,7 @@ struct AlphaView {
 enum class SimdBackend {
     Scalar,
     Avx2,
+    Neon,
 };
 
 struct Parameters {
@@ -81,9 +82,13 @@ struct KernelDiagnostics {
     std::size_t gaussianAvx2Executions = 0;
     std::size_t gaussianDownsampleAvx2Executions = 0;
     std::size_t gaussianReconstructionAvx2Executions = 0;
+    std::size_t gaussianNeonExecutions = 0;
+    std::size_t gaussianDownsampleNeonExecutions = 0;
+    std::size_t gaussianReconstructionNeonExecutions = 0;
     std::uint64_t downsampleNanoseconds = 0;
     std::uint64_t reducedBlurNanoseconds = 0;
     std::uint64_t reconstructionNanoseconds = 0;
+    std::size_t peakPoolBytes = 0;
 };
 
 class RenderWorkspace {

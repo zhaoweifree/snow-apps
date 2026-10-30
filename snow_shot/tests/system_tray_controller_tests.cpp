@@ -12,6 +12,7 @@
 
 #include "widgets/context_menu.h"
 #include "widgets/modal.h"
+#include "theme/theme_manager.h"
 
 #include <QAction>
 #include <QApplication>
@@ -177,6 +178,12 @@ void verifyTraySkinDestruction(snow_shot::presentation::SystemTrayController& co
 
 void verifyConfiguredTrayMenuOptions(snow_shot::presentation::SystemTrayController& controller) {
     using snow_shot::storage::TraySettings;
+    using Action = snow_shot::presentation::GlobalShortcutAction;
+    const auto stitchId = QStringLiteral("quick.stitch-selected-images");
+    const auto splitId = QStringLiteral("quick.split-selected-images");
+    require(!TraySettings().menuOptions().contains(stitchId) &&
+                !TraySettings().menuOptions().contains(splitId),
+            "selected-image stitching and splitting start unchecked in the tray");
     auto& appStorage = snow_shot::storage::ApplicationStorage::instance();
     require(snow_shot::storage::ExtendedFeaturesSettings().setTranslationPageEnabled(true),
             "enable all optional tray commands");
@@ -202,11 +209,28 @@ void verifyConfiguredTrayMenuOptions(snow_shot::presentation::SystemTrayControll
     QPointer<adqt::widgets::AdContextMenu> menu = controller.createContextMenu();
     QApplication::processEvents();
     QStringList visible;
+    QAction* stitching = nullptr;
+    QAction* splitting = nullptr;
     for (auto* action : menu->actions()) {
         if (!action->isSeparator() && action->isVisible())
             visible.append(action->data().toString());
+        if (action->data().toString() == stitchId)
+            stitching = action;
+        if (action->data().toString() == splitId)
+            splitting = action;
     }
     require(visible == options, "the tray must display every persisted selection, including Exit");
+    QVector<Action> imageActions;
+    QObject::connect(&controller,
+                     &snow_shot::presentation::SystemTrayController::quickActionRequested, menu,
+                     [&](Action action) { imageActions.append(action); });
+    require(stitching && stitching->isVisible() && splitting && splitting->isVisible(),
+            "selected stitching and splitting tray entries are visible");
+    stitching->trigger();
+    splitting->trigger();
+    require(imageActions ==
+                QVector<Action>{Action::StitchSelectedImages, Action::SplitSelectedImages},
+            "selected-image tray entries dispatch their own action exactly once");
     menu->dismissPopup();
     drainMenus();
     require(!menu, "the configured tray session retires after dismissal");
@@ -572,6 +596,101 @@ void verifyHideShowTrayAction(snow_shot::presentation::SystemTrayController& con
     drainMenus();
 }
 
+void verifyThemeIcons(const QTemporaryDir& directory) {
+    using adqt::theme::ThemeScheme;
+    using snow_shot::presentation::GlobalShortcutAction;
+    using snow_shot::presentation::SystemTrayController;
+    auto& theme = adqt::theme::ThemeManager::instance();
+    const auto originalConfig = theme.config();
+    theme.setColorScheme(ThemeScheme::Light);
+    SystemTrayController controller;
+    auto* tray = controller.findChild<QSystemTrayIcon*>();
+    require(tray != nullptr, "theme icon checks require a tray icon");
+    const auto source = [&]() { return tray->property("resolvedIconSource").toString(); };
+    const QString lightResource = QStringLiteral(":/snow-shot/app-icons/snow-shot-tray-dark.png");
+    const QString darkResource =
+        QStringLiteral(":/snow-shot/app-icons/snow-shot-tray-snow-light.png");
+    controller.setIconSelection(QStringLiteral("dark"));
+    controller.setDarkIconSelection(QStringLiteral("snow-light"));
+    require(source() == lightResource &&
+                controller.darkIconSelection() == QStringLiteral("snow-light"),
+            "editing dark icon settings must preserve the active light icon");
+    theme.setColorScheme(ThemeScheme::Dark);
+    require(source() == darkResource,
+            "entering dark theme must immediately select its bundled icon");
+    controller.setIconSelection(QStringLiteral("snow-dark"));
+    require(source() == darkResource, "regular icon edits must preserve the dedicated dark icon");
+    theme.setColorScheme(ThemeScheme::Light);
+    require(source() == QStringLiteral(":/snow-shot/app-icons/snow-shot-tray-snow-dark.png"),
+            "returning to light theme must restore its independent icon selection");
+
+    const QString regularPath = directory.filePath(QStringLiteral("regular-theme-icon.png"));
+    const QString darkPath = directory.filePath(QStringLiteral("dark-theme-icon.png"));
+    QImage regularImage(32, 32, QImage::Format_ARGB32_Premultiplied);
+    regularImage.fill(QColor(31, 107, 53));
+    QImage darkImage(32, 32, QImage::Format_ARGB32_Premultiplied);
+    darkImage.fill(QColor(53, 71, 211));
+    require(regularImage.save(regularPath) && darkImage.save(darkPath),
+            "custom theme icon fixtures must be writable");
+    controller.setCustomIconPath(regularPath);
+    controller.setDarkCustomIconPath(darkPath);
+    require(source() == regularPath && controller.darkCustomIconPath() == darkPath,
+            "editing the dark custom path must preserve the regular custom icon");
+    theme.setColorScheme(ThemeScheme::Dark);
+    require(source() == darkPath &&
+                tray->icon().pixmap(QSize(32, 32), 1.0).toImage().pixelColor(16, 16) ==
+                    darkImage.pixelColor(16, 16),
+            "a valid dark custom icon must override the dark bundled choice");
+    const auto decodeCount = tray->property("customIconDecodeCount").toULongLong();
+    theme.setDensity(adqt::theme::ThemeDensity::Compact);
+    controller.show();
+    controller.show();
+    require(tray->property("customIconDecodeCount").toULongLong() == decodeCount,
+            "unrelated theme updates and tray refreshes must reuse the active custom icon");
+    theme.setDensity(adqt::theme::ThemeDensity::Comfortable);
+    controller.setDarkCustomIconPath(directory.filePath(QStringLiteral("missing-dark.png")));
+    require(source() == darkResource,
+            "invalid dark custom files must fall back to the selected dark bundled icon");
+    controller.setDarkCustomIconPath(QString());
+    require(source() == darkResource,
+            "a dedicated dark bundled choice must override the regular custom image");
+    controller.setDarkIconSelection(QStringLiteral("inherit"));
+    require(source() == regularPath,
+            "inherited dark settings must preserve existing custom icon configurations");
+    controller.setDarkCustomIconPath(darkPath);
+    require(source() == darkPath, "a dark custom image must also override inherited settings");
+    controller.setDarkCustomIconPath(directory.filePath(QStringLiteral("missing-dark.png")));
+    require(source() == QStringLiteral(":/snow-shot/app-icons/snow-shot-tray-snow-dark.png"),
+            "an invalid dark override with inheritance must fall back to the regular bundled icon");
+    controller.setDarkCustomIconPath(QString());
+    controller.setCustomIconPath(QString());
+    require(source() == QStringLiteral(":/snow-shot/app-icons/snow-shot-tray-snow-dark.png"),
+            "inherited dark settings must preserve existing bundled icon configurations");
+    controller.setDarkIconSelection(QStringLiteral("snow-light"));
+    controller.setQuickActionChecked(GlobalShortcutAction::ToggleGlobalHotkeys, true);
+    const auto requireBadge = [&]() {
+        const QColor badge = tray->icon().pixmap(QSize(32, 32), 1.0).toImage().pixelColor(12, 12);
+        require(badge.red() > 180 && badge.green() < 100 && badge.blue() < 100 &&
+                    !tray->icon().isMask(),
+                "theme changes must preserve the disabled-shortcuts badge and icon colors");
+    };
+    theme.setColorScheme(ThemeScheme::Light);
+    requireBadge();
+    theme.setColorScheme(ThemeScheme::Dark);
+    requireBadge();
+    controller.setQuickActionChecked(GlobalShortcutAction::ToggleGlobalHotkeys, false);
+    SystemTrayController initiallyDark;
+    initiallyDark.setDarkIconSelection(QStringLiteral("snow-light"));
+    require(
+        initiallyDark.findChild<QSystemTrayIcon*>()->property("resolvedIconSource").toString() ==
+            darkResource,
+        "controllers created in dark theme must resolve the dark icon before a theme transition");
+    controller.setDarkIconSelection(QStringLiteral("unsupported"));
+    require(controller.darkIconSelection() == QStringLiteral("inherit"),
+            "unsupported dark selections must return to the compatible inherited default");
+    theme.setConfig(originalConfig);
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -606,6 +725,11 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     snow_shot::presentation::SystemTrayController controller;
+    if (application.arguments().contains(QStringLiteral("--theme-icons-only"))) {
+        verifyThemeIcons(storageDirectory);
+        snow_shot::storage::ApplicationStorage::instance().shutdown();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--fullscreen-suppression-only"))) {
         verifyFullscreenSuppressionBadge(controller, storageDirectory);
         snow_shot::storage::ApplicationStorage::instance().shutdown();
@@ -1670,10 +1794,14 @@ int main(int argc, char* argv[]) {
          {std::pair{QStringLiteral("quick.open-pin-to-screen-management"),
                     snow_shot::presentation::GlobalShortcutAction::OpenPinToScreenManagement},
           std::pair{QStringLiteral("quick.global-canvas"),
-                    snow_shot::presentation::GlobalShortcutAction::GlobalCanvas}}) {
+                    snow_shot::presentation::GlobalShortcutAction::GlobalCanvas},
+          std::pair{QStringLiteral("quick.stitch-selected-images"),
+                    snow_shot::presentation::GlobalShortcutAction::StitchSelectedImages},
+          std::pair{QStringLiteral("quick.split-selected-images"),
+                    snow_shot::presentation::GlobalShortcutAction::SplitSelectedImages}}) {
         auto* optionalAction = actionForId(entry.first);
         require(optionalAction != nullptr && !optionalAction->isVisible(),
-                "management and canvas tray actions must start hidden");
+                "optional quick actions must start hidden");
         controller.setMenuOptions({entry.first, QStringLiteral("tray.exit")});
         require(optionalAction->isVisible(), "selected optional tray action must be visible");
         const auto previousCount = quickActions.size();

@@ -814,6 +814,8 @@ std::vector<Scenario> makeScenarios() {
         addKernel("kernel_inversion_" + std::string(sizeName), 3, width, height, 0.5);
         addKernel("kernel_blend_" + std::string(sizeName), 3, width, height, 0.55, true);
     }
+    addKernel("kernel_gaussian_high_scalar_1920x1080", 1, 1920, 1080, 1.0, false,
+              snow_canvas_filter_render::ExecutionOptions{true, false});
     addKernel("kernel_brightness_1920x1080", 6, 1920, 1080, 0.75);
     addKernel("kernel_brightness_3840x2160", 6, 3840, 2160, 0.75);
     addKernel("kernel_brightness_neutral_3840x2160", 6, 3840, 2160, 0.5);
@@ -1064,7 +1066,10 @@ void printResults(const std::vector<Result>& results) {
                       << " gaussian_passes=" << result.diagnostics.gaussianPasses
                       << " downsample_avx2=" << result.diagnostics.gaussianDownsampleAvx2Executions
                       << " reconstruction_avx2="
-                      << result.diagnostics.gaussianReconstructionAvx2Executions << " replay_ms="
+                      << result.diagnostics.gaussianReconstructionAvx2Executions
+                      << " downsample_neon=" << result.diagnostics.gaussianDownsampleNeonExecutions
+                      << " reconstruction_neon="
+                      << result.diagnostics.gaussianReconstructionNeonExecutions << " replay_ms="
                       << static_cast<double>(result.diagnostics.sceneReplayNanoseconds) / 1.0e6
                       << " path_ms="
                       << static_cast<double>(result.diagnostics.pathConstructionNanoseconds) / 1.0e6
@@ -1123,7 +1128,7 @@ bool writeCsv(const std::string& path, const std::vector<Result>& results, std::
               "scene_replay_ns,path_construction_ns,mask_construction_ns,mask_scan_ns,"
               "downsample_ns,reduced_blur_ns,"
               "reconstruction_ns,presentation_ns,simd_backend,execution_plan_builds,dependency_"
-              "item_visits,planning_ns\n";
+              "item_visits,planning_ns,gaussian_downsample_neon,gaussian_reconstruction_neon\n";
     stream << std::fixed << std::setprecision(6);
     for (const Result& result : results) {
         stream << "1," << csvEscape(result.suite) << ',' << csvEscape(result.scenario) << ','
@@ -1182,7 +1187,9 @@ bool writeCsv(const std::string& path, const std::vector<Result>& results, std::
                << result.diagnostics.simdBackend << ','
                << result.diagnostics.executionPlanBuildCount << ','
                << result.diagnostics.dependencyItemVisits << ','
-               << result.diagnostics.planningNanoseconds << '\n';
+               << result.diagnostics.planningNanoseconds << ','
+               << result.diagnostics.gaussianDownsampleNeonExecutions << ','
+               << result.diagnostics.gaussianReconstructionNeonExecutions << '\n';
     }
     if (!stream) {
         error = "failed while writing CSV output: " + path;

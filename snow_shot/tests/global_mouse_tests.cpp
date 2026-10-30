@@ -52,10 +52,10 @@ void everyCombinationMatchesExactlyAndLatchesItsAction() {
     const std::array buttons{QStringLiteral("left_drag"), QStringLiteral("right_drag"),
                              QStringLiteral("wheel_drag"), QStringLiteral("side_button_1_drag"),
                              QStringLiteral("side_button_2_drag")};
-    const std::array actions{Action::ScreenshotCopy,      Action::ScreenshotFixed,
-                             Action::ScreenshotOcr,       Action::ScreenshotTranslation,
-                             Action::ScreenshotQuickSave, Action::ScreenshotSave,
-                             Action::ScreenRecording};
+    const std::array actions{Action::ScreenshotCopy,        Action::ScreenshotFixed,
+                             Action::ScreenshotOcr,         Action::ScreenshotOcrCopy,
+                             Action::ScreenshotTranslation, Action::ScreenshotQuickSave,
+                             Action::ScreenshotSave,        Action::ScreenRecording};
     for (const auto& key : keys) {
         for (const auto& button : buttons) {
             for (const auto action : actions) {
@@ -485,6 +485,15 @@ void managerLoadsLiveSettingsAndCoalescesOnlyMovement() {
     require(input->buttonDrags == 1, "busy capture must reject a direct button drag");
     manager.setCaptureAvailable(true);
     auto& store = storage.configuration();
+    require(store.setValue(
+                QStringLiteral("global_mouse/screenshot_ocr_copy"),
+                QJsonObject{{QStringLiteral("activation_key"), QStringLiteral("shift")},
+                            {QStringLiteral("mouse_button"), QStringLiteral("right_drag")}}) &&
+                input->configuration.bindings.size() == 1 &&
+                input->configuration.bindings.first().action == Action::ScreenshotOcrCopy,
+            "copy after recognition bindings must reach the native backend immediately");
+    require(store.setValue(QStringLiteral("global_mouse/screenshot_ocr_copy"), QJsonObject{}),
+            "copy after recognition bindings must be clearable");
     require(
         store.setValue(QStringLiteral("global_mouse/screenshot_quick_save"),
                        QJsonObject{{QStringLiteral("activation_key"), QStringLiteral("shift")},

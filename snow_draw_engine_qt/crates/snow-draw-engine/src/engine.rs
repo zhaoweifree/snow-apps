@@ -48,6 +48,8 @@ mod pen_highlight_angle_tests;
 #[cfg(test)]
 mod rounded_diamond_tests;
 #[cfg(test)]
+mod shape_text_tests;
+#[cfg(test)]
 mod speech_bubble_tests;
 #[cfg(test)]
 mod spotlight_shape_tests;
@@ -1020,3 +1022,7 @@ impl Engine {
 #[cfg(test)]
 #[path = "engine/serial_number_drag_tests.rs"]
 mod serial_number_drag_tests;
+
+#[cfg(test)]
+#[path = "engine/pressure_brush_tests.rs"]
+mod pressure_brush_tests;

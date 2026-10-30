@@ -13,6 +13,7 @@ pub struct StrokePointFilter {
     sample_spacing: f64,
     distance_until_sample: f64,
     response_distance: f64,
+    source_distance: f64,
 }
 
 impl StrokePointFilter {
@@ -24,6 +25,7 @@ impl StrokePointFilter {
             sample_spacing,
             distance_until_sample: sample_spacing,
             response_distance,
+            source_distance: 0.0,
         }
     }
 
@@ -32,11 +34,22 @@ impl StrokePointFilter {
         self.filtered = point;
         self.smoothed = point;
         self.distance_until_sample = self.sample_spacing;
+        self.source_distance = 0.0;
     }
 
     pub fn ingest(&mut self, point: Point<f64>, output: &mut Vec<Point<f64>>) {
+        self.ingest_with_metadata(point, |sample, _| output.push(sample));
+    }
+
+    pub fn ingest_with_metadata(
+        &mut self,
+        point: Point<f64>,
+        mut output: impl FnMut(Point<f64>, f64),
+    ) {
         let mut segment_start = self.last_raw;
         let mut segment_length = distance(segment_start, point);
+        let total_length = segment_length;
+        let source_start = self.source_distance;
         if segment_length <= 1e-12 {
             self.last_raw = point;
             return;
@@ -45,13 +58,16 @@ impl StrokePointFilter {
         while segment_length + 1e-12 >= self.distance_until_sample {
             let ratio = self.distance_until_sample / segment_length;
             let sample = lerp_point(segment_start, point, ratio);
-            output.push(self.stabilize(sample));
+            let source_distance =
+                source_start + total_length - segment_length + self.distance_until_sample;
+            output(self.stabilize(sample), source_distance);
             segment_start = sample;
             segment_length = distance(segment_start, point);
             self.distance_until_sample = self.sample_spacing;
         }
         self.distance_until_sample = (self.distance_until_sample - segment_length).max(1e-12);
         self.last_raw = point;
+        self.source_distance += total_length;
     }
 
     fn stabilize(&mut self, sample: Point<f64>) -> Point<f64> {

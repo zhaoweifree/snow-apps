@@ -21,11 +21,11 @@ members = [
     "crates/snow-ui-selector-c",
     "crates/snow-selected-text",
     "crates/snow-selected-text-c",
+    "crates/snow-language-detection-c",
     "crates/snow-stitch-images",
     "crates/snow-stitch-images-c",
     "crates/snow-ocr-process",
     "crates/snow-audio-recorder",
-    "crates/rapid-ocr-rs",
     "crates/snow-recording-model",
     "crates/snow-recording-runtime",
     "crates/snow-recording-effects",
@@ -33,16 +33,12 @@ members = [
     "crates/snow-recording-export",
     "crates/snow-screen-recorder",
 ]
+# Keep the independent OCR submodule on its own nightly toolchain and lockfile.
+exclude = ["crates/simd-paddle-ocr-rs"]
 resolver = "3"
 
-[patch.crates-io]
-# Preserve native diagnostics; see ../docs/ort-native-logging-patch.md.
-# Keep the wrapper and its native API types on the same Git revision.
-ort = { git = "https://github.com/mg-chao/ort.git", rev = "90018ee581fb1bb1baf8e82eba8e679728ff27dc" }
-ort-sys = { git = "https://github.com/mg-chao/ort.git", rev = "90018ee581fb1bb1baf8e82eba8e679728ff27dc" }
-
 [workspace.package]
-license = "Apache-2.0"
+license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
 anyhow = "1.0.102"
@@ -52,7 +48,6 @@ ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec"
 half = "2.7.1"
 image = { version = "0.25.9", default-features = false, features = ["png"] }
 png = "0.18.1"
-rand = "0.9.5"
 rayon = "1.11.0"
 rustc-hash = "2.1.1"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -60,11 +55,11 @@ serde_json = "1.0.145"
 smallvec = "1"
 tempfile = "3"
 thiserror = "2.0.17"
-tokio = { version = "1.49.0", default-features = false }
 uuid = { version = "1.18.1", features = ["v4"] }
 windows = "0.62.2"
 windows-core = "0.62.2"
 num_cpus = "1.17.0"
+whatlang = "0.18.0"
 rstar = "0.12.2"
 zstd = "0.13.3"
 

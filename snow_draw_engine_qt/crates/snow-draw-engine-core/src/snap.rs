@@ -273,6 +273,37 @@ pub struct ObjectSnapRectRequest<'a> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ObjectSnapService;
 
+/// Translation constraints applied before choosing movement snaps and building guides.
+/// Bounds must contain the target size; position_step must be finite and positive.
+#[derive(Clone, Copy, Debug)]
+pub struct ObjectSnapMoveConstraints {
+    pub bounds: DrawRect,
+    pub position_step: f64,
+}
+
+impl ObjectSnapMoveConstraints {
+    fn position(self, value: f64, min: f64, max: f64) -> f64 {
+        // Restrict to lattice positions inside the bounds, including fractional bounds.
+        let min = (min / self.position_step).ceil();
+        let max = (max / self.position_step).floor();
+        (value / self.position_step).round().clamp(min, max) * self.position_step
+    }
+
+    fn resolve(self, rect: DrawRect) -> DrawRect {
+        let x = self.position(
+            rect.min_x,
+            self.bounds.min_x,
+            self.bounds.max_x - rect.width(),
+        );
+        let y = self.position(
+            rect.min_y,
+            self.bounds.min_y,
+            self.bounds.max_y - rect.height(),
+        );
+        rect.translate(Point::new(x - rect.min_x, y - rect.min_y))
+    }
+}
+
 impl ObjectSnapService {
     const EPSILON: f64 = 0.0001;
     const ALL_ANCHORS: [SnapAxisAnchor; 3] = [
@@ -339,6 +370,17 @@ impl ObjectSnapService {
     }
 
     pub fn snap_rect(&self, request: ObjectSnapRectRequest<'_>) -> ObjectSnapResult {
+        self.snap_rect_with_move_constraints(request, None)
+    }
+
+    /// Keep the unconstrained editor path unchanged. Movement clients may restrict
+    /// positions to a pixel lattice and capture bounds; infeasible candidates never
+    /// compete with representable alignments, and all guides use the resolved rect.
+    pub fn snap_rect_with_move_constraints(
+        &self,
+        request: ObjectSnapRectRequest<'_>,
+        constraints: Option<ObjectSnapMoveConstraints>,
+    ) -> ObjectSnapResult {
         let ObjectSnapRectRequest {
             target_rect,
             reference_rects,
@@ -354,13 +396,18 @@ impl ObjectSnapService {
             || (!enable_point_snaps && !enable_gap_snaps)
             || (target_anchors_x.is_empty() && target_anchors_y.is_empty())
         {
-            return ObjectSnapResult::default();
+            let resolved = constraints.map_or(target_rect, |limits| limits.resolve(target_rect));
+            return ObjectSnapResult::new(
+                resolved.min_x - target_rect.min_x,
+                resolved.min_y - target_rect.min_y,
+                Vec::new(),
+            );
         }
 
         let effective_target_anchors_x = Self::deduplicate_anchors(target_anchors_x);
         let effective_target_anchors_y = Self::deduplicate_anchors(target_anchors_y);
 
-        let candidates_x = Self::build_axis_candidates(
+        let mut candidates_x = Self::build_axis_candidates(
             SnapAxis::X,
             target_rect,
             reference_rects,
@@ -369,7 +416,7 @@ impl ObjectSnapService {
             enable_point_snaps,
             enable_gap_snaps,
         );
-        let candidates_y = Self::build_axis_candidates(
+        let mut candidates_y = Self::build_axis_candidates(
             SnapAxis::Y,
             target_rect,
             reference_rects,
@@ -379,12 +426,23 @@ impl ObjectSnapService {
             enable_gap_snaps,
         );
 
+        if let Some(limits) = constraints {
+            candidates_x.retain(|candidate| {
+                let proposed = target_rect.translate(Point::new(candidate.offset, 0.0));
+                (limits.resolve(proposed).min_x - proposed.min_x).abs() < Self::EPSILON
+            });
+            candidates_y.retain(|candidate| {
+                let proposed = target_rect.translate(Point::new(0.0, candidate.offset));
+                (limits.resolve(proposed).min_y - proposed.min_y).abs() < Self::EPSILON
+            });
+        }
         let x_candidate = Self::select_best_candidate(&candidates_x, target_rect, snap_distance);
         let y_candidate = Self::select_best_candidate(&candidates_y, target_rect, snap_distance);
 
         let dx = x_candidate.map_or(0.0, |candidate| candidate.offset);
         let dy = y_candidate.map_or(0.0, |candidate| candidate.offset);
-        let snapped_rect = target_rect.translate(Point::new(dx, dy));
+        let proposed = target_rect.translate(Point::new(dx, dy));
+        let snapped_rect = constraints.map_or(proposed, |limits| limits.resolve(proposed));
 
         let mut guides = Vec::new();
         Self::append_candidate_guides(
@@ -404,7 +462,15 @@ impl ObjectSnapService {
             &mut guides,
         );
 
-        ObjectSnapResult::new(dx, dy, guides)
+        if constraints.is_some() {
+            ObjectSnapResult::new(
+                snapped_rect.min_x - target_rect.min_x,
+                snapped_rect.min_y - target_rect.min_y,
+                guides,
+            )
+        } else {
+            ObjectSnapResult::new(dx, dy, guides)
+        }
     }
 
     fn overlaps_perpendicular(a: DrawRect, b: DrawRect, axis: SnapAxis) -> bool {
@@ -671,4 +737,116 @@ struct GapSideCandidate {
     gap_size: f64,
     gap_frequency: i32,
     gap_side: GapSide,
+}
+
+#[cfg(test)]
+mod constrained_move_tests {
+    use super::*;
+
+    fn rect(x: f64, y: f64, w: f64, h: f64) -> DrawRect {
+        DrawRect::new(x, y, x + w, y + h)
+    }
+
+    fn snap(target: DrawRect, references: &[DrawRect], bounds: DrawRect) -> ObjectSnapResult {
+        OBJECT_SNAP_SERVICE.snap_rect_with_move_constraints(
+            ObjectSnapRectRequest {
+                target_rect: target,
+                reference_rects: references,
+                snap_distance: 8.0,
+                target_anchors_x: &ObjectSnapService::ALL_ANCHORS,
+                target_anchors_y: &ObjectSnapService::ALL_ANCHORS,
+                enable_point_snaps: true,
+                enable_gap_snaps: true,
+            },
+            Some(ObjectSnapMoveConstraints {
+                bounds,
+                position_step: 1.0,
+            }),
+        )
+    }
+
+    #[test]
+    fn pixel_centers_preserve_the_other_axis_and_rebuild_markers() {
+        let bounds = rect(-200.0, -200.0, 600.0, 600.0);
+        let result = snap(
+            rect(31.0, 22.0, 20.0, 20.0),
+            &[rect(20.0, 20.0, 41.0, 40.0)],
+            bounds,
+        );
+        assert_eq!((result.dx, result.dy), (0.0, -2.0));
+        assert_eq!(result.guides.len(), 1);
+        let guide = &result.guides[0];
+        assert_eq!(guide.axis, SnapGuideAxis::Horizontal);
+        assert_eq!(
+            guide.markers,
+            vec![Point::new(41.0, 20.0), Point::new(40.5, 20.0)]
+        );
+        let transposed = snap(
+            rect(22.0, 31.0, 20.0, 20.0),
+            &[rect(20.0, 20.0, 40.0, 41.0)],
+            bounds,
+        );
+        assert_eq!((transposed.dx, transposed.dy), (-2.0, 0.0));
+        assert_eq!(transposed.guides.len(), 1);
+        assert_eq!(transposed.guides[0].axis, SnapGuideAxis::Vertical);
+        assert_eq!(
+            transposed.guides[0].markers,
+            vec![Point::new(20.0, 41.0), Point::new(20.0, 40.5)]
+        );
+        // An infeasible center must not displace a nearby representable edge candidate.
+        let alternative = snap(
+            rect(39.0, 100.0, 20.0, 20.0),
+            &[rect(20.0, 20.0, 41.0, 40.0)],
+            bounds,
+        );
+        assert_eq!(alternative.dx, 2.0);
+        assert!(!alternative.guides.is_empty());
+    }
+
+    #[test]
+    fn boundary_rejection_preserves_perpendicular_alignment() {
+        let result = snap(
+            rect(24.0, 22.0, 40.0, 40.0),
+            &[rect(28.0, 20.0, 40.0, 40.0)],
+            rect(0.0, 0.0, 64.0, 300.0),
+        );
+        assert_eq!((result.dx, result.dy), (0.0, -2.0));
+        assert_eq!(result.guides.len(), 1);
+        assert_eq!(result.guides[0].axis, SnapGuideAxis::Horizontal);
+        assert_eq!(
+            result.guides[0].markers,
+            vec![Point::new(44.0, 40.0), Point::new(48.0, 40.0)]
+        );
+    }
+
+    #[test]
+    fn gap_endpoints_use_the_final_perpendicular_position() {
+        let result = snap(
+            rect(178.0, 40.0, 40.0, 20.0),
+            &[rect(20.0, 30.0, 40.0, 41.0), rect(100.0, 30.0, 40.0, 41.0)],
+            rect(-200.0, -200.0, 600.0, 600.0),
+        );
+        assert_eq!((result.dx, result.dy), (2.0, 0.0));
+        let gap = result
+            .guides
+            .iter()
+            .find(|guide| {
+                guide.kind == SnapGuideKind::Gap && guide.start.x == 140.0 && guide.end.x == 180.0
+            })
+            .expect("moving gap");
+        assert_eq!(gap.start.y, 50.0);
+        assert_eq!(gap.end.y, 50.0);
+        assert_eq!(gap.label, Some(40.0));
+    }
+
+    #[test]
+    fn empty_references_still_resolve_the_pixel_bounds() {
+        let result = snap(
+            rect(-2.5, 100.5, 20.0, 20.0),
+            &[],
+            rect(0.2, 0.2, 100.0, 100.0),
+        );
+        assert_eq!((result.dx, result.dy), (3.5, -20.5));
+        assert!(result.guides.is_empty());
+    }
 }

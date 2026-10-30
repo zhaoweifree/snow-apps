@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include <QFont>
+#include <QIcon>
 #include <QFlags>
 #include <QMetaObject>
 #include <QPointer>
@@ -45,6 +46,9 @@ class AdModal final : public QObject {
                  NOTIFY windowTaskbarVisibleChanged)
   Q_PROPERTY(bool windowMinimizeButtonVisible READ windowMinimizeButtonVisible WRITE
                  setWindowMinimizeButtonVisible NOTIFY windowMinimizeButtonVisibleChanged)
+  Q_PROPERTY(bool windowMaximizeButtonVisible READ windowMaximizeButtonVisible WRITE
+                 setWindowMaximizeButtonVisible NOTIFY windowMaximizeButtonVisibleChanged)
+  Q_PROPERTY(QIcon windowIcon READ windowIcon WRITE setWindowIcon NOTIFY windowIconChanged)
   Q_PROPERTY(bool windowAlwaysOnTopButtonVisible READ windowAlwaysOnTopButtonVisible WRITE
                  setWindowAlwaysOnTopButtonVisible NOTIFY windowAlwaysOnTopButtonVisibleChanged)
   Q_PROPERTY(bool windowAlwaysOnTop READ windowAlwaysOnTop WRITE setWindowAlwaysOnTop NOTIFY
@@ -227,6 +231,10 @@ class AdModal final : public QObject {
   void setWindowTaskbarVisible(bool value);
   bool windowMinimizeButtonVisible() const;
   void setWindowMinimizeButtonVisible(bool value);
+  bool windowMaximizeButtonVisible() const;
+  void setWindowMaximizeButtonVisible(bool value);
+  QIcon windowIcon() const;
+  void setWindowIcon(const QIcon& value);
   bool windowAlwaysOnTopButtonVisible() const;
   void setWindowAlwaysOnTopButtonVisible(bool value);
   bool windowAlwaysOnTop() const;
@@ -334,6 +342,8 @@ class AdModal final : public QObject {
   void windowModeDetachedChanged(bool value);
   void windowTaskbarVisibleChanged(bool value);
   void windowMinimizeButtonVisibleChanged(bool value);
+  void windowMaximizeButtonVisibleChanged(bool value);
+  void windowIconChanged(const QIcon& value);
   void windowAlwaysOnTopButtonVisibleChanged(bool value);
   void windowAlwaysOnTopChanged(bool value);
   void openChanged(bool value);
@@ -448,6 +458,7 @@ class AdModal final : public QObject {
   void refreshTexts();
   void refreshVisibility();
   void refreshTitleIcon();
+  void refreshWindowIcon();
   void applyVisualStyle();
   void applySectionInsets(const VisualStyle& style);
   [[nodiscard]] bool showsHeader() const;
@@ -514,8 +525,10 @@ class AdModal final : public QObject {
   QPointer<QHBoxLayout> headerLayout_;
   QPointer<QLabel> titleIconLabel_;
   QPointer<QLabel> titleLabel_;
+  QPointer<QLabel> windowIconLabel_;
   QPointer<QToolButton> closeButton_;
   QPointer<QToolButton> minimizeButton_;
+  QPointer<QToolButton> maximizeButton_;
   QPointer<QToolButton> alwaysOnTopButton_;
   QPointer<QWidget> body_;
   QPointer<QVBoxLayout> bodyLayout_;
@@ -551,6 +564,8 @@ class AdModal final : public QObject {
   bool windowResizable_ = false;
   bool windowTaskbarVisible_ = false;
   bool windowMinimizeButtonVisible_ = false;
+  bool windowMaximizeButtonVisible_ = false;
+  QIcon windowIcon_;
   bool windowAlwaysOnTopButtonVisible_ = false;
   bool windowAlwaysOnTop_ = false;
   bool windowGeometryInitialized_ = false;

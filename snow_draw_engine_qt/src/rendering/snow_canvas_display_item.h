@@ -10,8 +10,13 @@
 #include <cstdint>
 #include <array>
 #include <memory>
+#include <set>
 #include <unordered_map>
 #include <vector>
+
+namespace snow_canvas_stroke_rendering {
+struct Cache;
+}
 
 class SnowCanvasSceneItem : public SnowSceneDisplayItem {
   public:
@@ -49,7 +54,8 @@ class SnowCanvasSceneItem : public SnowSceneDisplayItem {
                                 const SnowPathChunkRange* ranges, std::uint32_t rangeCount,
                                 const SnowPathChunk* chunks, std::uint32_t chunkCount,
                                 const SnowArrowPathCommand* commands, std::uint32_t commandCount,
-                                bool closed, bool fullReset);
+                                bool closed, bool fullReset,
+                                std::uint8_t role = SNOW_PATH_GEOMETRY_ROLE_CENTERLINE);
     void setTextUtf8(const QByteArray& text);
     void setFontFamilyUtf8(const QByteArray& family);
     void rebuildLocalRectangleGeometry();
@@ -75,6 +81,9 @@ class SnowCanvasSceneItem : public SnowSceneDisplayItem {
     std::uint64_t penFilterGeometryRevision() const;
     struct PathChunk {
         std::uint64_t stableId = 0;
+        // Unique across documents and cache lifetimes, retained when chunks are copied/reused.
+        std::uint64_t cacheId = 0;
+        std::uint64_t geometryFingerprint = 0;
         std::uint32_t commandStart = 0;
         QRectF canvasBounds;
         double cumulativeStartLength = 0.0;
@@ -82,6 +91,12 @@ class SnowCanvasSceneItem : public SnowSceneDisplayItem {
         std::vector<std::int64_t> spatialCells;
     };
     const std::vector<PathChunk>& pathChunks() const;
+    const std::vector<PathChunk>& pressurePathChunks() const;
+    void queryPressurePathChunks(const QRectF& canvasBounds,
+                                 std::vector<std::uint32_t>* outChunkIndices) const;
+    QRectF pathCanvasBounds() const;
+    QRectF pressureCanvasBounds() const;
+    std::uint64_t pressureGeometryRevision() const;
     const QPainterPath& aggregateClosedPath() const;
     bool pathIsClosed() const;
     void queryPathChunks(const QRectF& canvasBounds,
@@ -91,6 +106,9 @@ class SnowCanvasSceneItem : public SnowSceneDisplayItem {
     // Retain vector geometry with the owned snapshot. The renderer checks the key
     // because callers may also update the public display fields directly.
     MagnifierGeometryCache& magnifierGeometryCache() const;
+    snow_canvas_stroke_rendering::Cache& strokeRenderingCache() const;
+    const snow_canvas_stroke_rendering::Cache* strokeRenderingCacheIfPresent() const;
+    std::uint64_t strokeRenderingGeometryRevision() const;
 
     QRectF viewBounds;
 
@@ -98,8 +116,18 @@ class SnowCanvasSceneItem : public SnowSceneDisplayItem {
     void assign(const SnowSceneDisplayItem& item);
     void refreshPointers();
     void rebuildPenFilterGeometry(std::size_t firstChangedPoint);
-    void rebuildPathSpatialIndex();
-    void rebuildAggregateClosedPath();
+    struct PathStorage {
+        std::vector<PathChunk> chunks;
+        std::unordered_map<std::int64_t, std::vector<std::uint32_t>> spatialCells;
+        std::array<std::multiset<double>, 4> bounds;
+        std::uint64_t revision = 0;
+    };
+    static void removePathIndex(PathStorage& storage, std::size_t start, std::size_t end);
+    static void insertPathIndex(PathStorage& storage, std::size_t start, std::size_t end);
+    static QRectF storageBounds(const PathStorage& storage);
+    static void queryPathStorage(const PathStorage& storage, const QRectF& canvasBounds,
+                                 std::vector<std::uint32_t>* outChunkIndices);
+    void rebuildAggregateClosedPath(bool geometryChanged = true);
 
     std::vector<SnowArrowPoint> m_arrowPoints;
     std::vector<SnowArrowPathCommand> m_arrowPathCommands;
@@ -113,13 +141,14 @@ class SnowCanvasSceneItem : public SnowSceneDisplayItem {
     std::vector<PenSegmentChunk> m_penGeometryChunks;
     std::unordered_map<std::int64_t, std::vector<std::uint32_t>> m_penSpatialCells;
     std::uint64_t m_penGeometryRevision = 0;
-    std::vector<PathChunk> m_pathChunks;
-    std::unordered_map<std::int64_t, std::vector<std::uint32_t>> m_pathSpatialCells;
+    PathStorage m_pathGeometry;
+    PathStorage m_pressureGeometry;
     QPainterPath m_aggregateClosedPath;
-    std::uint64_t m_pathGeometryRevision = 0;
     bool m_pathClosed = false;
     mutable bool m_arrowTextClipCacheValid = false;
     mutable std::unique_ptr<MagnifierGeometryCache> m_magnifierGeometry;
+    mutable std::shared_ptr<snow_canvas_stroke_rendering::Cache> m_strokeRenderingGeometry;
+    std::uint64_t m_strokeRenderingGeometryRevision = 0;
     mutable bool m_arrowTextClipNeeded = true;
     mutable std::uint64_t m_arrowTextClipGeometryRevision = 0;
     mutable double m_arrowTextClipStrokeWidth = 0.0;
@@ -143,6 +172,9 @@ class SnowCanvasOverlayItem : public SnowOverlayDisplayItem {
     const QPainterPath& localRectanglePath() const;
     bool hasRoundedCorners() const;
     bool hasUniformCorners() const;
+    snow_canvas_stroke_rendering::Cache& strokeRenderingCache() const;
+    const snow_canvas_stroke_rendering::Cache* strokeRenderingCacheIfPresent() const;
+    std::uint64_t strokeRenderingGeometryRevision() const;
 
     QRectF viewBounds;
 
@@ -157,4 +189,6 @@ class SnowCanvasOverlayItem : public SnowOverlayDisplayItem {
     QPainterPath m_localRectanglePath;
     bool m_hasRoundedCorners = false;
     bool m_hasUniformCorners = false;
+    mutable std::shared_ptr<snow_canvas_stroke_rendering::Cache> m_strokeRenderingGeometry;
+    std::uint64_t m_strokeRenderingGeometryRevision = 0;
 };

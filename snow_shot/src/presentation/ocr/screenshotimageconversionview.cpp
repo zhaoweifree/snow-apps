@@ -1,5 +1,6 @@
 #include "snow_shot/presentation/screenshotimageconversionview.h"
 #include "snow_shot/presentation/screenshotimageconversionclipboard.h"
+#include "snow_shot/presentation/screenshotdocumentformatting.h"
 
 #include "theme/theme_manager.h"
 #include "antd_icons.h"
@@ -23,18 +24,6 @@
 
 #include <algorithm>
 
-namespace {
-class InertDocument final : public QTextDocument {
-  public:
-    explicit InertDocument(QObject* parent) : QTextDocument(parent) {}
-
-  protected:
-    QVariant loadResource(int, const QUrl&) override {
-        return {};
-    }
-};
-} // namespace
-
 ScreenshotImageConversionView::ScreenshotImageConversionView(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("screenshotImageConversionView"));
     auto* layout = new QVBoxLayout(this);
@@ -42,7 +31,7 @@ ScreenshotImageConversionView::ScreenshotImageConversionView(QWidget* parent) : 
     layout->setSpacing(0);
     m_browser = new QTextBrowser(this);
     m_browser->setObjectName(QStringLiteral("screenshotImageConversionPreview"));
-    m_browser->setDocument(new InertDocument(m_browser));
+    m_browser->setDocument(new snow_shot::presentation::ScreenshotInertDocument(m_browser));
     m_browser->setFrameStyle(QFrame::NoFrame);
     m_browser->setOpenLinks(false);
     m_browser->setOpenExternalLinks(false);
@@ -137,15 +126,10 @@ void ScreenshotImageConversionView::render() {
     const QColor codeBackground(blended(fill.red(), base.red()),
                                 blended(fill.green(), base.green()),
                                 blended(fill.blue(), base.blue()));
-    document->setDefaultStyleSheet(
-        QStringLiteral(
-            "body { color: %1; } p { margin-top: 6px; margin-bottom: 6px; } "
-            "h1,h2,h3 { margin-top: 12px; margin-bottom: 8px; } "
-            "a { color: %2; } pre,code { font-family: '%3'; color: %1; background-color: %4; } "
-            "blockquote { margin-left: 16px; color: %5; } "
-            "table { border-collapse: collapse; } td,th { border: 1px solid %6; padding: 6px; }")
-            .arg(theme.colorText.name(), theme.colorLink.name(), mono, codeBackground.name(),
-                 theme.colorTextSecondary.name(), theme.colorBorder.name()));
+    const snow_shot::presentation::ScreenshotDocumentStyle style{
+        theme.colorText, theme.colorLink,          mono,
+        codeBackground,  theme.colorTextSecondary, theme.colorBorder};
+    snow_shot::presentation::setScreenshotDocumentStyle(*document, style);
     const QTextCursor previous = m_browser->textCursor();
     const int previousAnchor = previous.anchor();
     const int previousPosition = previous.position();
@@ -153,45 +137,8 @@ void ScreenshotImageConversionView::render() {
     const int horizontal = m_browser->horizontalScrollBar()->value();
     const bool follow =
         scroll >= m_browser->verticalScrollBar()->maximum() - 2 && !previous.hasSelection();
-    if (m_format == SnowShotImageConversionFormat::Markdown) {
-        document->setMarkdown(m_source, QTextDocument::MarkdownDialectGitHub);
-    } else {
-        document->setHtml(m_source);
-    }
-    // Markdown import does not apply the HTML stylesheet to code blocks or links.
-    QVector<QTextCursor> links;
-    for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
-        for (auto fragment = block.begin(); !fragment.atEnd(); ++fragment) {
-            const auto text = fragment.fragment();
-            if (text.isValid() && text.charFormat().isAnchor()) {
-                QTextCursor link(document);
-                link.setPosition(text.position());
-                link.setPosition(text.position() + text.length(), QTextCursor::KeepAnchor);
-                links.push_back(link);
-            }
-        }
-        auto blockFormat = block.blockFormat();
-        if (blockFormat.hasProperty(QTextFormat::BlockCodeFence) ||
-            blockFormat.hasProperty(QTextFormat::BlockCodeLanguage) ||
-            blockFormat.nonBreakableLines()) {
-            QTextCursor code(block);
-            blockFormat.setBackground(codeBackground);
-            blockFormat.setLeftMargin(8);
-            blockFormat.setRightMargin(8);
-            code.setBlockFormat(blockFormat);
-            code.select(QTextCursor::BlockUnderCursor);
-            QTextCharFormat characters;
-            characters.setFontFamilies({mono});
-            characters.setForeground(theme.colorText);
-            characters.setBackground(codeBackground);
-            code.mergeCharFormat(characters);
-        }
-    }
-    QTextCharFormat linkFormat;
-    linkFormat.setForeground(theme.colorLink);
-    for (auto& link : links) {
-        link.mergeCharFormat(linkFormat);
-    }
+    snow_shot::presentation::setScreenshotDocumentSource(
+        *document, m_source, m_format == SnowShotImageConversionFormat::Markdown, style);
     const int end = std::max(0, document->characterCount() - 1);
     QTextCursor restored(document);
     restored.setPosition(std::min(previousAnchor, end));

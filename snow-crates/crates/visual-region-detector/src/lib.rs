@@ -8,7 +8,9 @@ pub use error::{Error, Result};
 pub use geometry::{Rect, iou};
 pub use grid::BgrImage;
 pub use model::Region;
-pub use output::{draw_regions, regions_to_jsonable, write_crops};
+#[cfg(feature = "file-io")]
+pub use output::write_crops;
+pub use output::{draw_regions, regions_to_jsonable};
 pub use pipeline::detect_regions;
 
 #[cfg(feature = "opencv")]

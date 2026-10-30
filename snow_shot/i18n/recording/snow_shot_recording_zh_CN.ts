@@ -213,4 +213,11 @@ Keep this folder to recover the recording.</source>
             <translation>屏幕录制设置</translation>
         </message>
     </context>
+    <context>
+        <name>ScreenRecordingToolbarWindow</name>
+        <message>
+            <source>Show recording toolbar</source>
+            <translation>显示录屏工具栏</translation>
+        </message>
+    </context>
 </TS>

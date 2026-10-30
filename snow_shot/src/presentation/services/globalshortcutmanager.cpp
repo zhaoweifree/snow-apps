@@ -23,13 +23,14 @@ namespace {
 constexpr int MAX_SHORTCUTS_PER_ACTION = 2;
 constexpr int FIRST_REGISTRATION_ID = 0x2200;
 constexpr int LAST_REGISTRATION_ID = 0xBFFF;
-constexpr std::size_t ACTION_COUNT = 25;
+constexpr std::size_t ACTION_COUNT = 28;
 
 constexpr std::array<GlobalShortcutAction, ACTION_COUNT> ALL_ACTIONS = {
     GlobalShortcutAction::Screenshot,
     GlobalShortcutAction::ScreenshotDelay,
     GlobalShortcutAction::ScreenshotFixed,
     GlobalShortcutAction::ScreenshotOcr,
+    GlobalShortcutAction::ScreenshotOcrCopy,
     GlobalShortcutAction::ScreenshotTranslation,
     GlobalShortcutAction::ScreenshotCopy,
     GlobalShortcutAction::ScreenshotSave,
@@ -42,6 +43,8 @@ constexpr std::array<GlobalShortcutAction, ACTION_COUNT> ALL_ACTIONS = {
     GlobalShortcutAction::OpenCaptureHistory,
     GlobalShortcutAction::OpenPinToScreenManagement,
     GlobalShortcutAction::GlobalCanvas,
+    GlobalShortcutAction::StitchSelectedImages,
+    GlobalShortcutAction::SplitSelectedImages,
     GlobalShortcutAction::SwitchWindowGroup,
     GlobalShortcutAction::OpenSettings,
     GlobalShortcutAction::PinClipboardContent,
@@ -138,6 +141,8 @@ shortcuts::ShortcutBindingList persistedShortcuts(const storage::ShortcutSetting
         return settings.screenshotFixed();
     case GlobalShortcutAction::ScreenshotOcr:
         return settings.screenshotOcr();
+    case GlobalShortcutAction::ScreenshotOcrCopy:
+        return settings.screenshotOcrCopy();
     case GlobalShortcutAction::ScreenshotTranslation:
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION
         return settings.screenshotTranslation();
@@ -166,6 +171,10 @@ shortcuts::ShortcutBindingList persistedShortcuts(const storage::ShortcutSetting
         return settings.switchWindowGroup();
     case GlobalShortcutAction::GlobalCanvas:
         return settings.globalCanvas();
+    case GlobalShortcutAction::StitchSelectedImages:
+        return settings.stitchSelectedImages();
+    case GlobalShortcutAction::SplitSelectedImages:
+        return settings.splitSelectedImages();
     case GlobalShortcutAction::OpenPinToScreenManagement:
         return settings.openPinToScreenManagement();
     case GlobalShortcutAction::OpenSettings:
@@ -203,6 +212,8 @@ bool persistShortcuts(const storage::ShortcutSettings& settings, GlobalShortcutA
         return settings.setScreenshotFixed(bindings);
     case GlobalShortcutAction::ScreenshotOcr:
         return settings.setScreenshotOcr(bindings);
+    case GlobalShortcutAction::ScreenshotOcrCopy:
+        return settings.setScreenshotOcrCopy(bindings);
     case GlobalShortcutAction::ScreenshotTranslation:
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION
         return settings.setScreenshotTranslation(bindings);
@@ -231,6 +242,10 @@ bool persistShortcuts(const storage::ShortcutSettings& settings, GlobalShortcutA
         return settings.setSwitchWindowGroup(bindings);
     case GlobalShortcutAction::GlobalCanvas:
         return settings.setGlobalCanvas(bindings);
+    case GlobalShortcutAction::StitchSelectedImages:
+        return settings.setStitchSelectedImages(bindings);
+    case GlobalShortcutAction::SplitSelectedImages:
+        return settings.setSplitSelectedImages(bindings);
     case GlobalShortcutAction::OpenPinToScreenManagement:
         return settings.setOpenPinToScreenManagement(bindings);
     case GlobalShortcutAction::OpenSettings:

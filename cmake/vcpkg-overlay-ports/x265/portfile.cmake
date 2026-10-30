@@ -15,6 +15,8 @@ vcpkg_from_bitbucket(
         "${VCPKG_ROOT_DIR}/ports/x265/fix-cmake-4.patch"
         macos-arm64-deployment-target.patch
         short-propagation-row.patch
+        arm64-intrinsics-without-assembly.patch
+        windows-arm64-gas-assembly.patch
 )
 
 vcpkg_check_features(OUT_FEATURE_OPTIONS OPTIONS
@@ -32,7 +34,33 @@ if(VCPKG_TARGET_ARCHITECTURE STREQUAL "x86" OR VCPKG_TARGET_ARCHITECTURE STREQUA
         list(APPEND OPTIONS "-DENABLE_ASSEMBLY=OFF")
     endif()
 elseif(VCPKG_TARGET_IS_WINDOWS)
-    list(APPEND OPTIONS "-DENABLE_ASSEMBLY=OFF")
+    if(VCPKG_TARGET_ARCHITECTURE STREQUAL "arm64")
+        # Upstream's assembly rules require a GAS compiler frontend. Compile its
+        # independent NEON C++ kernels while retaining C for assembly-only entries.
+        list(APPEND OPTIONS
+            -DENABLE_ARM_INTRINSICS=ON
+            -DENABLE_NEON_DOTPROD=OFF
+            -DENABLE_NEON_I8MM=OFF
+            -DENABLE_SVE=OFF
+            -DENABLE_SVE2=OFF)
+        if(SNOW_X265_ENABLE_WINDOWS_ARM64_ASSEMBLY)
+            # Experimental opt-in until ARMASM64 and native ARM64 validation passes.
+            vcpkg_find_acquire_program(PERL)
+            vcpkg_find_acquire_program(GASPREPROCESSOR)
+            list(FILTER GASPREPROCESSOR INCLUDE REGEX gas-preprocessor)
+            find_program(SNOW_X265_ARMASM64 NAMES armasm64 REQUIRED)
+            list(APPEND OPTIONS
+                -DENABLE_ASSEMBLY=ON
+                -DENABLE_MSVC_ARM64_ASSEMBLY=ON
+                "-DPERL_EXECUTABLE=${PERL}"
+                "-DX265_GASPREPROCESSOR=${GASPREPROCESSOR}"
+                "-DX265_ARMASM64_EXECUTABLE=${SNOW_X265_ARMASM64}")
+        else()
+            list(APPEND OPTIONS -DENABLE_ASSEMBLY=OFF)
+        endif()
+    else()
+        list(APPEND OPTIONS -DENABLE_ASSEMBLY=OFF)
+    endif()
 endif()
 
 string(COMPARE EQUAL "${VCPKG_LIBRARY_LINKAGE}" "dynamic" ENABLE_SHARED)

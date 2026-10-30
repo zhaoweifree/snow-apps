@@ -1,6 +1,7 @@
 #include "screenshot_selection_presentation_fixture.h"
 #include "snow_shot/presentation/screenshotselectioneditworkflow.h"
 #include "snow_shot/presentation/screenshotselectionsettingsstore.h"
+#include "snow_shot/presentation/screenshothistoryservice.h"
 #include "widgets/select.h"
 
 #include "snow_shot/compat/qt_compat.h"
@@ -27,6 +28,13 @@ void require(bool condition, const char* message) {
 struct QuickSetFixture {
     Fixture presentation{QSize(1200, 800), false};
     ScreenshotSelectionSettingsStore settings;
+    QTemporaryDir historyDirectory;
+    std::unique_ptr<snow_shot::storage::CaptureHistoryRepository> repository =
+        snow_shot::storage::makeCaptureHistoryRepository(historyDirectory.path());
+    ScreenshotHistoryService history{{presentation.displays, presentation.canvasRuntime,
+                                      presentation.selection, presentation.interaction,
+                                      presentation.intelligentSelection},
+                                     *repository};
     std::unique_ptr<ScreenshotSelectionEditWorkflow> workflow;
     ScreenshotApplySelectionCallback applyModal;
     int applications = 0;
@@ -55,7 +63,7 @@ struct QuickSetFixture {
                 }});
         presentation.commands.readSelectionQuickSets = [this] {
             ScreenshotSelectionToolbarQuickSets quickSets;
-            quickSets.previous = settings.previousSelectionParams(bounds());
+            quickSets.previous = history.latestSelectionParams({bounds(), {}, false});
             quickSets.presets = sanitizeScreenshotSelectionPresets(settings.presets(), bounds());
             return quickSets;
         };
@@ -77,6 +85,22 @@ struct QuickSetFixture {
     QRect bounds() const {
         return ScreenshotHalfOpenRect::fromRectF(presentation.geometry.canvasBounds())
             .toAlignedQRect();
+    }
+
+    void remember(const ScreenshotSelectionParams& params) {
+        require(repository->requestClear().get().success, "test history must clear");
+        auto entry = history.snapshotCurrent(false);
+        require(entry.has_value(), "selection fixture must produce a history snapshot");
+        entry->selection = params;
+        entry->recordedCanvasBounds = entry->recordedCanvasBounds.united(params.selection);
+        entry->displays.first().image =
+            QImage(entry->recordedCanvasBounds.size(), QImage::Format_ARGB32_Premultiplied);
+        entry->displays.first().image.fill(Qt::white);
+        entry->displays.first().sourceCanvasOrigin = entry->recordedCanvasBounds.topLeft();
+        entry->displays.first().sourceCanvasRect = entry->recordedCanvasBounds;
+        history.commit(std::move(*entry));
+        history.drainPendingWrites();
+        require(repository->records().size() == 1, "Previous must use committed history");
     }
 
     void flush() {
@@ -164,7 +188,7 @@ void compoundSelectionsCanSwitchBetweenPreviousAndSavedPresets() {
             saved.selection = QRect(60, 70, 320, 180);
             saved.radius = 10;
             saved.shadowWidth = 4;
-            fixture.settings.setPreviousSelectionParams(previous);
+            fixture.remember(previous);
             fixture.settings.setPresets({{QStringLiteral("Saved rectangle"), saved}});
             fixture.choose(QStringLiteral("selection:previous"), keyboard);
             require(fixture.presentation.selection.params(fixture.bounds()) == previous &&
@@ -258,7 +282,7 @@ void unavailableRestoresPreserveTheActiveSelection() {
                             ScreenshotSessionState::Editing &&
                         fixture.effectWrites == 0,
                     "an empty clamped restore must preserve geometry, mode and stored effects");
-            fixture.settings.setPreviousSelectionParams(outside);
+            fixture.remember(outside);
             fixture.select()->showPopup();
             fixture.flush();
             require(!fixture.option(QStringLiteral("selection:previous"))
@@ -268,7 +292,7 @@ void unavailableRestoresPreserveTheActiveSelection() {
             fixture.select()->hidePopup();
             const auto partial = shapedParams(
                 custom, QRect(fixture.bounds().bottomRight() - QPoint(99, 99), QSize(200, 160)));
-            fixture.settings.setPreviousSelectionParams(partial);
+            fixture.remember(partial);
             fixture.choose(QStringLiteral("selection:previous"), true);
             require(fixture.presentation.selection.selectionRegion() ==
                             partial.region->intersected(QRegion(fixture.bounds())) &&
@@ -279,10 +303,10 @@ void unavailableRestoresPreserveTheActiveSelection() {
 }
 
 void previousAvailabilityUsesCurrentCanvasWithoutChangingStorage() {
-    ScreenshotSelectionSettingsStore settings;
-    settings.clear();
+    QuickSetFixture fixture;
     const QRect bounds(-100, -50, 300, 200);
-    require(!settings.previousSelectionParams(bounds), "missing Previous must remain unavailable");
+    require(!fixture.history.latestSelectionParams({bounds, {}, false}),
+            "missing Previous must remain unavailable");
     require(!clampScreenshotSelectionParamsForRestore({}, bounds),
             "missing geometry must not become a one-pixel restore");
     ScreenshotSelectionParams emptyRegion;
@@ -292,27 +316,28 @@ void previousAvailabilityUsesCurrentCanvasWithoutChangingStorage() {
             "an authoritative empty region must remain unavailable");
     ScreenshotSelectionParams legacy;
     legacy.selection = QRect(500, 500, 100, 80);
-    settings.setPreviousSelectionParams(legacy);
-    const auto clamped = settings.previousSelectionParams(bounds);
+    fixture.remember(legacy);
+    const auto clamped = fixture.history.latestSelectionParams({bounds, {}, false});
     require(clamped && clamped->selection == QRect(100, 70, 100, 80) && !clamped->region,
             "legacy rectangles must retain size and move inside the current canvas");
-    require(!settings.previousSelectionParams(QRect()),
+    require(!fixture.history.latestSelectionParams({{}, {}, false}),
             "an unavailable canvas must not produce a restore");
     for (const bool custom : {false, true}) {
         const auto previous = shapedParams(custom, QRect(500, 500, 100, 80));
-        settings.setPreviousSelectionParams(previous);
-        require(!settings.previousSelectionParams(bounds) &&
-                    settings.previousSelectionParams(QRect(0, 0, 1200, 800)) == previous &&
-                    settings.previousSelectionParams() == previous,
-                "Previous availability must follow the canvas without changing stored geometry");
+        fixture.remember(previous);
+        require(!fixture.history.latestSelectionParams({bounds, {}, false}) &&
+                    fixture.history.latestSelectionParams({QRect(0, 0, 1200, 800), {}, false}) ==
+                        previous &&
+                    fixture.repository->records().first().selection.region == previous.region,
+                "Previous availability must follow the canvas without changing history");
         auto authoritative = previous;
         authoritative.selection = {};
         require(clampScreenshotSelectionParamsForRestore(authoritative, QRect(0, 0, 1200, 800)) ==
                     previous,
                 "restore validation must honor region geometry over the legacy rectangle");
     }
-    settings.clear();
 }
+
 } // namespace
 
 int main(int argc, char* argv[]) {

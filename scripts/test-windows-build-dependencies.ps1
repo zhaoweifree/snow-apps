@@ -15,6 +15,17 @@ function Get-PresetVariable([string]$Name, [string]$Variable) {
     return $null
 }
 
+function Get-PresetEnvironmentSetting([string]$Name, [string]$Variable) {
+    $preset = @($presetData.configurePresets | Where-Object { $_.name -ceq $Name })[0]
+    $environment = $preset.PSObject.Properties['environment']
+    if ($environment) {
+        $setting = $environment.Value.PSObject.Properties[$Variable]
+        if ($setting) { return $setting }
+    }
+    if ($preset.inherits) { return Get-PresetEnvironmentSetting $preset.inherits $Variable }
+    return $null
+}
+
 # Exercise the real bootstrap install block without downloading or building packages.
 $parseErrors = $null
 $bootstrapAst = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -76,6 +87,12 @@ foreach ($preset in @("windows-msvc-debug", "windows-msvc-performance",
         "windows-clang-portability", "snow-shot-msvc-release", "snow-shot-msvc-fast",
         "snow-shot-msvc-arm64-debug", "snow-shot-msvc-arm64-performance",
         "snow-shot-msvc-arm64-release", "snow-shot-msvc-arm64-fast")) {
+    $downloadedTools = Get-PresetEnvironmentSetting $preset 'VCPKG_FORCE_DOWNLOADED_BINARIES'
+    $systemTools = Get-PresetEnvironmentSetting $preset 'VCPKG_FORCE_SYSTEM_BINARIES'
+    if (-not $downloadedTools -or $null -ne $downloadedTools.Value -or
+        -not $systemTools -or $null -ne $systemTools.Value) {
+        $failures += "$preset must let vcpkg apply minimum tool versions and clear inherited force overrides."
+    }
     if ((Get-PresetVariable $preset "VCPKG_MANIFEST_INSTALL") -cne "ON") {
         $failures += "$preset must enable dependency installation when reusing a cache."
     }

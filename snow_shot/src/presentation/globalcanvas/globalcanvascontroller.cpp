@@ -1,5 +1,7 @@
+#include "snow_shot/presentation/screenshotcanvastools.h"
 #include "snow_shot/presentation/canvashistoryshortcuts.h"
 #include "snow_shot/presentation/globalcanvascontroller.h"
+#include "snow_shot/presentation/crosshaircursor.h"
 #include "globalcanvasplatform.h"
 #include "snow_shot/platform/screenshotwindow.h"
 #include "snow_shot/platform/physicalcursor.h"
@@ -24,6 +26,7 @@
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QMouseEvent>
+#include <QTabletEvent>
 #include <QPainter>
 #include <QPointer>
 #include <QResizeEvent>
@@ -79,6 +82,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
           drawing(std::make_unique<SnowCanvasWidget>(runtime, this)),
           tools(std::make_unique<ScreenshotFloatingToolPaletteWindow>(canvasOptions())),
           shortcuts(this) {
+        configureCanvasCrosshairCursor(*drawing);
 #ifdef Q_OS_MACOS
         setWindowFlag(Qt::NoDropShadowWindowHint);
 #endif
@@ -291,6 +295,22 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
         return result;
     }
     bool eventFilter(QObject* watched, QEvent* event) override {
+        if (watched == drawing.get() &&
+            (event->type() == QEvent::TabletPress || event->type() == QEvent::TabletMove ||
+             event->type() == QEvent::TabletRelease)) {
+            auto* tablet = static_cast<QTabletEvent*>(event);
+            const auto type = event->type() == QEvent::TabletPress     ? QEvent::MouseButtonPress
+                              : event->type() == QEvent::TabletRelease ? QEvent::MouseButtonRelease
+                                                                       : QEvent::MouseMove;
+            QMouseEvent pointer(type, tablet->position(), tablet->globalPosition(),
+                                tablet->button(), tablet->buttons(), tablet->modifiers(),
+                                tablet->pointingDevice());
+            if (eventFilter(watched, &pointer)) {
+                event->accept();
+                return true;
+            }
+            return false;
+        }
         if (watched == drawing.get() && samplingMouseReleasePending &&
             event->type() == QEvent::MouseButtonRelease) {
             samplingMouseReleasePending = false;
@@ -302,7 +322,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
             if (event->type() == QEvent::UngrabMouse || event->type() == QEvent::Hide ||
                 event->type() == QEvent::FocusOut)
                 finishPan();
-            if (!transparent && !sampleTarget) {
+            if (!transparent && !colorSampling.active()) {
                 if (event->type() == QEvent::Wheel && angleWheelTarget(*drawing)) {
                     auto* wheel = static_cast<QWheelEvent*>(event);
                     if (handleScreenshotStyleWheel(*tools->palette(), *drawing, *wheel,
@@ -330,26 +350,25 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
                 }
             }
         }
-        if (watched == drawing.get() && sampleTarget) {
+        if (watched == drawing.get() && colorSampling.active()) {
             if (event->type() == QEvent::MouseMove) {
                 updateColorSamplingPreview(snowPos(static_cast<QMouseEvent*>(event)));
                 return true;
             }
             if (event->type() == QEvent::Leave) {
-                sampleWindow->hide();
+                colorSampling.hidePreview();
             }
             if (event->type() == QEvent::Wheel)
                 return true;
             if (event->type() == QEvent::MouseButtonPress) {
                 auto* mouse = static_cast<QMouseEvent*>(event);
-                QPointer<adqt::widgets::AdColorPicker> target = sampleTarget;
                 const QImage preview = colorSamplingPreview(snowPos(mouse));
                 samplingMouseReleasePending = true;
-                cancelColorSampling();
-                if (mouse->button() == Qt::LeftButton && target && !preview.isNull()) {
-                    target->commitValue(adqt::widgets::AdColorValue::solid(
-                        preview.pixelColor(preview.width() / 2, preview.height() / 2)));
-                }
+                if (mouse->button() == Qt::LeftButton)
+                    static_cast<void>(
+                        colorSampling.commit(preview, [this]() { cancelColorSampling(); }));
+                else
+                    cancelColorSampling();
                 return true;
             }
             if (event->type() == QEvent::KeyPress &&
@@ -373,13 +392,8 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
             runtime.renderToImage(area, drawing->size() * drawing->devicePixelRatioF(), {});
         if (sampleRaster.isNull())
             return;
-        if (!sampleWindow)
-            sampleWindow = std::make_unique<ScreenshotCanvasColorSamplerWindow>();
-        sampleTarget = picker;
-        sampleDestroyedConnection =
-            connect(picker, &QObject::destroyed, this, [this]() { cancelColorSampling(); });
+        colorSampling.begin(picker, [this]() { cancelColorSampling(); });
         samplingMouseReleasePending = false;
-        sampleWindow->beginSampling(picker);
         drawing->setCursorForLayer(SnowCanvasCursorLayer::Host,
                                    ScreenshotCanvasColorSamplerWindow::samplingCursor());
         activateDrawing();
@@ -388,14 +402,10 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
         updateColorSamplingPreview(snowMapFromGlobal(drawing.get(), globalPosition));
     }
     void cancelColorSampling() {
-        if (!sampleTarget && sampleRaster.isNull())
+        if (!colorSampling.active() && sampleRaster.isNull())
             return;
-        sampleTarget.clear();
-        disconnect(sampleDestroyedConnection);
-        sampleDestroyedConnection = {};
         sampleRaster = {};
-        if (sampleWindow)
-            sampleWindow->endSampling();
+        colorSampling.end();
         drawing->clearCursorForLayer(SnowCanvasCursorLayer::Host);
     }
     QImage colorSamplingPreview(const QPointF& localPosition) const {
@@ -409,10 +419,10 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
     void updateColorSamplingPreview(const QPointF& localPosition) {
         const QImage preview = colorSamplingPreview(localPosition);
         if (preview.isNull()) {
-            sampleWindow->hide();
+            colorSampling.hidePreview();
         } else {
-            sampleWindow->updateSample(preview,
-                                       snowMapToGlobal(drawing.get(), localPosition).toPoint());
+            colorSampling.updatePreview(preview,
+                                        snowMapToGlobal(drawing.data(), localPosition).toPoint());
         }
     }
     void finishPan() {
@@ -510,7 +520,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
         exit.keyCombinations = {QKeyCombination(Qt::Key_Escape)};
         exit.priority = WindowShortcutManager::StandardPriority::WindowCommand;
         exit.canActivate = [this](const auto&) {
-            return !sampleTarget && !drawing->hasActiveTextEditing();
+            return !colorSampling.active() && !drawing->hasActiveTextEditing();
         };
         exit.activate = [this](const auto&) {
             this->close();
@@ -520,7 +530,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
         new CanvasHistoryShortcuts(
             shortcuts, this,
             [this](const auto&) {
-                return !transparent && !sampleTarget && !drawing->hasActiveTextEditing();
+                return !transparent && !colorSampling.active() && !drawing->hasActiveTextEditing();
             },
             [this](const QString& action) { return palette->activateScreenshotShortcut(action); });
         const auto bindings = storage::DrawingShortcutSettings().allShortcuts();
@@ -530,7 +540,8 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
             binding.shortcutBindings = it.value();
             binding.priority = WindowShortcutManager::StandardPriority::DrawingShortcut;
             binding.canActivate = [this, id = it.key()](const auto& context) {
-                return !transparent && !sampleTarget && !drawing->hasActiveTextEditing() &&
+                return !transparent && !colorSampling.active() &&
+                       !drawing->hasActiveTextEditing() &&
                        !WindowShortcutManager::focusAcceptsTextInput(context.focusWidget) &&
                        palette->canActivateDrawingShortcut(id);
             };
@@ -546,69 +557,13 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
                 it.value(), storage::DrawingShortcutSettings().shortcuts(it.key())));
     }
     void synchronizeTool() {
-        switch (drawing->canvasTool()) {
-        case SnowCanvasTool::Select:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Select);
-            break;
-        case SnowCanvasTool::SpeechBubble:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::SpeechBubble);
-            break;
-        case SnowCanvasTool::Shape:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Shape);
-            break;
-        case SnowCanvasTool::Arrow:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Arrow);
-            break;
-        case SnowCanvasTool::Distance:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Distance);
-            break;
-        case SnowCanvasTool::Angle:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Angle);
-            break;
-        case SnowCanvasTool::Line:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Line);
-            break;
-        case SnowCanvasTool::FreeDraw:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::FreeDraw);
-            break;
-        case SnowCanvasTool::RectangleHighlight:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::RectangleHighlight);
-            break;
-        case SnowCanvasTool::PenHighlight:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::PenHighlight);
-            break;
-        case SnowCanvasTool::Spotlight:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Spotlight);
-            break;
-        case SnowCanvasTool::Eraser:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Eraser);
-            break;
-        case SnowCanvasTool::RectangleEraser:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::RectangleEraser);
-            break;
-        case SnowCanvasTool::BrushEraser:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::BrushEraser);
-            break;
-        case SnowCanvasTool::RectangleFilter:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::RectangleFilter);
-            break;
-        case SnowCanvasTool::PenFilter:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::PenFilter);
-            break;
-        case SnowCanvasTool::Watermark:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Watermark);
-            break;
-        case SnowCanvasTool::Text:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Text);
-            break;
-        case SnowCanvasTool::SerialNumber:
-            palette->setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
-            break;
-        case SnowCanvasTool::AutoFilter:
-        case SnowCanvasTool::Magnifier:
-            break;
-        }
+        if (drawing->canvasTool() == SnowCanvasTool::AutoFilter ||
+            drawing->canvasTool() == SnowCanvasTool::Magnifier)
+            return;
+        if (const auto tool = paletteToolForCanvasTool(drawing->canvasTool()))
+            palette->setActiveTool(*tool);
     }
+
     void wireTools() {
         connect(drawing.get(), &SnowCanvasWidget::angleAdjustmentTargetChanged, this,
                 [this]() { angleWheelSteps.reset(); });
@@ -617,101 +572,16 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
             cancelColorSampling();
             synchronizeTool();
         });
-        connect(palette, &ScreenshotToolPalette::selectRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Select);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Select);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::speechBubbleRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::SpeechBubble);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::SpeechBubble);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::shapeRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Shape);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Shape);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::distanceToolRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Distance);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Distance);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::angleToolRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Angle);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Angle);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::arrowRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Arrow);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Arrow);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::lineRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Line);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Line);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::freeDrawRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::FreeDraw);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::FreeDraw);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::highlightRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::RectangleHighlight);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::RectangleHighlight);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::penHighlightRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::PenHighlight);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::PenHighlight);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::spotlightRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Spotlight);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Spotlight);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::rectangleEraserRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::RectangleEraser);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::RectangleEraser);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::brushEraserRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::BrushEraser);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::BrushEraser);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::eraserRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Eraser);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Eraser);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::rectangleFilterRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::RectangleFilter);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::RectangleFilter);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::penFilterRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::PenFilter);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::PenFilter);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::watermarkRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Watermark);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Watermark);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::textRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::Text);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::Text);
-            activateDrawing();
-        });
-        connect(palette, &ScreenshotToolPalette::serialNumberRequested, this, [this]() {
-            drawing->setCanvasTool(SnowCanvasTool::SerialNumber);
-            palette->setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
-            activateDrawing();
-        });
+        bindScreenshotCanvasToolRequests(
+            *palette, *this,
+            [this](SnowCanvasTool tool) {
+                drawing->setCanvasTool(tool);
+                synchronizeTool();
+                activateDrawing();
+            },
+            [](SnowCanvasTool tool) {
+                return tool != SnowCanvasTool::AutoFilter && tool != SnowCanvasTool::Magnifier;
+            });
         connect(palette, &ScreenshotToolPalette::serialNumberDecrementRequested, this,
                 [this]() { drawing->adjustSelectedSerialNumbers(-1); });
         connect(palette, &ScreenshotToolPalette::serialNumberIncrementRequested, this,
@@ -806,10 +676,8 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
     QHash<QString, WindowShortcutManager::BindingHandle> drawingBindings;
     ScreenshotToolPalette* palette = nullptr;
     QPointer<QScreen> display;
-    QPointer<adqt::widgets::AdColorPicker> sampleTarget;
-    std::unique_ptr<ScreenshotCanvasColorSamplerWindow> sampleWindow;
+    ScreenshotCanvasColorSamplingSession colorSampling{*this};
     QImage sampleRaster;
-    QMetaObject::Connection sampleDestroyedConnection;
     bool samplingMouseReleasePending = false;
     bool transparent = false;
     bool panning = false;

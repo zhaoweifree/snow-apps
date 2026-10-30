@@ -1,3 +1,4 @@
+#include "snow_shot/presentation/screenshotcanvastools.h"
 #include "snow_shot/presentation/canvashistoryshortcuts.h"
 #include "snow_shot/shortcuts/shortcutbinding.h"
 #include "snow_shot/presentation/pinnedgeometry.h"
@@ -30,6 +31,7 @@
 #include <QEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QTabletEvent>
 #include <QPointer>
 #include <QScreen>
 #include <QScopeGuard>
@@ -105,6 +107,7 @@ ScreenshotPinnedEditController::ScreenshotPinnedEditController(
                 const auto categories = std::exchange(m_automationFilterCategories, {});
                 for (const auto& category : categories)
                     m_autoFilterController->fillCategory(category);
+                emit automationAutoFilterStateChanged();
             });
     connect(m_autoFilterController.get(), &ScreenshotAutoFilterController::detectionFailed, this,
             [this](const QString& error) {
@@ -112,11 +115,20 @@ ScreenshotPinnedEditController::ScreenshotPinnedEditController(
                 if (!m_automationFilterCategories.isEmpty()) {
                     m_automationFilterCategories.clear();
                     m_automationFilterError = error;
+                    emit automationAutoFilterStateChanged();
                 }
             });
     connect(m_autoFilterController.get(), &ScreenshotAutoFilterController::detectionFailed, this,
             [this](const QString& message) {
                 adqt::widgets::AdMessageService::error(message, -1, &m_pinnedWindow);
+            });
+    connect(m_autoFilterController.get(), &ScreenshotAutoFilterController::detectionFinished, this,
+            [this](const QString& error) {
+                if (m_automationFilterCategories.isEmpty())
+                    return;
+                m_automationFilterCategories.clear();
+                m_automationFilterError = error;
+                emit automationAutoFilterStateChanged();
             });
     connect(m_autoFilterController.get(), &ScreenshotAutoFilterController::availabilityChanged,
             this, [this](bool available) {
@@ -195,7 +207,7 @@ bool ScreenshotPinnedEditController::resizeWindowToolActive() const {
 }
 
 bool ScreenshotPinnedEditController::canvasColorSamplingActive() const {
-    return !m_canvasColorSamplingTarget.isNull();
+    return m_canvasColorSampling && m_canvasColorSampling->active();
 }
 
 void ScreenshotPinnedEditController::updateCanvasColorSamplingAfterCursorMove(
@@ -213,6 +225,49 @@ bool ScreenshotPinnedEditController::eventFilter(QObject* watched, QEvent* event
     if (watched != &m_canvas || event == nullptr || !m_editMode) {
         return QObject::eventFilter(watched, event);
     }
+    if (event->type() == QEvent::FocusOut || event->type() == QEvent::Hide) {
+        m_tabletFrameGesture = false;
+        m_tabletSamplingReleasePending = false;
+    }
+
+    if (event->type() == QEvent::TabletPress || event->type() == QEvent::TabletMove ||
+        event->type() == QEvent::TabletRelease) {
+        auto* tablet = static_cast<QTabletEvent*>(event);
+        if (m_tabletSamplingReleasePending) {
+            if (event->type() == QEvent::TabletRelease) {
+                m_tabletSamplingReleasePending = false;
+            }
+            event->accept();
+            return true;
+        }
+        const bool outsideContent = !m_pinnedWindow.contentViewRect().contains(
+            m_pinnedWindow.windowPositionForEvent(watched, tablet->position()));
+        if (m_tabletFrameGesture || (event->type() != QEvent::TabletRelease &&
+                                     QWidget::mouseGrabber() != &m_canvas && outsideContent)) {
+            m_tabletFrameGesture = event->type() != QEvent::TabletRelease &&
+                                   (m_tabletFrameGesture || event->type() == QEvent::TabletPress);
+            // Keep Qt's existing mouse fallback for frame resizing, while preventing
+            // the native brush handler from receiving this host-owned gesture.
+            event->ignore();
+            return true;
+        }
+        const auto type = event->type() == QEvent::TabletPress     ? QEvent::MouseButtonPress
+                          : event->type() == QEvent::TabletRelease ? QEvent::MouseButtonRelease
+                                                                   : QEvent::MouseMove;
+        QMouseEvent pointer(type, tablet->position(), tablet->globalPosition(), tablet->button(),
+                            tablet->buttons(), tablet->modifiers(), tablet->pointingDevice());
+        const bool samplingPress =
+            event->type() == QEvent::TabletPress && canvasColorSamplingActive();
+        const QPointer<ScreenshotPinnedEditController> lifetime(this);
+        if (eventFilter(watched, &pointer)) {
+            if (lifetime) {
+                m_tabletSamplingReleasePending = samplingPress;
+            }
+            event->accept();
+            return true;
+        }
+        return false;
+    }
 
     if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress ||
         event->type() == QEvent::MouseButtonDblClick || event->type() == QEvent::Wheel) {
@@ -228,7 +283,7 @@ bool ScreenshotPinnedEditController::eventFilter(QObject* watched, QEvent* event
         }
     }
 
-    if (!m_canvasColorSamplingTarget.isNull()) {
+    if (canvasColorSamplingActive()) {
         switch (event->type()) {
         case QEvent::MouseMove: {
             auto* mouseEvent = static_cast<QMouseEvent*>(event);
@@ -401,54 +456,20 @@ void ScreenshotPinnedEditController::ensureToolbar() {
         });
         connect(toolbar, &ScreenshotToolPalette::moveRequested, this,
                 &ScreenshotPinnedEditController::activateResizeWindowTool);
-        connect(toolbar, &ScreenshotToolPalette::selectRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Select); });
-        connect(toolbar, &ScreenshotToolPalette::speechBubbleRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::SpeechBubble); });
-        connect(toolbar, &ScreenshotToolPalette::shapeRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Shape); });
-        connect(toolbar, &ScreenshotToolPalette::distanceToolRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Distance); });
-        connect(toolbar, &ScreenshotToolPalette::angleToolRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Angle); });
-        connect(toolbar, &ScreenshotToolPalette::arrowRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Arrow); });
-        connect(toolbar, &ScreenshotToolPalette::lineRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Line); });
-        connect(toolbar, &ScreenshotToolPalette::freeDrawRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::FreeDraw); });
-        connect(toolbar, &ScreenshotToolPalette::highlightRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::RectangleHighlight); });
-        connect(toolbar, &ScreenshotToolPalette::penHighlightRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::PenHighlight); });
-        connect(toolbar, &ScreenshotToolPalette::magnifierRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Magnifier); });
-        connect(toolbar, &ScreenshotToolPalette::spotlightRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Spotlight); });
-        connect(toolbar, &ScreenshotToolPalette::rectangleEraserRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::RectangleEraser); });
-        connect(toolbar, &ScreenshotToolPalette::brushEraserRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::BrushEraser); });
-        connect(toolbar, &ScreenshotToolPalette::eraserRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Eraser); });
+        snow_shot::presentation::bindScreenshotCanvasToolRequests(
+            *toolbar, *this, [this](SnowCanvasTool tool) {
+                activateCanvasTool(tool);
+                if (tool == SnowCanvasTool::AutoFilter)
+                    m_autoFilterController->validate();
+            });
         connect(toolbar, &ScreenshotToolPalette::filterRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Filter); });
-        connect(toolbar, &ScreenshotToolPalette::rectangleFilterRequested, this,
                 [this]() { activateCanvasTool(SnowCanvasTool::RectangleFilter); });
         toolbar->setAutoFilterAvailable(m_autoFilterController->available());
-        connect(toolbar, &ScreenshotToolPalette::autoFilterRequested, this, [this]() {
-            activateCanvasTool(SnowCanvasTool::AutoFilter);
-            m_autoFilterController->validate();
-        });
         connect(toolbar, &ScreenshotToolPalette::autoFilterCategoryRequested,
                 m_autoFilterController.get(), &ScreenshotAutoFilterController::fillCategory);
-        connect(toolbar, &ScreenshotToolPalette::penFilterRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::PenFilter); });
 
         toolbar->setWatermarkConfig(m_canvas.canvasWatermarkConfig());
         toolbar->setSpotlightConfig(m_canvas.canvasSpotlightConfig());
-        connect(toolbar, &ScreenshotToolPalette::watermarkRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Watermark); });
 
         connect(toolbar, &ScreenshotToolPalette::watermarkPreviewChanged, this,
                 [this](const SnowCanvasWatermarkConfig& config) {
@@ -459,10 +480,6 @@ void ScreenshotPinnedEditController::ensureToolbar() {
                 [this](const SnowCanvasSpotlightConfig& config) {
                     m_canvas.previewCanvasSpotlightConfig(config);
                 });
-        connect(toolbar, &ScreenshotToolPalette::textRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::Text); });
-        connect(toolbar, &ScreenshotToolPalette::serialNumberRequested, this,
-                [this]() { activateCanvasTool(SnowCanvasTool::SerialNumber); });
         connect(toolbar, &ScreenshotToolPalette::ocrRequested, this, [this]() {
             prepareRecognitionToolActivation();
             emit textRecognitionRequested();
@@ -560,6 +577,8 @@ void ScreenshotPinnedEditController::setEditMode(bool enabled) {
     }
 
     m_editMode = enabled;
+    m_tabletFrameGesture = false;
+    m_tabletSamplingReleasePending = false;
     m_angleWheelSteps.reset();
     if (enabled) {
         const QPointer<ScreenshotPinnedEditController> guard(this);
@@ -918,74 +937,10 @@ void ScreenshotPinnedEditController::syncPaletteFromCanvasTool() {
         return;
     }
 
-    switch (m_canvas.canvasTool()) {
-    case SnowCanvasTool::Select:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Select);
-        break;
-    case SnowCanvasTool::SpeechBubble:
-        host->setActiveTool(ScreenshotToolPalette::Tool::SpeechBubble);
-        break;
-    case SnowCanvasTool::Shape:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Shape);
-        break;
-    case SnowCanvasTool::Arrow:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Arrow);
-        break;
-    case SnowCanvasTool::Distance:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Distance);
-        break;
-    case SnowCanvasTool::Angle:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Angle);
-        break;
-    case SnowCanvasTool::Line:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Line);
-        break;
-    case SnowCanvasTool::FreeDraw:
-        host->setActiveTool(ScreenshotToolPalette::Tool::FreeDraw);
-        break;
-    case SnowCanvasTool::RectangleHighlight:
-        host->setActiveTool(ScreenshotToolPalette::Tool::RectangleHighlight);
-        break;
-    case SnowCanvasTool::PenHighlight:
-        host->setActiveTool(ScreenshotToolPalette::Tool::PenHighlight);
-        break;
-    case SnowCanvasTool::Magnifier:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Magnifier);
-        break;
-    case SnowCanvasTool::Spotlight:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Spotlight);
-        break;
-    case SnowCanvasTool::Eraser:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Eraser);
-        break;
-    case SnowCanvasTool::RectangleEraser:
-        host->setActiveTool(ScreenshotToolPalette::Tool::RectangleEraser);
-        break;
-    case SnowCanvasTool::BrushEraser:
-        host->setActiveTool(ScreenshotToolPalette::Tool::BrushEraser);
-        break;
-    case SnowCanvasTool::AutoFilter:
-        host->setActiveTool(ScreenshotToolPalette::Tool::AutoFilter);
-        break;
-    case SnowCanvasTool::RectangleFilter:
-        host->setActiveTool(ScreenshotToolPalette::Tool::RectangleFilter);
-        break;
-    case SnowCanvasTool::PenFilter:
-        host->setActiveTool(ScreenshotToolPalette::Tool::PenFilter);
-        break;
-    case SnowCanvasTool::Watermark:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Watermark);
-        break;
-    case SnowCanvasTool::Text:
-        host->setActiveTool(ScreenshotToolPalette::Tool::Text);
-        break;
-    case SnowCanvasTool::SerialNumber:
-        host->setActiveTool(ScreenshotToolPalette::Tool::SerialNumber);
-        break;
-    default:
+    if (const auto tool = snow_shot::presentation::paletteToolForCanvasTool(m_canvas.canvasTool()))
+        host->setActiveTool(*tool);
+    else
         host->clearActiveTool();
-        break;
-    }
 }
 
 void ScreenshotPinnedEditController::syncPaletteFromCanvasStyle() {
@@ -1016,15 +971,9 @@ void ScreenshotPinnedEditController::beginCanvasColorSampling(
     }
 
     cancelCanvasColorSampling();
-    if (m_canvasColorSamplerWindow == nullptr) {
-        m_canvasColorSamplerWindow = std::make_unique<ScreenshotCanvasColorSamplerWindow>();
-    }
-    m_canvasColorSamplingTarget = picker;
-    m_canvasColorSamplingDestroyedConnection =
-        connect(picker, &QObject::destroyed, this, [this]() { cancelCanvasColorSampling(); });
-    if (m_canvasColorSamplerWindow != nullptr) {
-        m_canvasColorSamplerWindow->beginSampling(picker);
-    }
+    if (!m_canvasColorSampling)
+        m_canvasColorSampling = std::make_unique<ScreenshotCanvasColorSamplingSession>(*this);
+    m_canvasColorSampling->begin(picker, [this]() { cancelCanvasColorSampling(); });
     m_canvasColorSampler.reset();
     if (m_toolbarWindow != nullptr) {
         m_shortcutManager.addScopeWindow(m_toolbarWindow);
@@ -1046,16 +995,12 @@ void ScreenshotPinnedEditController::beginCanvasColorSampling(
 }
 
 void ScreenshotPinnedEditController::cancelCanvasColorSampling() {
-    m_canvasColorSamplingTarget.clear();
-    disconnect(m_canvasColorSamplingDestroyedConnection);
-    m_canvasColorSamplingDestroyedConnection = {};
     m_canvasColorSampler.reset();
     if (m_toolbarWindow != nullptr) {
         m_shortcutManager.removeScopeWindow(m_toolbarWindow);
     }
-    if (m_canvasColorSamplerWindow != nullptr) {
-        m_canvasColorSamplerWindow->endSampling();
-    }
+    if (m_canvasColorSampling)
+        m_canvasColorSampling->end();
     setCanvasColorSamplingCursor(false);
 }
 
@@ -1091,30 +1036,20 @@ ScreenshotPinnedEditController::canvasColorPreviewAtPhysicalPoint(const QPoint& 
 
 void ScreenshotPinnedEditController::updateCanvasColorSamplingPreviewAtPhysicalPoint(
     const QPoint& physicalPosition, const QPoint& globalPosition) {
-    if (m_canvasColorSamplerWindow == nullptr || m_canvasColorSamplingTarget.isNull()) {
+    if (!canvasColorSamplingActive()) {
         return;
     }
     const QImage preview = canvasColorPreviewAtPhysicalPoint(physicalPosition);
     if (!preview.isNull()) {
-        m_canvasColorSamplerWindow->updateSample(preview, globalPosition);
+        m_canvasColorSampling->updatePreview(preview, globalPosition);
     }
 }
 
 bool ScreenshotPinnedEditController::commitCanvasColorSampleAtPhysicalPoint(
     const QPoint& physicalPosition) {
-    QPointer<adqt::widgets::AdColorPicker> picker = m_canvasColorSamplingTarget;
     const QImage preview = canvasColorPreviewAtPhysicalPoint(physicalPosition);
-    cancelCanvasColorSampling();
-    if (picker.isNull() || preview.isNull()) {
-        return false;
-    }
-
-    const QColor sampled = preview.pixelColor(preview.width() / 2, preview.height() / 2);
-    if (!sampled.isValid()) {
-        return false;
-    }
-    picker->commitValue(adqt::widgets::AdColorValue::solid(sampled));
-    return true;
+    return m_canvasColorSampling &&
+           m_canvasColorSampling->commit(preview, [this]() { cancelCanvasColorSampling(); });
 }
 
 bool ScreenshotPinnedEditController::automationAutoFilter(const QStringList& categories) {
@@ -1131,6 +1066,7 @@ bool ScreenshotPinnedEditController::automationAutoFilter(const QStringList& cat
     m_automationFilterCategories = categories;
     if (!m_canvas.setCanvasTool(SnowCanvasTool::AutoFilter)) {
         m_automationFilterCategories.clear();
+        emit automationAutoFilterStateChanged();
         return false;
     }
     m_autoFilterController->validate();
@@ -1139,6 +1075,7 @@ bool ScreenshotPinnedEditController::automationAutoFilter(const QStringList& cat
         for (const auto& category : pending)
             m_autoFilterController->fillCategory(category);
     }
+    emit automationAutoFilterStateChanged();
     return true;
 }
 
@@ -1156,6 +1093,7 @@ void ScreenshotPinnedEditController::cancelAutomationAutoFilter() {
 void ScreenshotPinnedEditController::resetAutoFilterSession() {
     m_automationFilterCategories.clear();
     m_autoFilterController->resetSession();
+    emit automationAutoFilterStateChanged();
 }
 
 void ScreenshotPinnedEditController::setCanvasColorSamplingCursor(bool enabled) {

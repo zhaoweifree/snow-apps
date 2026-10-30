@@ -9,7 +9,8 @@ namespace snow_shot::presentation::detail {
 snapshotClipboardMimeData(const QMimeData* mimeData, qreal devicePixelRatio,
                           const QColor& baseColor, bool includeDetachedImage,
                           const ScreenshotClipboardContentReader::AllocationCheck& allocate = {},
-                          std::optional<ScreenshotClipboardContentSnapshot> nativeSnapshot = {});
+                          std::optional<ScreenshotClipboardContentSnapshot> nativeSnapshot = {},
+                          bool imagesOnly = false);
 } // namespace snow_shot::presentation::detail
 
 #endif

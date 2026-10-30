@@ -156,9 +156,9 @@ void ScreenshotOverlayCoordinator::showOverlayWindows(
 
 void ScreenshotOverlayCoordinator::hideOverlayWindowsImmediately(
     const ScreenshotDisplaySession& displaySession) {
-    // This path is on the first-frame critical path of ending a capture. Hide the
-    // interaction surfaces and leave renderer/native-surface retirement to the
-    // deferred maintenance pass.
+    // Detach the compositor frame before the first hide. Renderer/backing-store
+    // destruction can wait for export, but a hidden native window can retain its
+    // last presented frame even after the deferred maintenance pass destroys it.
     m_uiHost.hideToolbar();
     m_uiHost.hideShortcutHints();
     SNOW_SHOT_PIN_PERF_MILESTONE("overlay.toolbar_hidden");
@@ -166,10 +166,7 @@ void ScreenshotOverlayCoordinator::hideOverlayWindowsImmediately(
         if (overlay == nullptr) {
             return;
         }
-        if (overlay->canvas() != nullptr) {
-            overlay->canvas()->setInteractionEnabled(false);
-        }
-        overlay->hide();
+        overlay->hideForNativeSurfaceRelease();
     });
     m_overlayMaintenancePending = true;
     SNOW_SHOT_PIN_PERF_MILESTONE("overlay.overlays_hidden");

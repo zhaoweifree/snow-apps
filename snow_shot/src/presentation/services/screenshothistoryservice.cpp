@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <deque>
 #include <exception>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -76,9 +77,9 @@ bool structurallyValidCanvasPayload(const QByteArray& payload) {
 snow_shot::storage::PersistedSelection
 persistedSelection(const ScreenshotSelectionParams& selection) {
     return {
-        selection.selection,   selection.radius,          selection.shadowWidth,
-        selection.shadowColor, selection.lockAspectRatio, selection.lockDragAspectRatio,
-        selection.region,
+        selection.selection,   selection.radius,           selection.shadowWidth,
+        selection.shadowColor, selection.lockAspectRatio,  selection.lockDragAspectRatio,
+        selection.region,      selection.layoutCompaction, selection.backgroundOpacityPercent,
     };
 }
 
@@ -87,12 +88,67 @@ presentationSelection(const snow_shot::storage::PersistedSelection& selection) {
     ScreenshotSelectionParams result;
     result.selection = selection.rectangle;
     result.region = selection.region;
+    result.layoutCompaction = selection.layoutCompaction;
+    result.backgroundOpacityPercent = selection.backgroundOpacityPercent;
     result.radius = selection.cornerRadius;
     result.shadowWidth = selection.shadowWidth;
     result.shadowColor = selection.shadowColor;
     result.lockAspectRatio = selection.lockAspectRatio;
     result.lockDragAspectRatio = selection.lockDragAspectRatio;
     return result;
+}
+
+std::optional<ScreenshotSelectionParams>
+selectionForRestore(const snow_shot::storage::CaptureHistoryRecord& record,
+                    const ScreenshotSelectionRestoreTarget& target) {
+    using snow_shot::storage::CaptureHistoryContentKind;
+    using snow_shot::storage::CaptureHistorySource;
+    if (record.contentKind != CaptureHistoryContentKind::ScreenshotSession ||
+        target.bounds.isEmpty()) {
+        return std::nullopt;
+    }
+    auto params = presentationSelection(record.selection);
+    // Pending drafts have not passed through the persisted-selection normalizer yet.
+    // Their authoritative region must also supply the bounds used for overflow checks.
+    if (params.region) {
+        params.selection = params.region->boundingRect();
+        if (params.selection.isEmpty())
+            return std::nullopt;
+    }
+    qint64 dx = 0;
+    qint64 dy = 0;
+    if (record.desktopGeometry) {
+        if (record.desktopGeometry->canvasUsesPoints != target.canvasUsesPoints)
+            return std::nullopt;
+        dx = qint64(record.desktopGeometry->canvasOrigin.x()) - target.canvasOrigin.x();
+        dy = qint64(record.desktopGeometry->canvasOrigin.y()) - target.canvasOrigin.y();
+    } else {
+        if (std::any_of(record.displays.cbegin(), record.displays.cend(),
+                        [&target](const auto& display) {
+                            return display.canvasUsesPoints != target.canvasUsesPoints;
+                        })) {
+            return std::nullopt;
+        }
+        // Early direct captures used absolute desktop coordinates instead of canvas ones.
+        if (record.source == CaptureHistorySource::CurrentMonitor ||
+            record.source == CaptureHistorySource::FocusedWindow) {
+            dx = -qint64(record.canvasBounds.x());
+            dy = -qint64(record.canvasBounds.y());
+        }
+    }
+    const qint64 x = qint64(params.selection.x()) + dx;
+    const qint64 y = qint64(params.selection.y()) + dy;
+    constexpr qint64 minimum = std::numeric_limits<int>::min();
+    constexpr qint64 maximum = std::numeric_limits<int>::max();
+    if (dx < minimum || dx > maximum || dy < minimum || dy > maximum || x < minimum ||
+        y < minimum || x > maximum - params.selection.width() + 1 ||
+        y > maximum - params.selection.height() + 1) {
+        return std::nullopt;
+    }
+    params.selection.moveTopLeft(QPoint(static_cast<int>(x), static_cast<int>(y)));
+    if (params.region)
+        params.region->translate(QPoint(static_cast<int>(dx), static_cast<int>(dy)));
+    return clampScreenshotSelectionParamsForRestore(params, target.bounds);
 }
 
 snow_shot::storage::CaptureHistoryDraft storageDraft(const ScreenshotHistoryEntry& entry) {
@@ -643,6 +699,73 @@ bool ScreenshotHistoryService::presentTransientEntry(const ScreenshotHistoryEntr
     return applyEntry(imported);
 }
 
+std::optional<ScreenshotSelectionParams>
+ScreenshotHistoryService::latestSelectionParams(const ScreenshotSelectionRestoreTarget& target) {
+    refreshMetadata();
+    for (const auto& record : m_entries) {
+        if (auto params = selectionForRestore(record, target))
+            return params;
+    }
+    return std::nullopt;
+}
+
+bool ScreenshotHistoryService::browsePreviousSelection(
+    const ScreenshotSelectionRestoreTarget& target,
+    const std::function<bool(const ScreenshotSelectionParams&)>& applySelection) {
+    return browseSelection(target, true, applySelection);
+}
+
+bool ScreenshotHistoryService::browseNextSelection(
+    const ScreenshotSelectionRestoreTarget& target,
+    const std::function<bool(const ScreenshotSelectionParams&)>& applySelection) {
+    return browseSelection(target, false, applySelection);
+}
+
+bool ScreenshotHistoryService::browseSelection(
+    const ScreenshotSelectionRestoreTarget& target, bool previous,
+    const std::function<bool(const ScreenshotSelectionParams&)>& applySelection) {
+    if (!applySelection || m_navigationInProgress)
+        return false;
+    refreshMetadata();
+    if (!m_selectionNavigationId.isEmpty() &&
+        (m_selectionNavigationRevision != m_context.selection.changeRevision() ||
+         m_selectionNavigationModeRevision != m_context.interaction.selectionModeRevision())) {
+        resetSelectionNavigation();
+    }
+    qsizetype index = -1;
+    if (!m_selectionNavigationId.isEmpty()) {
+        const auto current =
+            std::find_if(m_entries.cbegin(), m_entries.cend(),
+                         [this](const auto& r) { return r.id == m_selectionNavigationId; });
+        index = std::distance(m_entries.cbegin(), current);
+    } else if (!previous) {
+        return false;
+    }
+    const qsizetype step = previous ? 1 : -1;
+    for (index += step; index >= 0 && index < m_entries.size(); index += step) {
+        const auto params = selectionForRestore(m_entries[index], target);
+        if (!params)
+            continue;
+        const QString id = m_entries[index].id;
+        const quint64 generation = m_selectionNavigationGeneration;
+        if (!applySelection(*params))
+            return false;
+        // Confirmation can synchronously retire or replace the capture session.
+        if (generation == m_selectionNavigationGeneration) {
+            m_selectionNavigationId = id;
+            m_selectionNavigationRevision = m_context.selection.changeRevision();
+            m_selectionNavigationModeRevision = m_context.interaction.selectionModeRevision();
+        }
+        return true;
+    }
+    return false;
+}
+
+void ScreenshotHistoryService::resetSelectionNavigation() {
+    ++m_selectionNavigationGeneration;
+    m_selectionNavigationId.clear();
+}
+
 bool ScreenshotHistoryService::applyEntry(const ScreenshotHistoryEntry& entry) {
     const bool pointSources =
         std::any_of(entry.displays.cbegin(), entry.displays.cend(),
@@ -770,6 +893,7 @@ bool ScreenshotHistoryService::applyEntry(const ScreenshotHistoryEntry& entry) {
                   image.size()));
     }
     m_context.selection = restoredSelection;
+    resetSelectionNavigation();
     m_context.interaction.cancelDrag();
     bool requestIntelligentSelection = false;
     if (entry.persistent || !m_context.selection.hasPixelSelection()) {
@@ -795,6 +919,7 @@ bool ScreenshotHistoryService::applyEntry(const ScreenshotHistoryEntry& entry) {
 }
 
 void ScreenshotHistoryService::resetCaptureNavigation() {
+    resetSelectionNavigation();
     ++m_navigationGeneration;
     if (m_navigationInProgress) {
         m_navigationInProgress = false;
@@ -820,8 +945,6 @@ void ScreenshotHistoryService::scheduleWrite(ScreenshotHistoryEntry entry) {
         ++m_navigationIndex;
     }
     m_pendingWrites.push_back(PendingWrite{id, m_validationQueue->submit(std::move(draft))});
-    // Remember the exported snapshot, even if the live editor has since changed or closed.
-    m_context.selectionCommitted(entry.selection);
 }
 
 void ScreenshotHistoryService::reapCompletedWrites() {
@@ -894,9 +1017,15 @@ void ScreenshotHistoryService::refreshMetadata() {
                     refreshed.end());
     m_unreadableEntries = std::move(retainedUnreadable);
     std::sort(refreshed.begin(), refreshed.end(), [](const auto& first, const auto& second) {
-        return first.createdUtc > second.createdUtc;
+        return first.createdUtc != second.createdUtc ? first.createdUtc > second.createdUtc
+                                                     : first.id < second.id;
     });
     m_entries = std::move(refreshed);
+    if (!m_selectionNavigationId.isEmpty() &&
+        std::none_of(m_entries.cbegin(), m_entries.cend(),
+                     [this](const auto& record) { return record.id == m_selectionNavigationId; })) {
+        resetSelectionNavigation();
+    }
     if (!selectedId.isEmpty()) {
         const auto selected =
             std::find_if(m_entries.cbegin(), m_entries.cend(),

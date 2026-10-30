@@ -236,10 +236,10 @@ Document apply(const Options& options, const Document& source, const GeneratedRa
         }
         return unwrap(transform(source, transformOptions));
     }
-    if (scenario == "resize-stream") {
+    if (scenario == "resize-stream" || scenario == "resize-extreme") {
         ResizeOptions resize;
-        resize.width = std::max(1U, options.width / 4);
-        resize.height = std::max(1U, options.height / 4);
+        resize.width = scenario == "resize-extreme" ? 1U : std::max(1U, options.width / 4);
+        resize.height = scenario == "resize-extreme" ? 1U : std::max(1U, options.height / 4);
         resize.maximum_threads = 1;
         resize.linear_rgb = false;
         // Select the bounded source-major accumulator instead of the row ring.

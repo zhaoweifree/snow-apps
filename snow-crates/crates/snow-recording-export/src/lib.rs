@@ -15,12 +15,14 @@ pub mod streaming;
 pub mod bench_timing;
 
 mod animation;
-pub(crate) mod ffmpeg_util;
+#[doc(hidden)]
+pub mod ffmpeg_util;
 #[cfg(any(test, feature = "bench-experiments"))]
 mod frame_converter;
+mod gif_encoder;
 mod gif_palette;
 mod output_scaler;
-pub(crate) mod video_quality;
+pub(crate) use snow_recording_model::video_quality;
 
 pub use config::{
     ExportAudioOutputConfig, ExportAudioTrackRequest, ExportExecutionMode, ExportFormat,
@@ -52,3 +54,12 @@ pub mod clip;
 pub(crate) mod decoder;
 pub mod playback;
 pub(crate) mod tempo;
+
+#[cfg(test)]
+pub(crate) fn has_avi_compatibility() -> bool {
+    // The standalone compatibility FFmpeg profile adds AVI; the app profile omits it.
+    unsafe {
+        !ffmpeg_next::ffi::av_guess_format(c"avi".as_ptr(), std::ptr::null(), std::ptr::null())
+            .is_null()
+    }
+}

@@ -73,6 +73,7 @@ void RecordingColorSampler::begin(adqt::widgets::AdColorPicker* picker) {
     m_target = picker;
     m_destroyedConnection = connect(picker, &QObject::destroyed, this, [this] { cancel(); });
     m_active = true;
+    m_toolbar.setAutoHideBlocked(this, true);
     m_pressed = false;
     m_escapeRelease = false;
     m_preview->beginSampling(&m_area);
@@ -90,6 +91,7 @@ void RecordingColorSampler::cancel() {
     if (!m_active)
         return;
     m_active = false;
+    m_toolbar.setAutoHideBlocked(this, false);
     m_preview->endSampling();
     QApplication::restoreOverrideCursor();
     m_area.setInputMode(m_previousInputMode);

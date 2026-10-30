@@ -94,15 +94,13 @@ class ScreenshotOcrRecognitionService::Impl final {
     friend class ScreenshotOcrRecognitionService;
 
   public:
-    Impl(ScreenshotOcrRecognitionService* owner, const Options& options,
-         ScreenshotOcrBackendPreference preference)
+    Impl(ScreenshotOcrRecognitionService* owner, const Options& options)
         : m_owner(owner),
           m_shutdownTimeoutMilliseconds(std::max(1, options.shutdownTimeoutMilliseconds)),
           m_retryTimeUnit(std::max(1, options.retryTimeUnitMilliseconds)),
           m_beforeLocalRender(options.beforeLocalRender), m_proxyUrl(options.proxyUrl),
-          m_modelType(options.modelType), m_backendPreference(preference) {
+          m_modelType(options.modelType) {
         m_configuration.modelType = options.modelType;
-        m_configuration.backend = preference;
         m_configuration.detectorResizePolicy = options.detectorResizePolicy;
         m_configuration.textDetectionProcessing = options.textDetectionProcessing;
         m_queueClock.start();
@@ -119,7 +117,6 @@ class ScreenshotOcrRecognitionService::Impl final {
             m_assets.detectorModelPath = options.detectorModelPath;
             m_assets.recognizerModelPath = options.recognizerModelPath;
             m_assets.dictionaryPath = options.dictionaryPath;
-            m_assets.stateDirectory = options.stateDirectory;
             m_assetStatus = {ScreenshotOcrAssetPhase::ReadyCached, QStringLiteral("assets")};
         } else {
             const QString offlineRoot = options.offlineRoot.trimmed().isEmpty()
@@ -328,12 +325,6 @@ class ScreenshotOcrRecognitionService::Impl final {
         return true;
     }
 
-    void setBackendPreference(ScreenshotOcrBackendPreference preference) {
-        auto configuration = m_configuration;
-        configuration.backend = preference;
-        setRuntimeConfiguration(configuration);
-    }
-
     void setProxyUrl(const QString& proxyUrl) {
         if (m_proxyUrl == proxyUrl)
             return;
@@ -365,7 +356,7 @@ class ScreenshotOcrRecognitionService::Impl final {
             return;
         const bool modelChanged = m_modelType != configuration.modelType;
         const bool sessionChanged =
-            modelChanged || m_backendPreference != configuration.backend ||
+            modelChanged ||
             m_configuration.detectorResizePolicy != configuration.detectorResizePolicy ||
             m_configuration.textDetectionProcessing != configuration.textDetectionProcessing;
         if (sessionChanged)
@@ -375,7 +366,6 @@ class ScreenshotOcrRecognitionService::Impl final {
             m_invalidateWarmSession = true;
         m_configuration = configuration;
         m_modelType = configuration.modelType;
-        m_backendPreference = configuration.backend;
         if (modelChanged) {
             if (m_assetManager != nullptr) {
                 m_assetManager->setModelType(m_modelType);
@@ -612,7 +602,6 @@ class ScreenshotOcrRecognitionService::Impl final {
             const QJsonObject structured = QJsonDocument::fromJson(line).object();
             const QString event = structured.value(QStringLiteral("event")).toString();
             const bool workerEvent = event == QStringLiteral("ocr.worker_finished") ||
-                                     event == QStringLiteral("ocr.backend_fallback") ||
                                      event == QStringLiteral("ocr.engine_ready");
             QJsonObject fields =
                 workerEvent ? structured.value(QStringLiteral("fields")).toObject() : QJsonObject{};
@@ -722,7 +711,6 @@ class ScreenshotOcrRecognitionService::Impl final {
         m_sessionIdleGeneration = m_idleGeneration;
         m_invalidateWarmSession = false;
         QByteArray payload;
-        appendU8(payload, m_backendPreference == ScreenshotOcrBackendPreference::DirectMl ? 1 : 0);
         appendU8(
             payload,
             m_configuration.detectorResizePolicy == ScreenshotOcrDetectorResizePolicy::Min ? 1 : 0);
@@ -832,6 +820,14 @@ class ScreenshotOcrRecognitionService::Impl final {
              (m_sessionWarm && m_invalidateWarmSession) ||
              (idle && (m_sessionUsed || !m_sessionWarm ||
                        m_sessionIdleGeneration != m_idleGeneration || !hotEffective())))) {
+            if (idle && hotEffective() && !m_invalidateWarmSession &&
+                m_sessionGeneration == m_configurationGeneration) {
+                // Replace mutable inference storage while retaining immutable models.
+                // Like initial warm-up, reset starts only after the mapping is detached.
+                if (m_bufferState == BufferState::Empty)
+                    prepareSession(true);
+                return;
+            }
             releaseSession();
             return;
         }
@@ -971,11 +967,10 @@ class ScreenshotOcrRecognitionService::Impl final {
 
     void handleReady(const QByteArray& payload) {
         qsizetype offset = 0;
-        quint8 ok = 0, directMl = 0;
+        quint8 ok = 0;
         QString provider, runtimeVersion;
         quint32 protocolVersion = 0;
-        if (!takeU8(payload, offset, &ok) || !takeU8(payload, offset, &directMl) ||
-            !takeString(payload, offset, &provider) ||
+        if (!takeU8(payload, offset, &ok) || !takeString(payload, offset, &provider) ||
             !takeString(payload, offset, &runtimeVersion) ||
             !takeU32(payload, offset, &protocolVersion) || offset != payload.size() || ok == 0 ||
             runtimeVersion != QString::fromLatin1(kRuntimeVersion) ||
@@ -1342,7 +1337,6 @@ class ScreenshotOcrRecognitionService::Impl final {
     ProcessStopReason m_processStopReason = ProcessStopReason::None;
     qsizetype m_slotBytes = 0;
     int m_runningCount = 0, m_localRenderingCount = 0;
-    ScreenshotOcrBackendPreference m_backendPreference = ScreenshotOcrBackendPreference::Cpu;
     QByteArray m_readBuffer;
     QByteArray m_stderrBuffer;
     qint64 m_childPid = 0;
@@ -1365,11 +1359,11 @@ class ScreenshotOcrRecognitionService::Impl final {
 };
 
 ScreenshotOcrRecognitionService::ScreenshotOcrRecognitionService(QObject* parent)
-    : ScreenshotOcrRecognitionService(Options{}, ScreenshotOcrBackendPreference::Cpu, parent) {}
-ScreenshotOcrRecognitionService::ScreenshotOcrRecognitionService(
-    const Options& options, ScreenshotOcrBackendPreference preference, QObject* parent)
-    : ScreenshotOcrRecognitionPort(parent),
-      m_impl(std::make_unique<Impl>(this, options, preference)), m_storageOptions(options) {}
+    : ScreenshotOcrRecognitionService(Options{}, parent) {}
+ScreenshotOcrRecognitionService::ScreenshotOcrRecognitionService(const Options& options,
+                                                                 QObject* parent)
+    : ScreenshotOcrRecognitionPort(parent), m_impl(std::make_unique<Impl>(this, options)),
+      m_storageOptions(options) {}
 ScreenshotOcrRecognitionService::~ScreenshotOcrRecognitionService() = default;
 
 ScreenshotOcrRecognitionPort::RequestToken
@@ -1415,11 +1409,7 @@ bool ScreenshotOcrRecognitionService::modelFilesReady() const {
 ScreenshotOcrAssetStatus ScreenshotOcrRecognitionService::assetStatus() const {
     return m_impl != nullptr ? m_impl->assetStatus() : ScreenshotOcrAssetStatus{};
 }
-void ScreenshotOcrRecognitionService::setBackendPreference(
-    ScreenshotOcrBackendPreference preference) {
-    if (m_impl != nullptr)
-        m_impl->setBackendPreference(preference);
-}
+
 void ScreenshotOcrRecognitionService::setProxyUrl(const QString& proxyUrl) {
     if (m_impl != nullptr)
         m_impl->setProxyUrl(proxyUrl);
@@ -1475,6 +1465,6 @@ void ScreenshotOcrRecognitionService::resumeStorage(const QString& cacheRoot) {
     m_suspendedImpl.reset();
     m_storageOptions.cacheRoot = cacheRoot;
     m_storageOptions.modelType = m_storageConfiguration.modelType;
-    m_impl = std::make_unique<Impl>(this, m_storageOptions, m_storageConfiguration.backend);
+    m_impl = std::make_unique<Impl>(this, m_storageOptions);
     m_impl->setRuntimeConfiguration(m_storageConfiguration);
 }

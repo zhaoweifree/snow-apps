@@ -231,13 +231,13 @@ PenMaskAtlas::tile(const SnowCanvasSceneItem& item, int physicalTileX, int physi
         return found->second.tile;
     }
     ++m_diagnostics.misses;
-    const bool useAvx2 =
-        !execution.forceScalar && snow_canvas_filter_render::selectedSimdBackend() ==
-                                      snow_canvas_filter_render::SimdBackend::Avx2;
+    const bool useSimd =
+        !execution.forceScalar && snow_canvas_filter_render::selectedSimdBackend() !=
+                                      snow_canvas_filter_render::SimdBackend::Scalar;
     std::shared_ptr<Tile> generated;
     try {
         generated = rasterizeTile(item, physicalTileX, physicalTileY, displayInfo, devicePixelRatio,
-                                  useAvx2);
+                                  useSimd);
     } catch (const std::bad_alloc&) {
         return {};
     }
@@ -279,7 +279,7 @@ PenMaskAtlas::tile(const SnowCanvasSceneItem& item, int physicalTileX, int physi
 std::shared_ptr<Tile> PenMaskAtlas::rasterizeTile(const SnowCanvasSceneItem& item,
                                                   int physicalTileX, int physicalTileY,
                                                   const SceneDisplayInfo& displayInfo,
-                                                  qreal devicePixelRatio, bool useAvx2) {
+                                                  qreal devicePixelRatio, bool useSimd) {
     if (!(displayInfo.camera_zoom > 0.0) || !(devicePixelRatio > 0.0)) {
         return {};
     }
@@ -309,7 +309,7 @@ std::shared_ptr<Tile> PenMaskAtlas::rasterizeTile(const SnowCanvasSceneItem& ite
     const double transitionOuter = radius + 0.5;
     const int tileLeft = result->physicalOrigin.x();
     const int tileTop = result->physicalOrigin.y();
-    bool executedAvx2 = false;
+    bool executedSimd = false;
 
     for (std::uint32_t chunkIndex : chunks) {
         if (chunkIndex >= allChunks.size()) {
@@ -337,11 +337,11 @@ std::shared_ptr<Tile> PenMaskAtlas::rasterizeTile(const SnowCanvasSceneItem& ite
             const int endY =
                 qBound(0, static_cast<int>(std::ceil(std::max(ay, by) + transitionOuter)) - tileTop,
                        kTileSize);
-            if (useAvx2 &&
-                snow_canvas_pen_mask_avx2::rasterizeCapsuleSegment(
+            if (useSimd &&
+                snow_canvas_pen_mask_simd::rasterizeCapsuleSegment(
                     result->alpha.bits(), result->alpha.bytesPerLine(), tileLeft, tileTop, beginX,
                     endX, beginY, endY, ax, ay, bx, by, transitionOuter)) {
-                executedAvx2 = true;
+                executedSimd = true;
                 continue;
             }
             for (int y = beginY; y < endY; ++y) {
@@ -388,7 +388,7 @@ std::shared_ptr<Tile> PenMaskAtlas::rasterizeTile(const SnowCanvasSceneItem& ite
     result->occupied = result->coveredPixelCount != 0;
     ++m_diagnostics.rasterizedTiles;
     m_diagnostics.rasterizedPixels += kTileSize * kTileSize;
-    if (executedAvx2) {
+    if (executedSimd) {
         ++m_diagnostics.simdRasterExecutions;
     }
     return result;

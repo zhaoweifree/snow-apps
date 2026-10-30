@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use snow_draw_engine_core::DrawRect;
 use snow_draw_engine_display::{DisplaySpotlightCutout, SceneDisplayItem};
 use snow_draw_engine_document::{
-    DocumentDelta, DocumentRevision, ElementData, ElementId, arrow_bounds, arrow_is_degenerate,
-    filter_bounds, free_draw_bounds, pen_filter_bounds, serial_number_bounds, text_bounds,
+    DocumentDelta, DocumentRevision, ElementData, ElementId, arrow_is_degenerate, filter_bounds,
+    free_draw_bounds, pen_filter_bounds, serial_number_bounds, text_bounds,
 };
 use snow_draw_engine_model::DocumentModel;
 
@@ -264,7 +264,7 @@ impl DocumentSceneCache {
                 ),
                 bounds: model
                     .element_bounds(id)
-                    .unwrap_or_else(|_| arrow_bounds(arrow)),
+                    .unwrap_or_else(|_| snow_draw_engine_document::arrow_paint_bounds(arrow)),
             }),
             ElementData::FreeDraw(free_draw) => Some(CachedSceneEntry {
                 item: scene_item_from_free_draw(

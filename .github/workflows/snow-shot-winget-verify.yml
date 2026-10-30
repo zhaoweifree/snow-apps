@@ -6,7 +6,6 @@ on:
     paths:
       - 'scripts/*winget*.ps1'
       - 'scripts/snow-shot-editions.ps1'
-      - 'scripts/test-snow-shot-mini-release.ps1'
       - 'scripts/test-snow-shot-arm64-distribution.ps1'
       - '.github/workflows/snow-shot-winget*.yml'
       - 'cmake/SnowShotInstaller.cmake'
@@ -15,7 +14,6 @@ on:
     paths:
       - 'scripts/*winget*.ps1'
       - 'scripts/snow-shot-editions.ps1'
-      - 'scripts/test-snow-shot-mini-release.ps1'
       - 'scripts/test-snow-shot-arm64-distribution.ps1'
       - '.github/workflows/snow-shot-winget*.yml'
       - 'cmake/SnowShotInstaller.cmake'
@@ -56,7 +54,6 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/test-snow-shot-winget.ps1
-          ./scripts/test-snow-shot-mini-release.ps1
           ./scripts/test-snow-shot-arm64-distribution.ps1
       - name: Verify submission credentials without submitting
         if: github.event_name != 'pull_request'
@@ -83,16 +80,6 @@ jobs:
           ./scripts/test-snow-shot-winget-install.ps1 -Tag $env:RELEASE_TAG `
             -PreviousTag $env:PREVIOUS_TAG -Winget $env:WINGET_EXE -AllowUnrecognizedRelease `
             -Architecture $env:SNOW_ARCHITECTURE -RunningAppBehavior $env:RUNNING_APP_BEHAVIOR
-          . scripts/snow-shot-winget.ps1
-          $current = Invoke-SnowShotWingetApi "repos/mg-chao/snow-apps/releases/tags/$env:RELEASE_TAG"
-          $previous = Invoke-SnowShotWingetApi "repos/mg-chao/snow-apps/releases/tags/$env:PREVIOUS_TAG"
-          $currentEditions = @(Get-SnowShotReleaseEditions $current (Get-SnowShotWingetVersion $env:RELEASE_TAG))
-          $previousEditions = @(Get-SnowShotReleaseEditions $previous (Get-SnowShotWingetVersion $env:PREVIOUS_TAG))
-          if ('Mini' -in $currentEditions -and 'Mini' -in $previousEditions) {
-            ./scripts/test-snow-shot-winget-install.ps1 -Tag $env:RELEASE_TAG -Edition Mini `
-              -PreviousTag $env:PREVIOUS_TAG -Winget $env:WINGET_EXE -AllowUnrecognizedRelease `
-              -Architecture $env:SNOW_ARCHITECTURE -RunningAppBehavior $env:RUNNING_APP_BEHAVIOR
-          }
       - name: Verify generated installer quiet registration through WinGet
         if: github.event_name != 'push'
         shell: pwsh

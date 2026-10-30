@@ -12,16 +12,17 @@ that directory tree unless a file or nested directory states otherwise.
 | `snow_image/` | GPL-3.0-or-later |
 | `snow_image_viewer/` | GPL-3.0-or-later |
 | `ant_design_qt/` | Apache-2.0 |
-| `snow-crates/` | Apache-2.0 |
+| `snow-crates/` | GPL-3.0-or-later |
 | `snow_draw_engine_qt/` | Apache-2.0 |
-| `snow_rust_ffi/` | Apache-2.0 |
+| `snow_rust_ffi/` | GPL-3.0-or-later |
+| `snow-crates/crates/simd-paddle-ocr-rs/` | Apache-2.0 |
 
 Original repository-level orchestration files, including the root build files,
 `.github/`, `docs/`, `scripts/`, and shared `cmake/` modules, are licensed under
 GPL-3.0-or-later unless otherwise stated.
 
 The complete GPLv3 terms are available in `snow_shot/LICENSE`. The complete
-Apache-2.0 terms are available in `snow-crates/LICENSE` and the other
+Apache-2.0 terms are available in `ant_design_qt/LICENSE` and the other
 Apache-licensed component directories. Operative license and copyright
 notices are kept in each component's `COPYRIGHT` file so the standard license
 texts remain unchanged.

@@ -25,10 +25,12 @@ bool shapeStylesEqual(const SnowShapeStyle& lhs, const SnowShapeStyle& rhs) {
            colorsEqual(lhs.stroke, rhs.stroke) && lhs.stroke_width == rhs.stroke_width &&
            cornerRadiiEqual(lhs.corner_radii, rhs.corner_radii) &&
            lhs.start_arrowhead == rhs.start_arrowhead && lhs.end_arrowhead == rhs.end_arrowhead &&
-           lhs.stroke_style == rhs.stroke_style && lhs.arrow_type == rhs.arrow_type &&
-           lhs.arrow_ratio == rhs.arrow_ratio && lhs.arrow_shaft_type == rhs.arrow_shaft_type &&
-           lhs.opacity == rhs.opacity && lhs.highlight_shape == rhs.highlight_shape &&
-           lhs.shape == rhs.shape;
+           lhs.stroke_style == rhs.stroke_style &&
+           lhs.stroke_rendering_style == rhs.stroke_rendering_style &&
+           lhs.arrow_type == rhs.arrow_type && lhs.arrow_ratio == rhs.arrow_ratio &&
+           lhs.arrow_shaft_type == rhs.arrow_shaft_type && lhs.opacity == rhs.opacity &&
+           lhs.highlight_shape == rhs.highlight_shape && lhs.shape == rhs.shape &&
+           lhs.brush_mode == rhs.brush_mode;
 }
 
 bool fontFamiliesEqual(const char* lhs, std::uint32_t lhsLength, const char* rhs,
@@ -56,6 +58,7 @@ bool serialNumberStylesEqual(const SnowSerialNumberStyle& lhs, const SnowSerialN
            colorsEqual(lhs.fill, rhs.fill) && lhs.fill_style == rhs.fill_style &&
            lhs.font_size == rhs.font_size && lhs.stroke_width == rhs.stroke_width &&
            lhs.stroke_style == rhs.stroke_style && lhs.opacity == rhs.opacity &&
+           lhs.stroke_rendering_style == rhs.stroke_rendering_style &&
            lhs.font_family_truncated == rhs.font_family_truncated &&
            fontFamiliesEqual(lhs.font_family_utf8, lhs.font_family_utf8_len, rhs.font_family_utf8,
                              rhs.font_family_utf8_len);

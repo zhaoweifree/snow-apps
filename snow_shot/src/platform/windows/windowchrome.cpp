@@ -5,7 +5,9 @@
 #if defined(Q_OS_WIN) || defined(_WIN32)
 
 #include "windowcursorrefresh.h"
+#include "captureexclusioncomposition.h"
 
+#include <QOperatingSystemVersion>
 #include <QCursor>
 #include <QAbstractButton>
 #include <QVariant>
@@ -240,21 +242,29 @@ bool supportsWindowCaptureExclusion() {
 }
 
 bool setWindowExcludedFromCapture(QWidget* window, bool excluded) {
-    if (window == nullptr) {
+    if (window == nullptr || QGuiApplication::platformName() != QStringLiteral("windows")) {
         return false;
     }
     if (excluded && !supportsExcludeFromCapture()) {
         return false;
     }
 
-    window->winId();
-    const HWND hwnd = toNativeHwnd(window->winId());
-    if (hwnd == nullptr) {
-        return false;
-    }
-
+    window = window->window();
     const DWORD affinity = excluded ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE;
-    return SetWindowDisplayAffinity(hwnd, affinity) != 0;
+    const auto version = QOperatingSystemVersion::current();
+    return detail::setCaptureExclusionWithCompositionFallback(
+        excluded, version.majorVersion(), version.microVersion(),
+        [window, affinity]() -> detail::CaptureExclusionResult {
+            // Composition can replace the HWND; resolve it again for the retry.
+            const HWND hwnd = toNativeHwnd(window->winId());
+            if (hwnd == nullptr) {
+                return {false, ERROR_INVALID_WINDOW_HANDLE};
+            }
+            const bool succeeded = SetWindowDisplayAffinity(hwnd, affinity) != 0;
+            const DWORD error = succeeded ? ERROR_SUCCESS : GetLastError();
+            return {succeeded, error};
+        },
+        [window]() { return detail::applyCaptureExclusionCompositionFallback(window); });
 }
 
 std::optional<bool> setWindowInputTransparent(QWidget* window, bool transparent) {

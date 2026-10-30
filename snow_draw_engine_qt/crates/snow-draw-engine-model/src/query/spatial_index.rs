@@ -236,6 +236,22 @@ impl SpatialIndex {
         let max_x = (bounds.max_x / self.cell_size).floor() as i32;
         let max_y = (bounds.max_y / self.cell_size).floor() as i32;
 
+        if min_x > max_x || min_y > max_y {
+            return;
+        }
+        let width = (i64::from(max_x) - i64::from(min_x) + 1) as u64;
+        let height = (i64::from(max_y) - i64::from(min_y) + 1) as u64;
+        // Sparse exports retain the original coordinate frame, which can span
+        // millions of empty cells. Visit whichever set is smaller: the query's
+        // cells or the populated index. Candidate membership stays identical.
+        if width.saturating_mul(height) > self.cells.len() as u64 {
+            for &key in self.cells.keys() {
+                if key.x >= min_x && key.x <= max_x && key.y >= min_y && key.y <= max_y {
+                    f(key);
+                }
+            }
+            return;
+        }
         for y in min_y..=max_y {
             for x in min_x..=max_x {
                 f(CellKey { x, y });
@@ -264,5 +280,53 @@ impl SpatialQueryScratch {
         }
         self.marks[index] = self.stamp;
         self.candidates.push(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sparse_queries_preserve_candidates_and_marks_across_large_gaps() {
+        let mut index = SpatialIndex::default();
+        let ids: Vec<_> = (0..3)
+            .map(|index| ElementId {
+                index,
+                generation: 0,
+            })
+            .collect();
+        index.insert(ids[0], DrawRect::new(-512.0, -512.0, -256.0, -256.0));
+        index.insert(ids[1], DrawRect::new(0.0, 0.0, 256.0, 256.0));
+        index.insert(
+            ids[2],
+            DrawRect::new(1_000_000.0, 1_000_000.0, 1_000_256.0, 1_000_256.0),
+        );
+        for limit in [512.0, 1_000_256.0, f64::MAX] {
+            let mut candidates = index
+                .with_viewport_candidate_ids((-1024.0, -1024.0, limit, limit), |ids| {
+                    ids.iter().map(|id| id.index).collect::<Vec<_>>()
+                });
+            candidates.sort_unstable();
+            let expected = if limit == 512.0 {
+                vec![0, 1]
+            } else {
+                vec![0, 1, 2]
+            };
+            assert_eq!(candidates, expected);
+            index.with_viewport_candidate_marks(
+                (-1024.0, -1024.0, limit, limit),
+                |marks, stamp| {
+                    for id in &expected {
+                        assert_eq!(marks[*id as usize], stamp);
+                    }
+                },
+            );
+        }
+        index.remove(ids[1]);
+        index.with_point_candidate_ids(Point::new(10.0, 10.0), 0.0, |ids| assert!(ids.is_empty()));
+        index.with_point_candidate_ids(Point::new(-300.0, -300.0), 0.0, |found| {
+            assert_eq!(found, &[ids[0]]);
+        });
     }
 }

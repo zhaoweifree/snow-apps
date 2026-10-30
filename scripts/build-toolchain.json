@@ -1,0 +1,5 @@
+{
+  "msvcToolsetMinimum": "14.51",
+  "msvcCompilerMinimum": "19.51",
+  "rustMinimum": "1.97.1"
+}

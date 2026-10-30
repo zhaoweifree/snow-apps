@@ -189,6 +189,8 @@ fn pointer(
         .process_input(
             viewport,
             InputEvent::Pointer(PointerEvent {
+                pressure: None,
+                timestamp_ms: 0,
                 pointer_id: 1,
                 event_type,
                 device: PointerDevice::Mouse,

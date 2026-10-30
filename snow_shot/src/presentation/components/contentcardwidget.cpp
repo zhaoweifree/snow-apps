@@ -171,10 +171,19 @@ QWidget* ContentCardWidget::createPage(
                 &ContentCardWidget::screenshotHistoryEditRequested);
         connect(historyPage, &ScreenshotHistoryPageWidget::pinRequested, this,
                 &ContentCardWidget::screenshotHistoryPinRequested);
+        connect(historyPage, &ScreenshotHistoryPageWidget::collageRequested, this,
+                &ContentCardWidget::screenshotHistoryCollageRequested);
+        connect(historyPage, &ScreenshotHistoryPageWidget::splitRequested, this,
+                &ContentCardWidget::screenshotHistorySplitRequested);
         page = historyPage;
     } else if (definition.kind ==
                snow_shot::presentation::settings::SettingsPageKind::PinnedWindowManagement) {
-        page = new PinnedWindowManagementPageWidget(m_stack);
+        auto* pinnedPage = new PinnedWindowManagementPageWidget(m_stack);
+        connect(pinnedPage, &PinnedWindowManagementPageWidget::collageRequested, this,
+                &ContentCardWidget::pinnedWindowCollageRequested);
+        connect(pinnedPage, &PinnedWindowManagementPageWidget::splitRequested, this,
+                &ContentCardWidget::pinnedWindowSplitRequested);
+        page = pinnedPage;
     } else if (definition.kind ==
                snow_shot::presentation::settings::SettingsPageKind::Translation) {
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION

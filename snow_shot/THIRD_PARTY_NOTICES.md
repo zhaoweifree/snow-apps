@@ -37,6 +37,10 @@ Recording crop speed control uses FFmpeg's libavfilter audio buffer and tempo
 filters for streaming pitch-preserving audio. These components are covered by
 the existing FFmpeg license notices in the generated vcpkg dependency bundle.
 
+Recording GIF exports use the Rust `gif` and `weezl` crates (MIT OR Apache-2.0)
+for palette-indexed frame encoding and LZW compression. Their license texts are
+included in the generated Rust dependency notice bundle.
+
 Parallel screenshot stitching uses Rayon (Apache-2.0 OR MIT). Its license
 texts and resolved dependencies are included in the generated Rust dependency
 notice bundle.
@@ -45,22 +49,13 @@ Animated pinned images use giflib (MIT) for GIF decoding, libwebp (BSD-3-Clause)
 for WebP decoding, and libpng (Libpng) with zlib-ng (Zlib) for PNG/APNG frames.
 Their resolved copyright notices are included in the generated vcpkg license bundle.
 
-The OCR worker uses `ort` and `ort-sys` 2.0.0-rc.13 (MIT OR Apache-2.0), pinned to
-revision `90018ee581fb1bb1baf8e82eba8e679728ff27dc` of
-https://github.com/mg-chao/ort with a native diagnostic-decoding and logger-category
-fix. Cargo retrieves their source and original license files from that fork.
-The release collector includes the selected Rust FFI and static OCR-worker
-dependency graphs, including these Git dependencies.
-
-The Windows asset manifest pins immutable OCR runtime 1.0.9. This raw-pixel
-worker enables static ONNX Runtime, DirectML, and crash diagnostics. Its notice
-collection follows that dependency closure; RapidOCR's CLI, encoded-image
-decoding, HTTP/TLS model downloads, and YAML features are disabled.
-
-RapidOCR's optional HTTP features use Reqwest with Rustls (Apache-2.0 OR ISC OR
-MIT). They require Rustls 0.23.45 or a compatible newer release to address
-GHSA-2mjx-qc3c-rqvc. Builds enabling those features include Rustls and its
-resolved dependency licenses in the generated notice bundle.
+The OCR worker uses the Apache-2.0 `simd-paddle-ocr-rs` Git submodule for
+CPU inference. It includes adaptations of Sdcb.SimdPaddleOCR (Apache-2.0),
+.NET runtime reading-order sorting (MIT), and AMD win-libm exponential
+approximation (MIT). The generated bundle includes the submodule's LICENSE,
+NOTICE, and both component notices from its `licenses/` directory, along with
+its resolved dependencies. The worker is built using the submodule's pinned
+nightly toolchain. Runtime 1.1.0 has no external inference libraries.
 
 The GPL-3.0-only `snow-shot-updater` sidecar is implemented in Rust and is
 distributed as part of Snow Shot. Its resolved normal and build dependency
@@ -68,18 +63,15 @@ graph—including Tokio, Reqwest with native platform TLS, Serde, RSA/SHA-256,
 SemVer, ZIP/Deflate, and Microsoft windows-rs—is collected into the same
 versioned notice bundle from its independently locked Cargo package.
 
-The optional PP-OCRv4 and PP-OCRv5 detector/recognizer models and dictionaries
-are redistributed from RapidAI/RapidOCR's ModelScope release `v3.9.2`, whose
-model card declares Apache License 2.0:
-https://www.modelscope.cn/models/RapidAI/RapidOCR/files?Revision=v3.9.2.
-Snow Shot downloads the matching mobile/server bundles from
-https://www.modelscope.cn/models/mgchao/SnowShotOCR and pins their sizes and
-SHA-256 hashes in `packaging/snow-shot-ocr-asset-manifest.json`.
+The three PP-OCRv6 model bundles and dictionaries retain their existing
+PaddleOCR Apache-2.0 licensing. Snow Shot uses the unchanged Tiny, Small, and
+Medium files from https://www.modelscope.cn/models/mgchao/SnowShotOCR, with
+sizes and SHA-256 hashes pinned in `packaging/snow-shot-ocr-asset-manifest.json`.
 
 Local crash diagnostics on Windows and macOS use Crashpad (Apache-2.0), pinned by the vcpkg baseline
 and the repository's Crashpad overlay. The client, helper, Chromium base code,
 and their bundled notices are included in the vcpkg license collection. The
-Qt-independent OCR bridge and shared Rust panic hook are Apache-2.0 code under
+Qt-independent OCR bridge and shared Rust panic hook are GPL-3.0-or-later code under
 `snow-crates/`.
 
 In-process barcode recognition and Smart Erase reconstruction use OpenCV
@@ -95,7 +87,7 @@ redistributed from https://github.com/WeChatCV/opencv_3rdparty at revision
 `cmake/FetchSnowShotQrModels.cmake`.
 
 Selected-text acquisition and its C bridge (`snow-selected-text` and
-`snow-selected-text-c`) are Apache-2.0 code under `snow-crates/`. They use the
+`snow-selected-text-c`) are GPL-3.0-or-later code under `snow-crates/`. They use the
 existing Microsoft windows-rs dependency (MIT OR Apache-2.0) for Windows UI
 Automation, native edit controls, and clipboard interoperability. On macOS they
 use accessibility-sys (MIT OR Apache-2.0), core-foundation (MIT OR Apache-2.0),
@@ -103,10 +95,19 @@ and the existing objc2 framework bindings (Zlib OR Apache-2.0 OR MIT) for
 Accessibility and pasteboard interoperability. Their resolved notices are
 included in the generated Rust dependency bundle. Apple system frameworks are
 provided by macOS and are not redistributed.
-Full includes these components in its unified Rust FFI archive; Mini's archive
-does not enable the selected-text dependency.
+Translation target switching uses `whatlang` 0.18.0 (MIT) through the repository's
+GPL-3.0-or-later `snow-language-detection-c` bridge. It analyzes the complete input in
+one call and exposes the detected ISO 639-3 language and raw confidence.
+The upstream MIT license and provenance are preserved under
+`licenses/cargo/whatlang-0.18.0/` because the published crate omits its license text.
+The release collector includes its resolved dependency notices.
+macOS installation collects each Rust target's normal and build dependency
+notices using the same target, features, and default-feature policy as compilation.
+Full and Mini collect their own graphs, including the OCR and MCP sidecars.
+Full includes selected-text acquisition and language detection in its unified
+Rust FFI archive; Mini's archive enables neither dependency.
 
-macOS application QoS uses the repository's Apache-2.0 `snow-core` scheduling
+macOS application QoS uses the repository's GPL-3.0-or-later `snow-core` scheduling
 policy and the existing Rayon worker pools (MIT OR Apache-2.0). Native pthread
 and dispatch APIs are provided by macOS and are not redistributed. The resolved
 Rayon notices remain included in the generated Rust dependency bundle.
@@ -118,7 +119,7 @@ ApplicationServices, CoreFoundation, and CoreGraphics are system frameworks and
 are not redistributed. Windows selection continues to use Microsoft windows-rs.
 
 Mouse and keyboard effect rendering and its C bridge (`snow-recording-effects`
-and `snow-recording-effects-c`) are Apache-2.0 code under `snow-crates/`. They
+and `snow-recording-effects-c`) are GPL-3.0-or-later code under `snow-crates/`. They
 reuse crossbeam-channel (MIT OR Apache-2.0) and Microsoft windows-rs (MIT OR
 Apache-2.0) for bounded input observation and native font rendering. Their
 resolved licenses are included in the generated Rust dependency bundle.
@@ -129,7 +130,7 @@ Rust dependency bundle. Deferred HDR source encoding uses the existing x265
 (GPL-2.0-or-later) dependency with both 8-bit and Main10 APIs; it adds no separate
 codec library or license.
 
-GPU screen recording uses the repository's Apache-2.0 `snow-d3d11` crate and
+GPU screen recording uses the repository's GPL-3.0-or-later `snow-d3d11` crate and
 Microsoft windows-rs (MIT OR Apache-2.0). The restricted FFmpeg 9.0 build enables
 native H.264 surfaces using AMD AMF headers 1.5.2 (MIT), NVIDIA nv-codec-headers
 13.0.19.0 (MIT), and Intel oneVPL dispatcher 2.17.0 (MIT). The headers and

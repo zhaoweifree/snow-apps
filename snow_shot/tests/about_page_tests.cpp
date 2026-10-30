@@ -714,6 +714,22 @@ void traySettingsAndFunctionNavigation() {
                 backend.selectValue(middle).toString() == QStringLiteral("open_function_settings"),
             "invalid writes must preserve the last valid setting");
     auto& configuration = snow_shot::storage::ApplicationStorage::instance().configuration();
+    constexpr auto darkIcon = settings::SettingsRadioBinding::TrayDarkIcon;
+    constexpr auto darkCustomIcon = settings::SettingsFilePathBinding::TrayDarkCustomIcon;
+    require(session.applyRadioValue(darkIcon, QStringLiteral("snow-light")) &&
+                backend.radioValue(darkIcon) == QStringLiteral("snow-light") &&
+                backend.radioValue(settings::SettingsRadioBinding::TrayIcon) ==
+                    QStringLiteral("default") &&
+                !session.applyRadioValue(darkIcon, QStringLiteral("invalid")) &&
+                backend.radioValue(darkIcon) == QStringLiteral("snow-light"),
+            "dark icon settings must have an independent validated radio binding");
+    require(
+        session.applyFilePathValue(darkCustomIcon, QStringLiteral("dark.png")) &&
+            backend.filePathValue(darkCustomIcon) == QStringLiteral("dark.png") &&
+            backend.filePathValue(settings::SettingsFilePathBinding::TrayCustomIcon).isEmpty() &&
+            backend.filePathStatus(darkCustomIcon).isEmpty() &&
+            !backend.filePathStatusError(darkCustomIcon),
+        "dark custom icon paths must be independent from regular icons and skin status");
     require(
         configuration.setValues({{QStringLiteral("tray/enabled"), false},
                                  {QStringLiteral("tray/icon"), QStringLiteral("dark")},
@@ -726,7 +742,8 @@ void traySettingsAndFunctionNavigation() {
             "reset must restore both modified tray settings");
     for (const QString& key :
          {QStringLiteral("tray/enabled"), QStringLiteral("tray/icon"),
-          QStringLiteral("tray/custom_icon"), QStringLiteral("tray/menu_options")}) {
+          QStringLiteral("tray/custom_icon"), QStringLiteral("tray/dark_icon"),
+          QStringLiteral("tray/dark_custom_icon"), QStringLiteral("tray/menu_options")}) {
         require(configuration.value(key) ==
                     snow_shot::storage::ConfigurationSchema::defaultValue(key),
                 "the merged tray reset also restores its icon and menu settings");

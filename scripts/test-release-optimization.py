@@ -248,7 +248,7 @@ snow_apply_release_size_sources(probe SOURCES cold.txt)
                 self.assertIn(expected, self.configure(fixture=fixture, succeeds=False))
 
     def test_production_policy_preserves_hot_libraries_and_mixed_sources(self):
-        self.configure(fixture=f'''
+        fixture = f'''
 # Read the policy's named manifests without applying it yet.
 set(SNOW_SHOT_ENABLE_AGGRESSIVE_RELEASE_OPTIMIZATION OFF)
 set(SNOW_SHOT_RELEASE_STATIC OFF)
@@ -267,6 +267,20 @@ target_sources(snow_shot PRIVATE ${{SNOW_SHOT_RELEASE_SIZE_SHELL_SOURCES}}
     src/presentation/capture/screenshotcaptureworker.cpp
     src/presentation/overlay/screenshotcanvasrenderer.cpp
     src/presentation/recording/recordingrenderjob.cpp)
+target_sources(snow_shot_collage PRIVATE ${{SNOW_SHOT_RELEASE_SIZE_COLLAGE_SOURCES}}
+    src/presentation/collage/collageeditorwidget.cpp
+    src/presentation/collage/collagepdfpagegrid.cpp
+    src/presentation/collage/collagepdfexport.cpp)
+target_sources(snow_shot_collage_core PRIVATE
+    src/presentation/collage/collagedocument.cpp
+    src/presentation/collage/collagetransformedrows_p.h
+    src/presentation/collage/collageresourcebudget.cpp)
+target_sources(snow_shot_image_split PRIVATE ${{SNOW_SHOT_RELEASE_SIZE_IMAGE_SPLIT_SOURCES}}
+    src/presentation/imagesplit/imagespliteditorwidget.cpp
+    src/presentation/imagesplit/imagesplitimagepreparation_p.cpp
+    src/presentation/imagesplit/imagesplitexport.cpp)
+target_sources(snow_shot_image_split_core PRIVATE
+    src/presentation/imagesplit/imagesplitdocument.cpp)
 get_property(targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(target IN LISTS targets)
     get_target_property(sources ${{target}} SOURCES)
@@ -290,7 +304,8 @@ foreach(target IN LISTS SNOW_SHOT_RELEASE_SIZE_TARGETS)
     endif()
 endforeach()
 foreach(source IN LISTS SNOW_SHOT_RELEASE_SIZE_STORAGE_SOURCES
-        SNOW_SHOT_RELEASE_SIZE_SETTINGS_SOURCES SNOW_SHOT_RELEASE_SIZE_SHELL_SOURCES)
+        SNOW_SHOT_RELEASE_SIZE_SETTINGS_SOURCES SNOW_SHOT_RELEASE_SIZE_SHELL_SOURCES
+        SNOW_SHOT_RELEASE_SIZE_COLLAGE_SOURCES SNOW_SHOT_RELEASE_SIZE_IMAGE_SPLIT_SOURCES)
     get_source_file_property(options "${{source}}" COMPILE_OPTIONS)
     if(NOT "$<$<CONFIG:Release>:/O1>" IN_LIST options)
         message(FATAL_ERROR "Cold source is missing its size option: ${{source}}")
@@ -307,7 +322,17 @@ foreach(source IN ITEMS src/storage/preparedpngimage.cpp
         src/presentation/services/globalshortcutmanager.cpp
         src/presentation/capture/screenshotcaptureworker.cpp
         src/presentation/overlay/screenshotcanvasrenderer.cpp
-        src/presentation/recording/recordingrenderjob.cpp)
+        src/presentation/recording/recordingrenderjob.cpp
+        src/presentation/collage/collagedocument.cpp
+        src/presentation/collage/collagetransformedrows_p.h
+        src/presentation/collage/collageresourcebudget.cpp
+        src/presentation/collage/collageeditorwidget.cpp
+        src/presentation/collage/collagepdfpagegrid.cpp
+        src/presentation/collage/collagepdfexport.cpp
+        src/presentation/imagesplit/imagesplitdocument.cpp
+        src/presentation/imagesplit/imagespliteditorwidget.cpp
+        src/presentation/imagesplit/imagesplitimagepreparation_p.cpp
+        src/presentation/imagesplit/imagesplitexport.cpp)
     get_source_file_property(options "${{source}}" COMPILE_OPTIONS)
     if(options)
         message(FATAL_ERROR "Hot source unexpectedly has size options: ${{source}}")
@@ -317,7 +342,10 @@ foreach(source IN ITEMS src/storage/preparedpngimage.cpp
         message(FATAL_ERROR "Hot source unexpectedly skips the PCH: ${{source}}")
     endif()
 endforeach()
-''')
+'''
+        self.configure(fixture=fixture)
+        self.configure(compiler="AppleClang", apple=True,
+                       fixture=fixture.replace(":/O1>", ":-Os>"))
 
     def test_formula_renderer_keeps_speed_and_microtex_remains_strippable(self):
         self.configure(fixture=f'''

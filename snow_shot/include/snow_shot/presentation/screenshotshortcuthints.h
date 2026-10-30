@@ -78,6 +78,9 @@ struct ScreenshotShortcutHintContext {
     QSet<SnowCanvasTool> quickSelectionDisabledTools;
     std::optional<snow_shot::shortcuts::ShortcutBindingMap> configuredShortcuts = std::nullopt;
     bool smartSelectionEnabled = true;
+    bool multiRegionEditing = false;
+    bool regionOperationActive = false;
+    bool regionConstructionActive = false;
 
     [[nodiscard]] bool operator==(const ScreenshotShortcutHintContext&) const = default;
 };
@@ -226,11 +229,12 @@ inline void appendScreenshotCursorMovementShortcutHintRows(
         rows, configuredShortcuts, QStringLiteral("move_cursor_right"), "Move cursor right");
 }
 
-[[nodiscard]] inline QVector<ScreenshotShortcutHintRow> screenshotShortcutHintRows(
-    ScreenshotShortcutHintMode mode,
-    const std::optional<snow_shot::shortcuts::ShortcutBindingMap>& configuredShortcuts =
-        std::nullopt,
-    bool smartSelectionEnabled = true) {
+[[nodiscard]] inline QVector<ScreenshotShortcutHintRow>
+screenshotShortcutHintRowsForMode(ScreenshotShortcutHintMode mode,
+                                  const ScreenshotShortcutHintContext& context) {
+    const auto& configuredShortcuts = context.configuredShortcuts;
+    const bool regionInputActive =
+        context.regionOperationActive || context.regionConstructionActive;
     if (mode == ScreenshotShortcutHintMode::Hidden || mode == ScreenshotShortcutHintMode::Tool) {
         return {};
     }
@@ -248,59 +252,84 @@ inline void appendScreenshotCursorMovementShortcutHintRows(
     if (mode == ScreenshotShortcutHintMode::SmartSelection) {
         rows.push_back(screenshotFixedShortcutHintRow("Switch element level: mouse wheel",
                                                       ScreenshotShortcutHintInput::Mouse));
-        if (smartSelectionEnabled) {
+        if (context.smartSelectionEnabled && !regionInputActive) {
             appendScreenshotConfiguredShortcutHintRow(
                 rows, configuredShortcuts,
                 QStringLiteral("switch_selection_between_window_and_window_sub_element"),
                 "Select window/window sub-element");
         }
-    } else {
+    } else if (!regionInputActive) {
         appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
                                                   QStringLiteral("move_entire_selection"),
                                                   "Move entire selection");
-        appendScreenshotConfiguredShortcutHintRow(
-            rows, configuredShortcuts, QStringLiteral("keep_selection_width_and_height_consistent"),
-            "Keep selection width and height consistent");
+        if (!context.multiRegionEditing) {
+            appendScreenshotConfiguredShortcutHintRow(
+                rows, configuredShortcuts,
+                QStringLiteral("keep_selection_width_and_height_consistent"),
+                "Keep selection width and height consistent");
+        }
     }
-    appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
-                                              QStringLiteral("selection_aspect_ratio_snap"),
-                                              "Selection Aspect Ratio Snap");
-    appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
-                                              QStringLiteral("select_previously_selected_area"),
-                                              "Select previously selected area");
-    appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
-                                              QStringLiteral("copy_color"), "Copy color");
-    appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
-                                              QStringLiteral("toggle_coordinate_mode"),
-                                              "Toggle Global/Relative Coordinates");
-    appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
-                                              QStringLiteral("toggle_cursor_visibility"),
-                                              "Toggle cursor visibility");
+    if (!context.multiRegionEditing && !regionInputActive) {
+        appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
+                                                  QStringLiteral("selection_aspect_ratio_snap"),
+                                                  "Selection Aspect Ratio Snap");
+    }
+    // Region operations block these configured commands in the shortcut controller.
+    if (!regionInputActive) {
+        appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
+                                                  QStringLiteral("copy_color"), "Copy color");
+        appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
+                                                  QStringLiteral("toggle_coordinate_mode"),
+                                                  "Toggle Global/Relative Coordinates");
+        appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
+                                                  QStringLiteral("toggle_cursor_visibility"),
+                                                  "Toggle cursor visibility");
+    }
     rows.push_back(screenshotFixedShortcutHintRow("Switch color format: Shift"));
 
-    const snow_shot::shortcuts::ShortcutBindingList previousHistoryShortcuts =
-        screenshotConfiguredShortcutHintKeys(configuredShortcuts,
-                                             QStringLiteral("previous_screenshot_history"));
-    const snow_shot::shortcuts::ShortcutBindingList nextHistoryShortcuts =
-        screenshotConfiguredShortcutHintKeys(configuredShortcuts,
-                                             QStringLiteral("next_screenshot_history"));
-    snow_shot::shortcuts::ShortcutBindingList historyShortcuts = previousHistoryShortcuts;
-    historyShortcuts.append(nextHistoryShortcuts);
-    if (!historyShortcuts.isEmpty()) {
-        QStringList historyShortcutChips;
-        if (!previousHistoryShortcuts.isEmpty()) {
-            historyShortcutChips.push_back(
-                snow_shot::shortcuts::formatShortcutListDisplayText(previousHistoryShortcuts));
+    if (!regionInputActive) {
+        const snow_shot::shortcuts::ShortcutBindingList previousHistoryShortcuts =
+            screenshotConfiguredShortcutHintKeys(configuredShortcuts,
+                                                 QStringLiteral("previous_screenshot_history"));
+        const snow_shot::shortcuts::ShortcutBindingList nextHistoryShortcuts =
+            screenshotConfiguredShortcutHintKeys(configuredShortcuts,
+                                                 QStringLiteral("next_screenshot_history"));
+        snow_shot::shortcuts::ShortcutBindingList historyShortcuts = previousHistoryShortcuts;
+        historyShortcuts.append(nextHistoryShortcuts);
+        if (!historyShortcuts.isEmpty()) {
+            QStringList historyShortcutChips;
+            if (!previousHistoryShortcuts.isEmpty()) {
+                historyShortcutChips.push_back(
+                    snow_shot::shortcuts::formatShortcutListDisplayText(previousHistoryShortcuts));
+            }
+            if (!nextHistoryShortcuts.isEmpty()) {
+                historyShortcutChips.push_back(
+                    snow_shot::shortcuts::formatShortcutListDisplayText(nextHistoryShortcuts));
+            }
+            rows.push_back({screenshotShortcutHintText("Switch screenshot history"),
+                            snow_shot::shortcuts::formatShortcutListDisplayText(historyShortcuts),
+                            ScreenshotShortcutHintInput::Keyboard,
+                            std::move(historyShortcutChips)});
         }
-        if (!nextHistoryShortcuts.isEmpty()) {
-            historyShortcutChips.push_back(
-                snow_shot::shortcuts::formatShortcutListDisplayText(nextHistoryShortcuts));
-        }
-        rows.push_back({screenshotShortcutHintText("Switch screenshot history"),
-                        snow_shot::shortcuts::formatShortcutListDisplayText(historyShortcuts),
-                        ScreenshotShortcutHintInput::Keyboard, std::move(historyShortcutChips)});
+    }
+    if (context.multiRegionEditing && !context.regionConstructionActive &&
+        context.activeTool == ScreenshotActiveTool::Move) {
+        appendScreenshotConfiguredShortcutHintRow(rows, configuredShortcuts,
+                                                  QStringLiteral("duplicate_latest_region"),
+                                                  "Duplicate latest region");
     }
     return rows;
+}
+
+[[nodiscard]] inline QVector<ScreenshotShortcutHintRow> screenshotShortcutHintRows(
+    ScreenshotShortcutHintMode mode,
+    const std::optional<snow_shot::shortcuts::ShortcutBindingMap>& configuredShortcuts =
+        std::nullopt,
+    bool smartSelectionEnabled = true) {
+    ScreenshotShortcutHintContext context;
+    context.configuredShortcuts = configuredShortcuts;
+    context.smartSelectionEnabled = smartSelectionEnabled;
+    return screenshotShortcutHintRowsForMode(mode, context);
 }
 
 [[nodiscard]] inline bool
@@ -326,9 +355,7 @@ screenshotShortcutHintLines(const QVector<ScreenshotShortcutHintRow>& rows) {
 [[nodiscard]] inline QVector<ScreenshotShortcutHintRow>
 screenshotShortcutHintRows(const ScreenshotShortcutHintContext& context) {
     if (context.captureMode == ScreenshotCaptureMode::ScrollingCapture) {
-        return screenshotShortcutHintRows(ScreenshotShortcutHintMode::Scrolling,
-                                          context.configuredShortcuts,
-                                          context.smartSelectionEnabled);
+        return screenshotShortcutHintRowsForMode(ScreenshotShortcutHintMode::Scrolling, context);
     }
 
     // Selection-stage hints are independent of the currently selected canvas
@@ -337,8 +364,7 @@ screenshotShortcutHintRows(const ScreenshotShortcutHintContext& context) {
     const ScreenshotShortcutHintMode selectionMode =
         screenshotShortcutHintSelectionModeForContext(context);
     if (selectionMode != ScreenshotShortcutHintMode::Hidden) {
-        return screenshotShortcutHintRows(selectionMode, context.configuredShortcuts,
-                                          context.smartSelectionEnabled);
+        return screenshotShortcutHintRowsForMode(selectionMode, context);
     }
 
     // Hints are intentionally limited to the canvas editing tools after the

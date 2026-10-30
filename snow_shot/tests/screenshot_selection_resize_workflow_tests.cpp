@@ -75,11 +75,10 @@ void resizingDoesNotReplacePreviousScreenshotSelection(
         settingsStore.clear();
         ScreenshotSelectionParams previous;
         previous.selection = QRect(5, 10, 100, 80);
-        if (hasPrevious) {
-            settingsStore.setPreviousSelectionParams(previous);
-        }
         QWidget owner;
         ScreenshotSelectionResizeRequest request;
+        if (hasPrevious)
+            request.previousParams = previous;
         request.currentParams.selection = QRect(20, 30, 320, 180);
         request.selectionBounds = QRect(0, 0, 1920, 1080);
         request.ownerWindow = &owner;
@@ -95,12 +94,9 @@ void resizingDoesNotReplacePreviousScreenshotSelection(
         modal->acceptButton()->click();
         flushEvents();
         require(applied, "confirming resize should apply the current selection");
-        require(settingsStore.hasPreviousSelectionParams() == hasPrevious,
-                "resizing must not create a previous screenshot selection");
-        if (hasPrevious) {
-            require(settingsStore.previousSelectionParams() == previous,
-                    "resizing must preserve the previous exported selection");
-        }
+        require(request.previousParams.has_value() == hasPrevious &&
+                    (!hasPrevious || request.previousParams == previous),
+                "resizing must preserve the history-derived previous selection");
     }
     settingsStore.clear();
 }
@@ -118,9 +114,9 @@ void unavailablePreviousGeometryIsDisabled(ScreenshotSelectionResizeWorkflow& wo
         } else {
             previous.region = QRegion(previous.selection).subtracted(QRect(530, 520, 20, 20));
         }
-        settingsStore.setPreviousSelectionParams(previous);
         QWidget owner;
         ScreenshotSelectionResizeRequest request;
+        request.previousParams = previous;
         request.currentParams.selection = QRect(20, 30, 160, 100);
         request.selectionBounds = QRect(0, 0, 300, 200);
         request.ownerWindow = &owner;
@@ -139,7 +135,7 @@ void unavailablePreviousGeometryIsDisabled(ScreenshotSelectionResizeWorkflow& wo
         require(previousDisabled, "an empty clipped Previous must be disabled in the resize modal");
         modal->reject();
         flushEvents();
-        require(settingsStore.previousSelectionParams() == previous,
+        require(request.previousParams == previous,
                 "canvas-specific availability must preserve the stored previous geometry");
     }
     settingsStore.clear();
@@ -265,8 +261,6 @@ void compoundPreviousSelectionKeepsPresetsRectangular(ScreenshotSelectionSetting
     ScreenshotSelectionParams previous;
     previous.selection = QRect(10, 10, 100, 80);
     previous.region = QRegion(previous.selection).subtracted(QRect(40, 30, 20, 20));
-    settings.setPreviousSelectionParams(previous);
-    require(settings.previousSelectionParams() == previous, "Previous selection preserves holes");
     settings.setPresets({{QStringLiteral("Rectangle"), previous}});
     require(settings.presets().size() == 1 && !settings.presets().first().params.region,
             "named presets must store rectangular bounds");

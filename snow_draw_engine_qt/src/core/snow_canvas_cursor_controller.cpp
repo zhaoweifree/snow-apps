@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 SnowCanvasCursorController::SnowCanvasCursorController(QWidget& widget) : m_widget(widget) {}
 
@@ -13,7 +14,7 @@ void SnowCanvasCursorController::setCursor(SnowCanvasCursorLayer layer, const QC
         m_engineCursorStyle.reset();
     }
     cursorForLayer(layer) = cursor;
-    applyResolvedCursor();
+    applyResolvedCursor(m_widget.devicePixelRatioF());
 }
 
 void SnowCanvasCursorController::clearCursor(SnowCanvasCursorLayer layer) {
@@ -21,7 +22,13 @@ void SnowCanvasCursorController::clearCursor(SnowCanvasCursorLayer layer) {
         m_engineCursorStyle.reset();
     }
     cursorForLayer(layer).reset();
-    applyResolvedCursor();
+    applyResolvedCursor(m_widget.devicePixelRatioF());
+}
+
+void SnowCanvasCursorController::setCrosshairCursorFactory(CrosshairCursorFactory factory) {
+    m_crosshairCursorFactory = std::move(factory);
+    m_crosshairCursor.reset();
+    applyResolvedCursor(m_widget.devicePixelRatioF());
 }
 
 std::optional<QCursor>& SnowCanvasCursorController::cursorForLayer(SnowCanvasCursorLayer layer) {
@@ -34,13 +41,13 @@ std::optional<QCursor>& SnowCanvasCursorController::cursorForLayer(SnowCanvasCur
     }
 }
 
-void SnowCanvasCursorController::applyResolvedCursor() {
+void SnowCanvasCursorController::applyResolvedCursor(qreal devicePixelRatio) {
     if (m_hostCursor.has_value()) {
-        applyResolvedCursorToWidget(*m_hostCursor);
+        applyResolvedCursorToWidget(*m_hostCursor, devicePixelRatio);
         return;
     }
     if (m_canvasToolCursor.has_value()) {
-        applyResolvedCursorToWidget(*m_canvasToolCursor);
+        applyResolvedCursorToWidget(*m_canvasToolCursor, devicePixelRatio);
         return;
     }
     if (m_widget.testAttribute(Qt::WA_SetCursor)) {
@@ -48,20 +55,33 @@ void SnowCanvasCursorController::applyResolvedCursor() {
     }
 }
 
-void SnowCanvasCursorController::applyResolvedCursorToWidget(const QCursor& cursor) {
+void SnowCanvasCursorController::applyResolvedCursorToWidget(const QCursor& cursor,
+                                                             qreal devicePixelRatio) {
+    QCursor resolvedCursor = cursor;
+    if (cursor.shape() == Qt::CrossCursor && m_crosshairCursorFactory) {
+        const qreal dpr =
+            std::isfinite(devicePixelRatio) && devicePixelRatio > 0.0 ? devicePixelRatio : 1.0;
+        if (!m_crosshairCursor || dpr != m_crosshairCursorDevicePixelRatio) {
+            m_crosshairCursor = m_crosshairCursorFactory(dpr);
+            m_crosshairCursorDevicePixelRatio = dpr;
+        }
+        resolvedCursor = *m_crosshairCursor;
+    }
     // QWidget forwards every cursor change to the platform window, and on
     // Windows each changed-shape transition reaches the native sprite
     // immediately. Re-applying the cursor a widget already shows would flash
     // it, so layered updates must resolve to a no-op here.
-    if (m_widget.testAttribute(Qt::WA_SetCursor) && m_widget.cursor() == cursor) {
+    if (m_widget.testAttribute(Qt::WA_SetCursor) && m_widget.cursor() == resolvedCursor) {
         return;
     }
-    const QCursor resolvedCursor = cursor;
     m_widget.setCursor(resolvedCursor);
 }
 
 void SnowCanvasCursorController::setEngineCursor(SnowCursorStyle style) {
-    const qreal dpr = m_widget.devicePixelRatioF();
+    setEngineCursor(style, m_widget.devicePixelRatioF());
+}
+
+void SnowCanvasCursorController::setEngineCursor(SnowCursorStyle style, qreal dpr) {
     if (dpr != m_cursorDevicePixelRatio) {
         m_cursorDevicePixelRatio = dpr;
         m_strokeCursor.reset();
@@ -80,7 +100,7 @@ void SnowCanvasCursorController::setEngineCursor(SnowCursorStyle style) {
         m_canvasToolCursor = snow_canvas_input::cursorForSnowCursor(style, dpr);
     }
     m_engineCursorStyle = style;
-    applyResolvedCursor();
+    applyResolvedCursor(dpr);
 }
 
 void SnowCanvasCursorController::configureStrokeCursor(double diameter,
@@ -94,11 +114,13 @@ void SnowCanvasCursorController::configureStrokeCursor(double diameter,
     m_strokeDiameter = diameter;
     m_strokeColor = color;
     m_strokeCursor.reset();
-    refreshDevicePixelRatio();
+    refreshDevicePixelRatio(m_widget.devicePixelRatioF());
 }
 
-void SnowCanvasCursorController::refreshDevicePixelRatio() {
+void SnowCanvasCursorController::refreshDevicePixelRatio(qreal devicePixelRatio) {
     if (m_engineCursorStyle) {
-        setEngineCursor(*m_engineCursorStyle);
+        setEngineCursor(*m_engineCursorStyle, devicePixelRatio);
+    } else {
+        applyResolvedCursor(devicePixelRatio);
     }
 }

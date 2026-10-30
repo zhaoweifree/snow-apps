@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#pragma once
+
+#include "snow_shot/storage/screenshotexportvariables.h"
+#include <QPointF>
+#include <cstdint>
+#include <span>
+
+namespace snow_shot::platform {
+// GUI thread. Native desktop coordinates: physical pixels on Windows, Quartz points on macOS.
+// Only requested fields are read; an empty field set performs no native lookup.
+[[nodiscard]] storage::ScreenshotWindowNames
+screenshotWindowNamesAtPoint(const QPointF& point, std::span<const std::uintptr_t> excludedWindows,
+                             storage::ScreenshotWindowNameFields fields);
+} // namespace snow_shot::platform

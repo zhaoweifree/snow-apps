@@ -156,7 +156,8 @@ fn encode(
 }
 
 fn decode(path: &Path) -> Vec<(i64, Vec<u8>)> {
-    // Independent decoder: production FFmpeg omits the GIF packet parser.
+    // Composite frame rectangles and transparency into the displayed canvas.
+    // The production FFmpeg profile omits the GIF packet parser.
     let mut options = gif::DecodeOptions::new();
     options.set_color_output(gif::ColorOutput::RGBA);
     let mut decoder = options
@@ -302,6 +303,161 @@ fn gif_preserves_variable_delays_last_hold_and_single_frame() {
         }
         assert_eq!(end, 75);
     }
+}
+
+#[test]
+fn gif_palette_changes_keep_sparse_frames_and_unchanged_background() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("sparse-palettes.gif");
+    let (width, height) = (193u32, 109u32);
+    let mut encoder = StreamingEncoder::create(config(&path, width, height)).unwrap();
+    let mut sources = Vec::new();
+    for (index, color) in [
+        [64, 64, 64],
+        [224, 32, 32],
+        [224, 32, 32],
+        [32, 64, 224],
+        [64, 64, 64],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut pixels = frame(width, height, 0, Scene::Gradient);
+        for y in 40..48usize {
+            for x in (50 + index * 4)..(58 + index * 4) {
+                pixels[(y * width as usize + x) * 4..][..3].copy_from_slice(&color);
+            }
+        }
+        encoder
+            .push_rgba_frame_at_pts(index as u64, &pixels)
+            .unwrap();
+        sources.push(pixels);
+    }
+    encoder.finish_at_pts(sources.len() as u64).unwrap();
+    let decoded = decode(&path);
+    for index in 1..sources.len() {
+        for pixel in 0..(width * height) as usize {
+            let at = pixel * 4;
+            if sources[index][at..at + 3] == sources[index - 1][at..at + 3] {
+                assert_eq!(
+                    decoded[index].1[at..at + 4],
+                    decoded[index - 1].1[at..at + 4],
+                    "unchanged source pixel changed after palette replacement, frame {index}"
+                );
+            }
+        }
+    }
+    let mut input = gif::DecodeOptions::new()
+        .read_info(std::fs::File::open(&path).unwrap())
+        .unwrap();
+    let mut index = 0;
+    while let Some(frame) = input.read_next_frame().unwrap() {
+        if index > 0 {
+            assert!(
+                u32::from(frame.width) * u32::from(frame.height) <= 12 * 8,
+                "small RGB changes must stay cropped after palette replacement"
+            );
+            assert_eq!(frame.dispose, gif::DisposalMethod::Keep);
+        }
+        index += 1;
+    }
+    assert_eq!(index, sources.len());
+}
+
+#[test]
+fn gif_quality_controls_color_budget_and_size() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut measurements = Vec::new();
+    for (quality, max_entries) in [(0, 16), (80, 208), (100, 256)] {
+        let path = directory.path().join(format!("quality-{quality}.gif"));
+        let mut settings = config(&path, 192, 108);
+        settings.video.quality = quality;
+        let mut encoder = StreamingEncoder::create(settings).unwrap();
+        encoder
+            .push_rgba_frame_at_pts(0, &frame(192, 108, 0, Scene::Gradient))
+            .unwrap();
+        encoder.finish_at_pts(1).unwrap();
+        let mut input = gif::DecodeOptions::new()
+            .read_info(std::fs::File::open(&path).unwrap())
+            .unwrap();
+        let first = input.read_next_frame().unwrap().unwrap();
+        let used = first
+            .buffer
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            used.len() < max_entries,
+            "reserve one color for transparent differences"
+        );
+        measurements.push((
+            std::fs::metadata(&path).unwrap().len(),
+            mse(&path, 192, 108, 1, Scene::Gradient),
+        ));
+    }
+    assert!(measurements[0].0 < measurements[2].0);
+    assert!(measurements[0].1 > measurements[1].1);
+    assert!(measurements[1].1 > measurements[2].1);
+}
+
+#[test]
+fn gif_prepared_and_rgba_paths_share_quality_deltas_and_replacement_timing() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut outputs = Vec::new();
+    for prepared in [false, true] {
+        let path = directory.path().join(format!("prepared-{prepared}.gif"));
+        let mut settings = config(&path, 193, 109);
+        settings.video.quality = 17;
+        let mut encoder = StreamingEncoder::create(settings).unwrap();
+        // Preparing a frame that is subsequently replaced must not advance
+        // palette or RGB-difference state. Repeat the last source as a hold.
+        for (index, pts) in [0, 0, 3, 8, 13].into_iter().enumerate() {
+            let pixels = frame(193, 109, index.min(3), Scene::Gradient);
+            if prepared {
+                let mut rgba = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGBA, 193, 109);
+                let stride = rgba.stride(0);
+                for y in 0..109 {
+                    rgba.data_mut(0)[y * stride..][..193 * 4]
+                        .copy_from_slice(&pixels[y * 193 * 4..][..193 * 4]);
+                }
+                let format = encoder.input_pixel_format();
+                let mut scaler = ffmpeg::software::scaling::Context::get(
+                    ffmpeg::format::Pixel::RGBA,
+                    193,
+                    109,
+                    format,
+                    193,
+                    109,
+                    ffmpeg::software::scaling::Flags::BICUBIC,
+                )
+                .unwrap();
+                let mut converted = ffmpeg::frame::Video::new(format, 193, 109);
+                scaler.run(&rgba, &mut converted).unwrap();
+                encoder
+                    .push_prepared_video_frame_ref_at_pts(pts, &converted)
+                    .unwrap();
+            } else {
+                encoder.push_rgba_frame_at_pts(pts, &pixels).unwrap();
+            }
+        }
+        assert_eq!(encoder.finish_at_pts(20).unwrap().encoded_frames, 4);
+        let frames = decode(&path);
+        assert_eq!(
+            frames.iter().map(|f| f.0).collect::<Vec<_>>(),
+            [0, 15, 40, 65]
+        );
+        assert_eq!(frames[2].1, frames[3].1);
+        let mut input = gif::DecodeOptions::new()
+            .read_info(std::fs::File::open(&path).unwrap())
+            .unwrap();
+        let mut duration = 0;
+        while let Some(frame) = input.read_next_frame().unwrap() {
+            duration += frame.delay;
+        }
+        assert_eq!(duration, 100);
+        outputs.push(std::fs::read(path).unwrap());
+    }
+    assert_eq!(outputs[0], outputs[1]);
 }
 
 #[test]

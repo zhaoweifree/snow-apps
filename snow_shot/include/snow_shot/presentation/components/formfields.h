@@ -38,6 +38,8 @@ struct Metadata {
     settings::TranslatableText description = {};
     settings::TranslatableText placeholder = {};
     settings::TranslatableText suffix = {};
+    // Optional inline help action for settings-row descriptions.
+    settings::TranslatableText descriptionAction = {};
 };
 
 struct Options {
@@ -118,6 +120,7 @@ class FormField final : public QObject {
   signals:
     void valueEdited(const QVariant& value);
     void valueCommitted(const QVariant& value);
+    void descriptionActionRequested();
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

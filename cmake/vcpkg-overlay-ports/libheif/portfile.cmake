@@ -11,6 +11,7 @@ vcpkg_from_github(
         "${_snow_vcpkg_libheif_port}/find-modules.diff"
         "${_snow_vcpkg_libheif_port}/gdk-pixbuf.patch"
         "${_snow_vcpkg_libheif_port}/symbol-exports.diff"
+        aom-encoder-context-lifetime.patch
 )
 
 vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS

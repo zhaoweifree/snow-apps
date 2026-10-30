@@ -218,12 +218,13 @@ void ScreenshotFloatingToolPaletteWindow::setTransientOwnerWindow(QWidget* owner
 
 void ScreenshotFloatingToolPaletteWindow::setPlacementContext(QScreen* screen,
                                                               const QRect& logicalBounds,
-                                                              const QRect& physicalBounds) {
+                                                              const QRect& physicalBounds,
+                                                              bool preservePhysicalSize) {
     const bool placementScreenChangedByCaller = m_placementScreen != screen;
     const bool changed = placementScreenChangedByCaller ||
                          m_movementLogicalBounds != logicalBounds ||
                          m_movementPhysicalBounds != physicalBounds;
-    if (placementScreenChangedByCaller) {
+    if (placementScreenChangedByCaller && !preservePhysicalSize) {
         resetPhysicalSizeInvariant();
     }
     m_placementScreen = screen;

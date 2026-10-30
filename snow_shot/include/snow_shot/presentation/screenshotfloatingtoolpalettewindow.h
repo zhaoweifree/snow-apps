@@ -41,8 +41,11 @@ class ScreenshotFloatingToolPaletteWindow : public QWidget {
     ScreenshotToolPaletteHost* paletteHost() const;
     void setOwnerWindow(QWidget* owner);
     void setTransientOwnerWindow(QWidget* owner);
+    // Preserve the physical baseline when adopting a display reached by native
+    // dragging; new capture-region placement normally establishes a new baseline.
     void setPlacementContext(QScreen* screen, const QRect& logicalBounds,
-                             const QRect& physicalBounds = QRect());
+                             const QRect& physicalBounds = QRect(),
+                             bool preservePhysicalSize = false);
     void setStyleToolbarAboveMain(bool above);
     void prepareForDisplay();
     // Retire the platform window and backing store while keeping the reusable

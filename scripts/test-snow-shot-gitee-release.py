@@ -31,7 +31,7 @@ class PublisherTests(unittest.TestCase):
         self.release = {"schema": 1, "tag": TAG, "sourceCommit": "a" * 40,
                         "title": "Snow Shot 1.2.3", "body": "Detailed bilingual notes.\n",
                         "assets": []}
-        self.add_asset("package.zip", b"binary package")
+        self.add_asset("snow-shot-1.2.3-windows-x64-online-update.zip", b"binary package")
         self.add_asset("latest-version.json", b"signed manifest")
 
     def add_asset(self, name, data):
@@ -40,6 +40,69 @@ class PublisherTests(unittest.TestCase):
         self.release["assets"].append({"name": name, "path": str(path),
                                        "size": len(data), "sha256": publisher.sha256(path)})
         return path
+
+    def test_gitee_selects_only_update_and_installer_downloads(self):
+        assets, _ = self.paired_windows_release(('x64', 'arm64'))
+        for name in list(assets):
+            if name.endswith(('.exe', '.zip')):
+                self.add_asset(name + '.sha256', b'checksum')
+                self.add_asset(name.rsplit('.', 1)[0] + '.manifest.json', b'audit inventory')
+        for product, architecture in (('snow-shot', 'arm64'), ('snow-shot', 'x86_64'),
+                                      ('snow-shot-mini', 'arm64')):
+            self.add_homebrew_dmg(architecture, product)
+            self.add_asset(f'{product}-1.2.3-macos-{architecture}-homebrew.tar.gz', b'homebrew')
+        self.add_asset('install-snow-shot-macos.sh', b'installer script')
+        for name in ('symbols.zip', 'winget.yaml', 'scoop.json', 'service.zip',
+                     'latest-version-other.json', 'snow-shot-9.9.9-windows-x64-online.exe'):
+            self.add_asset(name, b'other channel')
+        local = publisher.local_assets(self.release)
+        selected = publisher.gitee_assets(self.release, local)
+        self.assertEqual(len(selected), 43)  # 16 packages, 16 checksums, 4 feeds, 6 DMG assets, script.
+        self.assertTrue(set(assets) <= set(selected))
+        self.assertFalse(any(name.endswith(('.manifest.json', '-homebrew.tar.gz')) for name in selected))
+        self.assertIn('snow-shot-mini-1.2.3-macos-arm64.dmg.sha256', selected)
+        self.assertIn('install-snow-shot-macos.sh', selected)
+
+    def test_attachment_budget_excludes_other_channels_and_precedes_remote_mutations(self):
+        self.add_asset('snow-shot-1.2.3-macos-arm64-homebrew.tar.gz', b'large other channel' * 100)
+        assets = publisher.local_assets(self.release)
+        selected = publisher.gitee_assets(self.release, assets)
+        total = sum(path.stat().st_size for path in selected.values())
+        with patch.object(publisher, 'GITEE_ATTACHMENT_LIMIT', total):
+            self.assertEqual(publisher.gitee_assets(self.release, assets), selected)
+        with patch.object(publisher, 'GITEE_ATTACHMENT_LIMIT', total - 1), \
+             patch.object(publisher, 'sync_tag') as sync, \
+             patch.object(publisher, 'existing_release') as remote, \
+             patch.object(publisher, 'prune_old_releases') as cleanup:
+            with self.assertRaisesRegex(ValueError, 'attachment budget'):
+                publisher.publish(self.release, assets, 'token', 'user')
+            sync.assert_not_called()
+            remote.assert_not_called()
+            cleanup.assert_not_called()
+
+    def test_release_tags_push_only_a_source_record_without_history(self):
+        remote = self.directory / 'remote.git'
+        publisher.run('git', 'init', '--bare', '--quiet', str(remote))
+        with patch.object(publisher, 'GITEE_GIT', str(remote)):
+            first = publisher.sync_tag(TAG, 'a' * 40, 'token', 'user')
+            self.assertEqual(publisher.sync_tag(TAG, 'a' * 40, 'token', 'user'), first)
+            with self.assertRaisesRegex(ValueError, 'different source commit'):
+                publisher.sync_tag(TAG, 'b' * 40, 'token', 'user')
+        self.assertNotEqual(first, 'a' * 40)
+        self.assertEqual(publisher.run('git', '-C', str(remote), 'rev-list', '--count', TAG), '1')
+        self.assertEqual(publisher.run('git', '-C', str(remote), 'ls-tree', '--name-only', TAG), 'release.json')
+        self.assertEqual(publisher.run('git', '-C', str(remote), 'branch'), '')
+        record = json.loads(publisher.run('git', '-C', str(remote), 'show', f'{TAG}:release.json'))
+        self.assertEqual(record['sourceCommit'], 'a' * 40)
+        self.assertEqual(record['tag'], TAG)
+        self.assertEqual(record['sourceRepository'], 'https://github.com/mg-chao/snow-apps')
+
+    def test_legacy_source_tags_are_preserved_without_another_push(self):
+        with patch.object(publisher, 'git_with_gitee_auth', return_value=f"{'a' * 40}\trefs/tags/{TAG}") as git, \
+             patch.object(publisher, 'release_marker') as marker:
+            self.assertEqual(publisher.sync_tag(TAG, 'a' * 40, 'token', 'user'), 'a' * 40)
+        git.assert_called_once()
+        marker.assert_not_called()
 
     def test_authentication_stays_out_of_process_arguments(self):
         calls = []
@@ -69,11 +132,11 @@ class PublisherTests(unittest.TestCase):
                 publisher.asset_url({"name": name, "browser_download_url": bad}, TAG, name)
 
     def test_local_input_rejects_changed_or_duplicate_bytes(self):
-        self.assertEqual(set(publisher.local_assets(self.release)), {"package.zip", "latest-version.json"})
-        (self.directory / "package.zip").write_bytes(b"changed package")
+        self.assertEqual(set(publisher.local_assets(self.release)), {"snow-shot-1.2.3-windows-x64-online-update.zip", "latest-version.json"})
+        (self.directory / "snow-shot-1.2.3-windows-x64-online-update.zip").write_bytes(b"changed package")
         with self.assertRaisesRegex(ValueError, "differs from its audit"):
             publisher.local_assets(self.release)
-        (self.directory / "package.zip").write_bytes(b"binary package")
+        (self.directory / "snow-shot-1.2.3-windows-x64-online-update.zip").write_bytes(b"binary package")
         self.release["assets"].append(dict(self.release["assets"][0]))
         with self.assertRaisesRegex(ValueError, "duplicate"):
             publisher.local_assets(self.release)
@@ -114,6 +177,8 @@ class PublisherTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_direct_upload_order_retry_conflict_and_readonly_verification(self):
+        self.add_asset('snow-shot-1.2.3-macos-arm64-homebrew.tar.gz', b'GitHub-only archive')
+        self.add_asset('snow-shot-1.2.3-windows-x64-online-update.manifest.json', b'audit inventory')
         assets = publisher.local_assets(self.release)
         remote = {"id": 7, "tag_name": TAG, "name": self.release["title"],
                   "body": self.release["body"], "prerelease": False}
@@ -140,25 +205,81 @@ class PublisherTests(unittest.TestCase):
              patch.object(publisher, "verify_attachment", side_effect=fake_verify), \
              patch.object(publisher, "prune_old_releases", side_effect=lambda *args: events.append("cleanup")):
             publisher.publish(self.release, assets, "test-token", "test-user")
-            self.assertEqual(events, ["tag", "create", "package.zip", "verify:package.zip",
+            self.assertEqual(events, ["tag", "create", "snow-shot-1.2.3-windows-x64-online-update.zip", "verify:snow-shot-1.2.3-windows-x64-online-update.zip",
                                       "latest-version.json", "verify:latest-version.json", "cleanup"])
             events.clear()
             publisher.publish(self.release, assets, "test-token", "test-user")
-            self.assertEqual(events, ["tag", "verify:package.zip", "verify:latest-version.json", "cleanup"])
-            files.pop("package.zip")
+            self.assertEqual(events, ["tag", "verify:snow-shot-1.2.3-windows-x64-online-update.zip", "verify:latest-version.json", "cleanup"])
+            files.pop("snow-shot-1.2.3-windows-x64-online-update.zip")
             events.clear()
             with self.assertRaisesRegex(ValueError, "missing local assets"):
                 publisher.publish(self.release, assets, "", "", verify_only=True)
             self.assertEqual(events, ["verify:latest-version.json"])
             events.clear()
             publisher.publish(self.release, assets, "test-token", "test-user")
-            self.assertEqual(events, ["tag", "verify:latest-version.json", "package.zip", "verify:package.zip", "cleanup"])
+            self.assertEqual(events, ["tag", "verify:latest-version.json", "snow-shot-1.2.3-windows-x64-online-update.zip", "verify:snow-shot-1.2.3-windows-x64-online-update.zip", "cleanup"])
             files["latest-version.json"]["bytes"] = b"conflicting remote bytes"
-            files.pop("package.zip")
+            files.pop("snow-shot-1.2.3-windows-x64-online-update.zip")
             events.clear()
             with self.assertRaisesRegex(ValueError, "conflicting"):
                 publisher.publish(self.release, assets, "test-token", "test-user")
             self.assertEqual(events, ["tag"])
+
+    def test_existing_github_only_attachments_are_removed_after_downloads_are_verified(self):
+        extra = self.add_asset('snow-shot-1.2.3-macos-arm64-homebrew.tar.gz', b'legacy archive')
+        local = publisher.local_assets(self.release)
+        remote = {'id': 7, 'tag_name': TAG, 'name': self.release['title'], 'body': self.release['body']}
+        files = [{'id': index, 'name': name, 'size': path.stat().st_size,
+                  'browser_download_url': f'https://gitee.com/mg-chao/snow-apps/releases/download/{TAG}/{name}'}
+                 for index, (name, path) in enumerate(local.items(), 1)]
+        events = []
+        def delete(command, **kwargs):
+            self.assertNotIn('secret-token', str(command))
+            self.assertIn('secret-token', kwargs['input'])
+            self.assertEqual(events, ['verify:' + name for name in local if name != extra.name])
+            files[:] = [file for file in files if file['name'] != extra.name]
+            events.append('delete:' + extra.name)
+            return ''
+        with patch.object(publisher, 'sync_tag'), \
+             patch.object(publisher, 'existing_release', return_value=remote), \
+             patch.object(publisher, 'attachments', side_effect=lambda *args: list(files)), \
+             patch.object(publisher, 'verify_attachment', side_effect=lambda file, tag, name, *args: events.append('verify:' + name)), \
+             patch.object(publisher, 'post_form') as upload, \
+             patch.object(publisher, 'prune_old_releases'), \
+             patch.object(publisher.subprocess, 'check_output', side_effect=delete) as mutation, \
+             patch.object(publisher, 'api_json', return_value=None):
+            publisher.publish(self.release, local, '', '', verify_only=True)
+            mutation.assert_not_called()
+            self.assertEqual(len(files), 3)
+            events.clear()
+            publisher.publish(self.release, local, 'secret-token', 'user')
+            mutation.assert_called_once()
+            upload.assert_not_called()
+        self.assertEqual(events[-1], 'delete:' + extra.name)
+        self.assertEqual(len(files), 2)
+
+    def test_excluded_attachment_cleanup_validates_entire_plan_before_deleting(self):
+        extra = self.add_asset('snow-shot-1.2.3-macos-arm64-homebrew.tar.gz', b'legacy archive')
+        local = publisher.local_assets(self.release)
+        selected = publisher.gitee_assets(self.release, local)
+        valid = {'id': 1, 'name': extra.name, 'size': extra.stat().st_size,
+                 'browser_download_url': f'https://gitee.com/mg-chao/snow-apps/releases/download/{TAG}/{extra.name}'}
+        for changes in ({'id': False}, {'size': 1}, {'browser_download_url': 'https://example.test/archive'}):
+            with self.subTest(changes=changes), patch.object(publisher.subprocess, 'check_output') as delete:
+                with self.assertRaises(ValueError):
+                    publisher.prune_excluded_attachments(7, TAG, [valid, dict(valid, **changes)],
+                                                         local, selected, 'token')
+                delete.assert_not_called()
+        error = subprocess.CalledProcessError(56, ['curl'])
+        with patch.object(publisher.subprocess, 'check_output', side_effect=error) as delete, \
+             patch.object(publisher, 'api_json', return_value=None):
+            self.assertEqual(publisher.prune_excluded_attachments(7, TAG, [valid], local, selected, 'token'), 1)
+        delete.assert_called_once()
+        with patch.object(publisher.subprocess, 'check_output', side_effect=error) as delete, \
+             patch.object(publisher, 'api_json', return_value=valid):
+            with self.assertRaises(subprocess.CalledProcessError):
+                publisher.prune_excluded_attachments(7, TAG, [valid], local, selected, 'token')
+        delete.assert_called_once()
 
     def test_semver_retention_preserves_current_newer_unrelated_and_draft_releases(self):
         versions = ["alpha", "alpha.1", "alpha.beta", "beta", "beta.2", "beta.11", "rc.1"]
@@ -229,7 +350,7 @@ class PublisherTests(unittest.TestCase):
                 def upload(url, fields, token, file=None):
                     attempts.append(file.name)
                     events.append("upload:" + file.name)
-                    if attempts == ["package.zip"]:
+                    if attempts == ["snow-shot-1.2.3-windows-x64-online-update.zip"]:
                         if accepted:
                             files[file.name] = {"name": file.name}
                         raise publisher.GiteeQuotaError("quota")
@@ -245,11 +366,11 @@ class PublisherTests(unittest.TestCase):
                      patch.object(publisher, "prune_old_releases", side_effect=cleanup):
                     publisher.publish(self.release, assets, "test-token", "test-user")
                 if accepted:
-                    self.assertEqual(attempts, ["package.zip", "latest-version.json"])
+                    self.assertEqual(attempts, ["snow-shot-1.2.3-windows-x64-online-update.zip", "latest-version.json"])
                     self.assertEqual(events.count("cleanup"), 1)
                 else:
-                    self.assertEqual(attempts, ["package.zip", "package.zip", "latest-version.json"])
-                    self.assertEqual(events[:3], ["upload:package.zip", "cleanup", "upload:package.zip"])
+                    self.assertEqual(attempts, ["snow-shot-1.2.3-windows-x64-online-update.zip", "snow-shot-1.2.3-windows-x64-online-update.zip", "latest-version.json"])
+                    self.assertEqual(events[:3], ["upload:snow-shot-1.2.3-windows-x64-online-update.zip", "cleanup", "upload:snow-shot-1.2.3-windows-x64-online-update.zip"])
                 self.assertEqual(events[-2:], ["verify:latest-version.json", "cleanup"])
 
     def test_failed_uploads_do_not_trigger_unrelated_or_repeated_cleanup(self):
@@ -266,6 +387,35 @@ class PublisherTests(unittest.TestCase):
                     publisher.publish(self.release, publisher.local_assets(self.release), "token", "user")
                 upload.assert_called_once()
                 self.assertEqual(cleanup.call_count, int(quota))
+
+    def test_quota_retry_can_reclaim_excluded_assets_without_an_older_release(self):
+        extra = self.add_asset('snow-shot-1.2.3-macos-arm64-homebrew.tar.gz', b'legacy archive')
+        local = publisher.local_assets(self.release)
+        remote = {'id': 7, 'tag_name': TAG, 'name': self.release['title'], 'body': self.release['body']}
+        files = [{'id': 3, 'name': extra.name, 'size': extra.stat().st_size,
+                  'browser_download_url': f'https://gitee.com/mg-chao/snow-apps/releases/download/{TAG}/{extra.name}'}]
+        attempts = []
+        def upload(url, fields, token, file=None):
+            attempts.append(file.name)
+            if len(attempts) == 1:
+                raise publisher.GiteeQuotaError('quota')
+            files.append({'name': file.name})
+        def delete(*args, **kwargs):
+            self.assertEqual(len(attempts), 1)
+            files.clear()
+            return ''
+        with patch.object(publisher, 'sync_tag'), \
+             patch.object(publisher, 'existing_release', return_value=remote), \
+             patch.object(publisher, 'attachments', side_effect=lambda *args: list(files)), \
+             patch.object(publisher, 'post_form', side_effect=upload), \
+             patch.object(publisher, 'verify_attachment'), \
+             patch.object(publisher, 'prune_old_releases', return_value=0), \
+             patch.object(publisher.subprocess, 'check_output', side_effect=delete) as mutation, \
+             patch.object(publisher, 'api_json', return_value=None):
+            publisher.publish(self.release, local, 'token', 'user')
+        mutation.assert_called_once()
+        self.assertEqual(attempts, ['snow-shot-1.2.3-windows-x64-online-update.zip'] * 2 + ['latest-version.json'])
+        self.assertNotIn(extra.name, [file['name'] for file in files])
 
     def paired_windows_release(self, architectures=('x64',)):
         self.release.pop('nativeValidation', None)
@@ -314,6 +464,33 @@ class PublisherTests(unittest.TestCase):
             proofs[1]['Artifacts'][0]['Sha256'] = '0' * 64
             with self.assertRaisesRegex(ValueError, 'does not match published bytes'):
                 publisher.verify_local_release(self.release, assets, *auditors)
+
+    def test_arm64_waiver_requires_opt_in_exact_bytes_and_x64_proof(self):
+        assets, auditors = self.paired_windows_release(('x64', 'arm64'))
+        proofs = []
+        for platform in ('windows-x64', 'windows-arm64'):
+            artifacts = [{'Name': name, 'Bytes': path.stat().st_size, 'Sha256': publisher.sha256(path)}
+                         for name, path in assets.items() if platform in name and name.endswith(('.exe', '.zip'))]
+            proofs.append({'Platform': platform, 'HostPlatform': platform,
+                           'Passed': platform == 'windows-x64', 'Waived': platform == 'windows-arm64',
+                           'Artifacts': artifacts})
+        self.release['nativeValidation'] = proofs
+        invoke = lambda *args: 'a' * 40 if args[0] == 'git' else ''
+        with patch.object(publisher, 'run', side_effect=invoke):
+            with self.assertRaisesRegex(ValueError, 'does not match published bytes'):
+                publisher.verify_local_release(self.release, assets, *auditors)
+            publisher.verify_local_release(self.release, assets, *auditors, require_complete=True,
+                                           skip_arm64_native_validation=True)
+            proofs[1]['Artifacts'][0]['Sha256'] = '0' * 64
+            with self.assertRaisesRegex(ValueError, 'does not match published bytes'):
+                publisher.verify_local_release(self.release, assets, *auditors,
+                                               skip_arm64_native_validation=True)
+            proofs[1]['Artifacts'][0]['Sha256'] = publisher.sha256(assets[proofs[1]['Artifacts'][0]['Name']])
+            proofs[0]['Passed'] = False
+            proofs[0]['Waived'] = True
+            with self.assertRaisesRegex(ValueError, 'does not match published bytes'):
+                publisher.verify_local_release(self.release, assets, *auditors,
+                                               skip_arm64_native_validation=True)
 
     def test_historical_x64_verification_cannot_authorize_new_publication(self):
         assets, auditors = self.paired_windows_release()

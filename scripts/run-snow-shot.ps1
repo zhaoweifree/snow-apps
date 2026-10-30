@@ -13,6 +13,7 @@ param(
     [string]$Preset = "windows-msvc-debug",
     [ValidateSet("Full", "Mini")][string]$Edition = "Full",
     [switch]$Clean,
+    [switch]$Reconfigure,
     [switch]$NoBuild,
     [switch]$Detached
 )
@@ -93,7 +94,7 @@ if (-not $NoBuild) {
     $buildScript = Join-Path $PSScriptRoot "build.ps1"
     $vcpkgExecutable = Join-Path $repoRoot ".tools\vcpkg\vcpkg.exe"
     $skipBootstrap = Test-Path -LiteralPath $vcpkgExecutable -PathType Leaf
-    & $buildScript -Preset $Preset -Target $target -Clean:$Clean -SkipBootstrap:$skipBootstrap
+    & $buildScript -Preset $Preset -Target $target -Clean:$Clean -Reconfigure:$Reconfigure -SkipBootstrap:$skipBootstrap
     if ($LASTEXITCODE -ne 0) {
         throw "Snow Shot build failed with exit code $LASTEXITCODE."
     }

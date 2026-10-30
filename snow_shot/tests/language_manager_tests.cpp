@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QTemporaryDir>
+#include <QTranslator>
 
 #include <cstdlib>
 #include <iostream>
@@ -56,8 +57,29 @@ int main(int argc, char** argv) {
             "the English catalog should be active after canonicalizing the locale");
     require(adqt::locale::LocaleManager::instance().locale().name() == QStringLiteral("en_US"),
             "Ant Design Qt should follow the English application locale");
+    QTranslator sourceCatalog;
+    require(sourceCatalog.load(QStringLiteral(":/i18n/snow_shot_en_US.qm")),
+            "the compact source-language catalog must remain loadable");
+    require(sourceCatalog.translate("CanvasStatusReadout", "Locked").isEmpty() &&
+                QCoreApplication::translate("CanvasStatusReadout", "Locked") ==
+                    QStringLiteral("Locked"),
+            "identity messages must use English fallback instead of occupying the catalog");
+    require(sourceCatalog.translate("LanguageCatalog", "Language name") ==
+                QStringLiteral("English"),
+            "source-language catalog compaction must retain language-name metadata");
+    require(QCoreApplication::translate("PinnedWindowManagementPageWidget", "%n pinned window(s)",
+                                        nullptr, 1) == QStringLiteral("1 pinned window") &&
+                QCoreApplication::translate("PinnedWindowManagementPageWidget",
+                                            "%n pinned window(s)", nullptr,
+                                            2) == QStringLiteral("2 pinned windows"),
+            "source-language catalog compaction must preserve singular and plural forms");
 
     require(manager.setLanguage(QStringLiteral("zh_CN")), "Simplified Chinese should load");
+    require(QCoreApplication::translate("SettingsCatalog", "Mouse wheel opacity step") ==
+                    QString::fromUtf8("鼠标滚轮不透明度步长") &&
+                QCoreApplication::translate("SettingsCatalog", "Mouse wheel zoom step") ==
+                    QString::fromUtf8("鼠标滚轮缩放步长"),
+            "Simplified Chinese translates pinned wheel step labels");
     require(QCoreApplication::translate("CanvasStatusReadout", "Scale: %1%") ==
                     QString::fromUtf8("缩放：%1%") &&
                 QCoreApplication::translate("CanvasStatusReadout", "Locked") ==
@@ -110,6 +132,11 @@ int main(int argc, char** argv) {
                 QCoreApplication::translate("SettingsCatalog", "Repeat Action") ==
                     QString::fromUtf8("重複執行"),
             "language changes translate duplicate pin settings and option labels");
+    require(QCoreApplication::translate("SettingsCatalog", "Mouse wheel opacity step") ==
+                    QString::fromUtf8("滑鼠滾輪不透明度步長") &&
+                QCoreApplication::translate("SettingsCatalog", "Mouse wheel zoom step") ==
+                    QString::fromUtf8("滑鼠滾輪縮放步長"),
+            "Traditional Chinese translates pinned wheel step labels");
     require(QCoreApplication::translate("ScreenshotPinnedWindow", "Decrease 10%") ==
                     QString::fromUtf8("減少 10%") &&
                 QCoreApplication::translate("SettingsCatalog", "Increase scale by 10%") ==
@@ -125,6 +152,11 @@ int main(int argc, char** argv) {
     require(QCoreApplication::translate("PinnedWindowManagementPageWidget", "No pinned windows") ==
                 QString::fromUtf8("尚無固定到螢幕視窗"),
             "Traditional Chinese management should use the same window terminology");
+
+    require(manager.setLanguage(QStringLiteral("en_US")) &&
+                QCoreApplication::translate("CanvasStatusReadout", "Locked") ==
+                    QStringLiteral("Locked"),
+            "switching back to compact English must remove previous localized translations");
 
     require(manager.setLanguage(QStringLiteral("system")),
             "Follow system should be a persistent preference");

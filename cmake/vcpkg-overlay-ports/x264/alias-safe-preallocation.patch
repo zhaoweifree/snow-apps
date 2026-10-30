@@ -1,0 +1,31 @@
+diff --git a/common/base.h b/common/base.h
+--- a/common/base.h
++++ b/common/base.h
+@@ -320,11 +320,13 @@
+ #define PREALLOC_INIT\
+     int    prealloc_idx = 0;\
+     int64_t prealloc_size = 0;\
+-    uint8_t **preallocs[PREALLOC_BUF_SIZE];
+-
++    struct { void *slot; int64_t offset; } preallocs[PREALLOC_BUF_SIZE];
++
++/* Keep offsets separate from pointer objects. Writing a typed pointer through
++ * uint8_t ** violates strict aliasing and can leave a cached offset in use. */
+ #define PREALLOC( var, size )\
+ do {\
+-    var = (void*)(intptr_t)prealloc_size;\
+-    preallocs[prealloc_idx++] = (uint8_t**)&var;\
++    preallocs[prealloc_idx].slot = &var;\
++    preallocs[prealloc_idx++].offset = prealloc_size;\
+     prealloc_size += ALIGN((int64_t)(size), NATIVE_ALIGN);\
+ } while( 0 )
+@@ -333,5 +335,8 @@
+ do {\
+     CHECKED_MALLOC( ptr, prealloc_size );\
+     while( prealloc_idx-- )\
+-        *preallocs[prealloc_idx] = (uint8_t*)((intptr_t)(*preallocs[prealloc_idx]) + (intptr_t)ptr);\
++    {\
++        uint8_t *buffer = (uint8_t*)ptr + preallocs[prealloc_idx].offset;\
++        memcpy( preallocs[prealloc_idx].slot, &buffer, sizeof(buffer) );\
++    }\
+ } while( 0 )

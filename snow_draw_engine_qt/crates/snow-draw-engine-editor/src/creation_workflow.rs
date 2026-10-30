@@ -114,6 +114,7 @@ impl Editor {
 
     pub(crate) fn begin_arrow_creation(
         &mut self,
+        document: &DocumentModel,
         pointer_id: u32,
         start_canvas_position: Point<f64>,
         start_view_position: Point<f64>,
@@ -123,7 +124,12 @@ impl Editor {
             .distance_creation_generation
             .wrapping_add(1)
             .max(1);
+        let id = document.peek_next_element_id();
         self.state.interaction = InteractionState::CreatingArrow(CreateArrowState {
+            stroke_rendering_seed: snow_draw_engine_core::arrow::stroke_rendering_seed(
+                id.index,
+                id.generation,
+            ),
             pointer_id,
             committed_points: vec![start_canvas_position],
             press_view_position: start_view_position,
@@ -280,6 +286,10 @@ impl Editor {
         // edits to existing badges cannot become implicit sequence starts.
         let mut serial = SerialNumberData {
             center,
+            stroke_rendering_seed: snow_draw_engine_core::arrow::stroke_rendering_seed(
+                (center.x as f32).to_bits(),
+                (center.y as f32).to_bits(),
+            ),
             ..self.state.default_serial_number.clone()
         };
         serial.text_element_id = None;
@@ -403,6 +413,7 @@ impl Editor {
                     start_arrowhead: None,
                     end_arrowhead: None,
                     stroke_style: style.stroke_style,
+                    stroke_rendering_style: style.stroke_rendering_style,
                     arrow_type: style.arrow_type,
                     arrow_shaft_type: style.arrow_shaft_type,
                     arrow_ratio: style.arrow_ratio,
@@ -417,6 +428,13 @@ impl Editor {
         let arrow_context = self.arrow_engine_context(modifiers);
 
         let mut preview_arrow = arrow;
+        preview_arrow.stroke_rendering_seed = match &self.state.interaction {
+            InteractionState::CreatingArrow(state) => state.stroke_rendering_seed,
+            _ => snow_draw_engine_core::arrow::stroke_rendering_seed(
+                arrow_id.index,
+                arrow_id.generation,
+            ),
+        };
         let mut suggested_binding = None;
         for (edge, pointer) in [
             (ArrowEndpointEdge::Start, points.first().copied()?),
@@ -1427,6 +1445,8 @@ mod line_creation_tests {
             .process_arrow_creation_pointer_event(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 4,
                     event_type: PointerEventType::DoubleClick,
                     device: PointerDevice::Mouse,
@@ -1469,6 +1489,8 @@ mod line_creation_tests {
             .process_arrow_creation_pointer_event(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 4,
                     event_type: PointerEventType::DoubleClick,
                     device: PointerDevice::Mouse,
@@ -1508,6 +1530,8 @@ mod line_creation_tests {
             .process_arrow_creation_pointer_event(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 4,
                     event_type: PointerEventType::DoubleClick,
                     device: PointerDevice::Mouse,
@@ -1546,6 +1570,8 @@ mod line_creation_tests {
             .handle_arrow_pointer_up(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 4,
                     event_type: PointerEventType::Up,
                     device: PointerDevice::Mouse,
@@ -1585,6 +1611,8 @@ mod line_creation_tests {
             .handle_arrow_pointer_down(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 4,
                     event_type: PointerEventType::Down,
                     device: PointerDevice::Mouse,
@@ -1630,6 +1658,8 @@ mod line_creation_tests {
             editor.state.default_line_style.arrow_type = arrow_type;
             let pointer = |event_type, position, button, buttons| {
                 InputEvent::Pointer(PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 4,
                     event_type,
                     device: PointerDevice::Mouse,
@@ -1711,6 +1741,8 @@ mod line_creation_tests {
             .handle_arrow_double_click(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 4,
                     event_type: PointerEventType::DoubleClick,
                     device: PointerDevice::Mouse,
@@ -1737,6 +1769,7 @@ mod line_creation_tests {
         let mut editor = Editor::new(EngineConfig::default()).unwrap();
         editor.set_active_tool(ActiveTool::Filter).unwrap();
         editor.state.interaction = InteractionState::CreatingRectangle(CreateRectangleState {
+            stroke_rendering_seed: 0,
             pointer_id: 7,
             start_canvas_position: Point::new(10.0, 20.0),
         });
@@ -1745,6 +1778,8 @@ mod line_creation_tests {
             .handle_rectangle_pointer_up(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 7,
                     event_type: PointerEventType::Up,
                     device: PointerDevice::Mouse,
@@ -1779,10 +1814,13 @@ mod line_creation_tests {
         let mut editor = Editor::new(EngineConfig::default()).unwrap();
         editor.set_active_tool(ActiveTool::Spotlight).unwrap();
         editor.state.interaction = InteractionState::CreatingRectangle(CreateRectangleState {
+            stroke_rendering_seed: 0,
             pointer_id: 9,
             start_canvas_position: Point::new(10.0, 20.0),
         });
         let event = |event_type, position| PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 9,
             event_type,
             device: PointerDevice::Mouse,
@@ -1840,10 +1878,13 @@ mod line_creation_tests {
         let mut editor = Editor::new(EngineConfig::default()).unwrap();
         editor.set_active_tool(ActiveTool::PenHighlight).unwrap();
         editor.state.interaction = InteractionState::CreatingPenHighlight(CreateRectangleState {
+            stroke_rendering_seed: 0,
             pointer_id: 7,
             start_canvas_position: Point::new(10.0, 20.0),
         });
         let event = |event_type, position| PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 7,
             event_type,
             device: PointerDevice::Mouse,
@@ -1918,6 +1959,8 @@ mod line_creation_tests {
                     start.y + projected_length * locked_angle.sin(),
                 );
                 let event = |event_type, shift| PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 7,
                     event_type,
                     device: PointerDevice::Mouse,
@@ -1938,6 +1981,7 @@ mod line_creation_tests {
                 let up_event = event(PointerEventType::Up, true);
                 editor.state.interaction =
                     InteractionState::CreatingPenHighlight(CreateRectangleState {
+                        stroke_rendering_seed: 0,
                         pointer_id: 7,
                         start_canvas_position: start,
                     });
@@ -1991,6 +2035,7 @@ mod line_creation_tests {
             editor.set_active_tool(ActiveTool::PenHighlight).unwrap();
             editor.state.interaction =
                 InteractionState::CreatingPenHighlight(CreateRectangleState {
+                    stroke_rendering_seed: 0,
                     pointer_id: 3,
                     start_canvas_position: Point::new(20.0, 20.0),
                 });
@@ -1998,6 +2043,8 @@ mod line_creation_tests {
                 .process_pen_highlight_creation_pointer_event(
                     &document,
                     PointerEvent {
+                        pressure: None,
+                        timestamp_ms: 0,
                         pointer_id: 3,
                         event_type,
                         device: PointerDevice::Mouse,
@@ -2021,6 +2068,9 @@ mod line_creation_tests {
             document.peek_next_element_id(),
             ElementMeta::default(),
             RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 rectangle_kind: RectangleElementKind::Rectangle,
                 highlight_shape: HighlightShape::Rectangle,
                 center: Point::new(0.0, 0.0),
@@ -2041,11 +2091,18 @@ mod line_creation_tests {
         let mut editor = Editor::new(EngineConfig::default()).unwrap();
         editor.set_surface_size(400, 400).unwrap();
         editor.set_active_tool(ActiveTool::Arrow).unwrap();
-        editor.begin_arrow_creation(1, Point::new(-150.0, 0.0), Point::new(50.0, 200.0));
+        editor.begin_arrow_creation(
+            &document,
+            1,
+            Point::new(-150.0, 0.0),
+            Point::new(50.0, 200.0),
+        );
         editor
             .handle_arrow_pointer_move(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 1,
                     event_type: PointerEventType::Move,
                     device: PointerDevice::Mouse,
@@ -2070,6 +2127,8 @@ mod line_creation_tests {
             .handle_arrow_pointer_move(
                 &document,
                 PointerEvent {
+                    pressure: None,
+                    timestamp_ms: 0,
                     pointer_id: 1,
                     event_type: PointerEventType::Move,
                     device: PointerDevice::Mouse,
@@ -2086,5 +2145,163 @@ mod line_creation_tests {
                 .binding_highlight
                 .is_none()
         );
+    }
+    #[test]
+    fn stroke_rendering_rectangle_preview_and_commit_keep_latched_seed() {
+        use snow_draw_engine_core::arrow::StrokeRenderingStyle;
+        let mut document = DocumentModel::new();
+        let mut editor = Editor::new(EngineConfig::default()).unwrap();
+        editor.set_active_tool(ActiveTool::Shape).unwrap();
+        editor
+            .state
+            .default_rectangle_shape_style
+            .stroke_rendering_style = StrokeRenderingStyle::Cartoonist;
+        editor.state.interaction = InteractionState::CreatingRectangle(CreateRectangleState {
+            pointer_id: 9,
+            start_canvas_position: Point::new(10.0, 20.0),
+            stroke_rendering_seed: 417,
+        });
+        let event = |event_type| PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
+            pointer_id: 9,
+            event_type,
+            device: PointerDevice::Mouse,
+            position: Point::new(120.0, 90.0),
+            button: Some(PointerButton::Primary),
+            buttons: PointerButtons::default(),
+            modifiers: Modifiers::default(),
+        };
+        editor
+            .handle_rectangle_pointer_move(&document, event(PointerEventType::Move))
+            .unwrap();
+        let Some(ElementCreationPreview::Rectangle(preview)) =
+            editor.state.creation_preview.clone()
+        else {
+            panic!("rectangle preview missing");
+        };
+        assert_eq!(preview.stroke_rendering_seed, 417);
+        // A changed allocation cursor cannot change the appearance of an active gesture.
+        let unrelated_id = document.allocate_element_id();
+        let mut unrelated = Transaction::new("unrelated element");
+        let mut other = preview;
+        other.center.x += 500.0;
+        unrelated.insert_rectangle(unrelated_id, ElementMeta::default(), other);
+        document.apply_transaction(unrelated).unwrap();
+        let committed_id = document.peek_next_element_id();
+        editor
+            .handle_rectangle_pointer_up(&document, event(PointerEventType::Up))
+            .unwrap();
+        let Some(EditorCommand::ApplyTransaction(command)) = editor.pending_command.take() else {
+            panic!("rectangle transaction missing");
+        };
+        document.apply_transaction(command.transaction).unwrap();
+        assert_eq!(*document.rectangle(committed_id).unwrap(), preview);
+    }
+
+    #[test]
+    fn stroke_rendering_arrow_and_line_preview_commit_preserve_seed_and_style() {
+        use snow_draw_engine_core::arrow::StrokeRenderingStyle;
+        for tool in [ActiveTool::Arrow, ActiveTool::Line] {
+            let mut document = DocumentModel::new();
+            let mut editor = Editor::new(EngineConfig::default()).unwrap();
+            editor.set_active_tool(tool).unwrap();
+            editor.state.default_arrow_style.stroke_rendering_style = StrokeRenderingStyle::Artist;
+            editor.state.default_line_style.stroke_rendering_style =
+                StrokeRenderingStyle::Cartoonist;
+            let points = [Point::new(20.0, 30.0), Point::new(160.0, 110.0)];
+            editor.begin_arrow_creation(&document, 1, points[0], points[0]);
+            let preview = editor
+                .arrow_preview_from_points(&document, &points, Modifiers::default(), false)
+                .unwrap()
+                .arrow;
+            let id = document.peek_next_element_id();
+            assert_ne!(preview.stroke_rendering_seed, 0);
+            assert!(
+                editor
+                    .finalize_arrow_creation_from_points(&document, &points, Modifiers::default())
+                    .unwrap()
+            );
+            let Some(EditorCommand::ApplyTransaction(command)) = editor.pending_command.take()
+            else {
+                panic!("arrow transaction missing");
+            };
+            document.apply_transaction(command.transaction).unwrap();
+            let committed = document.arrow(id).unwrap();
+            assert_eq!(
+                committed.stroke_rendering_seed,
+                preview.stroke_rendering_seed
+            );
+            assert_eq!(
+                committed.stroke_rendering_style,
+                preview.stroke_rendering_style
+            );
+            assert_eq!(committed.is_line(), tool == ActiveTool::Line);
+        }
+    }
+
+    #[test]
+    fn stroke_rendering_line_style_patch_refreshes_preview_before_commit() {
+        use snow_draw_engine_core::arrow::StrokeRenderingStyle;
+        let mut document = DocumentModel::new();
+        let mut editor = Editor::new(EngineConfig::default()).unwrap();
+        editor.set_active_tool(ActiveTool::Line).unwrap();
+        editor.state.default_line_style.stroke_style = StrokeStyle::Dotted;
+        let points = [Point::new(20.0, 30.0), Point::new(160.0, 110.0)];
+        editor.begin_arrow_creation(&document, 1, points[0], points[0]);
+        let preview = editor
+            .arrow_preview_from_points(&document, &points, Modifiers::default(), false)
+            .unwrap();
+        let original = preview.arrow.clone();
+        editor.set_arrow_creation_preview(Some(preview), Vec::new());
+
+        for rendering_style in [
+            StrokeRenderingStyle::Artist,
+            StrokeRenderingStyle::Cartoonist,
+            StrokeRenderingStyle::Architect,
+        ] {
+            let revision = editor.scene_state_revision;
+            let mut style = editor.state.default_line_style;
+            style.stroke_rendering_style = rendering_style;
+            style.stroke_style = StrokeStyle::Solid;
+            assert!(
+                editor
+                    .set_shape_style_patch(
+                        &document,
+                        ShapeStylePatch {
+                            kind: ShapeKind::Line,
+                            style,
+                            properties: crate::SHAPE_STYLE_PROPERTY_STROKE_RENDERING_STYLE,
+                        },
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+            let Some(ElementCreationPreview::Arrow(preview)) =
+                editor.state.creation_preview.as_ref()
+            else {
+                panic!("line preview missing");
+            };
+            let mut expected = original.clone();
+            expected.stroke_rendering_style = rendering_style;
+            assert_eq!(*preview, expected);
+            assert_ne!(editor.scene_state_revision, revision);
+        }
+
+        let Some(ElementCreationPreview::Arrow(preview)) = editor.state.creation_preview.clone()
+        else {
+            panic!("line preview missing");
+        };
+        let id = document.peek_next_element_id();
+        assert!(
+            editor
+                .finalize_arrow_creation_from_points(&document, &points, Modifiers::default())
+                .unwrap()
+        );
+        let Some(EditorCommand::ApplyTransaction(command)) = editor.pending_command.take() else {
+            panic!("line transaction missing");
+        };
+        document.apply_transaction(command.transaction).unwrap();
+        assert_eq!(*document.arrow(id).unwrap(), preview);
     }
 }

@@ -241,6 +241,8 @@ mod tests {
                         trail: COLOR,
                         trail_duration_ms: lifetime,
                         click: [0; 4],
+                        highlight_radius:
+                            snow_recording_model::render::DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
                         highlight: [0; 4],
                         record_mouse_clicks: false,
                         show_keyboard: false,

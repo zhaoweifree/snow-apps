@@ -193,19 +193,21 @@ void everyDirectionRequestsOnePhysicalPixel() {
     });
 
     const struct {
-        PhysicalCursorDirection direction;
+        QPoint direction;
         QPoint expected;
     } cases[] = {
-        {PhysicalCursorDirection::Up, QPoint(300, 239)},
-        {PhysicalCursorDirection::Down, QPoint(300, 240)},
-        {PhysicalCursorDirection::Left, QPoint(299, 240)},
-        {PhysicalCursorDirection::Right, QPoint(300, 240)},
+        {QPoint(0, -1), QPoint(300, 239)},  {QPoint(0, 1), QPoint(300, 240)},
+        {QPoint(-1, 0), QPoint(299, 240)},  {QPoint(1, 0), QPoint(300, 240)},
+        {QPoint(-1, -1), QPoint(299, 239)}, {QPoint(1, -1), QPoint(300, 238)},
+        {QPoint(-1, 1), QPoint(299, 239)},  {QPoint(1, 1), QPoint(300, 240)},
     };
     for (const auto& testCase : cases) {
-        const auto result = cursor.moveOnePixel(testCase.direction);
+        const auto before = writes.size();
+        const auto result = cursor.movePixels(testCase.direction, 1);
         require(result.status == PhysicalCursorMoveStatus::Applied &&
-                    result.position == testCase.expected && writes.constLast() == testCase.expected,
-                "a cursor direction did not request exactly one physical pixel");
+                    result.position == testCase.expected &&
+                    writes.constLast() == testCase.expected && writes.size() == before + 1,
+                "a cursor step must move one physical pixel per active axis in a single warp");
     }
 }
 
@@ -225,6 +227,9 @@ void logicalRetinaStepsUseOneWarp() {
                     PhysicalCursorMoveStatus::InvalidTarget &&
                 writes == 1,
             "invalid distances must not move the cursor");
+    require(cursor.movePixels(QPoint(), 1).status == PhysicalCursorMoveStatus::InvalidTarget &&
+                writes == 1,
+            "a cancelled movement vector must not warp the cursor");
     live.setX(std::numeric_limits<int>::max() - 1);
     require(cursor.movePixels(PhysicalCursorDirection::Right, 2).status ==
                     PhysicalCursorMoveStatus::InvalidTarget &&
@@ -252,20 +257,18 @@ void nativeMovementGranularityIsSymmetric() {
             return desktop == requested;
         },
         [&] { return std::optional<QPointF>(desktop); }, false, [&] { return currentScale; }});
-    const std::array<std::pair<PhysicalCursorDirection, QPoint>, 4> directions = {{
-        {PhysicalCursorDirection::Up, QPoint(0, -1)},
-        {PhysicalCursorDirection::Down, QPoint(0, 1)},
-        {PhysicalCursorDirection::Left, QPoint(-1, 0)},
-        {PhysicalCursorDirection::Right, QPoint(1, 0)},
-    }};
+    const std::array<QPoint, 8> directions = {
+        QPoint(0, -1),  QPoint(0, 1),  QPoint(-1, 0), QPoint(1, 0),
+        QPoint(-1, -1), QPoint(1, -1), QPoint(-1, 1), QPoint(1, 1),
+    };
     for (int displayScale : {2, 1, 2}) {
         scale = displayScale;
         for (const QPoint start : {QPoint(600, 400), QPoint(-600, -400)}) {
-            for (const auto& [direction, offset] : directions) {
+            for (const auto& offset : directions) {
                 desktop = start;
                 for (int repeat = 1; repeat <= 3; ++repeat) {
                     const int before = writes;
-                    const auto result = cursor.moveOnePixel(direction);
+                    const auto result = cursor.movePixels(offset, 1);
                     require(result.status == PhysicalCursorMoveStatus::Applied &&
                                 desktop == start + offset * repeat &&
                                 result.position == (start + offset * repeat) * scale &&
@@ -273,7 +276,7 @@ void nativeMovementGranularityIsSymmetric() {
                             "repeated cursor nudges must move one native step in every direction");
                 }
                 desktop = start;
-                const auto result = cursor.movePixels(direction, 3);
+                const auto result = cursor.movePixels(offset, 3);
                 require(result.commandApplied() && desktop == start + offset * (scale == 2 ? 2 : 3),
                         "larger requests must round up to a whole native step");
             }

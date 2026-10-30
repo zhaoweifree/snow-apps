@@ -1,4 +1,5 @@
 #include "modal.h"
+#include "window_size_icon.h"
 #include "detail/pointer_region.h"
 #include "detail/native_window_chrome.h"
 
@@ -334,6 +335,15 @@ class ModalOverlayWidget final : public QWidget {
 
   void setWindowResizable(bool value) { windowResizable_ = value; }
 
+  void setWindowManagementButtons(bool minimizeEnabled, bool maximizeEnabled) {
+    if (windowMinimizeEnabled_ == minimizeEnabled && windowMaximizeEnabled_ == maximizeEnabled) {
+      return;
+    }
+    windowMinimizeEnabled_ = minimizeEnabled;
+    windowMaximizeEnabled_ = maximizeEnabled;
+    applyWindowModeNativeChrome();
+  }
+
   void setVisible(bool visible) override {
     if (visible && isWindow()) {
       // Qt skips Tool owners when creating a dialog's transient parent. These
@@ -415,11 +425,13 @@ class ModalOverlayWidget final : public QWidget {
     }
 
     const QRect previousGeometry = geometry();
+    const Qt::WindowStates previousState = windowState();
     const bool wasVisible = isVisible();
     setWindowFlags(flags);
     applyWindowModeNativeChrome();
     if (wasVisible) {
       setGeometry(previousGeometry);
+      setWindowState(previousState);
       show();
       raise();
       activateWindow();
@@ -526,7 +538,7 @@ class ModalOverlayWidget final : public QWidget {
 
   void applyWindowModeNativeChrome() {
     if (!windowModeChromeEnabled_) return;
-    detail::applyNativeWindowChrome(this);
+    detail::applyNativeWindowChrome(this, windowMinimizeEnabled_, windowMaximizeEnabled_);
 #ifdef Q_OS_MACOS
     if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
       if (macModalSession_) {
@@ -667,7 +679,49 @@ class ModalOverlayWidget final : public QWidget {
 
     const auto* msg = static_cast<const MSG*>(message);
     switch (msg->message) {
+      case WM_GETMINMAXINFO: {
+        if (!windowMaximizeEnabled_) break;
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        if (GetMonitorInfoW(MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) {
+          // Win32 monitor rectangles are physical pixels, including on mixed-DPI
+          // displays. Use their work area directly so maximize respects the taskbar.
+          // Win32 passes this writable structure through LPARAM.
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          auto* info = reinterpret_cast<MINMAXINFO*>(msg->lParam);
+          info->ptMaxPosition.x = monitor.rcWork.left - monitor.rcMonitor.left;
+          info->ptMaxPosition.y = monitor.rcWork.top - monitor.rcMonitor.top;
+          info->ptMaxSize.x = monitor.rcWork.right - monitor.rcWork.left;
+          info->ptMaxSize.y = monitor.rcWork.bottom - monitor.rcWork.top;
+          const qreal ratio = devicePixelRatioF();
+          info->ptMinTrackSize.x = std::max(info->ptMinTrackSize.x,
+                                            static_cast<LONG>(std::ceil(minimumWidth() * ratio)));
+          info->ptMinTrackSize.y = std::max(info->ptMinTrackSize.y,
+                                            static_cast<LONG>(std::ceil(minimumHeight() * ratio)));
+          *result = 0;
+          return true;
+        }
+        break;
+      }
+
       case WM_NCCALCSIZE:
+        if (windowMaximizeEnabled_ && IsZoomed(msg->hwnd)) {
+          MONITORINFO monitor{};
+          monitor.cbSize = sizeof(monitor);
+          if (GetMonitorInfoW(MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            // Win32 uses either pointer type in LPARAM, selected by wParam.
+            // NOLINTBEGIN(performance-no-int-to-ptr)
+            auto* client = msg->wParam ? &reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam)->rgrc[0]
+                                       : reinterpret_cast<RECT*>(msg->lParam);
+            // NOLINTEND(performance-no-int-to-ptr)
+            // Windows keeps an invisible resize frame outside maximized windows.
+            // Exclude it from our painted client area, including the taskbar edge.
+            client->left = std::max(client->left, monitor.rcWork.left);
+            client->top = std::max(client->top, monitor.rcWork.top);
+            client->right = std::min(client->right, monitor.rcWork.right);
+            client->bottom = std::min(client->bottom, monitor.rcWork.bottom);
+          }
+        }
         *result = 0;
         return true;
 
@@ -714,6 +768,8 @@ class ModalOverlayWidget final : public QWidget {
   bool maskEnabled_ = true;
   bool windowModeChromeEnabled_ = false;
   bool windowResizable_ = false;
+  bool windowMinimizeEnabled_ = false;
+  bool windowMaximizeEnabled_ = false;
   QPointer<QWidget> windowModeHeader_;
   QPointer<QWidget> windowModePanel_;
 #ifdef Q_OS_MACOS
@@ -802,7 +858,7 @@ class ModalIconButton final : public QToolButton {
               ? QIcon::Disabled
               : ((detail::widgetHovered(this) || isDown()) ? QIcon::Active : QIcon::Normal);
       const QSize logicalSize = iconSize().isValid() ? iconSize() : QSize(16, 16);
-      const QPixmap pixmap = currentIcon.pixmap(logicalSize, mode, QIcon::Off);
+      const QPixmap pixmap = currentIcon.pixmap(logicalSize, devicePixelRatioF(), mode, QIcon::Off);
       if (!pixmap.isNull()) {
         const QSize pixmapSize = snowDeviceIndependentSize(pixmap).toSize();
         const QPoint topLeft((width() - pixmapSize.width()) / 2,
@@ -1132,6 +1188,8 @@ void AdModal::setWindowResizable(bool value) {
   }
   windowResizable_ = value;
   windowGeometryInitialized_ = false;
+  reapplyWindowSurfaceFlags();
+  refreshVisibility();
   refreshLayout();
   applyVisualStyle();
 }
@@ -1153,7 +1211,33 @@ void AdModal::setWindowMinimizeButtonVisible(bool value) {
   }
   windowMinimizeButtonVisible_ = value;
   emit windowMinimizeButtonVisibleChanged(value);
+  reapplyWindowSurfaceFlags();
   refreshVisibility();
+}
+
+bool AdModal::windowMaximizeButtonVisible() const { return windowMaximizeButtonVisible_; }
+void AdModal::setWindowMaximizeButtonVisible(bool value) {
+  if (windowMaximizeButtonVisible_ == value) {
+    return;
+  }
+  windowMaximizeButtonVisible_ = value;
+  emit windowMaximizeButtonVisibleChanged(value);
+  reapplyWindowSurfaceFlags();
+  refreshVisibility();
+  applyVisualStyle();
+}
+
+QIcon AdModal::windowIcon() const { return windowIcon_; }
+void AdModal::setWindowIcon(const QIcon& value) {
+  if (windowIcon_.cacheKey() == value.cacheKey()) {
+    return;
+  }
+  windowIcon_ = value;
+  if (overlay_) {
+    overlay_->setWindowIcon(windowIcon_);
+  }
+  refreshWindowIcon();
+  emit windowIconChanged(windowIcon_);
 }
 
 bool AdModal::windowAlwaysOnTopButtonVisible() const { return windowAlwaysOnTopButtonVisible_; }
@@ -1188,7 +1272,7 @@ void AdModal::present() {
     return;
   }
   if (overlay_->isMinimized()) {
-    overlay_->showNormal();
+    overlay_->setWindowState(overlay_->windowState() & ~Qt::WindowMinimized);
   }
   overlay_->show();
   overlay_->raise();
@@ -1742,6 +1826,13 @@ bool AdModal::eventFilter(QObject* watched, QEvent* event) {
     return QObject::eventFilter(watched, event);
   }
 
+  if (watched == overlay_ && (event->type() == QEvent::WindowStateChange ||
+                              event->type() == QEvent::DevicePixelRatioChange)) {
+    // Restore labels and icon density follow native actions and display changes,
+    // while Qt retains the window's normal geometry across maximize/minimize.
+    applyVisualStyle();
+  }
+
   if (usesWindowSurface() && watched == overlay_ && event->type() == QEvent::Close && open_) {
     event->ignore();
     requestReject(CloseReason::CloseButton);
@@ -2052,6 +2143,11 @@ Qt::WindowFlags AdModal::windowSurfaceFlags() const {
   // A taskbar-visible surface must be a plain window: Qt::Tool surfaces never
   // get a taskbar button and owned dialogs only appear while their owner does.
   flags |= windowTaskbarVisible_ ? Qt::Window : (windowModeDetached_ ? Qt::Tool : Qt::Dialog);
+  if (windowMinimizeButtonVisible_) flags |= Qt::WindowMinimizeButtonHint;
+  if (windowMaximizeButtonVisible_ && windowResizable_) flags |= Qt::WindowMaximizeButtonHint;
+  if (windowMinimizeButtonVisible_ || windowMaximizeButtonVisible_) {
+    flags |= Qt::WindowCloseButtonHint;
+  }
   if (windowAlwaysOnTop_ ||
       (ownerWindow_ && ownerWindow_->windowFlags().testFlag(Qt::WindowStaysOnTopHint))) {
     flags |= Qt::WindowStaysOnTopHint;
@@ -2063,7 +2159,10 @@ void AdModal::reapplyWindowSurfaceFlags() {
   if (!overlay_ || !usesWindowSurface()) {
     return;
   }
-  static_cast<ModalOverlayWidget*>(overlay_.data())->applyWindowSurfaceFlags(windowSurfaceFlags());
+  auto* surface = static_cast<ModalOverlayWidget*>(overlay_.data());
+  surface->setWindowManagementButtons(windowMinimizeButtonVisible_,
+                                      windowMaximizeButtonVisible_ && windowResizable_);
+  surface->applyWindowSurfaceFlags(windowSurfaceFlags());
 }
 
 void AdModal::ensureOverlay() {
@@ -2111,6 +2210,9 @@ void AdModal::ensureOverlay() {
 #endif
     overlay->setWindowTitle(windowTitle_.trimmed().isEmpty() ? tr("Modal")
                                                              : windowTitle_.trimmed());
+    overlay->setWindowIcon(windowIcon_);
+    overlay->setWindowManagementButtons(windowMinimizeButtonVisible_,
+                                        windowMaximizeButtonVisible_ && windowResizable_);
     overlay->setWindowModeModality(windowModality_, ownerWindow_);
     overlay->setAttribute(Qt::WA_DeleteOnClose, false);
   } else {
@@ -2150,6 +2252,12 @@ void AdModal::ensureOverlay() {
   titleLabel->setWordWrap(true);
   titleLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
+  auto* windowIconLabel = new QLabel(header);
+  windowIconLabel->setObjectName(QStringLiteral("ad-modal-window-icon"));
+  windowIconLabel->setAlignment(Qt::AlignCenter);
+  windowIconLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+  windowIconLabel->hide();
+
   auto* closeButton = new ModalIconButton(header);
   closeButton->setObjectName(QStringLiteral("ad-modal-close"));
   closeButton->setAutoRaise(true);
@@ -2169,6 +2277,21 @@ void AdModal::ensureOverlay() {
     }
   });
 
+  auto* maximizeButton = new ModalIconButton(header);
+  maximizeButton->setObjectName(QStringLiteral("ad-modal-maximize"));
+  maximizeButton->setAutoRaise(true);
+  maximizeButton->setCursor(Qt::PointingHandCursor);
+  maximizeButton->setFocusPolicy(Qt::StrongFocus);
+  connect(maximizeButton, &QToolButton::clicked, this, [this]() {
+    if (overlay_ && usesWindowSurface() && windowResizable_) {
+      if (overlay_->isMaximized()) {
+        overlay_->showNormal();
+      } else {
+        overlay_->showMaximized();
+      }
+    }
+  });
+
   auto* alwaysOnTopButton = new ModalIconButton(header);
   alwaysOnTopButton->setObjectName(QStringLiteral("ad-modal-always-on-top"));
   alwaysOnTopButton->setAutoRaise(true);
@@ -2179,8 +2302,10 @@ void AdModal::ensureOverlay() {
   connect(alwaysOnTopButton, &QToolButton::clicked, this,
           [this](bool checked) { setWindowAlwaysOnTop(checked); });
 
+  headerLayout->addWidget(windowIconLabel, 0, Qt::AlignVCenter);
   headerLayout->addWidget(titleLabel, 1, Qt::AlignVCenter);
   headerLayout->addWidget(minimizeButton, 0, Qt::AlignTop);
+  headerLayout->addWidget(maximizeButton, 0, Qt::AlignTop);
   headerLayout->addWidget(alwaysOnTopButton, 0, Qt::AlignTop);
   headerLayout->addWidget(closeButton, 0, Qt::AlignTop);
 
@@ -2294,8 +2419,10 @@ void AdModal::ensureOverlay() {
   headerLayout_ = headerLayout;
   titleIconLabel_ = titleIconLabel;
   titleLabel_ = titleLabel;
+  windowIconLabel_ = windowIconLabel;
   closeButton_ = closeButton;
   minimizeButton_ = minimizeButton;
+  maximizeButton_ = maximizeButton;
   alwaysOnTopButton_ = alwaysOnTopButton;
   body_ = body;
   bodyLayout_ = bodyLayout;
@@ -2370,8 +2497,10 @@ void AdModal::releaseOverlay() {
   headerLayout_.clear();
   titleIconLabel_.clear();
   titleLabel_.clear();
+  windowIconLabel_.clear();
   closeButton_.clear();
   minimizeButton_.clear();
+  maximizeButton_.clear();
   alwaysOnTopButton_.clear();
   body_.clear();
   bodyLayout_.clear();
@@ -2632,6 +2761,10 @@ void AdModal::refreshVisibility() {
   if (minimizeButton_) {
     minimizeButton_->setVisible(windowChrome && windowMinimizeButtonVisible_);
   }
+  if (maximizeButton_) {
+    maximizeButton_->setVisible(windowChrome && windowMaximizeButtonVisible_);
+    maximizeButton_->setEnabled(windowResizable_ && !acceptButtonBusy_);
+  }
   if (alwaysOnTopButton_) {
     alwaysOnTopButton_->setVisible(windowChrome && windowAlwaysOnTopButtonVisible_);
   }
@@ -2678,6 +2811,7 @@ void AdModal::refreshVisibility() {
   }
 
   refreshTitleIcon();
+  refreshWindowIcon();
   updateAccessibility();
   applySectionInsets(resolveVisualStyle());
   refreshLayout();
@@ -2729,6 +2863,25 @@ void AdModal::refreshTitleIcon() {
   titleIconLabel_->show();
 }
 
+void AdModal::refreshWindowIcon() {
+  if (!windowIconLabel_) {
+    return;
+  }
+  if (!usesWindowSurface() || windowIcon_.isNull()) {
+    windowIconLabel_->clear();
+    windowIconLabel_->hide();
+    return;
+  }
+  const VisualStyle style = resolveVisualStyle();
+  const int size = std::max(12, style.iconSize);
+  const int gap = std::max(0, style.footerButtonGap);
+  windowIconLabel_->setContentsMargins(0, 0, gap, 0);
+  windowIconLabel_->setFixedSize(size + gap, size);
+  windowIconLabel_->setPixmap(
+      windowIcon_.pixmap(QSize(size, size), windowIconLabel_->devicePixelRatioF()));
+  windowIconLabel_->show();
+}
+
 void AdModal::updateAccessibility() {
   if (!overlay_) {
     return;
@@ -2767,6 +2920,14 @@ void AdModal::updateAccessibility() {
   if (minimizeButton_) {
     minimizeButton_->setAccessibleName(tr("Minimize"));
     minimizeButton_->setAccessibleDescription(tr("Minimize modal window"));
+    minimizeButton_->setToolTip(tr("Minimize"));
+  }
+  if (maximizeButton_) {
+    const bool maximized = overlay_->isMaximized();
+    maximizeButton_->setAccessibleName(maximized ? tr("Restore") : tr("Maximize"));
+    maximizeButton_->setAccessibleDescription(maximized ? tr("Restore modal window")
+                                                        : tr("Maximize modal window"));
+    maximizeButton_->setToolTip(maximizeButton_->accessibleName());
   }
   if (alwaysOnTopButton_) {
     alwaysOnTopButton_->setAccessibleName(tr("Always on top"));
@@ -2910,6 +3071,9 @@ void AdModal::applyVisualStyle() {
   auto* overlayWidget = static_cast<ModalOverlayWidget*>(overlay_.data());
   if (overlayWidget) {
     overlayWidget->setWindowResizable(usesWindowSurface() && windowResizable_);
+    overlayWidget->setWindowManagementButtons(
+        usesWindowSurface() && windowMinimizeButtonVisible_,
+        usesWindowSurface() && windowMaximizeButtonVisible_ && windowResizable_);
     overlayWidget->setRootColor(usesWindowSurface() ? style.containerBg : style.rootBg);
     overlayWidget->setMaskEnabled(!usesWindowSurface() && maskVisible_);
     overlayWidget->setMaskColor(style.maskBg);
@@ -3012,6 +3176,19 @@ void AdModal::applyVisualStyle() {
   applyChromeButton(minimizeButton_,
                     outlined_icons::Minus(adqt::icons::IconColors::primary(style.closeIconColor)));
   applyChromeButton(
+      maximizeButton_,
+      overlay_->isMaximized()
+          ? outlined_icons::Copy(adqt::icons::IconColors::primary(style.closeIconColor))
+          : outlined_icons::Border(adqt::icons::IconColors::primary(style.closeIconColor)));
+  if (maximizeButton_) {
+#ifdef Q_OS_WIN
+    maximizeButton_->setIcon(QIcon(windowSizeIconPixmap(
+        overlay_->isMaximized(), style.closeIconColor, panel_->devicePixelRatioF())));
+    maximizeButton_->setIconSize(QSize(10, 10));
+#endif
+    maximizeButton_->setEnabled(windowResizable_ && !acceptButtonBusy_);
+  }
+  applyChromeButton(
       alwaysOnTopButton_,
       windowAlwaysOnTop_
           ? filled_icons::Pushpin(adqt::icons::IconColors::primary(style.closeIconColor))
@@ -3025,6 +3202,7 @@ void AdModal::applyVisualStyle() {
   }
 
   refreshTitleIcon();
+  refreshWindowIcon();
   updateAccessibility();
   refreshLayout();
   if (open_) {

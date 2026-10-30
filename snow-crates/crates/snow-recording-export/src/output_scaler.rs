@@ -1,11 +1,10 @@
-//! Output conversion shared by all recording export paths. libswscale cannot
-//! generate content-adaptive PAL8, so GIF conversion passes through full RGB.
+//! Output conversion shared by all recording export paths. GIF input remains
+//! RGB until encoding, where differences are determined before quantization.
 use std::ops::{Deref, DerefMut};
 
 use ffmpeg_next as ffmpeg;
 
 use crate::error::{RecordingExportError, Result};
-use crate::gif_palette::GifPalette;
 
 /// Recording downscales use pixel-area coverage, including the RGB48
 /// intermediate used by HDR overlays. Native conversion and any enlarged axis
@@ -52,7 +51,6 @@ pub(crate) fn recording_scaler(
 
 pub(crate) struct OutputScaler {
     scaler: ffmpeg::software::scaling::Context,
-    gif: Option<(GifPalette, ffmpeg::frame::Video)>,
 }
 
 impl OutputScaler {
@@ -65,26 +63,16 @@ impl OutputScaler {
         height: u32,
         flags: ffmpeg::software::scaling::Flags,
     ) -> std::result::Result<Self, ffmpeg::Error> {
-        let gif = (output == ffmpeg::format::Pixel::PAL8).then(|| {
-            (
-                GifPalette::default(),
-                ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGB24, width, height),
-            )
-        });
         let scaler = recording_scaler(
             input,
             input_width,
             input_height,
-            if gif.is_some() {
-                ffmpeg::format::Pixel::RGB24
-            } else {
-                output
-            },
+            output,
             width,
             height,
             flags,
         )?;
-        Ok(Self { scaler, gif })
+        Ok(Self { scaler })
     }
 
     pub(crate) fn run(
@@ -92,13 +80,7 @@ impl OutputScaler {
         input: &ffmpeg::frame::Video,
         output: &mut ffmpeg::frame::Video,
     ) -> std::result::Result<(), ffmpeg::Error> {
-        if let Some((palette, rgb)) = &mut self.gif {
-            self.scaler.run(input, rgb)?;
-            palette.convert(rgb, output);
-            Ok(())
-        } else {
-            self.scaler.run(input, output)
-        }
+        self.scaler.run(input, output)
     }
 
     pub(crate) fn run_owned_rgba(
@@ -106,13 +88,7 @@ impl OutputScaler {
         input: &[u8],
         output: &mut ffmpeg::frame::Video,
     ) -> Result<()> {
-        if let Some((palette, rgb)) = &mut self.gif {
-            convert_owned_rgba(&mut self.scaler, input, rgb)?;
-            palette.convert(rgb, output);
-            Ok(())
-        } else {
-            convert_owned_rgba(&mut self.scaler, input, output)
-        }
+        convert_owned_rgba(&mut self.scaler, input, output)
     }
 }
 

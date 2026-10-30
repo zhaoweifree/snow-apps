@@ -4,6 +4,7 @@
 #include "snow_canvas_changed_viewports.h"
 #include "snow_canvas_ffi_handles.h"
 #include "snow_canvas_fill_render.h"
+#include "snow_canvas_pressure_mask_atlas.h"
 #include "snow_canvas_text_render.h"
 #include "snow_canvas_type_conversions.h"
 #include "snow_canvas_watermark_renderer.h"
@@ -24,6 +25,7 @@ void clearDrawingCachesForCurrentThread() {
     snow_canvas_fill_render::resetHatchTextureCacheForCurrentThread();
     snow_canvas_renderer::resetWatermarkRenderCacheForCurrentThread();
     snow_canvas_text_render::clearRenderCacheForCurrentThread();
+    snow_canvas_pressure_mask::clearCacheForCurrentThread();
 }
 
 bool toEngineRuntimeConfig(const SnowCanvasRuntimeConfig& config, SnowStyleDefaults& styleDefaults,

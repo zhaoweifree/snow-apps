@@ -1134,7 +1134,10 @@ AdFormItem::AdFormItem(const QString& label, QWidget* controlWidget, const QStri
   setControlWidget(controlWidget);
 }
 
-AdFormItem::~AdFormItem() { clearControlValueSignals(); }
+AdFormItem::~AdFormItem() {
+  disconnect(labelAccessoryDestroyedConnection_);
+  clearControlValueSignals();
+}
 
 QString AdFormItem::label() const { return label_; }
 
@@ -1145,6 +1148,33 @@ void AdFormItem::setLabel(const QString& value) {
   label_ = value;
   emit labelChanged(label_);
   refresh();
+}
+
+QWidget* AdFormItem::labelAccessoryWidget() const { return labelAccessoryWidget_.data(); }
+
+void AdFormItem::setLabelAccessoryWidget(QWidget* widget) {
+  if (labelAccessoryWidget_ == widget) {
+    return;
+  }
+  disconnect(labelAccessoryDestroyedConnection_);
+  if (auto* previous = labelAccessoryWidget_.data()) {
+    labelLayout_->removeWidget(previous);
+    previous->hide();
+    previous->setParent(nullptr);
+  }
+  labelAccessoryWidget_ = widget;
+  if (widget) {
+    widget->setParent(labelHost_);
+    labelLayout_->addWidget(widget, 0, Qt::AlignRight | Qt::AlignVCenter);
+    widget->show();
+    labelAccessoryDestroyedConnection_ = connect(widget, &QObject::destroyed, this, [this] {
+      labelAccessoryWidget_.clear();
+      refresh();
+      emit labelAccessoryWidgetChanged(nullptr);
+    });
+  }
+  refresh();
+  emit labelAccessoryWidgetChanged(widget);
 }
 
 QString AdFormItem::fieldKey() const { return fieldName_; }
@@ -1788,6 +1818,8 @@ void AdFormItem::ensureUi() {
   labelLayout_->addWidget(tooltipWidget_, 0, Qt::AlignVCenter);
   labelLayout_->addWidget(optionalWidget_, 0, Qt::AlignVCenter);
   labelLayout_->addWidget(colonWidget_, 0, Qt::AlignVCenter);
+  labelAccessorySpacer_ = new QSpacerItem(0, 0, QSizePolicy::Fixed, QSizePolicy::Minimum);
+  labelLayout_->addSpacerItem(labelAccessorySpacer_);
 
   controlHost_ = new QWidget(this);
   controlHost_->setObjectName(QStringLiteral("ad-form-item-control"));
@@ -1942,6 +1974,10 @@ void AdFormItem::refreshLabel(const detail::FormVisualStyle* resolvedStyle) {
       resolvedStyle ? *resolvedStyle : resolveStyleFor(this, controlSize);
   const bool vertical = effectiveVerticalLayout();
   const bool hasLabel = !label_.trimmed().isEmpty();
+  const bool hasAccessory = !labelAccessoryWidget_.isNull();
+  labelAccessorySpacer_->changeSize(hasAccessory ? style.metrics.feedbackIconGap : 0, 0,
+                                    hasAccessory ? QSizePolicy::Expanding : QSizePolicy::Fixed);
+  labelLayout_->invalidate();
 
   labelHost_->setVisible(!noStyle_ && hasLabel);
   if (!hasLabel) {

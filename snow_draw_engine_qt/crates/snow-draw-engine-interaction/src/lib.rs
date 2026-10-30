@@ -55,6 +55,8 @@ pub struct PointerEvent {
     pub button: Option<PointerButton>,
     pub buttons: PointerButtons,
     pub modifiers: Modifiers,
+    pub pressure: Option<f64>,
+    pub timestamp_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -52,9 +52,9 @@ function Invoke-FixtureSubmit {
     Require (-not ($args -contains '--replace')) 'Submission must not replace versions'
     $global:LASTEXITCODE = $script:submitExitCode
 }
-function Set-FixtureRelease([string]$Tag, [string]$Edition = 'Full') {
+function Set-FixtureRelease([string]$Tag) {
     $version = Get-SnowShotWingetVersion $Tag
-    $name = if ($Edition -eq 'Mini') { "snow-shot-mini-$version-windows-x64-online.exe" } else { "snow-shot-$version-windows-x64-offline.exe" }
+    $name = "snow-shot-$version-windows-x64-offline.exe"
     $script:release = @{
         tag_name = $Tag; draft = $false; prerelease = $true
         published_at = '2026-09-28T01:30:00+02:00'
@@ -64,12 +64,48 @@ function Set-FixtureRelease([string]$Tag, [string]$Edition = 'Full') {
     }
 }
 try {
-    Set-FixtureRelease 'v1.2.0_snow-shot' Mini
-    $miniDirectory = New-SnowShotWingetManifest 'v1.2.0_snow-shot' $root Mini
-    $miniInstaller = Get-Content (Join-Path $miniDirectory 'mg-chao.snow-shot-mini.installer.yaml') -Raw
-    Require ($miniInstaller.Contains('ProductCode: SnowShotMini') -and $miniInstaller.Contains('snow-shot-mini-1.2.0-windows-x64-online.exe')) 'Mini WinGet has its own registration and online installer.'
-    $miniLocale = Get-Content (Join-Path $miniDirectory 'mg-chao.snow-shot-mini.locale.en-US.yaml') -Raw
-    Require ($miniLocale.Contains('PackageName: Snow Shot Mini') -and -not $miniLocale.Contains('  - translate')) 'Mini metadata must describe retained features.'
+    Set-FixtureRelease 'v1.2.0_snow-shot'
+    $requestsBeforeMini = $script:requests.Count
+    Expect-Failure { New-SnowShotWingetManifest 'v1.2.0_snow-shot' $root Mini } 'Mini'
+    Expect-Failure { Get-SnowShotWingetSubmission '1.2.0' Mini } 'Mini'
+    Expect-Failure { Submit-SnowShotWingetManifest 'v1.2.0_snow-shot' $root 'Invoke-FixtureSubmit' Mini } 'Mini'
+    Expect-Failure { & (Join-Path $PSScriptRoot 'new-snow-shot-winget-manifest.ps1') -Tag 'v1.2.0' -Edition Mini } 'Mini'
+    Expect-Failure { & (Join-Path $PSScriptRoot 'submit-snow-shot-winget.ps1') -Tag 'v1.2.0' -Edition Mini -ManifestDirectory $root } 'Mini'
+    Expect-Failure { & (Join-Path $PSScriptRoot 'test-snow-shot-winget-install.ps1') -Edition Mini } 'Mini'
+    Require ($script:requests.Count -eq $requestsBeforeMini -and $script:submitted -eq 0) 'Unsupported Mini requests must fail before network or submission.'
+    Require (-not (Test-Path -LiteralPath $root)) 'Unsupported Mini requests must not generate manifests.'
+    # Here-string line endings follow the checkout, while generated YAML must always use LF.
+    $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'snow-shot-winget.ps1')).Replace("`r`n", "`n")
+    $expectedManifests = @{}
+    foreach ($checkout in @('LF', 'CRLF')) {
+        $sourceDirectory = Join-Path $root $checkout
+        $null = New-Item -ItemType Directory -Force -Path $sourceDirectory
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'snow-shot-editions.ps1') -Destination $sourceDirectory
+        $newline = if ($checkout -eq 'CRLF') { "`r`n" } else { "`n" }
+        $sourcePath = Join-Path $sourceDirectory 'snow-shot-winget.ps1'
+        [IO.File]::WriteAllText($sourcePath, $source.Replace("`n", $newline), [Text.UTF8Encoding]::new($false))
+        & {
+            . $sourcePath
+            function Invoke-SnowShotWingetApi([string]$Path) { return $script:release }
+            Set-FixtureRelease 'v1.2.0_snow-shot'
+            $directory = New-SnowShotWingetManifest 'v1.2.0_snow-shot' $sourceDirectory
+            $locale = Get-Content (Join-Path $directory 'mg-chao.snow-shot.locale.en-US.yaml') -Raw
+            Require ($locale.Contains('PackageName: Snow Shot')) "$checkout package name mismatch."
+            foreach ($tag in @('chatbot', 'screen-capture', 'screenshot', 'snowshot', 'translate', 'annotation', 'ocr')) {
+                Require ($locale.Contains("  - $tag`n")) "$checkout is missing retained tag: $tag"
+            }
+            foreach ($file in Get-ChildItem -LiteralPath $directory -Filter '*.yaml') {
+                $content = [IO.File]::ReadAllText($file.FullName)
+                Require (-not $content.Contains("`r")) "$checkout manifests must use LF."
+                if ($checkout -eq 'LF') { $expectedManifests[$file.Name] = $content }
+                else { Require ($content -ceq $expectedManifests[$file.Name]) "Checkout line endings changed $($file.Name)." }
+            }
+            $script:release.body = "- chatbot`n- translate"
+            $directory = New-SnowShotWingetManifest 'v1.2.0_snow-shot' $sourceDirectory
+            $locale = Get-Content (Join-Path $directory 'mg-chao.snow-shot.locale.en-US.yaml') -Raw
+            Require ($locale.Contains("ReleaseNotes: |2-`n  - chatbot`n  - translate`nReleaseNotesUrl:")) "$checkout release notes must remain literal."
+        }
+    }
     foreach ($tag in @('v1.1.5-beta', 'v1.1.5-beta_snow-shot', 'v1.2.0', 'v1.2.0_snow-shot')) {
         Set-FixtureRelease $tag
         $directory = New-SnowShotWingetManifest $tag $root
@@ -174,21 +210,40 @@ try {
         [IO.File]::WriteAllText((Join-Path $DestinationPath 'x64/dependency.appx'), 'fixture')
     }
     function Add-AppxPackage {
-        param($Path, $DependencyPath)
+        param($Path, $DependencyPath, [switch]$ForceApplicationShutdown)
         Require ($DependencyPath.Count -gt 0) 'Client provisioning must install matching dependencies'
+        if ($script:dependenciesInUse -and -not $ForceApplicationShutdown) {
+            throw 'Fixture dependency is in use (0x80073D02).'
+        }
+        Require ($ForceApplicationShutdown.IsPresent -eq $script:expectForceShutdown) 'Only disposable hosted Windows runners may close dependency applications.'
         $script:repairCalls++
         if (-not $script:repairBroken) { $script:fixtureWingetVersion = '1.29.380' }
     }
     $script:repairCalls = 0
     $script:repairBroken = $false
-    $script:fixtureWingetVersion = '1.26.510'
-    $null = . (Join-Path $PSScriptRoot 'initialize-snow-shot-winget.ps1') -ToolDirectory (Join-Path $root 'client')
-    Require ($script:repairCalls -eq 1) 'Older client was not upgraded'
-    $null = . (Join-Path $PSScriptRoot 'initialize-snow-shot-winget.ps1') -ToolDirectory (Join-Path $root 'client')
-    Require ($script:repairCalls -eq 1) 'Compatible client was unnecessarily reinstalled'
-    $script:repairBroken = $true
-    $script:fixtureWingetVersion = '1.26.510'
-    Expect-Failure { . (Join-Path $PSScriptRoot 'initialize-snow-shot-winget.ps1') -ToolDirectory (Join-Path $root 'client') } 'or newer is required'
+    try {
+        $env:RUNNER_ENVIRONMENT = 'github-hosted'
+        $env:RUNNER_OS = 'Windows'
+        $script:expectForceShutdown = $true
+        $script:dependenciesInUse = $true
+        $script:fixtureWingetVersion = '1.26.510'
+        $null = . (Join-Path $PSScriptRoot 'initialize-snow-shot-winget.ps1') -ToolDirectory (Join-Path $root 'client')
+        Require ($script:repairCalls -eq 1) 'Older client was not upgraded with active dependencies'
+        $null = . (Join-Path $PSScriptRoot 'initialize-snow-shot-winget.ps1') -ToolDirectory (Join-Path $root 'client')
+        Require ($script:repairCalls -eq 1) 'Compatible client was unnecessarily reinstalled'
+        $env:RUNNER_ENVIRONMENT = ''
+        $script:expectForceShutdown = $false
+        $script:dependenciesInUse = $false
+        $script:fixtureWingetVersion = '1.26.510'
+        $null = . (Join-Path $PSScriptRoot 'initialize-snow-shot-winget.ps1') -ToolDirectory (Join-Path $root 'client')
+        Require ($script:repairCalls -eq 2) 'Local client provisioning must not force application shutdown'
+        $script:repairBroken = $true
+        $script:fixtureWingetVersion = '1.26.510'
+        Expect-Failure { . (Join-Path $PSScriptRoot 'initialize-snow-shot-winget.ps1') -ToolDirectory (Join-Path $root 'client') } 'or newer is required'
+    } finally {
+        $env:RUNNER_ENVIRONMENT = $runnerEnvironment
+        $env:RUNNER_OS = $runnerOs
+    }
     Write-Output 'PASS: Snow Shot WinGet generation and submission fixtures.'
 } finally {
     $env:WINGET_CREATE_GITHUB_TOKEN = $originalToken

@@ -32,6 +32,7 @@ struct GlobalMouseManager::Impl {
             std::pair{Action::ScreenshotCopy, "global_mouse/screenshot_copy"},
             std::pair{Action::ScreenshotFixed, "global_mouse/screenshot_fixed"},
             std::pair{Action::ScreenshotOcr, "global_mouse/screenshot_ocr"},
+            std::pair{Action::ScreenshotOcrCopy, "global_mouse/screenshot_ocr_copy"},
             std::pair{Action::ScreenshotTranslation, "global_mouse/screenshot_translation"},
             std::pair{Action::ScreenshotSave, "global_mouse/screenshot_save"},
             std::pair{Action::ScreenshotQuickSave, "global_mouse/screenshot_quick_save"},

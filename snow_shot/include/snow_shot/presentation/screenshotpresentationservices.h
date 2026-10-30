@@ -74,6 +74,8 @@ class ScreenshotPresentationServices final {
     void updateOverlayState();
     // Continuous drags mutate the model immediately and prepare presentation at the frame boundary.
     void requestSelectionDragPresentation();
+    // Wheel edits retain every model delta; only their presentation is coalesced.
+    void requestSelectionEffectPresentation();
     void updatePointerPresentation(ScreenshotOverlayWindow* overlay, const QPointF& localPosition);
     void requestColorPickerPresentation(ScreenshotOverlayWindow* overlay,
                                         const QPointF& localPosition);

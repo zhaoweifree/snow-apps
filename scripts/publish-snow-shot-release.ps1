@@ -7,6 +7,7 @@ param(
     [string]$Arm64BuildDirectory = 'build/snow-shot-msvc-arm64-release',
     [string]$Arm64OcrRuntimeArchive = '',
     [string]$NativeValidationDirectory = '',
+    [switch]$SkipArm64NativeValidation,
     [string]$SigningKeyPath,
     [switch]$SkipBuild,
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.-]*$')][string]$MacHost,
@@ -245,7 +246,7 @@ foreach ($edition in @('Full', 'Mini')) {
             $descriptor = if ($kind -eq 'installer') { $manifest.Installer } else { $manifest.Archive }
             $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($hash -cne $descriptor.Sha256 -or (Get-Item -LiteralPath $source).Length -ne $descriptor.Bytes) { throw 'Package audit manifest mismatch.' }
-            $nativeValidation += Assert-SnowShotNativeValidation -Manifest $manifest -ArtifactPath $source -Platform "windows-$architecture" -ProofDirectory $NativeValidationDirectory
+            $nativeValidation += Assert-SnowShotNativeValidation -Manifest $manifest -ArtifactPath $source -Platform "windows-$architecture" -ProofDirectory $NativeValidationDirectory -SkipArm64NativeValidation:$SkipArm64NativeValidation
             $path = "setup/$($product.Product)_windows-$architecture-$variant$suffix"
             Copy-Item -LiteralPath $source -Destination (Join-Path $releaseDirectory $path)
                 $githubDirectory = Join-Path $releaseDirectory 'github-assets'
@@ -348,8 +349,8 @@ if ($AuditOnly) {
     if ($tagCommit -cne $head) { throw 'GitHub release tag does not match the audited source checkout.' }
     $localManifestPath = Join-Path $releaseDirectory 'local-release.json'
     if (-not $SkipGitee) {
-        # Both destinations receive the same local audit inputs. Gitee never downloads
-        # packages from GitHub, including the reproducible Homebrew distribution archive.
+        # Preserve every local audit input for retries. GitHub receives the full asset
+        # set; the Gitee publisher selects only update and installer downloads.
         $sharedDirectory = Join-Path $releaseDirectory 'github-assets'
         $null = New-Item -ItemType Directory -Force -Path $sharedDirectory
         $descriptors = foreach ($name in $githubAssets.Keys) {
@@ -363,7 +364,8 @@ if ($AuditOnly) {
         @{ schema = 1; tag = $tag; sourceCommit = $head; title = "Snow Shot $Version"; nativeValidation = $nativeValidation;
             body = [IO.File]::ReadAllText($ReleaseNotesPath); assets = @($descriptors) } |
             ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $localManifestPath -Encoding utf8NoBOM
-        & python (Join-Path $PSScriptRoot 'publish-snow-shot-gitee-release.py') --manifest $localManifestPath --auditor $auditor --mini-auditor $miniAuditor --prepare-homebrew
+        $validationArguments = @(if ($SkipArm64NativeValidation) { '--skip-arm64-native-validation' })
+        & python (Join-Path $PSScriptRoot 'publish-snow-shot-gitee-release.py') --manifest $localManifestPath --auditor $auditor --mini-auditor $miniAuditor --prepare-homebrew @validationArguments
         if ($LASTEXITCODE -ne 0) { throw 'Local distribution preparation failed before publication.' }
         $localRelease = Get-Content -Raw -LiteralPath $localManifestPath | ConvertFrom-Json
         $githubAssets = @{}
@@ -371,7 +373,7 @@ if ($AuditOnly) {
     }
     Publish-SnowGitHubRelease $GitHubRepository $Version $githubAssets (Join-Path $releaseDirectory 'verify-github') -NotesPath $ReleaseNotesPath
     if (-not $SkipGitee) {
-        & python (Join-Path $PSScriptRoot 'publish-snow-shot-gitee-release.py') --manifest $localManifestPath --auditor $auditor --mini-auditor $miniAuditor
+        & python (Join-Path $PSScriptRoot 'publish-snow-shot-gitee-release.py') --manifest $localManifestPath --auditor $auditor --mini-auditor $miniAuditor @validationArguments
         if ($LASTEXITCODE -ne 0) { throw "Local Gitee publication failed. Retry with the audited manifest: $localManifestPath" }
     }
 Write-Output "Published and verified Snow Shot $Version on $destinations."

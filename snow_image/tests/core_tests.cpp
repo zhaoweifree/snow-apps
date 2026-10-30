@@ -6,6 +6,7 @@
 #include "snow/image/raster.h"
 #include "snow/image/raster_conversion.h"
 #include "heif_fixtures.h"
+#include "../src/raster_serialization.h"
 
 #include <algorithm>
 #include <array>
@@ -2826,7 +2827,8 @@ void test_webp_first_frame_preview(Service& service) {
                        "allocate offset WebP fragment");
     const std::array color{std::byte{80}, std::byte{120}, std::byte{160}, std::byte{128}};
     for (std::size_t offset = 0; offset < pixels.pixels().size(); offset += 4)
-        std::copy(color.begin(), color.end(), pixels.pixels().begin() + offset);
+        std::copy(color.begin(), color.end(),
+                  pixels.pixels().begin() + static_cast<std::ptrdiff_t>(offset));
     Frame frame;
     frame.image = std::move(pixels).freeze();
     source.frames.push_back(std::move(frame));
@@ -2912,7 +2914,8 @@ void test_webp_first_frame_preview(Service& service) {
             const auto offset = static_cast<std::size_t>(y * 8U + x) * 4U;
             const std::array transparent{std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}};
             const auto& expected = (y == 2 || y == 3) && x >= 2 && x < 6 ? color : transparent;
-            require(std::equal(expected.begin(), expected.end(), hinted.pixels.begin() + offset),
+            require(std::equal(expected.begin(), expected.end(),
+                               hinted.pixels.begin() + static_cast<std::ptrdiff_t>(offset)),
                     "exact frame offsets retain transparent canvas and straight alpha");
         }
     }
@@ -3791,6 +3794,86 @@ Document opaque_document(std::uint32_t width = 8, std::uint32_t height = 6) {
     return document;
 }
 
+void test_alpha_vector_boundaries() {
+    const std::array<snow::image::PixelFormat, 4> formats{
+        snow::image::PixelFormat{snow::image::SampleType::unsigned_integer,
+                                 snow::image::ChannelLayout::gray_alpha,
+                                 snow::image::AlphaMode::straight, 8, true},
+        snow::image::kRgba8, snow::image::kBgra8, snow::image::kRgba16};
+    for (auto format : formats) {
+        for (bool little_endian : {false, true}) {
+            format.little_endian = little_endian;
+            const std::size_t sample_bytes = format.bits_per_channel / 8U;
+            const std::size_t pixel_bytes = format.channel_count() * sample_bytes;
+            for (std::uint32_t width : {1U, 3U, 4U, 7U, 8U, 9U, 16U, 17U, 33U}) {
+                for (std::size_t alignment : {0U, 1U, 3U, 7U}) {
+                    const std::size_t stride = width * pixel_bytes + 13;
+                    std::vector<std::byte> pixels(stride * 3 + alignment, std::byte{0});
+                    auto* first = pixels.data() + alignment;
+                    for (std::size_t y = 0; y < 3; ++y) {
+                        for (std::uint32_t x = 0; x < width; ++x) {
+                            std::fill_n(first + y * stride + (x + 1) * pixel_bytes - sample_bytes,
+                                        sample_bytes, std::byte{0xFF});
+                        }
+                    }
+                    const ImageView view{
+                        width, 3, format, stride, {first, pixels.size() - alignment}};
+                    require(take(snow::image::classify_alpha(view), "classify vector alpha") ==
+                                snow::image::AlphaContent::opaque,
+                            "SIMD alpha classification ignores color, padding, and alignment");
+                    for (std::uint32_t x = 0; x < width; ++x) {
+                        auto* alpha = first + stride + (x + 1) * pixel_bytes - sample_bytes;
+                        for (std::size_t byte = 0; byte < sample_bytes; ++byte) {
+                            alpha[byte] = std::byte{0xFE};
+                            require(
+                                take(snow::image::classify_alpha(view), "classify alpha lane") ==
+                                    snow::image::AlphaContent::non_opaque,
+                                "every alpha byte in SIMD batches and scalar tails is checked");
+                            alpha[byte] = std::byte{0xFF};
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void test_crc32c_vector_boundaries() {
+    using namespace snow::image::detail::raster_serialization;
+    const auto reference = [](std::uint32_t state, std::span<const std::byte> bytes) {
+        for (std::byte byte : bytes) {
+            state ^= std::to_integer<std::uint8_t>(byte);
+            for (unsigned bit = 0; bit < 8; ++bit) {
+                state = (state >> 1U) ^ ((0U - (state & 1U)) & 0x82F63B78U);
+            }
+        }
+        return state;
+    };
+    const std::string_view known = "123456789";
+    require(crc32c(std::as_bytes(std::span(known.data(), known.size()))) == 0xE3069283U,
+            "CRC32C matches the standard Castagnoli test vector");
+    std::array<std::byte, 272> storage{};
+    for (std::size_t i = 0; i < storage.size(); ++i) {
+        storage[i] = static_cast<std::byte>((i * 73 + 19) & 255);
+    }
+    for (std::size_t offset = 0; offset < 16; ++offset) {
+        for (std::size_t count = 0; count <= 256; ++count) {
+            const std::span<const std::byte> bytes(storage.data() + offset, count);
+            for (std::uint32_t initial : {0U, 0xFFFFFFFFU, 0x12345678U}) {
+                const auto expected = reference(initial, bytes);
+                require(
+                    crc32c_update(initial, bytes) == expected,
+                    "selected CRC32C backend matches bitwise reference at every alignment/tail");
+                const std::size_t split = count / 2;
+                require(crc32c_update(crc32c_update(initial, bytes.first(split)),
+                                      bytes.subspan(split)) == expected,
+                        "streamed CRC32C preserves arbitrary intermediate state");
+            }
+        }
+    }
+    std::cout << "CRC32C hardware selected: " << crc32c_uses_hardware() << '\n';
+}
+
 void test_alpha_classification_and_composite() {
     Document opaque = opaque_document();
     require(take(snow::image::classify_alpha(opaque.frames[0].image), "classify opaque RGBA8") ==
@@ -3909,6 +3992,129 @@ void test_persistent_file_input() {
             "persistent file input serializes concurrent seek and read operations");
     input = {};
     std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+void test_raster_descriptor_wire_compatibility() {
+    // Frozen SNOWRS/SNOWRB v1 descriptor bytes: binary strings, both DPI axes,
+    // metadata blocks, every optional HDR field, and a frame cursor hotspot.
+    constexpr std::string_view encoded =
+        "000001000000010000000100000006010000000000005840010000000000005e4003000000000000"
+        "00610062020000000000000001ff0100000000000000780100000000000000010000000000000074"
+        "01000000000000006301000000000000007f010204010200000000000000ff0000007a4400004b43"
+        "01000000000000803f0000004000004040000080400000a0400000c0400000e04001e803000001c8"
+        "0000000100000000000000010000000100000000000000000000007b000000000000000102010000"
+        "00000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        "000000000000000000a0420000000100000000000000000101000101000000000000000001000000"
+        "01000000000301080108";
+    std::vector<std::byte> expected;
+    for (std::size_t index = 0; index < encoded.size(); index += 2U) {
+        const auto digit = [](char value) { return value <= '9' ? value - '0' : value - 'a' + 10; };
+        expected.push_back(
+            static_cast<std::byte>(digit(encoded[index]) * 16 + digit(encoded[index + 1U])));
+    }
+
+    snow::image::DocumentDescriptor descriptor;
+    descriptor.canvas_width = 1;
+    descriptor.canvas_height = 1;
+    descriptor.metadata.orientation = snow::image::Orientation::rotate_90;
+    descriptor.metadata.horizontal_dpi = 96.0;
+    descriptor.metadata.vertical_dpi = 120.0;
+    descriptor.metadata.comment = std::string("a\0b", 3);
+    descriptor.metadata.exif = {std::byte{0x01}, std::byte{0xff}};
+    descriptor.metadata.xmp = {std::byte{'x'}};
+    descriptor.metadata.blocks.push_back({"t", "c", {std::byte{0x7f}}, true});
+    descriptor.color.primaries = snow::image::ColorPrimaries::display_p3;
+    descriptor.color.transfer = snow::image::TransferFunction::pq;
+    descriptor.color.dynamic_range = snow::image::DynamicRange::high;
+    descriptor.color.icc_profile = {std::byte{0xff}, std::byte{0}};
+    descriptor.color.source_peak_nits = 1000.0F;
+    descriptor.color.diffuse_white_nits = 203.0F;
+    descriptor.color.mastering_primaries_and_white = std::array<float, 8>{0, 1, 2, 3, 4, 5, 6, 7};
+    descriptor.color.max_content_light_level = 1000;
+    descriptor.color.max_frame_average_light_level = 200;
+    snow::image::RasterFrameDescriptor frame;
+    frame.width = 1;
+    frame.height = 1;
+    frame.duration = std::chrono::nanoseconds(123);
+    frame.blend = snow::image::FrameBlend::over;
+    frame.disposal = snow::image::FrameDisposal::previous;
+    frame.cursor_hotspot = std::array<std::uint32_t, 2>{0, 0};
+    frame.layout.color_range = snow::image::ColorRange::limited;
+    frame.layout.planes = {{snow::image::PlaneSemantic::packed, 1, 1, snow::image::kRgba8, 8}};
+    descriptor.frames.push_back(frame);
+    const std::array<std::byte, 4> pixels{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+
+    const auto check_descriptor = [&](const snow::image::DocumentDescriptor& actual) {
+        require(
+            actual.metadata.comment == descriptor.metadata.comment &&
+                actual.metadata.orientation == descriptor.metadata.orientation &&
+                actual.metadata.horizontal_dpi == descriptor.metadata.horizontal_dpi &&
+                actual.metadata.vertical_dpi == descriptor.metadata.vertical_dpi &&
+                actual.metadata.exif == descriptor.metadata.exif &&
+                actual.metadata.xmp == descriptor.metadata.xmp &&
+                actual.metadata.blocks.size() == 1 && actual.metadata.blocks.front().type == "t" &&
+                actual.metadata.blocks.front().content_type == "c" &&
+                actual.metadata.blocks.front().data == descriptor.metadata.blocks.front().data &&
+                actual.metadata.blocks.front().safe_to_copy &&
+                actual.color.primaries == descriptor.color.primaries &&
+                actual.color.transfer == descriptor.color.transfer &&
+                actual.color.dynamic_range == descriptor.color.dynamic_range &&
+                actual.color.icc_profile == descriptor.color.icc_profile &&
+                actual.color.source_peak_nits == descriptor.color.source_peak_nits &&
+                actual.color.diffuse_white_nits == descriptor.color.diffuse_white_nits &&
+                actual.color.mastering_primaries_and_white ==
+                    descriptor.color.mastering_primaries_and_white &&
+                actual.color.max_content_light_level == descriptor.color.max_content_light_level &&
+                actual.color.max_frame_average_light_level ==
+                    descriptor.color.max_frame_average_light_level &&
+                actual.frames.front().cursor_hotspot == frame.cursor_hotspot &&
+                actual.frames.front().duration == frame.duration &&
+                actual.frames.front().blend == frame.blend &&
+                actual.frames.front().disposal == frame.disposal &&
+                actual.frames.front().layout == frame.layout,
+            "v1 raster metadata and descriptor fields survive shared decoding");
+    };
+
+    const std::uint64_t required = take(snow::image::RasterBufferStore::required_bytes(descriptor),
+                                        "size wire-compatibility raster buffer");
+    std::vector<std::byte> buffer(static_cast<std::size_t>(required));
+    auto buffer_store = take(snow::image::RasterBufferStore::create(buffer, descriptor),
+                             "create wire-compatibility raster buffer");
+    require(buffer_store->write_rows(0, 0, 0, 1, 4, pixels).has_value() &&
+                buffer_store->commit().has_value(),
+            "commit wire-compatibility raster buffer");
+    require(buffer.size() >= expected.size() + 96U &&
+                std::equal(expected.begin(), expected.end(), buffer.begin() + 96),
+            "SNOWRB v1 descriptor encoding remains byte-compatible");
+    auto reopened_buffer = take(snow::image::RasterBufferStore::open(buffer),
+                                "reopen wire-compatibility raster buffer");
+    check_descriptor(reopened_buffer->descriptor());
+
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("snow-image-wire-compatibility-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".snowrs");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    auto file_store = take(snow::image::RasterStore::create(path, descriptor),
+                           "create wire-compatibility raster file");
+    require(file_store->write_rows(0, 0, 0, 1, 4, pixels).has_value() &&
+                file_store->commit().has_value(),
+            "commit wire-compatibility raster file");
+    std::ifstream input(path, std::ios::binary);
+    input.seekg(64);
+    std::vector<std::byte> file_descriptor(expected.size());
+    input.read(reinterpret_cast<char*>(file_descriptor.data()),
+               static_cast<std::streamsize>(file_descriptor.size()));
+    require(input.good() && file_descriptor == expected,
+            "SNOWRS v1 descriptor encoding remains byte-compatible");
+    input.close();
+    auto reopened_file =
+        take(snow::image::RasterStore::open(path), "reopen wire-compatibility raster file");
+    check_descriptor(reopened_file->descriptor());
+    reopened_file.reset();
+    file_store.reset();
     std::filesystem::remove(path, ignored);
 }
 
@@ -4563,6 +4769,39 @@ void test_parallel_resize_determinism() {
             "parallel resize honors cancellation");
 }
 
+void test_resize_table_resource_estimates() {
+    using snow::image::ResamplingMethod;
+    using snow::image::ResizeOptions;
+    const ResizeOptions extreme{1, 1, ResamplingMethod::lanczos3, true, false, 1};
+    const auto horizontal =
+        take(snow::image::estimate_resize_resources(65'536, 1, snow::image::kRgba8, extreme),
+             "estimate extreme horizontal resize tables");
+    const auto vertical =
+        take(snow::image::estimate_resize_resources(1, 65'536, snow::image::kRgba8, extreme),
+             "estimate extreme vertical resize tables");
+    require(horizontal.retained_bytes >= 65'536U * 8U &&
+                horizontal.working_bytes >= (std::uint64_t{8} << 20U) &&
+                vertical.retained_bytes >= 65'536U * 8U &&
+                vertical.working_bytes < (std::uint64_t{32} << 20U),
+            "resize admission includes both axis tables and bounded inversion scratch");
+    auto nearest = extreme;
+    nearest.method = ResamplingMethod::nearest;
+    const auto sparse =
+        take(snow::image::estimate_resize_resources(1, 65'536, snow::image::kRgba8, nearest),
+             "estimate nearest sampling tables");
+    require(sparse.retained_bytes < vertical.retained_bytes,
+            "nearest sampling does not budget a Lanczos-sized coefficient table");
+    const auto identity = take(snow::image::estimate_resize_resources(
+                                   65'536, 1, snow::image::kRgba8, ResizeOptions{65'536, 1}),
+                               "estimate identity rows");
+    require(identity.retained_bytes == 0, "identity rows retain no filter tables");
+    require(!snow::image::estimate_resize_resources(0, 1, snow::image::kRgba8, extreme) &&
+                !snow::image::estimate_resize_resources(
+                    1, 1, snow::image::kRgba8,
+                    ResizeOptions{std::numeric_limits<std::uint32_t>::max(), 1}),
+            "resize estimates reject unsupported dimensions before allocation");
+}
+
 Document patterned_resize_document(std::uint32_t width, std::uint32_t height,
                                    snow::image::PixelFormat format) {
     snow::image::MutableImage image =
@@ -4789,6 +5028,28 @@ void test_jxl_opaque_progressive_preview(Service& service) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    if (argc == 2 && std::string_view(argv[1]) == "--alpha-only") {
+        test_alpha_classification_and_composite();
+        test_alpha_vector_boundaries();
+        return 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--crc32c-only") {
+        test_crc32c_vector_boundaries();
+        return 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--raster-stores-only") {
+        test_raster_descriptor_wire_compatibility();
+        test_raster_store();
+        test_raster_buffer_store();
+        std::cout << "snow_image raster store tests passed\n";
+        return 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--resize-only") {
+        test_parallel_resize_determinism();
+        test_streaming_resize();
+        test_resize_table_resource_estimates();
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--webp-only") {
         Service service;
         test_webp(service);
@@ -4871,7 +5132,10 @@ int main(int argc, char* argv[]) {
     }
     test_shared_image_ownership();
     test_alpha_classification_and_composite();
+    test_alpha_vector_boundaries();
+    test_crc32c_vector_boundaries();
     test_persistent_file_input();
+    test_raster_descriptor_wire_compatibility();
     test_raster_store();
     test_raster_buffer_store();
     test_format_mapping();

@@ -440,7 +440,7 @@ pub fn render_bundle_range_with_speed(
     {
         encoder_config.encode_threads = threads;
     }
-    let mut builder = StreamingEncoder::builder(encoder_config);
+    let mut builder = StreamingEncoder::builder(encoder_config).offline_output();
     if let Some(threads) = software_threads {
         builder = builder.software_fallback_threads(threads);
     }

@@ -144,12 +144,13 @@ void RecordingEffectPreview::configure(const QRect& capture, const QSize& output
                                        const QColor& trail, const QColor& click, bool keyboard,
                                        int trailDurationMs, const QColor& keyboardBackground,
                                        const QColor& keyboardForeground, int keyboardSize,
-                                       const QColor& highlight, bool recordMouseClicks) {
+                                       const QColor& highlight, bool recordMouseClicks,
+                                       int highlightRadius) {
     if (m_capture == capture && m_output == output && m_trail == trail && m_click == click &&
         m_keyboard == keyboard && m_trailDurationMs == trailDurationMs &&
         m_keyboardBackground == keyboardBackground && m_keyboardForeground == keyboardForeground &&
         m_keyboardSize == keyboardSize && m_highlight == highlight &&
-        m_recordMouseClicks == recordMouseClicks) {
+        m_recordMouseClicks == recordMouseClicks && m_highlightRadius == highlightRadius) {
         return;
     }
     // Clear with the old transform before changing geometry or disabling an effect.
@@ -160,6 +161,7 @@ void RecordingEffectPreview::configure(const QRect& capture, const QSize& output
     m_trail = trail;
     m_click = click;
     m_highlight = highlight;
+    m_highlightRadius = highlightRadius;
     m_recordMouseClicks = recordMouseClicks;
     m_keyboard = keyboard;
     m_keyboardSize = keyboardSize;
@@ -234,7 +236,8 @@ void RecordingEffectPreview::synchronize() {
                                       nullptr,
                                       nullptr,
                                       0u,
-                                      1.0};
+                                      1.0,
+                                      static_cast<uint32_t>(m_highlightRadius)};
 #ifdef Q_OS_MACOS
     // Native input uses desktop points; fixed-pixel styles need a display-pixel canvas.
     config.canvas_scale = m_area.devicePixelRatioF();

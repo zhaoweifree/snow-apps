@@ -2,6 +2,7 @@
 
 #include "snow_canvas_element_id.h"
 #include "snow_canvas_text.h"
+#include "snow_canvas_fill_render.h"
 #include "snow_canvas_text_edit_geometry.h"
 #include "snow_canvas_text_editor_input.h"
 #include "snow_canvas_text_editor_view.h"
@@ -290,7 +291,8 @@ QRegion SnowCanvasTextEditorSession::applyTextStyle(const SnowTextStyle& style,
     const double previousFontSize = m_previewItem.font_size;
     const QString previousFontFamily = snow_canvas_text::fontFamilyFromSceneItem(m_previewItem);
     const auto previousHorizontalAlign = m_previewItem.text_horizontal_align;
-    const auto previousFillAlpha = m_previewItem.fill.a;
+    const bool previousFillVisible =
+        snow_canvas_fill_render::hasVisibleFill(m_previewItem.fill, m_previewItem.fill_style);
     const auto previousStrokeAlpha = m_previewItem.stroke.a;
     const double previousStrokeWidth = m_previewItem.stroke_width;
     snow_canvas_text::applyTextStyleToSceneItem(m_previewItem, style);
@@ -304,7 +306,8 @@ QRegion SnowCanvasTextEditorSession::applyTextStyle(const SnowTextStyle& style,
         previousFontSize != m_previewItem.font_size ||
         previousFontFamily != snow_canvas_text::fontFamilyFromSceneItem(m_previewItem) ||
         (snow_canvas_element_id::hasElementId(m_bubbleId) &&
-         (previousFillAlpha != m_previewItem.fill.a ||
+         (previousFillVisible != snow_canvas_fill_render::hasVisibleFill(
+                                     m_previewItem.fill, m_previewItem.fill_style) ||
           previousStrokeAlpha != m_previewItem.stroke.a ||
           previousStrokeWidth != m_previewItem.stroke_width ||
           previousHorizontalAlign != m_previewItem.text_horizontal_align)) ||

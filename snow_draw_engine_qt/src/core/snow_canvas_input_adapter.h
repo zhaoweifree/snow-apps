@@ -13,6 +13,7 @@
 
 class QKeyEvent;
 class QMouseEvent;
+class QTabletEvent;
 class QWheelEvent;
 
 namespace snow_canvas_input {
@@ -22,6 +23,7 @@ QCursor strokeCursor(double diameter, const std::optional<QColor>& color, bool c
 QCursor cursorForSnowCursor(SnowCursorStyle style, qreal devicePixelRatio = 1.0);
 
 SnowInputEvent makePointerInput(const QMouseEvent& event, SnowPointerEventType eventType);
+SnowInputEvent makePointerInput(const QTabletEvent& event, SnowPointerEventType eventType);
 SnowInputEvent makePointerInput(const QPointF& position, Qt::MouseButton button,
                                 Qt::MouseButtons buttons, Qt::KeyboardModifiers modifiers,
                                 SnowPointerEventType eventType);

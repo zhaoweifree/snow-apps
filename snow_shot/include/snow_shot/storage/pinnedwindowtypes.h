@@ -3,6 +3,7 @@
 
 #include "pinnedwindowplacement.h"
 #include "pinnedsourceidentity.h"
+#include "pinnedtextstyle.h"
 #include "capturehistorytypes.h"
 #include "snow_shot/image/screenshotanimationsource.h"
 #include <QByteArray>
@@ -75,6 +76,8 @@ struct PinnedWindowRecord final {
     QString originalFileName;
     QString originalHtml;
     QString originalText;
+    PinnedTextFormat textFormat = PinnedTextFormat::PlainText;
+    std::optional<PinnedTextStyle> textStyle;
     double firstCreationTextDpi = 1.0;
     QRectF canvasSourceRect;
     QRectF contentCanvasRect;

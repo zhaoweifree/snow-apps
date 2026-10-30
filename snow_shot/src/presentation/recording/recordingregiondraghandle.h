@@ -1,9 +1,10 @@
 #ifndef SNOW_SHOT_PRESENTATION_RECORDING_RECORDINGREGIONDRAGHANDLE_H
 #define SNOW_SHOT_PRESENTATION_RECORDING_RECORDINGREGIONDRAGHANDLE_H
 
-#include "../components/overlaycontrolbutton.h"
+#include "snow_shot/presentation/components/overlaycontrolbutton.h"
 
-class RecordingRegionDragHandle final : public snow_shot::presentation::OverlayControlButton {
+class RecordingRegionDragHandle final
+    : public snow_shot::presentation::components::OverlayControlButton {
     Q_OBJECT
 
   public:

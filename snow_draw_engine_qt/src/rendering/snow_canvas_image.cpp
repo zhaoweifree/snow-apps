@@ -14,7 +14,11 @@
 
 #if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
 #if defined(Q_PROCESSOR_ARM_64)
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <arm64_neon.h>
+#else
 #include <arm_neon.h>
+#endif
 #elif defined(Q_PROCESSOR_X86_64)
 #include <emmintrin.h>
 #endif
@@ -119,6 +123,20 @@ QImage transformColorAndFormat(const QImage& image, const QColorTransform& trans
                                QImage::Format format, Qt::ImageConversionFlags flags) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     return image.colorTransformed(transform, format, flags);
+#else
+    QImage converted = image;
+    converted.applyColorTransform(transform);
+    return converted.convertToFormat(format, flags);
+#endif
+}
+
+// Colour transform first, format conversion second, deliberately *not* the combined
+// Qt6 call: the combined conversion can mark premultiplied channels as straight
+// RGBA, so a tile that has to stay premultiplied uses this shape instead.
+QImage transformColorOnly(const QImage& image, const QColorTransform& transform,
+                          QImage::Format format, Qt::ImageConversionFlags flags) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return image.colorTransformed(transform).convertToFormat(format, flags);
 #else
     QImage converted = image;
     converted.applyColorTransform(transform);
@@ -536,7 +554,11 @@ bool snowCanvasCopyRgba8888Rows(const QImage& image, int firstRow, int rowCount,
     const auto sourceAddress = reinterpret_cast<std::uintptr_t>(image.constBits());
     const auto destinationAddress = reinterpret_cast<std::uintptr_t>(destination);
     constexpr auto addressMaximum = std::numeric_limits<std::uintptr_t>::max();
-    const auto sourceBytes = static_cast<std::uintptr_t>(image.sizeInBytes());
+    // Borrowed crops keep their original stride; padding after their final pixel row is not
+    // readable source storage and must not falsely overlap an adjacent destination buffer.
+    const auto sourceBytes =
+        static_cast<std::uintptr_t>(image.sizeInBytes() - image.bytesPerLine() +
+                                    (qsizetype(image.width()) * image.depth() + 7) / 8);
     const auto destinationExtent = static_cast<std::uintptr_t>(required);
     if (sourceBytes > addressMaximum - sourceAddress ||
         destinationExtent > addressMaximum - destinationAddress ||
@@ -545,6 +567,8 @@ bool snowCanvasCopyRgba8888Rows(const QImage& image, int firstRow, int rowCount,
         return false;
 
     const bool transformColor = colorSpace.isValid() && image.colorSpace() != colorSpace;
+    const bool preservePremultiplication =
+        transformColor && image.pixelFormat().premultiplied() == QPixelFormat::Premultiplied;
     const auto copyRows = [&](const QImage& converted) {
         if (converted.isNull())
             return false;
@@ -558,7 +582,8 @@ bool snowCanvasCopyRgba8888Rows(const QImage& image, int firstRow, int rowCount,
         return copyRows(image);
 
     try {
-        if ((flags & Qt::PreferDither) && (flags & Qt::Dither_Mask) != Qt::ThresholdDither) {
+        if ((flags & Qt::PreferDither) && (flags & Qt::Dither_Mask) != Qt::ThresholdDither &&
+            !preservePremultiplication) {
             // Qt 6.11's indexed color converter writes the palette of its
             // shallow source copy. Give that path independent image metadata
             // while borrowing the same immutable pixels for this call.
@@ -605,12 +630,18 @@ bool snowCanvasCopyRgba8888Rows(const QImage& image, int firstRow, int rowCount,
                     view.setColorSpace(sourceColorSpace);
                     const QImage converted =
                         !transformColor ? view.convertToFormat(QImage::Format_RGBA8888, flags)
-                        : image.format() <= QImage::Format_Indexed8
-                            // Qt converts the global palette before expanding
-                            // pixels; colorTransformed follows a different route.
-                            ? convertColorAndFormat(view, colorSpace, QImage::Format_RGBA8888, flags)
-                            : transformColorAndFormat(view, transform, QImage::Format_RGBA8888,
-                                                      flags);
+                        : preservePremultiplication
+                            // Qt's combined color/format conversion can mark premultiplied
+                            // channels as straight RGBA. Preserve native precision/alpha for
+                            // color conversion, then explicitly unpremultiply this bounded tile.
+                            ? transformColorOnly(view, transform, QImage::Format_RGBA8888, flags)
+                            : image.format() <= QImage::Format_Indexed8
+                                  // Qt converts the global palette before expanding
+                                  // pixels; colorTransformed follows a different route.
+                                  ? convertColorAndFormat(view, colorSpace, QImage::Format_RGBA8888,
+                                                          flags)
+                                  : transformColorAndFormat(view, transform,
+                                                            QImage::Format_RGBA8888, flags);
                     if (converted.isNull()) {
                         failed.store(true, std::memory_order_relaxed);
                         return;

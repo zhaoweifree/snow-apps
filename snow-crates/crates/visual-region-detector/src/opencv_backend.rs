@@ -55,6 +55,7 @@ pub fn regions_to_jsonable(
 }
 
 /// Export crops from an OpenCV Mat using the portable lossless writer.
+#[cfg(feature = "file-io")]
 pub fn write_crops(
     mat: &Mat,
     regions: &[Region],

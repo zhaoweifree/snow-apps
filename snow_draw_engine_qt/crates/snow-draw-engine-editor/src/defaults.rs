@@ -47,6 +47,7 @@ pub fn editor_style_defaults() -> EditorStyleDefaults {
 
     EditorStyleDefaults {
         speech_bubble: RectangleShapeStyle {
+            stroke_rendering_style: Default::default(),
             shape: snow_draw_engine_document::HighlightShape::Rectangle,
             fill: ColorRgba8::default(),
             fill_style: FillStyle::Solid,
@@ -61,6 +62,7 @@ pub fn editor_style_defaults() -> EditorStyleDefaults {
         spotlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
         spotlight_corner_radii: CornerRadii::default(),
         rectangle: RectangleShapeStyle {
+            stroke_rendering_style: Default::default(),
             shape: snow_draw_engine_document::HighlightShape::Rectangle,
             fill: ColorRgba8::default(),
             fill_style: FillStyle::Solid,
@@ -70,6 +72,7 @@ pub fn editor_style_defaults() -> EditorStyleDefaults {
             corner_radii: CornerRadii::splat(6.0),
         },
         arrow: ArrowStyle {
+            stroke_rendering_style: Default::default(),
             stroke,
             stroke_width: 2.0,
             start_arrowhead: None,
@@ -80,6 +83,8 @@ pub fn editor_style_defaults() -> EditorStyleDefaults {
             arrow_ratio: 1.0,
         },
         line: ShapeStyle {
+            stroke_rendering_style: Default::default(),
+            brush_mode: Default::default(),
             shape: snow_draw_engine_document::HighlightShape::Rectangle,
             fill: ColorRgba8::default(),
             fill_style: FillStyle::Solid,
@@ -101,6 +106,8 @@ pub fn editor_style_defaults() -> EditorStyleDefaults {
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
         },
         free_draw: ShapeStyle {
+            stroke_rendering_style: Default::default(),
+            brush_mode: Default::default(),
             shape: snow_draw_engine_document::HighlightShape::Rectangle,
             fill: ColorRgba8::default(),
             fill_style: FillStyle::Solid,
@@ -122,6 +129,8 @@ pub fn editor_style_defaults() -> EditorStyleDefaults {
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
         },
         rectangle_highlight: ShapeStyle {
+            stroke_rendering_style: Default::default(),
+            brush_mode: Default::default(),
             shape: snow_draw_engine_document::HighlightShape::Rectangle,
             fill: stroke,
             fill_style: FillStyle::Solid,
@@ -138,6 +147,8 @@ pub fn editor_style_defaults() -> EditorStyleDefaults {
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
         },
         pen_highlight: ShapeStyle {
+            stroke_rendering_style: Default::default(),
+            brush_mode: Default::default(),
             shape: snow_draw_engine_document::HighlightShape::Rectangle,
             fill: ColorRgba8::default(),
             fill_style: FillStyle::Solid,
@@ -180,6 +191,7 @@ pub fn editor_style_defaults() -> EditorStyleDefaults {
             opacity: 1.0,
         },
         serial_number: SerialNumberStyle {
+            stroke_rendering_style: Default::default(),
             number: 1,
             serial_number_type: SerialNumberType::OutlinedCircle,
             numeric_type: snow_draw_engine_document::SerialNumberNumericType::Arabic,

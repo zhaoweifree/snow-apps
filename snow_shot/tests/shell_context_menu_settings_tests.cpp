@@ -9,6 +9,7 @@
 
 #include <QApplication>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -23,6 +24,9 @@ namespace storage = snow_shot::storage;
 
 const QString kKey = QStringLiteral("system/context_menu_mode");
 const QString kId = QStringLiteral("system.context-menu-mode");
+const QString kShortcutKey = QStringLiteral("context_menu_shortcuts/edit_with_snow_shot");
+const QString kShortcutId = QStringLiteral("edit_with_snow_shot");
+constexpr auto kScope = settings::SettingsLocalShortcutScope::WindowsContextMenu;
 constexpr auto kBinding = settings::SettingsSelectBinding::ContextMenuMode;
 
 void require(bool condition, const char* message) {
@@ -38,12 +42,32 @@ void catalogAndDefaults(const QString& configurationPath) {
                 schema->valueKind == storage::ConfigurationValueKind::String &&
                 schema->allowedStringValues ==
                     QStringList{QStringLiteral("image_files"), QStringLiteral("disabled")},
-            "shared schema defaults to Image files with two exact string values");
+            "shared schema defaults to Image and document files with two exact string values");
     const auto& registry = settings::builtInSettingsRegistry();
     require(registry.isValid(), "the context menu setting preserves valid catalog bindings");
     const auto* field = registry.field(kId);
     const settings::SettingsSearchIndex search(registry);
+    const auto* shortcutField = registry.fieldForLocalShortcut(kScope, kShortcutId);
+    const auto* shortcutSchema = storage::ConfigurationSchema::entry(kShortcutKey);
+    require(shortcutSchema && shortcutSchema->defaultValue == QJsonArray{} &&
+                shortcutSchema->valueKind == storage::ConfigurationValueKind::ShortcutList &&
+                shortcutSchema->maximumListItems == 1,
+            "menu access keys default to an empty shortcut list with one allowed assignment");
 #ifdef Q_OS_WIN
+    require(
+        shortcutField && shortcutField->pageId == QStringLiteral("shortcuts-mouse") &&
+            shortcutField->sectionId == QStringLiteral("windows-context-menu-shortcuts") &&
+            shortcutField->configurationKey == kShortcutKey &&
+            shortcutField->reset == settings::SettingsSectionReset::WindowsContextMenuShortcuts &&
+            std::get<settings::SettingsLocalShortcutDefinition>(shortcutField->definition->payload)
+                    .maximumShortcutCount == 1 &&
+            shortcutField->definition->title.translated() ==
+                (snow_shot::app::edition::isMini ? QStringLiteral("Edit with Snow Shot Mini")
+                                                 : QStringLiteral("Edit with Snow Shot")) &&
+            registry.catalog().page(shortcutField->pageId)->sections.last().id ==
+                shortcutField->sectionId &&
+            !search.search(QStringLiteral("Edit with Snow Shot")).isEmpty(),
+        "Windows exposes the searchable edition-aware recorder in the final shortcut category");
     require(field && field->configurationKey == kKey &&
                 field->pageId == QStringLiteral("general") &&
                 field->sectionId == QStringLiteral("system-general") &&
@@ -55,7 +79,8 @@ void catalogAndDefaults(const QString& configurationPath) {
     const auto& select = std::get<settings::SettingsSelectDefinition>(field->definition->payload);
     require(select.source == settings::SettingsSelectSource::Fixed && select.options.size() == 2 &&
                 select.options[0].value == QStringLiteral("image_files") &&
-                select.options[0].label.translated() == QStringLiteral("Image files") &&
+                select.options[0].label.translated() ==
+                    QStringLiteral("Image and document files") &&
                 select.options[1].value == QStringLiteral("disabled") &&
                 select.options[1].label.translated() == QStringLiteral("Disabled") &&
                 !search.search(QStringLiteral("Windows context menu")).isEmpty(),
@@ -65,7 +90,7 @@ void catalogAndDefaults(const QString& configurationPath) {
                 section->items[2].id == QStringLiteral("system.restart-as-administrator"),
             "context menu dropdown follows the adjacent administrator startup controls");
 #else
-    require(!field && !registry.fieldForSelect(kBinding) &&
+    require(!shortcutField && !field && !registry.fieldForSelect(kBinding) &&
                 search.search(QStringLiteral("Windows context menu")).isEmpty(),
             "other platforms omit the Windows context menu control and search entry");
 #endif
@@ -83,19 +108,50 @@ void catalogAndDefaults(const QString& configurationPath) {
     file.close();
     storage::ConfigurationStore store(configurationPath, true, true, 60000);
     require(store.value(kKey) == QStringLiteral("image_files") &&
+                store.value(kShortcutKey) == QJsonArray{} &&
                 store.value(QStringLiteral("system/application_priority")) ==
                     QStringLiteral("normal"),
-            "old configurations acquire Image files without changing existing preferences");
+            "old configurations acquire Image and document files without changing existing "
+            "preferences");
     require(store.applySnapshot({{kKey, QStringLiteral("disabled")}}) &&
                 store.value(kKey) == QStringLiteral("disabled") && store.applySnapshot({}) &&
                 store.value(kKey) == QStringLiteral("image_files") &&
                 store.applySnapshot({{kKey, QStringLiteral("unknown")}}) &&
                 store.value(kKey) == QStringLiteral("image_files"),
-            "imports preserve Disabled and default missing or invalid preferences to Image files");
+            "imports preserve Disabled and default missing or invalid preferences to Image and "
+            "document files");
     const auto revision = store.revision();
     require(!store.setValue(kKey, false) && !store.setValue(kKey, QStringLiteral("unknown")) &&
                 store.revision() == revision,
             "direct writes reject non-string and unsupported context menu preferences");
+}
+
+void accessKeySchemaValidation() {
+    using snow_shot::shortcuts::ShortcutBinding;
+    using snow_shot::shortcuts::shortcutBindingsToJson;
+    ShortcutBinding physical{QStringLiteral("E")};
+    physical.physicalKeys.insert(snow_shot::shortcuts::ShortcutPlatform::MacOS, 14);
+    for (const auto& value : {QJsonArray{QStringLiteral("e")}, shortcutBindingsToJson({physical}),
+                              QJsonArray{QStringLiteral("7")}, QJsonArray{}}) {
+        const auto normalized = storage::ConfigurationSchema::normalize(kShortcutKey, value);
+        require(normalized.valid, "valid logical access keys normalize successfully");
+        const auto keys = snow_shot::shortcuts::shortcutBindingsFromJson(normalized.value, false);
+        require(keys.isEmpty() || (keys.size() == 1 && keys.first().physicalKeys.isEmpty() &&
+                                   (keys.first().portableText == QStringLiteral("E") ||
+                                    keys.first().portableText == QStringLiteral("7"))),
+                "normalization uppercases letters and strips physical keyboard metadata");
+    }
+    for (const auto& value :
+         {QJsonValue(QStringLiteral("E")), QJsonValue(QJsonArray{42}),
+          QJsonValue(QJsonArray{QStringLiteral("Ctrl+E")}),
+          QJsonValue(QJsonArray{QStringLiteral("Shift+E")}),
+          QJsonValue(QJsonArray{QStringLiteral("Alt+E")}),
+          QJsonValue(QJsonArray{QStringLiteral("Meta+E")}),
+          QJsonValue(QJsonArray{QStringLiteral("F1")}), QJsonValue(QJsonArray{QStringLiteral(";")}),
+          QJsonValue(QJsonArray{QStringLiteral("雪")}),
+          QJsonValue(QJsonArray{QStringLiteral("E"), QStringLiteral("S")})})
+        require(!storage::ConfigurationSchema::normalize(kShortcutKey, value).valid,
+                "schema rejects malformed, modified, non-alphanumeric and multiple access keys");
 }
 
 void settingsTransactions(const QString& configurationDirectory, const QString& blockedDirectory) {
@@ -118,7 +174,7 @@ void settingsTransactions(const QString& configurationDirectory, const QString& 
     require(backend.selectValue(kBinding) == QStringLiteral("image_files") &&
                 session.state(kId).acceptedValue == QStringLiteral("image_files") &&
                 registration.setEnabled(true) && registry.keys.size() == 2,
-            "first launch applies the default Image files mode");
+            "first launch applies the default Image and document files mode");
     require(
         session.applySelectValue(kBinding, QStringLiteral("disabled")) && registry.keys.isEmpty() &&
             configuration.value(kKey) == QStringLiteral("disabled") && !session.hasDirtyFields(),
@@ -208,6 +264,124 @@ void settingsTransactions(const QString& configurationDirectory, const QString& 
             "other platforms reject context menu changes without side effects");
 #endif
 }
+
+void accessKeyTransactions(const QString& configurationDirectory, const QString& blockedDirectory) {
+    using snow_shot::shortcuts::ShortcutBinding;
+    using snow_shot::shortcuts::ShortcutBindingList;
+    using snow_shot::shortcuts::shortcutBindingsToJson;
+    Registry registry;
+    windows::ShellContextMenuRegistration registration(registry.options());
+    snow_shot::presentation::GlobalShortcutManager shortcuts;
+    settings::BuiltInSettingsBackend backend(shortcuts, nullptr, nullptr, nullptr, nullptr,
+                                             &registration);
+    settings::SettingsRuntimeSession session(settings::builtInSettingsRegistry(), backend);
+    auto& configuration = storage::ApplicationStorage::instance().configuration();
+#ifdef Q_OS_WIN
+    const ShortcutBindingList e{ShortcutBinding{QStringLiteral("E")}};
+    const ShortcutBindingList digit{ShortcutBinding{QStringLiteral("7")}};
+    const auto label = [&] {
+        return stringText(
+            registry.keys.value(Registry::path(QStringLiteral("png"))).values.value({}));
+    };
+    require(backend.localShortcuts(kScope, kShortcutId).isEmpty() && registration.setEnabled(true),
+            "prepare the default unassigned menu");
+    ShortcutBinding physical{QStringLiteral("e")};
+    physical.physicalKeys.insert(snow_shot::shortcuts::ShortcutPlatform::MacOS, 14);
+    require(session.applyLocalShortcuts(kScope, kShortcutId, {physical}) &&
+                session.localShortcuts(kScope, kShortcutId) == e &&
+                label().endsWith(QStringLiteral(" (&E)")) && !session.hasDirtyFields(),
+            "recorder commits canonical logical keys immediately to settings and native labels");
+    storage::ConfigurationStore persisted(configurationDirectory + QStringLiteral("/config.json"),
+                                          true, true, 60000);
+    require(persisted.value(kShortcutKey) == shortcutBindingsToJson(e),
+            "access keys survive an immediate configuration reload");
+    for (const auto& invalid :
+         {QStringLiteral("Ctrl+E"), QStringLiteral("Shift+E"), QStringLiteral("Alt+E"),
+          QStringLiteral("Meta+E"), QStringLiteral("F1"), QStringLiteral(";")}) {
+        const auto before = configuration.snapshot();
+        const auto nativeBefore = registry.keys;
+        require(!backend.validateLocalShortcut(kScope, kShortcutId, ShortcutBinding{invalid})
+                        .supported &&
+                    !backend.applyLocalShortcuts(kScope, kShortcutId, {ShortcutBinding{invalid}}) &&
+                    configuration.snapshot() == before && registry.keys == nativeBefore,
+                "invalid recorder assignments have no configuration or registry side effects");
+    }
+    require(!backend.applyLocalShortcuts(kScope, kShortcutId, {e.first(), digit.first()}) &&
+                !backend.applyLocalShortcuts(kScope, QStringLiteral("unknown"), e),
+            "the backend rejects extra keys and unknown commands");
+    const auto nativeBefore = registry.keys;
+    registry.writesBeforeFailure = 1;
+    require(!session.applyLocalShortcuts(kScope, kShortcutId, digit) &&
+                registry.keys == nativeBefore && backend.localShortcuts(kScope, kShortcutId) == e,
+            "a partial registry failure preserves the accepted access key");
+    configuration.relocate(blockedDirectory);
+    require(!backend.applyLocalShortcuts(kScope, kShortcutId, digit) &&
+                registry.keys == nativeBefore && backend.localShortcuts(kScope, kShortcutId) == e,
+            "a failed configuration flush restores native labels and the in-memory assignment");
+    configuration.relocate(configurationDirectory);
+    require(configuration.flushNow().success, "recover preference persistence");
+    require(session.applySelectValue(kBinding, QStringLiteral("disabled")) &&
+                session.applyLocalShortcuts(kScope, kShortcutId, digit) && registry.keys.isEmpty(),
+            "users can save an access key while the context menu is disabled");
+    auto imported = configuration.snapshot();
+    imported.insert(kKey, QStringLiteral("image_files"));
+    imported.insert(kShortcutKey, shortcutBindingsToJson(e));
+    registry.writesBeforeFailure = 1;
+    require(!backend.importConfigurationSnapshot(imported,
+                                                 storage::ConfigurationSchema::currentVersion()) &&
+                registry.keys.isEmpty() &&
+                configuration.value(kKey) == QStringLiteral("disabled") &&
+                backend.localShortcuts(kScope, kShortcutId) == digit,
+            "failed imports roll back menu mode and access key together");
+    require(backend.importConfigurationSnapshot(imported,
+                                                storage::ConfigurationSchema::currentVersion()) &&
+                label().endsWith(QStringLiteral(" (&E)")) &&
+                backend.localShortcuts(kScope, kShortcutId) == e,
+            "successful imports apply menu mode and access key in one native transaction");
+    auto& language = snow_shot::presentation::LanguageManager::instance();
+    const QString english = label();
+    for (const auto& locale : {QStringLiteral("zh_CN"), QStringLiteral("zh_TW")})
+        require(language.setLanguage(locale) && label() != english &&
+                    label().endsWith(QStringLiteral(" (&E)")),
+                "language changes translate the label while preserving its assigned access key");
+    require(language.setLanguage(QStringLiteral("en_US")), "restore English");
+    registry.writesBeforeFailure = 1;
+    require(!session.reset(settings::SettingsSectionReset::WindowsContextMenuShortcuts) &&
+                label().endsWith(QStringLiteral(" (&E)")),
+            "a failed category reset preserves the saved access key");
+    require(session.reset(settings::SettingsSectionReset::WindowsContextMenuShortcuts) &&
+                session.localShortcuts(kScope, kShortcutId).isEmpty() &&
+                !label().contains(QLatin1Char('&')) &&
+                configuration.value(kKey) == QStringLiteral("image_files"),
+            "category reset clears only the shortcut and removes its menu suffix");
+    require(session.applyLocalShortcuts(kScope, kShortcutId, digit) &&
+                session.applyLocalShortcuts(kScope, kShortcutId, {}) &&
+                !label().contains(QLatin1Char('&')),
+            "clearing an assignment removes the mnemonic");
+    for (const bool missing : {false, true}) {
+        require(session.applyLocalShortcuts(kScope, kShortcutId, e),
+                "prepare legacy or invalid import");
+        imported = configuration.snapshot();
+        if (missing)
+            imported.remove(kShortcutKey);
+        else
+            imported.insert(kShortcutKey, QJsonArray{QStringLiteral("Ctrl+E")});
+        require(backend.importConfigurationSnapshot(
+                    imported, storage::ConfigurationSchema::currentVersion()) &&
+                    backend.localShortcuts(kScope, kShortcutId).isEmpty() &&
+                    !label().contains(QLatin1Char('&')),
+                "missing or invalid imported access keys use the unassigned default");
+    }
+#else
+    Q_UNUSED(configurationDirectory);
+    Q_UNUSED(blockedDirectory);
+    const auto before = configuration.snapshot();
+    require(
+        !backend.applyLocalShortcuts(kScope, kShortcutId, {ShortcutBinding{QStringLiteral("E")}}) &&
+            configuration.snapshot() == before && registry.keys.isEmpty(),
+        "other platforms reject native access key changes without side effects");
+#endif
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -215,6 +389,7 @@ int main(int argc, char** argv) {
     QTemporaryDir temporary;
     require(temporary.isValid(), "create isolated settings test storage");
     catalogAndDefaults(temporary.filePath(QStringLiteral("existing.json")));
+    accessKeySchemaValidation();
     auto& applicationStorage = storage::ApplicationStorage::instance();
     require(applicationStorage.initialize({temporary.path(), temporary.path(), 60000}).success,
             "initialize isolated application storage");
@@ -226,6 +401,7 @@ int main(int argc, char** argv) {
             "create a file that blocks configuration persistence");
     blocker.close();
     settingsTransactions(applicationStorage.configurationDirectory(), blocker.fileName());
+    accessKeyTransactions(applicationStorage.configurationDirectory(), blocker.fileName());
     applicationStorage.shutdown();
     std::cout << "Shell context menu settings tests passed\n";
     return 0;

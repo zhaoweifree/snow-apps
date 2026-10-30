@@ -1,4 +1,5 @@
 #include "snow_draw_engine_qt/snow_canvas_image.h"
+#include "snow_draw_engine_qt/snow_canvas_overlay_style.h"
 #include "snow_canvas_smart_erase.h"
 #include "snow_canvas_renderer.h"
 #include "snow_canvas_background_restore.h"
@@ -8,8 +9,10 @@
 #include "snow_canvas_fill_render.h"
 #include "snow_canvas_magnifier_renderer.h"
 #include "snow_canvas_pen_mask_atlas.h"
+#include "snow_canvas_pressure_mask_atlas.h"
 #include "snow_canvas_render_diagnostics.h"
 #include "snow_canvas_render_geometry.h"
+#include "snow_canvas_stroke_rendering.h"
 #include "snow_canvas_text.h"
 #include "snow_canvas_text_layout.h"
 #include "snow_canvas_text_render.h"
@@ -103,6 +106,10 @@ std::uint64_t filterDependencyFingerprint(const SnowCanvasSceneItem* items, std:
         hash = filterTileHashDouble(hash, item.opacity);
         hash = filterTileHashAppend(hash, item.penFilterGeometryRevision());
         hash = filterTileHashAppend(hash, item.pathGeometryRevision());
+        hash = filterTileHashAppend(hash, item.pressureGeometryRevision());
+        hash = filterTileHashAppend(hash, item.stroke_rendering_style);
+        hash = filterTileHashAppend(hash, item.stroke_rendering_seed);
+        hash = filterTileHashAppend(hash, item.brush_mode);
         hash = filterTileHashAppend(hash, item.filter.filter_type);
         hash = filterTileHashAppend(hash, item.filter.render_phase);
         hash = filterTileHashDouble(hash, item.filter.strength);
@@ -169,6 +176,10 @@ filterDependencyFingerprintsForRegion(const SnowCanvasSceneItem* items,
             hash = filterTileHashDouble(hash, item.opacity);
             hash = filterTileHashAppend(hash, item.penFilterGeometryRevision());
             hash = filterTileHashAppend(hash, item.pathGeometryRevision());
+            hash = filterTileHashAppend(hash, item.pressureGeometryRevision());
+            hash = filterTileHashAppend(hash, item.stroke_rendering_style);
+            hash = filterTileHashAppend(hash, item.stroke_rendering_seed);
+            hash = filterTileHashAppend(hash, item.brush_mode);
             hash = filterTileHashAppend(hash, item.filter.filter_type);
             hash = filterTileHashAppend(hash, item.filter.render_phase);
             hash = filterTileHashDouble(hash, item.filter.strength);
@@ -188,12 +199,6 @@ filterDependencyFingerprintsForRegion(const SnowCanvasSceneItem* items,
         fingerprints.push_back(hash);
     }
     return fingerprints;
-}
-
-void applyMultiSelectionDashStyle(QPen& pen) {
-    pen.setStyle(Qt::CustomDashLine);
-    pen.setCapStyle(Qt::FlatCap);
-    pen.setDashPattern({5.0, 3.0});
 }
 
 bool isDashedSelectionFrame(SnowOverlayRectKind kind) {
@@ -273,7 +278,7 @@ void applyRectangleStrokeStyle(QPen& pen, SnowStrokeStyle style) {
 }
 
 QBrush fillBrushForStyle(const SnowColorRgba8& color, SnowFillStyle style) {
-    if (color.a == 0) {
+    if (!snow_canvas_fill_render::hasVisibleFill(color, style)) {
         return Qt::NoBrush;
     }
     QBrush brush(toQColor(color));
@@ -695,6 +700,32 @@ void drawArrowDisplayItem(QPainter& painter, const ArrowRenderProjection& projec
                   projection.view.cameraZoom, arrowRatio, projection.background);
 }
 
+template <typename Item>
+void drawStrokeRenderingGeometry(QPainter& painter,
+                                 const snow_canvas_render_geometry::ViewProjection& projection,
+                                 const Item& item, const QColor& headBackground) {
+    const auto& geometry = snow_canvas_stroke_rendering::geometry(item);
+    painter.save();
+    painter.translate(canvasToView(projection, item.center_x, item.center_y));
+    painter.rotate(item.rotation * kRadiansToDegrees);
+    painter.scale(projection.cameraZoom, projection.cameraZoom);
+    painter.setPen(Qt::NoPen);
+    if (!geometry.originalFill.isEmpty() &&
+        snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style)) {
+        snow_canvas_fill_render::drawStyledFill(painter, geometry.originalFill, item.fill,
+                                                item.fill_style, item.stroke_width);
+    }
+    if (item.stroke.a != 0 && item.stroke_width > 0) {
+        if (!geometry.backgroundHeads.isEmpty()) {
+            painter.setBrush(headBackground);
+            painter.drawPath(geometry.backgroundHeads);
+        }
+        painter.setBrush(toQColor(item.stroke));
+        painter.drawPath(geometry.ink);
+    }
+    painter.restore();
+}
+
 void drawRectItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
                   const SnowCanvasSceneItem& item) {
     const snow_canvas_render_geometry::ViewProjection projection =
@@ -705,9 +736,19 @@ void drawRectItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
         item.width <= 0.0 || item.height <= 0.0 || zoom <= 0.0) {
         return;
     }
-    const bool hasFill = item.fill.a != 0;
+    const bool hasFill = snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style);
     const bool hasStroke = item.stroke.a != 0 && item.stroke_width > 0.0;
     if (!hasFill && !hasStroke) {
+        return;
+    }
+
+    if (item.stroke_rendering_style != SNOW_STROKE_RENDERING_STYLE_ARCHITECT) {
+        painter.save();
+        if (item.blend_mode == SNOW_BLEND_MODE_MULTIPLY)
+            painter.setCompositionMode(QPainter::CompositionMode_Multiply);
+        painter.setOpacity(qBound(0.0, item.opacity, 1.0));
+        drawStrokeRenderingGeometry(painter, projection, item, Qt::transparent);
+        painter.restore();
         return;
     }
 
@@ -833,7 +874,7 @@ void drawSpeechBubbleItem(QPainter& painter, const SceneDisplayInfo& displayInfo
     painter.save();
     painter.setWorldTransform(canvasToViewTransform(projection), true);
     painter.setOpacity(qBound(0.0, item.opacity, 1.0));
-    if (item.fill.a != 0) {
+    if (snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style)) {
         painter.setPen(Qt::NoPen);
         snow_canvas_fill_render::drawStyledFill(painter, *path, item.fill, item.fill_style,
                                                 item.stroke_width);
@@ -857,7 +898,7 @@ QRectF viewRectToCanvas(const snow_canvas_render_geometry::ViewProjection& view,
 }
 
 void drawOwnedPathChunks(QPainter& painter, const ArrowRenderProjection& projection,
-                         const SnowCanvasSceneItem& item) {
+                         const SnowCanvasSceneItem& item, const void* cacheNamespace) {
     const double strokeWidth = item.stroke_width;
     const QColor stroke = toQColor(item.stroke);
     if (item.pathChunks().empty()) {
@@ -865,15 +906,34 @@ void drawOwnedPathChunks(QPainter& painter, const ArrowRenderProjection& project
     }
     painter.save();
     const bool hasExplicitClip = painter.hasClipping();
+    const bool pressureStroke =
+        item.is_free_draw != 0 && item.brush_mode == SNOW_BRUSH_MODE_PRESSURE_SENSITIVE;
+    // Capture in view coordinates before camera inversion rounds the logical clip to integers.
+    const QRegion pressurePhysicalClip = pressureStroke && hasExplicitClip
+                                             ? painter.deviceTransform().map(painter.clipRegion())
+                                             : QRegion();
     const QRectF canvasVisible =
         hasExplicitClip ? viewRectToCanvas(projection.view, painter.clipBoundingRect())
                               .adjusted(-strokeWidth, -strokeWidth, strokeWidth, strokeWidth)
                         : QRectF();
     painter.setWorldTransform(canvasToViewTransform(projection.view), true);
 
-    if (item.pathIsClosed() && item.fill.a != 0 && !item.aggregateClosedPath().isEmpty()) {
+    if (item.pathIsClosed() &&
+        snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style) &&
+        !item.aggregateClosedPath().isEmpty()) {
         snow_canvas_fill_render::drawStyledFill(painter, item.aggregateClosedPath(), item.fill,
                                                 item.fill_style, item.stroke_width);
+    }
+
+    if (pressureStroke) {
+        if (stroke.alpha() != 0 && strokeWidth > 0.0) {
+            snow_canvas_pressure_mask::DrawOptions options;
+            options.cacheNamespace = cacheNamespace;
+            options.physicalClip = hasExplicitClip ? &pressurePhysicalClip : nullptr;
+            snow_canvas_pressure_mask::draw(painter, item, stroke, options);
+        }
+        painter.restore();
+        return;
     }
 
     if (stroke.alpha() != 0 && strokeWidth > 0.0) {
@@ -922,7 +982,8 @@ void drawOwnedPathChunks(QPainter& painter, const ArrowRenderProjection& project
 }
 
 void drawArrowItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
-                   const SnowCanvasSceneItem& item, double inheritedOpacity = 1.0) {
+                   const SnowCanvasSceneItem& item, double inheritedOpacity = 1.0,
+                   const void* cacheNamespace = nullptr) {
     painter.save();
     if (item.blend_mode == SNOW_BLEND_MODE_MULTIPLY) {
         painter.setCompositionMode(QPainter::CompositionMode_Multiply);
@@ -930,11 +991,12 @@ void drawArrowItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
     painter.setOpacity(inheritedOpacity * qBound(0.0, item.opacity, 1.0));
     const ArrowRenderProjection projection = arrowProjectionForScene(displayInfo);
     if (item.has_bound_text_element != 0 && item.arrow_text_overlay == 0 &&
-        item.needsArrowTextClip(
-            2.0 /
-            (projection.view.cameraZoom *
-             (painter.device() != nullptr ? qMax<qreal>(1.0, painter.device()->devicePixelRatioF())
-                                          : 1.0)))) {
+        (item.stroke_rendering_style != SNOW_STROKE_RENDERING_STYLE_ARCHITECT ||
+         item.needsArrowTextClip(
+             2.0 /
+             (projection.view.cameraZoom *
+              (painter.device() != nullptr ? qMax<qreal>(1.0, painter.device()->devicePixelRatioF())
+                                           : 1.0))))) {
         const auto& bounds = item.arrow_text_bounds;
         const QPointF topLeft = canvasToView(projection.view, bounds[0] - 5.0, bounds[1] - 5.0);
         const QPointF bottomRight = canvasToView(projection.view, bounds[2] + 5.0, bounds[3] + 5.0);
@@ -949,8 +1011,12 @@ void drawArrowItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
         clip.addRect(labelRect);
         painter.setClipPath(clip, Qt::IntersectClip);
     }
-    if (!item.pathChunks().empty() && item.arrow_shaft_type != SNOW_ARROW_SHAFT_TYPE_TAPERED) {
-        drawOwnedPathChunks(painter, projection, item);
+    if (item.stroke_rendering_style != SNOW_STROKE_RENDERING_STYLE_ARCHITECT &&
+        item.is_free_draw == 0) {
+        drawStrokeRenderingGeometry(painter, projection.view, item, projection.background);
+    } else if (!item.pathChunks().empty() &&
+               item.arrow_shaft_type != SNOW_ARROW_SHAFT_TYPE_TAPERED) {
+        drawOwnedPathChunks(painter, projection, item, cacheNamespace);
         const double viewStrokeWidth = item.stroke_width * projection.view.cameraZoom;
         if (item.arrowhead_primitive_count > 0) {
             drawArrowheadPrimitives(painter, projection, item.arrowhead_primitives,
@@ -975,7 +1041,8 @@ void drawArrowItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
             item.arrow_point_count >= 3 && item.arrow_points != nullptr &&
             item.arrow_points[0].x == item.arrow_points[item.arrow_point_count - 1].x &&
             item.arrow_points[0].y == item.arrow_points[item.arrow_point_count - 1].y;
-        if (fallbackClosed && item.fill.a != 0 && !rustPath.isEmpty()) {
+        if (fallbackClosed && snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style) &&
+            !rustPath.isEmpty()) {
             QPainterPath fillPath = rustPath;
             fillPath.closeSubpath();
             snow_canvas_fill_render::drawStyledFill(painter, fillPath, item.fill, item.fill_style,
@@ -1010,7 +1077,7 @@ void drawTextItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
     painter.setOpacity(qBound(0.0, item.opacity, 1.0));
 
     const QRectF localRect(-width / 2.0, -height / 2.0, width, height);
-    if (item.fill.a != 0) {
+    if (snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style)) {
         snow_canvas_text_render::drawBackground(painter, item, painter.font(), localRect, zoom);
     }
 
@@ -1022,7 +1089,7 @@ void drawTextItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
 }
 
 void drawSerialNumberItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
-                          const SnowSceneDisplayItem& item) {
+                          const SnowCanvasSceneItem& item) {
     const snow_canvas_render_geometry::ViewProjection projection =
         snow_canvas_render_geometry::sceneProjection(displayInfo);
     const QPointF center = canvasToView(projection, item.center_x, item.center_y);
@@ -1035,7 +1102,8 @@ void drawSerialNumberItem(QPainter& painter, const SceneDisplayInfo& displayInfo
     }
     const bool solid = serialNumberIsSolid(item);
     const bool square = serialNumberIsSquare(item);
-    if (!solid && item.fill.a == 0 && (item.stroke.a == 0 || strokeWidth <= 0.0)) {
+    if (!solid && !snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style) &&
+        (item.stroke.a == 0 || strokeWidth <= 0.0)) {
         return;
     }
 
@@ -1082,7 +1150,18 @@ void drawSerialNumberItem(QPainter& painter, const SceneDisplayInfo& displayInfo
     }
     snow_canvas_fill_render::drawTextBackgroundFill(painter, backgroundPath, item.fill,
                                                     item.fill_style, item.font_size, zoom);
-    if (square) {
+    const bool outlined = item.serial_number_type == SNOW_SERIAL_NUMBER_TYPE_OUTLINED_CIRCLE ||
+                          item.serial_number_type == SNOW_SERIAL_NUMBER_TYPE_OUTLINED_SQUARE;
+    if (outlined && item.stroke_rendering_style != SNOW_STROKE_RENDERING_STYLE_ARCHITECT) {
+        const auto& geometry = snow_canvas_stroke_rendering::geometry(item);
+        painter.save();
+        painter.scale(zoom, zoom);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(toQColor(item.stroke));
+        if (item.stroke.a != 0 && strokeWidth > 0.0)
+            painter.drawPath(geometry.ink);
+        painter.restore();
+    } else if (square) {
         painter.drawRoundedRect(localRect, cornerRadius, cornerRadius);
     } else {
         painter.drawEllipse(localRect);
@@ -1123,7 +1202,8 @@ void drawSerialNumberConnectorItem(QPainter& painter, const SceneDisplayInfo& di
 
 void drawSceneItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
                    const SnowCanvasSceneItem& item, const SnowCanvasSmartEraseSnapshot& smartErase,
-                   const QList<SnowCanvasBaseImageSource>* baseImageSources) {
+                   const QList<SnowCanvasBaseImageSource>* baseImageSources,
+                   const void* cacheNamespace) {
     switch (item.kind) {
     case SNOW_SCENE_DISPLAY_ITEM_DRAW_RECT:
         drawRectItem(painter, displayInfo, item);
@@ -1132,7 +1212,7 @@ void drawSceneItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
         drawSpeechBubbleItem(painter, displayInfo, item);
         break;
     case SNOW_SCENE_DISPLAY_ITEM_ARROW:
-        drawArrowItem(painter, displayInfo, item);
+        drawArrowItem(painter, displayInfo, item, 1.0, cacheNamespace);
         break;
     case SNOW_SCENE_DISPLAY_ITEM_TEXT:
         drawTextItem(painter, displayInfo, item);
@@ -1150,7 +1230,7 @@ void drawSceneItem(QPainter& painter, const SceneDisplayInfo& displayInfo,
     case SNOW_SCENE_DISPLAY_ITEM_MAGNIFIER:
         if (item.magnifier.connection_type == SNOW_MAGNIFIER_CONNECTION_LEADER_LINE &&
             item.arrow_point_count >= 2)
-            drawArrowItem(painter, displayInfo, item, painter.opacity());
+            drawArrowItem(painter, displayInfo, item, painter.opacity(), cacheNamespace);
         snow_canvas_magnifier_renderer::render(painter, displayInfo, item, baseImageSources);
         break;
     default:
@@ -1195,6 +1275,13 @@ bool drawMagnifierMoveHandle(QPainter& painter, const OverlayDisplayInfo& displa
 
 void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInfo,
                          const SnowOverlayDisplayItem& item) {
+    if (item.stroke_rendering_style != SNOW_STROKE_RENDERING_STYLE_ARCHITECT) {
+        const SnowCanvasOverlayItem retained(item);
+        drawStrokeRenderingGeometry(painter,
+                                    snow_canvas_render_geometry::overlayProjection(displayInfo),
+                                    retained, Qt::transparent);
+        return;
+    }
     if (drawMagnifierMoveHandle(painter, displayInfo, item))
         return;
     const snow_canvas_render_geometry::ViewProjection projection =
@@ -1205,7 +1292,8 @@ void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInf
     const double height = item.height * zoom;
     const double strokeWidth = item.stroke_width * zoom;
 
-    if (item.rect_kind == SNOW_OVERLAY_RECT_SPEECH_BUBBLE_ADD_TAIL_HANDLE) {
+    if (item.rect_kind == SNOW_OVERLAY_RECT_SPEECH_BUBBLE_ADD_TAIL_HANDLE ||
+        item.rect_kind == SNOW_OVERLAY_RECT_SHAPE_TEXT_HANDLE) {
         painter.save();
         painter.translate(center);
         painter.rotate(item.rotation * kRadiansToDegrees);
@@ -1244,7 +1332,7 @@ void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInf
     } else {
         pen = QPen(toQColor(item.stroke), strokeWidth);
         if (isDashedSelectionFrame(item.rect_kind)) {
-            applyMultiSelectionDashStyle(pen);
+            snowCanvasApplySelectionDashStyle(pen);
         }
         pen.setJoinStyle(Qt::MiterJoin);
     }
@@ -1273,7 +1361,14 @@ void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInf
 
 void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInfo,
                          const SnowCanvasOverlayItem& item) {
+    if (item.stroke_rendering_style != SNOW_STROKE_RENDERING_STYLE_ARCHITECT) {
+        drawStrokeRenderingGeometry(painter,
+                                    snow_canvas_render_geometry::overlayProjection(displayInfo),
+                                    item, Qt::transparent);
+        return;
+    }
     if (item.rect_kind == SNOW_OVERLAY_RECT_SPEECH_BUBBLE_ADD_TAIL_HANDLE ||
+        item.rect_kind == SNOW_OVERLAY_RECT_SHAPE_TEXT_HANDLE ||
         item.rect_kind == SNOW_OVERLAY_RECT_SPEECH_BUBBLE_TAIL_BASE_HANDLE ||
         item.rect_kind == SNOW_OVERLAY_RECT_SPEECH_BUBBLE_TAIL_TIP_HANDLE) {
         drawOverlayRectItem(painter, displayInfo, static_cast<const SnowOverlayDisplayItem&>(item));
@@ -1305,7 +1400,7 @@ void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInf
         item.width <= 0.0 || item.height <= 0.0) {
         return;
     }
-    const bool hasFill = item.fill.a != 0;
+    const bool hasFill = snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style);
     const bool hasStroke = item.stroke.a != 0 && item.stroke_width > 0.0;
     if (!hasFill && !hasStroke) {
         return;
@@ -1327,7 +1422,7 @@ void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInf
         } else {
             QPen viewPen(toQColor(item.stroke), item.stroke_width * zoom);
             if (isDashedSelectionFrame(item.rect_kind)) {
-                applyMultiSelectionDashStyle(viewPen);
+                snowCanvasApplySelectionDashStyle(viewPen);
             }
             viewPen.setJoinStyle(Qt::MiterJoin);
             painter.setPen(viewPen);
@@ -1347,7 +1442,7 @@ void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInf
     if (hasStroke) {
         pen = QPen(toQColor(item.stroke), item.stroke_width);
         if (isDashedSelectionFrame(item.rect_kind)) {
-            applyMultiSelectionDashStyle(pen);
+            snowCanvasApplySelectionDashStyle(pen);
         }
         pen.setJoinStyle(Qt::MiterJoin);
     } else {
@@ -1390,6 +1485,12 @@ void drawOverlayRectItem(QPainter& painter, const OverlayDisplayInfo& displayInf
 
 void drawFocusConnectionItem(QPainter& painter, const OverlayDisplayInfo& displayInfo,
                              const SnowOverlayDisplayItem& item) {
+    if (item.stroke_rendering_style != SNOW_STROKE_RENDERING_STYLE_ARCHITECT) {
+        const SnowCanvasOverlayItem retained(item);
+        const auto projection = focusConnectionProjection(displayInfo);
+        drawStrokeRenderingGeometry(painter, projection.view, retained, projection.background);
+        return;
+    }
     const ArrowRenderProjection projection = focusConnectionProjection(displayInfo);
     QPainterPath rustPath = arrowPathFromCommands(projection.view, item.arrow_path_commands,
                                                   item.arrow_path_command_count);
@@ -1399,6 +1500,16 @@ void drawFocusConnectionItem(QPainter& painter, const OverlayDisplayInfo& displa
                          false, item.stroke, item.stroke_width,
                          rustPath.isEmpty() ? nullptr : &rustPath, item.arrowhead_primitives,
                          item.arrowhead_primitive_count);
+}
+
+void drawFocusConnectionItem(QPainter& painter, const OverlayDisplayInfo& displayInfo,
+                             const SnowCanvasOverlayItem& item) {
+    if (item.stroke_rendering_style != SNOW_STROKE_RENDERING_STYLE_ARCHITECT) {
+        const auto projection = focusConnectionProjection(displayInfo);
+        drawStrokeRenderingGeometry(painter, projection.view, item, projection.background);
+        return;
+    }
+    drawFocusConnectionItem(painter, displayInfo, static_cast<const SnowOverlayDisplayItem&>(item));
 }
 
 void drawPenFilterContourItem(QPainter& painter, const OverlayDisplayInfo& displayInfo,
@@ -2500,6 +2611,8 @@ void renderSceneItemsTiled(const SceneRenderRequest& request) {
 
 namespace {
 void renderSceneItemsImpl(const SceneRenderRequest& request) {
+    const void* cacheNamespace =
+        request.cacheNamespace != nullptr ? request.cacheNamespace : request.displayCache;
     QPainter& painter = *request.painter;
     const SceneDisplayInfo& displayInfo = *request.displayInfo;
     const SnowCanvasSceneItem* sceneItems = request.sceneItems;
@@ -2583,7 +2696,7 @@ void renderSceneItemsImpl(const SceneRenderRequest& request) {
             return plan.restoration(index).effective &&
                    exposedRegion.intersects(plan.restoration(index).logicalBounds.toAlignedRect());
         });
-    if ((hasFilter || hasRestoration) &&
+    if ((hasFilter || hasRestoration || request.forceBackgroundRaster) &&
         (hasBackgroundContent || sceneItemCount > filterIndices.size())) {
         g_filterDiagnostics.usedFilterPath = true;
         g_filterDiagnostics.recorderCount = 1;
@@ -2892,7 +3005,7 @@ void renderSceneItemsImpl(const SceneRenderRequest& request) {
                 if (!ordinaryFilter(item)) {
                     const StageTimer replayTimer{g_filterDiagnostics.sceneReplayNanoseconds};
                     drawSceneItem(scenePainter, displayInfo, item, request.smartErase,
-                                  request.baseImageSources);
+                                  request.baseImageSources, cacheNamespace);
                     ++g_filterDiagnostics.replayedItemCount;
                     renderedContent = true;
                     ++position;
@@ -3201,7 +3314,8 @@ void renderSceneItemsImpl(const SceneRenderRequest& request) {
             scenePainter.end();
             const StageTimer presentationTimer{g_filterDiagnostics.presentationNanoseconds};
             painter.save();
-            painter.setClipRegion(exposedRegion.intersected(QRegion(surfaceBounds)));
+            painter.setClipRegion(exposedRegion.intersected(QRegion(surfaceBounds)),
+                                  Qt::IntersectClip);
             if (!plan.restorationIndices.empty()) {
                 painter.setCompositionMode(QPainter::CompositionMode_Source);
             }
@@ -3220,6 +3334,10 @@ void renderSceneItemsImpl(const SceneRenderRequest& request) {
             kernelDiagnostics.gaussianDownsampleAvx2Executions;
         g_filterDiagnostics.gaussianReconstructionAvx2Executions =
             kernelDiagnostics.gaussianReconstructionAvx2Executions;
+        g_filterDiagnostics.gaussianDownsampleNeonExecutions =
+            kernelDiagnostics.gaussianDownsampleNeonExecutions;
+        g_filterDiagnostics.gaussianReconstructionNeonExecutions =
+            kernelDiagnostics.gaussianReconstructionNeonExecutions;
         g_filterDiagnostics.downsampleNanoseconds = kernelDiagnostics.downsampleNanoseconds;
         g_filterDiagnostics.reducedBlurNanoseconds = kernelDiagnostics.reducedBlurNanoseconds;
         g_filterDiagnostics.reconstructionNanoseconds = kernelDiagnostics.reconstructionNanoseconds;
@@ -3265,7 +3383,7 @@ void renderSceneItemsImpl(const SceneRenderRequest& request) {
             const std::uint32_t index = candidateIndices[candidate];
             if (index < sceneItemCount) {
                 drawSceneItem(painter, displayInfo, sceneItems[index], request.smartErase,
-                              request.baseImageSources);
+                              request.baseImageSources, cacheNamespace);
             }
         }
         return;
@@ -3275,7 +3393,8 @@ void renderSceneItemsImpl(const SceneRenderRequest& request) {
         if (!exposedRegion.intersects(alignedRectForBounds(sceneItemBounds(displayInfo, item)))) {
             continue;
         }
-        drawSceneItem(painter, displayInfo, item, request.smartErase, request.baseImageSources);
+        drawSceneItem(painter, displayInfo, item, request.smartErase, request.baseImageSources,
+                      cacheNamespace);
     }
 }
 } // namespace
@@ -3367,13 +3486,15 @@ void accumulateFilterRenderDiagnostics(FilterRenderDiagnostics& target,
     target.maskConstructionNanoseconds += source.maskConstructionNanoseconds;
     target.pathConstructionNanoseconds += source.pathConstructionNanoseconds;
     target.maskScanNanoseconds += source.maskScanNanoseconds;
+    target.gaussianDownsampleNeonExecutions += source.gaussianDownsampleNeonExecutions;
+    target.gaussianReconstructionNeonExecutions += source.gaussianReconstructionNeonExecutions;
     target.downsampleNanoseconds += source.downsampleNanoseconds;
     target.reducedBlurNanoseconds += source.reducedBlurNanoseconds;
     target.reconstructionNanoseconds += source.reconstructionNanoseconds;
     target.presentationNanoseconds += source.presentationNanoseconds;
     if (source.simdBackend != nullptr &&
-        std::string_view(source.simdBackend) == std::string_view("avx2")) {
-        target.simdBackend = "avx2";
+        std::string_view(source.simdBackend) != std::string_view("scalar")) {
+        target.simdBackend = source.simdBackend;
     }
     target.workingSurfacePixelCount += source.workingSurfacePixelCount;
     target.peakEffectPixelCount =

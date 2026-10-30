@@ -5,6 +5,7 @@
 
 #if SNOW_SHOT_ENABLE_TEXT_TRANSLATION
 #include "snow_shot/network/snowshotapiclient.h"
+#include "snow_shot/translation/translationlanguagedetector.h"
 
 #include <QLocale>
 #include <QJsonValue>
@@ -25,6 +26,7 @@ struct TranslationPreferences {
     QString targetLanguage;
     QString modelId;
     QString secondaryTargetLanguage = QStringLiteral("en");
+    int languageDetectionConfidenceThreshold = 60;
     friend bool operator==(const TranslationPreferences&, const TranslationPreferences&) = default;
 };
 
@@ -40,7 +42,8 @@ class TranslationService final : public QObject {
     enum class ChangeReason { UserPreferences, Catalog, ModelInvalidated };
     static TranslationService& forClient(SnowShotApiClient& client,
                                          storage::ConfigurationStore& settings,
-                                         const QLocale& locale);
+                                         const QLocale& locale,
+                                         TranslationLanguageDetector languageDetector = {});
     ~TranslationService() override;
     const QVector<SnowShotChatModel>& models() const {
         return m_models;
@@ -69,7 +72,7 @@ class TranslationService final : public QObject {
   private:
     friend class TranslationJob;
     TranslationService(SnowShotApiClient& client, storage::ConfigurationStore& settings,
-                       QLocale locale);
+                       QLocale locale, TranslationLanguageDetector languageDetector);
     // No outcome means a nested preference write or destruction retired this transaction.
     std::optional<bool> writePreferences(const QMap<QString, QJsonValue>& values,
                                          ChangeReason reason);
@@ -81,6 +84,7 @@ class TranslationService final : public QObject {
     QString m_defaultTarget;
     QVector<SnowShotChatModel> m_models;
     TranslationPreferences m_preferences;
+    TranslationLanguageDetector m_languageDetector;
     SnowShotApiClient::RequestToken m_modelsToken = 0;
     QString m_catalogError;
     bool m_catalogAttempted = false;
@@ -139,12 +143,17 @@ class TranslationJob final : public QObject {
     TranslationJob(TranslationService& service, const QStringList& texts, QObject* owner);
     void prepare();
     void pump();
+    void publishState();
     void fail(const QString& error);
     void invalidateModel(const QString& id);
     QPointer<TranslationService> m_service;
     QPointer<SnowShotApiClient> m_client;
     QVector<Unit> m_units;
+    // Unit positions remain public; only exact duplicate input shares a provider request.
+    QVector<QVector<int>> m_unitGroups;
     TranslationPreferences m_preferences;
+    std::optional<DetectedTranslationLanguage> m_detectedLanguage;
+    QString m_effectiveTargetLanguage;
     QString m_translationMode;
     QHash<int, SnowShotApiClient::RequestToken> m_requests;
     SnowShotTranslationResult m_result;
@@ -152,6 +161,7 @@ class TranslationJob final : public QObject {
     quint64 m_generation = 0;
     bool m_rateLimited = false;
     bool m_fixedPreferences = false;
+    bool m_languageDetectionAttempted = false;
 };
 #endif
 } // namespace snow_shot::translation

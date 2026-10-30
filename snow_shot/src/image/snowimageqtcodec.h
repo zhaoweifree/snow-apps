@@ -47,6 +47,8 @@ class AnimationDecoder final {
     friend std::shared_ptr<const ScreenshotAnimationSource>
     decodeAnimationSource(const QByteArray&, QString*, AnimationCancellationCheck,
                           AnimationAllocationCheck);
+    friend QImage decodeAnimationFirstFrame(const QByteArray&, QString*, AnimationCancellationCheck,
+                                            AnimationAllocationCheck);
 };
 
 // A null result and empty error means an ordinary static image. Recognized
@@ -55,6 +57,11 @@ class AnimationDecoder final {
 decodeAnimationSource(const QByteArray& encoded, QString* error = nullptr,
                       AnimationCancellationCheck cancelled = {},
                       AnimationAllocationCheck allocationCheck = {});
+// Composes the same initial frame without retaining playback bytes/timing or a display raster.
+// A null image and empty error denotes an ordinary static image.
+[[nodiscard]] QImage decodeAnimationFirstFrame(const QByteArray& encoded, QString* error = nullptr,
+                                               AnimationCancellationCheck cancelled = {},
+                                               AnimationAllocationCheck allocationCheck = {});
 [[nodiscard]] std::unique_ptr<AnimationDecoder>
 openAnimationDecoder(std::shared_ptr<const ScreenshotAnimationSource> source,
                      QString* error = nullptr, AnimationAllocationCheck allocationCheck = {},
@@ -102,6 +109,18 @@ struct EncodeResult final {
                                  uchar* destination, qsizetype destinationStride,
                                  qsizetype destinationSize, QString* error = nullptr);
 
+struct ResizeResourceEstimate final {
+    qint64 retainedBytes = 0;
+    qint64 scratchBytes = 0;
+};
+// Source conversion caches and source/output rasters are budgeted by the caller. Retained bytes
+// cover immutable filter tables and the bounded output tile cache; scratch includes codec headroom.
+[[nodiscard]] std::optional<ResizeResourceEstimate> resizeResources(QSize source, QSize output);
+// The synchronous full resize uses the same tables/scratch without a lazy output tile cache.
+[[nodiscard]] std::optional<qint64> resizeWorkingBytes(QSize source, QSize output);
+[[nodiscard]] ScreenshotImageRowSource resizedRowSource(ScreenshotImageRowSource source,
+                                                        QSize output, QString* error = nullptr);
+
 [[nodiscard]] QByteArray encodePng(const QImage& image, int compressionLevel = 0);
 [[nodiscard]] QByteArray encodePng(const ScreenshotImageRowSource& source,
                                    int compressionLevel = 0);
@@ -111,11 +130,15 @@ struct EncodeResult final {
 // rendering/encoding boundary; merely assigning an sRGB tag changes their meaning.
 [[nodiscard]] QImage decode(const QByteArray& encoded, snow::image::Format expectedFormat,
                             const char* nameHint);
+[[nodiscard]] QImage decodeFirstFrame(const QByteArray& encoded,
+                                      snow::image::Format expectedFormat);
 // Retains Qt's decoding, metadata and transformation behavior while putting
 // the returned raster in managed storage. Compatible readers decode in place.
 [[nodiscard]] QImage readManagedImage(QImageReader& reader);
 [[nodiscard]] QImage decodeIconFile(const QString& path, uint32_t preferredExtent);
 [[nodiscard]] QSize inspectSize(const QByteArray& encoded, snow::image::Format expectedFormat);
+[[nodiscard]] QSize inspectCanvasSize(const QByteArray& encoded,
+                                      snow::image::Format expectedFormat);
 [[nodiscard]] QImage decodeFile(const QString& path, snow::image::Format expectedFormat);
 [[nodiscard]] QImage decodeFileBgra(const QString& path, snow::image::Format expectedFormat);
 [[nodiscard]] bool inspectFile(const QString& path, snow::image::Format expectedFormat,

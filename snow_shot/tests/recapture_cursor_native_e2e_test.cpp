@@ -2,6 +2,7 @@
 #include "snow_shot/presentation/screenshotcapturecoordinator.h"
 #include "snow_shot/storage/applicationstorage.h"
 #include "snow_shot/storage/settingsadapters.h"
+#include "snow_capture.h"
 
 #include <QApplication>
 #include <QCursor>
@@ -16,7 +17,9 @@
 #include <QTimer>
 #include <QWidget>
 
+#include <algorithm>
 #include <functional>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <utility>
@@ -98,7 +101,7 @@ int runEditor(QApplication& app) {
     return app.exec();
 }
 
-int runNativeEditor(QApplication& app) {
+HCURSOR createNativeMarkerCursor() {
     BITMAPINFO bitmap{};
     bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bitmap.bmiHeader.biWidth = 24;
@@ -122,8 +125,50 @@ int runNativeEditor(QApplication& app) {
     DeleteObject(color);
     DeleteObject(mask);
     require(cursor != nullptr, "native class cursor creation failed");
+    return cursor;
+}
+
+LRESULT CALLBACK nativeEditorWindowProcedure(HWND window, UINT message, WPARAM wparam,
+                                             LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+        const auto* creation = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+        SetWindowLongPtrW(window, GWLP_USERDATA,
+                          reinterpret_cast<LONG_PTR>(creation->lpCreateParams));
+    }
+    if (message == WM_PAINT && GetWindowLongPtrW(window, GWLP_USERDATA) != 0) {
+        PAINTSTRUCT paint{};
+        const HDC dc = BeginPaint(window, &paint);
+        RECT client{};
+        GetClientRect(window, &client);
+        const int width = client.right - client.left;
+        const int brushes[] = {BLACK_BRUSH, GRAY_BRUSH, WHITE_BRUSH};
+        for (int i = 0; i < 3; ++i) {
+            const RECT band{client.left + width * i / 3, client.top,
+                            client.left + width * (i + 1) / 3, client.bottom};
+            FillRect(dc, &band, static_cast<HBRUSH>(GetStockObject(brushes[i])));
+        }
+        EndPaint(window, &paint);
+        return 0;
+    }
+    if (message == WM_KEYDOWN && wparam == VK_ESCAPE) {
+        DestroyWindow(window);
+        return 0;
+    }
+    if (message == WM_DESTROY) {
+        QCoreApplication::quit();
+        return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+int runNativeEditor(QApplication& app) {
+    const bool stockCrosshair = app.arguments().contains(QStringLiteral("--stock-crosshair"));
+    // LoadCursorW returns a borrowed shared resource. Only the marker cursor is owned here.
+    const HCURSOR cursor =
+        stockCrosshair ? LoadCursorW(nullptr, IDC_CROSS) : createNativeMarkerCursor();
+    require(cursor != nullptr, "native editor cursor was unavailable");
     WNDCLASSW klass{};
-    klass.lpfnWndProc = DefWindowProcW;
+    klass.lpfnWndProc = nativeEditorWindowProcedure;
     klass.hInstance = GetModuleHandleW(nullptr);
     klass.hCursor = cursor;
     klass.hbrBackground = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
@@ -131,13 +176,18 @@ int runNativeEditor(QApplication& app) {
     require(RegisterClassW(&klass), "native editor class registration failed");
     const int x = GetSystemMetrics(SM_CXSCREEN) / 2;
     const int y = GetSystemMetrics(SM_CYSCREEN) / 2;
-    const HWND window =
-        CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, klass.lpszClassName,
-                        L"Native cursor regression", WS_POPUP | WS_VISIBLE, x - 300, y - 220, 600,
-                        440, nullptr, nullptr, klass.hInstance, nullptr);
+    int stockBackground = 0;
+    const HWND window = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW, klass.lpszClassName, L"Native cursor regression",
+        (stockCrosshair ? WS_OVERLAPPEDWINDOW : WS_POPUP) | WS_VISIBLE, x - 300, y - 220, 600, 440,
+        nullptr, nullptr, klass.hInstance, stockCrosshair ? &stockBackground : nullptr);
     require(window != nullptr, "native editor creation failed");
     UpdateWindow(window);
-    std::cout << "READY " << x << ' ' << y << '\n' << std::flush;
+    RECT client{};
+    require(GetClientRect(window, &client), "native editor client geometry was unavailable");
+    POINT center{(client.right - client.left) / 2, (client.bottom - client.top) / 2};
+    require(ClientToScreen(window, &center), "native editor desktop position was unavailable");
+    std::cout << "READY " << center.x << ' ' << center.y << '\n' << std::flush;
     QTimer setup;
     QObject::connect(&setup, &QTimer::timeout, &app, [cursor, &setup] {
         CURSORINFO current{sizeof(CURSORINFO)};
@@ -148,19 +198,27 @@ int runNativeEditor(QApplication& app) {
     });
     setup.start(10);
     const int result = app.exec();
-    DestroyWindow(window);
+    if (IsWindow(window)) {
+        DestroyWindow(window);
+    }
     UnregisterClassW(klass.lpszClassName, klass.hInstance);
-    DestroyCursor(cursor);
+    if (!stockCrosshair) {
+        DestroyCursor(cursor);
+    }
     return result;
 }
 
 class EditorProcess final {
   public:
     QProcess process;
-    explicit EditorProcess(bool native = false) {
-        process.start(QCoreApplication::applicationFilePath(),
-                      {native ? QStringLiteral("--native-editor") : QStringLiteral("--editor"),
-                       QStringLiteral("--run-native")});
+    explicit EditorProcess(bool native = false, bool stockCrosshair = false) {
+        QStringList arguments{native ? QStringLiteral("--native-editor")
+                                     : QStringLiteral("--editor"),
+                              QStringLiteral("--run-native")};
+        if (stockCrosshair) {
+            arguments.push_back(QStringLiteral("--stock-crosshair"));
+        }
+        process.start(QCoreApplication::applicationFilePath(), arguments);
         require(process.waitForStarted(5000), "editor process did not start");
     }
     ~EditorProcess() {
@@ -280,14 +338,66 @@ ScreenshotCaptureResult capture(ScreenshotCaptureCoordinator& coordinator) {
     return result;
 }
 
+struct StockCrosshairGeometry {
+    QSize size;
+    QPoint nativeHotspot;
+};
+
+StockCrosshairGeometry stockCrosshairGeometry() {
+    const HCURSOR cursor = LoadCursorW(nullptr, IDC_CROSS);
+    require(cursor != nullptr, "stock crosshair was unavailable");
+    ICONINFO icon{};
+    require(GetIconInfo(cursor, &icon), "stock crosshair geometry was unavailable");
+    const bool color = icon.hbmColor != nullptr;
+    BITMAP bitmap{};
+    const int received = GetObjectW(color ? icon.hbmColor : icon.hbmMask, sizeof(bitmap), &bitmap);
+    // GetIconInfo transfers these bitmaps to the caller, but the stock HCURSOR stays borrowed.
+    if (icon.hbmColor != nullptr) {
+        DeleteObject(icon.hbmColor);
+    }
+    if (icon.hbmMask != nullptr) {
+        DeleteObject(icon.hbmMask);
+    }
+    require(received != 0 && bitmap.bmWidth > 0 && bitmap.bmHeight != 0,
+            "stock crosshair bitmap dimensions were unavailable");
+    const int height = std::abs(static_cast<int>(bitmap.bmHeight)) / (color ? 1 : 2);
+    return {{static_cast<int>(bitmap.bmWidth), height},
+            {static_cast<int>(icon.xHotspot), static_cast<int>(icon.yHotspot)}};
+}
+
+QImage scaledStockCrosshair(const QSize& size, QPoint& hotspot) {
+    SnowCaptureCursorImageView view{};
+    require(snow_capture_crosshair_cursor_image(&view) != 0,
+            "shared Snow Shot crosshair artwork was unavailable");
+    const auto width = static_cast<uint32_t>(size.width());
+    const auto height = static_cast<uint32_t>(size.height());
+    QImage image(size, QImage::Format_RGBA8888);
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint32_t sourceX = x * view.width / width;
+            const uint32_t sourceY = y * view.height / height;
+            const size_t offset = (static_cast<size_t>(sourceY) * view.width + sourceX) * 4;
+            const uint8_t* pixel = view.rgba + offset;
+            image.setPixelColor(static_cast<int>(x), static_cast<int>(y),
+                                QColor(pixel[0], pixel[1], pixel[2], pixel[3]));
+        }
+    }
+    hotspot = QPoint(static_cast<int>(std::min(
+                         width - 1, (view.hotspot_x * width + view.width - 1) / view.width)),
+                     static_cast<int>(std::min(
+                         height - 1, (view.hotspot_y * height + view.height - 1) / view.height)));
+    return image;
+}
+
 bool verifyCursor(const ScreenshotCaptureResult& result, const QPoint& position,
-                  const QString& artifact, bool editorCursor = true) {
+                  const QString& artifact, bool editorCursor = true, bool stockCrosshair = false) {
     for (const auto& display : result.displays) {
         if (!display.physicalRect.contains(position)) {
             continue;
         }
         const QPoint local = position - display.physicalRect.topLeft();
-        const QRect cropRect(local - QPoint(8, 8), QSize(96, 96));
+        const QRect cropRect(local - (stockCrosshair ? QPoint(48, 48) : QPoint(8, 8)),
+                             QSize(96, 96));
         QImage crop = display.image.copy(cropRect);
         require(result.cursorAvailable && !display.cursorPatch.isNull(),
                 "normal capture must retain a separate cursor patch");
@@ -296,6 +406,28 @@ bool verifyCursor(const ScreenshotCaptureResult& result, const QPoint& position,
                           display.cursorPatch);
         painter.end();
         require(crop.save(artifact), "could not save cursor evidence");
+        if (stockCrosshair && editorCursor) {
+            const StockCrosshairGeometry native = stockCrosshairGeometry();
+            QPoint hotspot;
+            const QImage artwork = scaledStockCrosshair(native.size, hotspot);
+            const QRect expectedRect(local - hotspot, native.size);
+            if (display.cursorPixelRect != expectedRect) {
+                return false;
+            }
+            QImage expected =
+                display.image.copy(expectedRect).convertToFormat(QImage::Format_RGBA8888);
+            QPainter expectedPainter(&expected);
+            expectedPainter.drawImage(QPoint(0, 0), artwork);
+            expectedPainter.end();
+            const bool matched =
+                display.cursorPatch.convertToFormat(QImage::Format_RGBA8888) == expected;
+            std::cout << artifact.toStdString() << " backend=" << static_cast<int>(display.backend)
+                      << " stock_size=" << native.size.width() << 'x' << native.size.height()
+                      << " native_hotspot=" << native.nativeHotspot.x() << ','
+                      << native.nativeHotspot.y() << " normalized_hotspot=" << hotspot.x() << ','
+                      << hotspot.y() << " custom_pixels=" << matched << '\n';
+            return matched;
+        }
         int red = 0;
         int blue = 0;
         int green = 0;
@@ -328,8 +460,10 @@ void runRecapture(QApplication& app) {
     RestorePointer restorePointer;
     const QPoint outside = app.primaryScreen()->availableGeometry().topLeft() + QPoint(5, 5);
     SetCursorPos(outside.x(), outside.y());
-    const bool native = app.arguments().contains(QStringLiteral("--native-target"));
-    EditorProcess editor(native);
+    const bool stockCrosshair = app.arguments().contains(QStringLiteral("--stock-crosshair"));
+    const bool native =
+        stockCrosshair || app.arguments().contains(QStringLiteral("--native-target"));
+    EditorProcess editor(native, stockCrosshair);
     const auto ready = editor.waitLine("READY ").split(' ');
     require(ready.size() == 3, "invalid editor geometry");
     const QPoint point(ready[1].toInt(), ready[2].toInt());
@@ -337,11 +471,13 @@ void runRecapture(QApplication& app) {
     SetCursorPos(point.x(), point.y());
     editor.waitLine("ENTER");
 
-    const QString artifacts =
-        QDir::current().absoluteFilePath(QStringLiteral("cursor-e2e-evidence"));
+    const QString artifacts = QDir::current().absoluteFilePath(
+        stockCrosshair ? QStringLiteral("cursor-e2e-evidence/stock-crosshair")
+                       : QStringLiteral("cursor-e2e-evidence"));
     require(QDir().mkpath(artifacts), "could not create evidence directory");
     ScreenshotCaptureCoordinator coordinator;
-    require(verifyCursor(capture(coordinator), point, artifacts + QStringLiteral("/natural.png")),
+    require(verifyCursor(capture(coordinator), point, artifacts + QStringLiteral("/natural.png"),
+                         true, stockCrosshair),
             "setup failed: natural mouse entry did not capture the editor cursor");
     // Leave the editor's child canvas before covering it. Recapture must resolve the child
     // cursor again, rather than accidentally reusing the target's previously cached shape.
@@ -435,8 +571,8 @@ void runRecapture(QApplication& app) {
     }
     if (!refreshed) {
         const auto diagnostic = capture(coordinator);
-        static_cast<void>(
-            verifyCursor(diagnostic, point, artifacts + QStringLiteral("/timeout.png")));
+        static_cast<void>(verifyCursor(
+            diagnostic, point, artifacts + QStringLiteral("/timeout.png"), true, stockCrosshair));
     }
     require(refreshed, "native cursor readiness failed");
     require(!moveAfterHandover || (movedAfterHandover && capturePoint == point + QPoint(3, 0)),
@@ -444,17 +580,22 @@ void runRecapture(QApplication& app) {
     if (moveAfterHandover) {
         bool cursorAtCurrentPoint = false;
         for (const auto& display : result.displays) {
+            QPoint hotspot;
+            if (stockCrosshair && !display.cursorPatch.isNull()) {
+                static_cast<void>(scaledStockCrosshair(display.cursorPatch.size(), hotspot));
+            }
             cursorAtCurrentPoint |=
                 !display.cursorPatch.isNull() &&
-                display.physicalRect.topLeft() + display.cursorPixelRect.topLeft() == capturePoint;
+                display.physicalRect.topLeft() + display.cursorPixelRect.topLeft() + hotspot ==
+                    capturePoint;
         }
         require(cursorAtCurrentPoint,
                 "cursor pixels must use the acquired position after movement");
     }
     require(!app.arguments().contains(QStringLiteral("--change-after-ready")) || laterCursorChanged,
             "snapshot fixture must change the live cursor during capture");
-    const bool correct =
-        verifyCursor(result, capturePoint, artifacts + QStringLiteral("/recapture.png"));
+    const bool correct = verifyCursor(
+        result, capturePoint, artifacts + QStringLiteral("/recapture.png"), true, stockCrosshair);
     require(correct, "REGRESSION: re-capture did not capture the other process's editor cursor");
 
     QEventLoop restoredEntry;

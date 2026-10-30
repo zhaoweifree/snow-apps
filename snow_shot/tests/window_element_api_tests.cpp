@@ -55,6 +55,7 @@ int refreshed = 0;
 SnowUiSelectorBackend currentBackend = SNOW_UI_SELECTOR_BACKEND_MSAA;
 SnowUiSelectorHitTestMode currentMode = SNOW_UI_SELECTOR_HIT_TEST_MODE_WINDOW;
 QVector<std::uintptr_t> currentExclusions;
+QVector<SnowUiSelectorDisplay> currentDisplays;
 
 void require(bool condition, const char* message) {
     if (!condition) {
@@ -66,6 +67,116 @@ void require(bool condition, const char* message) {
 void setApi(const QString& api) {
     require(storage::ScreenshotSettings().setWindowElementApi(api),
             "failed to change the window element API");
+}
+
+QImage trackedSelectorImage(int& released) {
+    struct Storage {
+        uchar pixels[16]{};
+        int* released;
+    };
+    auto* storage = new Storage{{}, &released};
+    return QImage(
+        storage->pixels, 2, 2, 8, QImage::Format_ARGB32,
+        [](void* data) {
+            auto* image = static_cast<Storage*>(data);
+            ++*image->released;
+            delete image;
+        },
+        storage);
+}
+
+CapturedDisplayModel selectorDisplayWithTrackedPixels(int& imagesReleased, int& cursorsReleased) {
+    CapturedDisplayModel display;
+    display.physicalRect = QRect(-200, 40, 400, 300);
+    display.capturedLogicalRect = QRect(-100, 20, 200, 150);
+    display.nativeDisplayId = 17;
+    display.canvasUsesPoints = true;
+    display.image = trackedSelectorImage(imagesReleased);
+    display.cursorPatch = trackedSelectorImage(cursorsReleased);
+    return display;
+}
+
+void selectorServiceSnapshotsDoNotRetainCapturePixels() {
+    int imagesReleased = 0;
+    int cursorsReleased = 0;
+    ScreenshotSelectorServiceClient client({});
+    for (int cycle = 1; cycle <= 3; ++cycle) {
+        {
+            const QVector<CapturedDisplayModel> displays{
+                selectorDisplayWithTrackedPixels(imagesReleased, cursorsReleased)};
+            require(client.startRefreshWithDisplays(static_cast<quint64>(cycle), {123}, displays),
+                    "selector service geometry refresh failed");
+        }
+        require(imagesReleased == cycle && cursorsReleased == cycle,
+                "selector service geometry must not retain screenshot or cursor pixels");
+        QCoreApplication::sendPostedEvents();
+        if (cycle == 2)
+            client.destroyService();
+        else
+            require(client.releaseCache(), "selector service cache release failed");
+    }
+}
+
+void selectorCoordinatorSnapshotsDoNotRetainCapturePixels() {
+    int imagesReleased = 0;
+    int cursorsReleased = 0;
+    ScreenshotSelectorCoordinator coordinator;
+    for (int cycle = 1; cycle <= 3; ++cycle) {
+        {
+            const QVector<CapturedDisplayModel> displays{
+                selectorDisplayWithTrackedPixels(imagesReleased, cursorsReleased)};
+            require(coordinator.startRefreshWithDisplays({123}, displays),
+                    "selector coordinator geometry refresh failed");
+        }
+        require(imagesReleased == cycle && cursorsReleased == cycle,
+                "selector coordinator geometry must not retain screenshot or cursor pixels");
+        QCoreApplication::sendPostedEvents();
+        if (cycle == 2)
+            coordinator.destroyService();
+        else
+            coordinator.releaseCache();
+    }
+}
+
+void smartSelectionChangesPreserveActiveFrozenGeometry() {
+    auto& applicationStorage = storage::ApplicationStorage::instance();
+    require(applicationStorage.requestSmartSelection(true), "failed to enable smart selection");
+    ScreenshotSelectorCoordinator coordinator;
+    CapturedDisplayModel display;
+    display.physicalRect = QRect(-200, 40, 400, 300);
+    display.capturedLogicalRect = QRect(-100, 20, 200, 150);
+    display.nativeDisplayId = 17;
+    display.canvasUsesPoints = true;
+    const QVector<std::uintptr_t> exclusions{123, 456};
+    for (const bool refreshInFlight : {true, false}) {
+        require(coordinator.startRefreshWithDisplays(exclusions, {display}),
+                "frozen display refresh failed");
+        if (!refreshInFlight)
+            QCoreApplication::sendPostedEvents();
+        const int previousRefreshed = refreshed;
+        require(applicationStorage.requestSmartSelection(false),
+                "failed to change active smart selection");
+        require(refreshed == previousRefreshed + 1 && currentExclusions == exclusions &&
+                    currentDisplays.size() == 1 && currentDisplays.first().display_id == 17 &&
+                    currentDisplays.first().coordinate_space == 1 &&
+                    currentDisplays.first().x == -100 && currentDisplays.first().y == 20 &&
+                    currentDisplays.first().width == 200 && currentDisplays.first().height == 150 &&
+                    currentDisplays.first().pixel_width == 400 &&
+                    currentDisplays.first().pixel_height == 300,
+                "configuration refresh must preserve the frozen display geometry and exclusions");
+        QCoreApplication::sendPostedEvents();
+        require(coordinator.ready(), "configuration refresh did not become ready");
+        if (refreshInFlight)
+            coordinator.releaseCache();
+        else
+            coordinator.destroyService();
+        const int idleRefreshed = refreshed;
+        require(applicationStorage.requestSmartSelection(true),
+                "failed to restore smart selection while idle");
+        require(refreshed == idleRefreshed && !coordinator.ready() &&
+                    !coordinator.refreshInFlight(),
+                "configuration changes after release must not revive a completed capture");
+    }
 }
 
 void settingsPersistAndResetToUia(const QString& configurationPath) {
@@ -898,6 +1009,7 @@ uint8_t snow_ui_selector_service_refresh(SnowUiSelectorService* service, uint64_
     ++refreshed;
     currentBackend = backend;
     currentExclusions.clear();
+    currentDisplays.clear();
     for (size_t i = 0; i < count; ++i)
         currentExclusions.push_back(excluded[i]);
     service->refresh(epoch, 1, service->userdata);
@@ -911,7 +1023,10 @@ uint8_t snow_ui_selector_service_refresh_with_displays(SnowUiSelectorService* se
                                                        size_t displayCount) {
     if (displays == nullptr || displayCount == 0)
         return 0;
-    return snow_ui_selector_service_refresh(service, epoch, backend, excluded, count);
+    const uint8_t started =
+        snow_ui_selector_service_refresh(service, epoch, backend, excluded, count);
+    currentDisplays = QVector<SnowUiSelectorDisplay>(displays, displays + displayCount);
+    return started;
 }
 uint8_t snow_ui_selector_service_query(SnowUiSelectorService* service,
                                        const SnowUiSelectorQuery* query) {
@@ -950,6 +1065,14 @@ int main(int argc, char** argv) {
         return 0;
     }
     const bool selectorOnly = application.arguments().contains(QStringLiteral("--selector-only"));
+    if (application.arguments().contains(QStringLiteral("--selector-lifecycle-only"))) {
+        selectorServiceSnapshotsDoNotRetainCapturePixels();
+        selectorCoordinatorSnapshotsDoNotRetainCapturePixels();
+        smartSelectionChangesPreserveActiveFrozenGeometry();
+        require(created == destroyed, "selector leaked a native service");
+        applicationStorage.shutdown();
+        return 0;
+    }
     if (application.arguments().contains(
             QStringLiteral("--shortcut-exit-confirmation-settings-only"))) {
         shortcutExitConfirmationSettingsPersistAndReset(
@@ -981,6 +1104,9 @@ int main(int argc, char** argv) {
     changedApiRefreshesServiceAndRejectsOldResults();
     apiChangesDuringRefreshAndWhileIdle();
 #endif
+    selectorServiceSnapshotsDoNotRetainCapturePixels();
+    selectorCoordinatorSnapshotsDoNotRetainCapturePixels();
+    smartSelectionChangesPreserveActiveFrozenGeometry();
     diagnosticEnvironmentOverridesRemainAvailable();
     phasedSchedulingPreservesLatestPendingAndInitialCadence();
     queryAdmissionFailuresPreserveDeliveryOrderAndResetFreshness();

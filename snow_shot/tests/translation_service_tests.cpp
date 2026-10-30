@@ -1,5 +1,6 @@
 #include "translation_test_support.h"
 #include "snow_shot/translation/translationservice.h"
+#include "snow_shot/translation/translationlanguagedetector.h"
 #include "snow_shot/storage/configurationstore.h"
 #include "snow_shot/translation/translationlanguages.h"
 #include <QTemporaryDir>
@@ -112,16 +113,17 @@ void secondaryTargetsPersistAndReachEveryUnit(const QString& directory) {
     preferences.modelId = QStringLiteral("general");
     require(service.savePreferences(preferences), "save shared secondary preferences");
     QObject owner;
-    auto* job = service.createJob({QStringLiteral("中文"), QStringLiteral("Hello")}, &owner);
+    const QStringList texts{QStringLiteral("The complete source text is written in English."),
+                            QStringLiteral("Hello")};
+    auto* job = service.createJob(texts, &owner);
     job->start();
     waitUntil([&] { return server.streams.size() == 2; }, "each input block has its own request");
     for (const auto& stream : server.streams) {
         const auto messages = stream.body.value(QStringLiteral("messages")).toArray();
         const auto prompt = messages.first().toObject().value(QStringLiteral("content")).toString();
-        require(prompt.contains(QStringLiteral("Primary target language: zh-Hans")) &&
-                    prompt.contains(QStringLiteral("Secondary target language: ja")) &&
-                    prompt.contains(QStringLiteral("independent text block")),
-                "every unit receives both shared targets and independent routing instructions");
+        require(prompt.contains(QStringLiteral("Target language: zh-Hans")) &&
+                    !prompt.contains(QStringLiteral("Secondary target language")),
+                "every unit receives the same concrete primary target for unmatched source text");
     }
     job->cancel();
     require(settings.flushNow().success, "persist secondary preference before reopening");
@@ -129,6 +131,494 @@ void secondaryTargetsPersistAndReachEveryUnit(const QString& directory) {
     require(reopened.value(QStringLiteral("screenshot_translation/secondary_target_language")) ==
                 QStringLiteral("ja"),
             "secondary preference survives storage reload");
+}
+
+void detectionIsDeferredUntilRoutingNeedsIt(const QString& directory) {
+    Server server;
+    SnowShotApiClient client(server.url());
+    ConfigurationStore settings(directory + QStringLiteral("/lazy-detection.json"), true, true,
+                                60000);
+    const QStringList texts{QStringLiteral("Bonjour"),
+                            QStringLiteral("The remaining source text is written in English.")};
+    int detectionCalls = 0;
+    auto& service = TranslationService::forClient(
+        client, settings, QLocale::English, [&](const QString& input) {
+            ++detectionCalls;
+            require(input == texts.join(u'\n'), "deferred detection keeps the complete input");
+            return std::optional<DetectedTranslationLanguage>{{QStringLiteral("eng"), 0.8}};
+        });
+    auto preferences = service.preferences();
+    preferences.modelId = QStringLiteral("general");
+    preferences.targetLanguage = QStringLiteral("en");
+    preferences.secondaryTargetLanguage = QStringLiteral("en");
+    require(service.savePreferences(preferences), "configure identical translation targets");
+    QObject owner;
+    auto* job = service.createJob(texts, &owner);
+    const auto verifyTarget = [&](int count, const QString& target) {
+        waitUntil([&] { return server.streams.size() == count; }, "send lazy-routing units");
+        for (qsizetype index = count - texts.size(); index < count; ++index) {
+            const auto prompt = server.streams[index]
+                                    .body.value(QStringLiteral("messages"))
+                                    .toArray()
+                                    .first()
+                                    .toObject()
+                                    .value(QStringLiteral("content"))
+                                    .toString();
+            require(prompt.contains(QStringLiteral("Target language: %1\n").arg(target)),
+                    "lazy routing sends the concrete target to every unit");
+        }
+    };
+    job->start();
+    verifyTarget(2, QStringLiteral("en"));
+    require(detectionCalls == 0, "identical targets need no language detection");
+    job->cancel();
+    preferences.secondaryTargetLanguage = QStringLiteral("fr");
+    require(service.savePreferences(preferences), "enable target switching before retry");
+    job->retry();
+    verifyTarget(4, QStringLiteral("fr"));
+    require(detectionCalls == 1, "routing first detects when a retry enables switching");
+    job->cancel();
+    preferences.secondaryTargetLanguage = QStringLiteral("en");
+    require(service.savePreferences(preferences), "disable target switching before retry");
+    job->retry();
+    verifyTarget(6, QStringLiteral("en"));
+    job->cancel();
+    preferences.secondaryTargetLanguage = QStringLiteral("fr");
+    require(service.savePreferences(preferences), "re-enable target switching before retry");
+    job->retry();
+    verifyTarget(8, QStringLiteral("fr"));
+    require(detectionCalls == 1, "re-enabled routing reuses the original detection");
+    job->cancel();
+
+    preferences.secondaryTargetLanguage.clear();
+    auto* fixed = service.createJob(texts, preferences, &owner);
+    fixed->start();
+    verifyTarget(10, QStringLiteral("en"));
+    require(detectionCalls == 1, "an absent secondary target needs no detection");
+    fixed->cancel();
+    auto* empty = service.createJob({QString(), QStringLiteral("\t\n")}, &owner);
+    empty->start();
+    empty->retry();
+    require(empty->state() == TranslationJob::State::Completed && detectionCalls == 1 &&
+                server.streams.size() == 10,
+            "empty jobs complete without detection or provider requests");
+}
+
+void completeInputRoutingReachesEveryProviderAndRetries(const QString& directory) {
+    const QStringList texts{QStringLiteral("Bonjour"),
+                            QStringLiteral("The rest of the complete input is written in English, "
+                                           "and both output blocks must use the same target.")};
+    for (const auto& provider : {QStringLiteral("general"), QStringLiteral("specialist"),
+                                 QStringLiteral("custom"), QStringLiteral("native")}) {
+        Server builtIn;
+        Server external;
+        external.streamPath = provider == QStringLiteral("native")
+                                  ? QByteArrayLiteral("/v2/translate")
+                                  : QByteArrayLiteral("/v1/chat/completions");
+        SnowShotApiClient client(builtIn.url());
+        ConfigurationStore settings(directory + QStringLiteral("/routing-%1.json").arg(provider),
+                                    true, true, 60000);
+        QString model = provider;
+        if (provider == QStringLiteral("custom")) {
+            const snow_shot::CustomAiModelConfiguration configuration{
+                QStringLiteral("11111111-1111-4111-8111-111111111111"),
+                QStringLiteral("Custom routing test"),
+                external.url() + QStringLiteral("/v1"),
+                QStringLiteral("test-key"),
+                QStringLiteral("provider-model"),
+                false};
+            require(settings.setValue(QStringLiteral("api_configuration/custom_models"),
+                                      snow_shot::customAiModelsToJson({configuration})),
+                    "configure custom routing provider");
+            model = configuration.selectionId();
+        } else if (provider == QStringLiteral("native")) {
+            const snow_shot::TextTranslationConfiguration configuration{
+                QStringLiteral("22222222-2222-4222-8222-222222222222"),
+                QStringLiteral("Native routing test"),
+                QStringLiteral("deepl"),
+                external.url() + QStringLiteral("/v2/translate"),
+                QStringLiteral("test-key"),
+                {},
+                4};
+            require(
+                settings.setValue(QStringLiteral("api_configuration/text_translation"),
+                                  snow_shot::textTranslationConfigurationsToJson({configuration})),
+                "configure native routing provider");
+            model = configuration.selectionId();
+        }
+        int detectionCalls = 0;
+        auto& service = TranslationService::forClient(
+            client, settings, QLocale::English, [&](const QString& input) {
+                ++detectionCalls;
+                require(input == texts.join(u'\n'),
+                        "one detection call receives every complete original block together");
+                return std::optional<DetectedTranslationLanguage>{{QStringLiteral("eng"), 0.8}};
+            });
+        auto preferences = service.preferences();
+        preferences.sourceLanguage = QStringLiteral("ja");
+        preferences.targetLanguage = QStringLiteral("en");
+        preferences.secondaryTargetLanguage = QStringLiteral("fr");
+        preferences.languageDetectionConfidenceThreshold = 60;
+        preferences.modelId = model;
+        require(service.savePreferences(preferences), "save routing preferences");
+        Server& server =
+            provider == QStringLiteral("custom") || provider == QStringLiteral("native") ? external
+                                                                                         : builtIn;
+        const auto verifyRequests = [&](int first, const QString& target) {
+            waitUntil([&] { return server.streams.size() == first + texts.size(); },
+                      "all original units reach the selected provider");
+            QStringList transmittedTexts;
+            for (int index = first; index < first + texts.size(); ++index) {
+                const auto& body = server.streams[index].body;
+                if (provider == QStringLiteral("native")) {
+                    require(body.value(QStringLiteral("target_lang")) == target.toUpper() &&
+                                body.value(QStringLiteral("source_lang")) == QStringLiteral("JA"),
+                            "native provider receives resolved target and unchanged source hint");
+                    transmittedTexts.append(
+                        body.value(QStringLiteral("text")).toArray().first().toString());
+                } else if (provider == QStringLiteral("specialist")) {
+                    const auto options =
+                        body.value(QStringLiteral("translation_options")).toObject();
+                    require(options.value(QStringLiteral("target_lang")) == target &&
+                                options.value(QStringLiteral("source_lang")) ==
+                                    QStringLiteral("ja"),
+                            "Qwen MT receives resolved target and unchanged source hint");
+                    transmittedTexts.append(body.value(QStringLiteral("messages"))
+                                                .toArray()
+                                                .first()
+                                                .toObject()
+                                                .value(QStringLiteral("content"))
+                                                .toString());
+                } else {
+                    const auto messages = body.value(QStringLiteral("messages")).toArray();
+                    const auto prompt =
+                        messages.first().toObject().value(QStringLiteral("content")).toString();
+                    require(
+                        prompt.contains(QStringLiteral("Source language: ja\nTarget language: %1\n")
+                                            .arg(target)) &&
+                            !prompt.contains(QStringLiteral("Secondary target language")),
+                        "chat model receives resolved target without language routing");
+                    transmittedTexts.append(
+                        messages.last().toObject().value(QStringLiteral("content")).toString());
+                }
+            }
+            transmittedTexts.sort();
+            auto originalTexts = texts;
+            originalTexts.sort();
+            require(transmittedTexts == originalTexts,
+                    "translation preserves each original unit while sharing the detected target");
+        };
+        QObject owner;
+        auto* job = service.createJob(texts, &owner);
+        job->start();
+        verifyRequests(0, QStringLiteral("fr"));
+        require(detectionCalls == 1, "initial routing detects complete input once");
+        job->cancel();
+        auto changed = preferences;
+        changed.secondaryTargetLanguage = QStringLiteral("de");
+        changed.languageDetectionConfidenceThreshold = 90;
+        require(service.savePreferences(changed), "raise threshold before retry");
+        job->retry();
+        verifyRequests(2, QStringLiteral("en"));
+        require(detectionCalls == 1 && job->preferences() == changed,
+                "retry reapplies current threshold to the cached complete input detection");
+        job->cancel();
+
+        auto* fixed = service.createJob(texts, preferences, &owner);
+        fixed->start();
+        verifyRequests(4, QStringLiteral("fr"));
+        require(detectionCalls == 2, "each separate job detects its complete input once");
+        fixed->cancel();
+        fixed->retry();
+        verifyRequests(6, QStringLiteral("fr"));
+        require(detectionCalls == 2 && fixed->preferences() == preferences,
+                "fixed retry retains captured threshold and target preferences");
+        fixed->cancel();
+    }
+}
+
+void failedUnitRetryKeepsCompletedInputContext(const QString& directory) {
+    Server server;
+    SnowShotApiClient client(server.url());
+    ConfigurationStore settings(directory + QStringLiteral("/routing-partial-retry.json"), true,
+                                true, 60000);
+    const QStringList texts{QStringLiteral("Bonjour"),
+                            QStringLiteral("The completed block contains the English context "
+                                           "that determines the target for the entire input.")};
+    int detectionCalls = 0;
+    auto& service = TranslationService::forClient(
+        client, settings, QLocale::English, [&](const QString& input) {
+            ++detectionCalls;
+            return std::optional<DetectedTranslationLanguage>{
+                {input == texts.join(u'\n') ? QStringLiteral("eng") : QStringLiteral("fra"), 0.8}};
+        });
+    auto preferences = service.preferences();
+    preferences.targetLanguage = QStringLiteral("en");
+    preferences.secondaryTargetLanguage = QStringLiteral("fr");
+    preferences.modelId = QStringLiteral("general");
+    require(service.savePreferences(preferences), "configure partial retry routing");
+    QObject owner;
+    auto* job = service.createJob(texts, &owner);
+    job->start();
+    waitUntil([&] { return server.streams.size() == 2; }, "send both original input blocks");
+    const auto firstText = server.streams.first()
+                               .body.value(QStringLiteral("messages"))
+                               .toArray()
+                               .last()
+                               .toObject()
+                               .value(QStringLiteral("content"))
+                               .toString();
+    const int completedStream = firstText == texts[1] ? 0 : 1;
+    const int failedStream = 1 - completedStream;
+    server.delta(completedStream, QStringLiteral("completed translation"));
+    server.finish(completedStream);
+    waitUntil([&] { return job->units()[1].state == TranslationJob::State::Completed; },
+              "retain the context-bearing completed block");
+    server.fail(failedStream);
+    waitUntil([&] { return job->state() == TranslationJob::State::Failed; },
+              "the other block fails independently");
+    job->retry();
+    waitUntil([&] { return server.streams.size() == 3; }, "retry only the failed block");
+    const auto messages = server.streams.last().body.value(QStringLiteral("messages")).toArray();
+    require(detectionCalls == 1 &&
+                messages.first()
+                    .toObject()
+                    .value(QStringLiteral("content"))
+                    .toString()
+                    .contains(QStringLiteral("Target language: fr")) &&
+                messages.last().toObject().value(QStringLiteral("content")) == texts[0] &&
+                job->units()[1].text == QStringLiteral("completed translation"),
+            "failed-unit retry uses cached full-input detection and preserves completed context");
+    job->cancel();
+}
+
+void duplicateUnitsShareRequestsAndRetryByOriginalPosition(const QString& directory) {
+    Server server;
+    SnowShotApiClient client(server.url());
+    ConfigurationStore settings(directory + QStringLiteral("/duplicate-units.json"), true, true,
+                                60000);
+    auto& service = TranslationService::forClient(client, settings, QLocale::English);
+    QObject owner;
+    const QString repeated = QStringLiteral("repeat");
+    auto* job = service.createJob(
+        {repeated, QStringLiteral(" repeat "), repeated, repeated, QString()}, &owner);
+    QVector<int> changes(5);
+    QObject::connect(job, &TranslationJob::unitChanged, &owner, [&](int index) {
+        ++changes[index];
+        require(job->units()[0].text == job->units()[2].text &&
+                    job->units()[0].text == job->units()[3].text,
+                "every duplicate position is updated before any index notification");
+    });
+    job->start();
+    waitUntil([&] { return server.streams.size() == 2; },
+              "exact duplicates share one request while whitespace differences stay distinct");
+    const QString firstSource = server.streams[0]
+                                    .body.value(QStringLiteral("messages"))
+                                    .toArray()
+                                    .last()
+                                    .toObject()
+                                    .value(QStringLiteral("content"))
+                                    .toString();
+    const int shared = firstSource == repeated ? 0 : 1;
+    const int distinct = 1 - shared;
+    server.delta(shared, QStringLiteral("par"));
+    waitUntil([&] { return changes[0] == 1 && changes[2] == 1 && changes[3] == 1; },
+              "one provider delta reaches every original duplicate index");
+    server.delta(shared, QStringLiteral("tial"));
+    waitUntil([&] { return changes[0] == 2 && changes[2] == 2 && changes[3] == 2; },
+              "all duplicate positions receive subsequent streamed deltas");
+    server.delta(distinct, QStringLiteral("distinct translation"));
+    server.finish(distinct);
+    waitUntil([&] { return job->units()[1].state == TranslationJob::State::Completed; },
+              "the different source completes independently");
+    server.fail(shared);
+    waitUntil([&] { return job->state() == TranslationJob::State::Failed; },
+              "failure of the shared request settles every duplicate");
+    for (const int index : {0, 2, 3})
+        require(job->units()[index].state == TranslationJob::State::Failed &&
+                    job->units()[index].text == QStringLiteral("partial"),
+                "shared failures retain partial text at every original position");
+    job->retry();
+    waitUntil([&] { return server.streams.size() == 3; },
+              "retry sends one request for the failed duplicates");
+    require(job->units()[1].state == TranslationJob::State::Completed &&
+                job->units()[1].text == QStringLiteral("distinct translation"),
+            "retry preserves the completed distinct source");
+    server.delta(2, QStringLiteral("retried translation"));
+    server.finish(2);
+    waitUntil([&] { return job->state() == TranslationJob::State::Completed; },
+              "the shared retry completes all original positions");
+    for (const int index : {0, 2, 3})
+        require(job->units()[index].state == TranslationJob::State::Completed &&
+                    job->units()[index].text == QStringLiteral("retried translation") &&
+                    changes[index] == 3,
+                "retry replaces each duplicate's partial result and preserves index progress");
+    require(changes[1] == 1 && changes[4] == 0 && job->units()[4].text.isEmpty() &&
+                job->units()[4].state == TranslationJob::State::Completed,
+            "completed and empty units need no extra request or delta notification");
+}
+
+void duplicateDeltaObserversMayCancelOrDestroyTheJob(const QString& directory) {
+    Server server;
+    SnowShotApiClient client(server.url());
+    ConfigurationStore settings(directory + QStringLiteral("/duplicate-lifetime.json"), true, true,
+                                60000);
+    auto& service = TranslationService::forClient(client, settings, QLocale::English);
+    std::unique_ptr<TranslationJob> job(
+        service.createJob({QStringLiteral("same"), QStringLiteral("same")}, nullptr));
+    QVector<int> notifications;
+    bool cancelled = false;
+    QObject::connect(job.get(), &TranslationJob::unitChanged, &client, [&](int index) {
+        notifications.append(index);
+        if (!cancelled) {
+            cancelled = true;
+            job->cancel();
+        } else {
+            job.reset();
+        }
+    });
+    job->start();
+    waitUntil([&] { return server.streams.size() == 1; }, "start the shared cancellation fixture");
+    server.delta(0, QStringLiteral("partial"));
+    waitUntil([&] { return server.disconnected(0); }, "cancellation aborts the shared request");
+    require(notifications == QVector<int>{0} && job->state() == TranslationJob::State::Cancelled &&
+                job->units()[0].state == TranslationJob::State::Cancelled &&
+                job->units()[1].state == TranslationJob::State::Cancelled &&
+                job->units()[0].text == QStringLiteral("partial") &&
+                job->units()[1].text == QStringLiteral("partial"),
+            "reentrant cancellation stops notifications while retaining a coherent unit snapshot");
+    job->retry();
+    waitUntil([&] { return server.streams.size() == 2; }, "retry creates one replacement request");
+    server.delta(1, QStringLiteral("new output"));
+    waitUntil([&] { return !job && server.disconnected(1); },
+              "a duplicate delta observer may destroy its job safely");
+    require(notifications == QVector<int>({0, 0}),
+            "destroyed jobs publish no remaining duplicate-index notifications");
+}
+
+void terminalNotificationsRespectReentrantTransitions(const QString& directory) {
+    Server server;
+    SnowShotApiClient client(server.url());
+    ConfigurationStore settings(directory + QStringLiteral("/terminal-transitions.json"), true,
+                                true, 60000);
+    auto& service = TranslationService::forClient(client, settings, QLocale::English);
+    enum class Action { Retry, Cancel, Destroy };
+    for (const auto action : {Action::Retry, Action::Cancel, Action::Destroy}) {
+        std::unique_ptr<TranslationJob> job(service.createJob({QStringLiteral(" ")}, nullptr));
+        int completions = 0;
+        bool changed = false;
+        QObject::connect(job.get(), &TranslationJob::finished, &client, [&] { ++completions; });
+        QObject::connect(job.get(), &TranslationJob::stateChanged, &client, [&] {
+            if (changed || job->state() != TranslationJob::State::Completed)
+                return;
+            changed = true;
+            switch (action) {
+            case Action::Retry:
+                job->retry();
+                break;
+            case Action::Cancel:
+                job->cancel();
+                break;
+            case Action::Destroy:
+                job.reset();
+                break;
+            }
+        });
+        job->start();
+        require(changed && completions == (action == Action::Retry ? 1 : 0),
+                "empty completion publishes only the surviving transition after retry, cancel "
+                "or destruction");
+    }
+    require(server.modelRequests == 0 && server.streams.isEmpty(),
+            "reentrant empty jobs still avoid model discovery and requests");
+
+    QObject owner;
+    auto* job = service.createJob({QStringLiteral("source")}, &owner);
+    int completions = 0;
+    bool retried = false;
+    QObject::connect(job, &TranslationJob::finished, &owner, [&] { ++completions; });
+    QObject::connect(job, &TranslationJob::stateChanged, &owner, [&] {
+        if (!retried && job->state() == TranslationJob::State::Completed) {
+            retried = true;
+            job->retry();
+        }
+    });
+    job->start();
+    waitUntil([&] { return server.streams.size() == 1; }, "start terminal streaming fixture");
+    server.delta(0, QStringLiteral("translated"));
+    server.finish(0);
+    waitUntil([&] { return completions == 1; }, "publish the surviving completed generation");
+    require(retried && job->state() == TranslationJob::State::Completed &&
+                server.streams.size() == 1,
+            "terminal pump retry retains completed output and publishes no stale completion");
+}
+
+void failedNotificationsRespectReentrantRetry(const QString& directory) {
+    Server server;
+    auto client = std::make_unique<SnowShotApiClient>(server.url());
+    ConfigurationStore settings(directory + QStringLiteral("/terminal-failure.json"), true, true,
+                                60000);
+    auto& service = TranslationService::forClient(*client, settings, QLocale::English);
+    QObject owner;
+    auto* job = service.createJob({QStringLiteral("source")}, &owner);
+    int completions = 0;
+    bool retried = false;
+    QObject::connect(job, &TranslationJob::finished, &owner, [&] { ++completions; });
+    QObject::connect(job, &TranslationJob::stateChanged, &owner, [&] {
+        if (!retried && job->state() == TranslationJob::State::Failed) {
+            retried = true;
+            job->retry();
+        }
+    });
+    job->start();
+    waitUntil([&] { return server.streams.size() == 1; }, "start service failure fixture");
+    client.reset();
+    require(retried && job->state() == TranslationJob::State::Failed && completions == 1,
+            "service failure emits no obsolete completion after a listener retries and fails");
+}
+
+void invalidationNotificationsRespectReentrantRetry(const QString& directory) {
+    Server server;
+    SnowShotApiClient client(server.url());
+    ConfigurationStore settings(directory + QStringLiteral("/terminal-invalidation.json"), true,
+                                true, 60000);
+    snow_shot::CustomAiModelConfiguration model{
+        QStringLiteral("11111111-1111-4111-8111-111111111111"),
+        QStringLiteral("Invalidation fixture"),
+        server.url() + QStringLiteral("/v1"),
+        QStringLiteral("test-key"),
+        QStringLiteral("provider-model"),
+        false};
+    const QString key = QStringLiteral("api_configuration/custom_models");
+    require(settings.setValue(key, snow_shot::customAiModelsToJson({model})),
+            "configure terminal invalidation fixture");
+    auto& service = TranslationService::forClient(client, settings, QLocale::English);
+    QObject owner;
+    auto* job = service.createJob({QStringLiteral(" ")}, &owner);
+    int completions = 0;
+    int invalidations = 0;
+    bool retried = false;
+    QObject::connect(job, &TranslationJob::finished, &owner, [&] { ++completions; });
+    QObject::connect(job, &TranslationJob::invalidated, &owner, [&] { ++invalidations; });
+    QObject::connect(job, &TranslationJob::stateChanged, &owner, [&] {
+        if (!retried && job->state() == TranslationJob::State::Invalidated) {
+            retried = true;
+            job->retry();
+        }
+    });
+    job->start();
+    model.apiKey = QStringLiteral("replacement-key");
+    require(settings.setValue(key, snow_shot::customAiModelsToJson({model})),
+            "invalidate the selected model");
+    require(retried && completions == 2 && invalidations == 0 &&
+                job->state() == TranslationJob::State::Completed,
+            "a retried invalidation emits only the replacement generation's completion");
+    model.apiKey = QStringLiteral("another-key");
+    require(settings.setValue(key, snow_shot::customAiModelsToJson({model})),
+            "invalidate the model without retrying again");
+    require(invalidations == 1 && completions == 2 &&
+                job->state() == TranslationJob::State::Invalidated,
+            "an invalidation that remains current still emits its terminal notification");
 }
 
 void customModelsStayAvailableAndInvalidateTogether(const QString& directory) {
@@ -540,10 +1030,18 @@ int main(int argc, char** argv) {
     nestedPreferenceSaveSupersedesPublication(directory.path());
     catalogMetadataChangesPreservePreferenceWrites(directory.path());
     catalogSelectionWritesRespectNestedUpdates(directory.path());
+    terminalNotificationsRespectReentrantTransitions(directory.path());
+    failedNotificationsRespectReentrantRetry(directory.path());
+    invalidationNotificationsRespectReentrantRetry(directory.path());
     if (application.arguments().contains(QStringLiteral("--notification-lifetime-only")))
         return 0;
     discoverySharesRequestsAndCancellation(directory.path());
     secondaryTargetsPersistAndReachEveryUnit(directory.path());
+    detectionIsDeferredUntilRoutingNeedsIt(directory.path());
+    completeInputRoutingReachesEveryProviderAndRetries(directory.path());
+    failedUnitRetryKeepsCompletedInputContext(directory.path());
+    duplicateUnitsShareRequestsAndRetryByOriginalPosition(directory.path());
+    duplicateDeltaObserversMayCancelOrDestroyTheJob(directory.path());
     customModelsStayAvailableAndInvalidateTogether(directory.path());
     failuresAndOwnerLifetimes(directory.path());
     serverChangesRefreshModelsAndPreserveStreams(directory.path());

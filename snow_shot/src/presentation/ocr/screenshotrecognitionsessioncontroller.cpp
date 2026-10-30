@@ -468,6 +468,27 @@ void ScreenshotRecognitionSessionController::setTarget(ScreenshotRecognitionTarg
     }
 }
 
+void ScreenshotRecognitionSessionController::refreshFormattedTarget(
+    QImage image, std::shared_ptr<QTextDocument> document) {
+    auto it = m_textCache.find(m_target.key);
+    if (!m_target.hasFormattedText() || image.isNull() || !document || it == m_textCache.end() ||
+        !it->formatted)
+        return;
+    m_target.image = std::move(image);
+    m_target.formattedTextDocument = std::move(document);
+    m_target.formattedPlainText = m_target.formattedTextDocument->toPlainText();
+    it->formattedDocument = m_target.formattedTextDocument;
+    if (it->editingSession &&
+        !invokeOwned(it->editingSession, &ScreenshotOcrTextEditingSession::refreshOriginalText,
+                     m_target.formattedPlainText))
+        return;
+    if (m_active && m_mode == Mode::Text && !editing())
+        if (!notify(&ScreenshotRecognitionSessionController::applyFormattedText,
+                    m_target.formattedTextDocument))
+            return;
+    static_cast<void>(updateTextState());
+}
+
 void ScreenshotRecognitionSessionController::seedRecognitionResults(
     ScreenshotRecognitionResults results) {
     sanitizeEditionRecognitionResults(results);
@@ -2383,9 +2404,9 @@ QString ScreenshotRecognitionSessionController::latexDraft() const {
 }
 
 std::optional<ScreenshotRecognitionFileSnapshot>
-ScreenshotRecognitionSessionController::fileExportSnapshot() const {
+ScreenshotRecognitionSessionController::fileExportSnapshot() {
 #if SNOW_SHOT_ENABLE_IMAGE_CONVERSION || SNOW_SHOT_ENABLE_LATEX_RECOGNITION ||                     \
-    SNOW_SHOT_ENABLE_QR_RECOGNITION
+    SNOW_SHOT_ENABLE_QR_RECOGNITION || SNOW_SHOT_ENABLE_TABLE_RECOGNITION
     if (!m_active)
         return std::nullopt;
     switch (m_mode) {
@@ -2407,8 +2428,21 @@ ScreenshotRecognitionSessionController::fileExportSnapshot() const {
         return ScreenshotRecognitionFileSnapshot{ScreenshotRecognitionFileKind::Qr,
                                                  m_qrContents.join(QLatin1Char('\n'))};
 #endif
+#if SNOW_SHOT_ENABLE_TABLE_RECOGNITION
+    case Mode::Table: {
+        const QPointer<ScreenshotRecognitionSessionController> lifetime(this);
+        if (content())
+            content()->commitActiveTableEdit();
+        if (!lifetime || !m_active || m_mode != Mode::Table)
+            return std::nullopt;
+        ScreenshotRecognitionFileSnapshot snapshot;
+        snapshot.kind = ScreenshotRecognitionFileKind::Table;
+        if (m_tableSession)
+            snapshot.table = m_tableSession->document;
+        return snapshot;
+    }
+#endif
     case Mode::Text:
-    case Mode::Table:
     default:
         return std::nullopt;
     }

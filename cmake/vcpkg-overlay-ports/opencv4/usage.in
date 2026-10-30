@@ -2,3 +2,9 @@
 
     set(OpenCV_ROOT "${VCPKG_INSTALLED_DIR}/@TARGET_TRIPLET@/share/@PORT@")
     find_package(OpenCV REQUIRED)
+
+The Snow Apps overlay enables OPENCV_DNN_SNOW_SHOT_QR. Its DNN factory supports
+the pinned WeChat detector and super-resolution graphs, plus Net output aliases;
+it does not register unrelated neural-network layers. OpenCV_SNOW_SHOT_QR_PROFILE
+advertises this contract to the model tests. Update and run those tests whenever
+the bundled QR models or this registration profile changes.

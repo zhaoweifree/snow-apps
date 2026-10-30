@@ -1,5 +1,5 @@
-//! `cargo run --release -p snow-ocr-process --no-default-features
-//! --features dynamic-onnx-runtime --example memory_transfer_benchmark -- ocr-transfer 31`
+//! `cargo +nightly-2026-09-08 run --release -p snow-ocr-process --no-default-features
+//! --example memory_transfer_benchmark -- ocr-transfer 31`
 //! Exercises the production shared-memory validation and RGBA -> BGR loop.
 
 #[path = "../src/buffer.rs"]
@@ -30,7 +30,12 @@ fn main() {
     ] {
         map[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     }
-    for (index, pixel) in map[buffer::SLOT_HEADER..].chunks_exact_mut(4).enumerate() {
+    for (index, pixel) in map[buffer::SLOT_HEADER..]
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
         pixel.copy_from_slice(&[(index % 251) as u8, 43, 91, 255]);
     }
     let shared = buffer::SharedImage {

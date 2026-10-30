@@ -1,4 +1,10 @@
 #include "snow_canvas_fill_render.h"
+#include "snow_draw_engine_qt/snow_canvas_runtime.h"
+#include "snow_canvas_type_conversions.h"
+
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <QApplication>
 #include <QImage>
@@ -230,10 +236,154 @@ void shapeAndTextPatternsRespectClippingAndShareTheirScale() {
     }
 }
 
+QJsonValue withFillMode(const QJsonValue& value, const QString& mode, int alpha) {
+    if (value.isArray()) {
+        QJsonArray result;
+        for (const auto& entry : value.toArray()) {
+            result.append(withFillMode(entry, mode, alpha));
+        }
+        return result;
+    }
+    if (!value.isObject()) {
+        return value;
+    }
+    QJsonObject object = value.toObject();
+    for (auto it = object.begin(); it != object.end(); ++it) {
+        it.value() = withFillMode(it.value(), mode, alpha);
+    }
+    if (object.contains(QStringLiteral("fill_style"))) {
+        object.insert(QStringLiteral("fill_style"), mode);
+        object.insert(QStringLiteral("fill"), QJsonObject{{QStringLiteral("r"), 255},
+                                                          {QStringLiteral("g"), 204},
+                                                          {QStringLiteral("b"), 199},
+                                                          {QStringLiteral("a"), alpha}});
+    }
+    return object;
+}
+
+void borderFillsSkipPaintingAndHatchAllocation() {
+    for (double dpr : {1.0, 1.25, 2.0}) {
+        QImage image(QSize(128, 128), QImage::Format_ARGB32_Premultiplied);
+        image.setDevicePixelRatio(dpr);
+        image.fill(QColor("#123456"));
+        const QImage before = image;
+        QPainter painter(&image);
+        QPainterPath path;
+        path.addRoundedRect(QRectF(2, 2, 90, 90), 6, 6);
+        snow_canvas_fill_render::resetHatchTextureCacheForCurrentThread();
+        snow_canvas_fill_render::drawStyledFill(painter, path, {255, 204, 199, 255},
+                                                SNOW_FILL_STYLE_BORDER, 8.0);
+        snow_canvas_fill_render::drawTextBackgroundFill(painter, path, {255, 204, 199, 255},
+                                                        SNOW_FILL_STYLE_BORDER, 30.0);
+        painter.end();
+        require(image == before, "Border draws no fill pixels for shapes or text");
+        require(snow_canvas_fill_render::hatchTextureCacheEntryCountForCurrentThread() == 0,
+                "Border does not allocate hatch textures");
+    }
+    require(snow_canvas_types::toCanvasFillStyle(SNOW_FILL_STYLE_BORDER) ==
+                    SnowCanvasFillStyle::Border &&
+                snow_canvas_types::toEngineFillStyle(SnowCanvasFillStyle::Border) ==
+                    SNOW_FILL_STYLE_BORDER,
+            "Border round-trips through the Qt/C ABI conversion");
+}
+
+void borderExportsMatchTransparentFillsAndRetainOutlines() {
+    const QByteArray operations[] = {
+        R"({"type":"rectangle","bounds":[30,30,100,80]})",
+        R"({"type":"rounded_rectangle","bounds":[30,30,100,80]})",
+        R"({"type":"ellipse","bounds":[30,30,100,80]})",
+        R"({"type":"diamond","bounds":[30,30,100,80]})",
+        R"({"type":"arrow","points":[[30,30],[130,110]]})",
+        R"({"type":"line","points":[[30,30],[130,30],[130,110],[30,110],[30,30]]})",
+        R"({"type":"freehand","points":[[30,30],[130,30],[130,110],[30,110]],"closed":true})",
+        R"({"type":"text","bounds":[30,30,100,80],"text":"Border"})",
+        R"({"type":"serial_number","center":[80,70],"number":3})",
+    };
+    for (const auto& operation : operations) {
+        SnowCanvasRuntime source;
+        const auto result =
+            source.applyAnnotationTransaction("{\"version\":1,\"operations\":[" + operation + "]}");
+        require(!result.isEmpty(), "create fill export fixture");
+        const auto saved = QJsonDocument::fromJson(source.serializeDocumentSession()).object();
+        SnowCanvasRuntime border;
+        SnowCanvasRuntime transparent;
+        require(border.restoreDocumentSession(
+                    QJsonDocument(withFillMode(saved, QStringLiteral("Border"), 255).toObject())
+                        .toJson()) &&
+                    transparent.restoreDocumentSession(
+                        QJsonDocument(withFillMode(saved, QStringLiteral("Solid"), 0).toObject())
+                            .toJson()),
+                "restore Border and transparent fill sessions");
+        for (int size : {192, 288}) {
+            const QImage actual =
+                border.renderToImage(QRectF(0, 0, 192, 192), QSize(size, size), {});
+            const QImage expected =
+                transparent.renderToImage(QRectF(0, 0, 192, 192), QSize(size, size), {});
+            require(!actual.isNull() && actual == expected,
+                    "Border exports exactly the same visible ink as transparent fill");
+            bool painted = false;
+            for (int y = 0; y < size && !painted; ++y) {
+                for (int x = 0; x < size; ++x) {
+                    painted |= actual.pixelColor(x, y).alpha() != 0;
+                }
+            }
+            require(painted, "Border retains outlines and text in exports");
+        }
+    }
+}
+
+void borderStyleEditsPreserveColorAndUndo() {
+    struct Case {
+        const char* operation;
+        SnowCanvasShapeKind kind;
+    };
+    const Case cases[] = {
+        {R"({"type":"rectangle","bounds":[30,30,100,80],"style":{"fill":[255,204,199,255]}})",
+         SnowCanvasShapeKind::Rectangle},
+        {R"({"type":"line","points":[[30,30],[130,30],[130,110],[30,110],[30,30]],"style":{"fill":[255,204,199,255]}})",
+         SnowCanvasShapeKind::Line},
+        {R"({"type":"freehand","points":[[30,30],[130,30],[130,110],[30,110]],"closed":true,"style":{"fill":[255,204,199,255]}})",
+         SnowCanvasShapeKind::FreeDraw},
+    };
+    for (const auto& test : cases) {
+        SnowCanvasRuntime runtime;
+        const auto result = QJsonDocument::fromJson(runtime.applyAnnotationTransaction(
+                                                        "{\"version\":1,\"operations\":[" +
+                                                        QByteArray(test.operation) + "]}"))
+                                .object();
+        const auto id =
+            result.value(QStringLiteral("created_element_ids")).toArray().first().toObject();
+        SnowCanvasRuntimeEditor editor(runtime);
+        require(editor.select(id.value(QStringLiteral("index")).toInt(),
+                              id.value(QStringLiteral("generation")).toInt()),
+                "select the fill history fixture");
+        const auto filled = runtime.renderToImage(QRectF(0, 0, 192, 192), QSize(192, 192), {});
+        auto style = editor.canvasStyleToolbarState().shapeStyle;
+        const QColor color = style.fill;
+        style.fillStyle = SnowCanvasFillStyle::Border;
+        require(editor.setShapeStyleFromToolbar(style, SnowCanvasShapeStylePropertyFillStyle,
+                                                test.kind),
+                "apply Border to the selected shape or closed path");
+        require(editor.canvasStyleToolbarState().shapeStyle.fill == color,
+                "Border retains the selected fill color");
+        const auto border = runtime.renderToImage(QRectF(0, 0, 192, 192), QSize(192, 192), {});
+        require(border != filled, "Border removes the filled interior");
+        require(runtime.undo() &&
+                    runtime.renderToImage(QRectF(0, 0, 192, 192), QSize(192, 192), {}) == filled,
+                "undo restores the fill");
+        require(runtime.redo() &&
+                    runtime.renderToImage(QRectF(0, 0, 192, 192), QSize(192, 192), {}) == border,
+                "redo restores Border");
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
+    borderFillsSkipPaintingAndHatchAllocation();
+    borderExportsMatchTransparentFillsAndRetainOutlines();
+    borderStyleEditsPreserveColorAndUndo();
     patternedFillsKeepUniformCoverageAcrossTileBoundaries();
     thinStripesRemainConnectedAcrossTileCorners();
     shapeAndTextPatternsRespectClippingAndShareTheirScale();

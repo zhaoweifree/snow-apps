@@ -37,6 +37,9 @@ impl KeyboardOverlayFont {
     }
 }
 
+pub const DEFAULT_MOUSE_HIGHLIGHT_RADIUS: u32 = 41;
+pub const MOUSE_HIGHLIGHT_RADIUS_RANGE: std::ops::RangeInclusive<u32> = 8..=128;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectsConfig {
     pub show_cursor: bool,
@@ -47,6 +50,7 @@ pub struct EffectsConfig {
     pub mouse_trail_duration_ms: u64,
     pub mouse_click_rgba: [u8; 4],
     pub mouse_highlight_rgba: [u8; 4],
+    pub mouse_highlight_radius: u32,
 }
 
 impl Default for EffectsConfig {
@@ -60,12 +64,16 @@ impl Default for EffectsConfig {
             mouse_trail_duration_ms: 500,
             mouse_click_rgba: [0; 4],
             mouse_highlight_rgba: [0; 4],
+            mouse_highlight_radius: DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
         }
     }
 }
 
 impl EffectsConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if !MOUSE_HIGHLIGHT_RADIUS_RANGE.contains(&self.mouse_highlight_radius) {
+            return Err("mouse highlight radius must be between 8 and 128 pixels".into());
+        }
         if !(100..=2000).contains(&self.mouse_trail_duration_ms) {
             return Err("trail duration must be between 100 and 2000 ms".into());
         }
@@ -229,8 +237,68 @@ impl RenderMetadata {
     }
 }
 
-const RENDER_METADATA_MAGIC: &[u8] = b"SNOWRENDER\0\x01";
+const LEGACY_RENDER_METADATA_MAGIC: &[u8] = b"SNOWRENDER\0\x01";
+const RENDER_METADATA_MAGIC: &[u8] = b"SNOWRENDER\0\x02";
 const MAX_RENDER_METADATA_BYTES: u64 = 4 * 1024 * 1024;
+
+// Bincode encodes fields positionally. Keep the version-1 layout explicit so adding
+// highlight geometry does not reinterpret existing deferred recording metadata.
+#[derive(Serialize, Deserialize)]
+struct LegacyEffectsConfig {
+    show_cursor: bool,
+    keyboard: Option<KeyboardOverlayConfig>,
+    show_keyboard: bool,
+    record_mouse_clicks: bool,
+    mouse_trail_rgba: [u8; 4],
+    mouse_trail_duration_ms: u64,
+    mouse_click_rgba: [u8; 4],
+    mouse_highlight_rgba: [u8; 4],
+}
+
+#[derive(Serialize, Deserialize)]
+struct LegacyRenderConfig {
+    output_width: u32,
+    output_height: u32,
+    output_fps: u32,
+    effects: LegacyEffectsConfig,
+    playback_overlay: PlaybackOverlay,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LegacyRenderMetadata {
+    render: LegacyRenderConfig,
+    timeline: FinalizedTimeline,
+    coded_width: u32,
+    coded_height: u32,
+}
+
+impl From<LegacyRenderMetadata> for RenderMetadata {
+    fn from(legacy: LegacyRenderMetadata) -> Self {
+        let effects = legacy.render.effects;
+        Self {
+            render: RenderConfig {
+                output_width: legacy.render.output_width,
+                output_height: legacy.render.output_height,
+                output_fps: legacy.render.output_fps,
+                playback_overlay: legacy.render.playback_overlay,
+                effects: EffectsConfig {
+                    show_cursor: effects.show_cursor,
+                    keyboard: effects.keyboard,
+                    show_keyboard: effects.show_keyboard,
+                    record_mouse_clicks: effects.record_mouse_clicks,
+                    mouse_trail_rgba: effects.mouse_trail_rgba,
+                    mouse_trail_duration_ms: effects.mouse_trail_duration_ms,
+                    mouse_click_rgba: effects.mouse_click_rgba,
+                    mouse_highlight_rgba: effects.mouse_highlight_rgba,
+                    mouse_highlight_radius: DEFAULT_MOUSE_HIGHLIGHT_RADIUS,
+                },
+            },
+            timeline: legacy.timeline,
+            coded_width: legacy.coded_width,
+            coded_height: legacy.coded_height,
+        }
+    }
+}
 
 pub fn write_render_metadata(
     path: &std::path::Path,
@@ -276,16 +344,22 @@ fn decode_render_metadata(input: impl std::io::Read) -> crate::Result<RenderMeta
     let mut input = std::io::BufReader::new(input);
     let mut magic = [0u8; 12];
     input.read_exact(&mut magic)?;
-    if magic != RENDER_METADATA_MAGIC {
+    if magic != RENDER_METADATA_MAGIC && magic != LEGACY_RENDER_METADATA_MAGIC {
         return Err(crate::RecordingModelError::Decode(
             "unsupported render metadata format".into(),
         ));
     }
-    let metadata: RenderMetadata = bincode::DefaultOptions::new()
+    let options = bincode::DefaultOptions::new()
         .with_fixint_encoding()
-        .with_limit(MAX_RENDER_METADATA_BYTES)
-        .deserialize_from(&mut input)
-        .map_err(|error| crate::RecordingModelError::Decode(error.to_string()))?;
+        .with_limit(MAX_RENDER_METADATA_BYTES);
+    let metadata: RenderMetadata = if magic == LEGACY_RENDER_METADATA_MAGIC {
+        options
+            .deserialize_from::<_, LegacyRenderMetadata>(&mut input)
+            .map(RenderMetadata::from)
+    } else {
+        options.deserialize_from(&mut input)
+    }
+    .map_err(|error| crate::RecordingModelError::Decode(error.to_string()))?;
     metadata
         .validate()
         .map_err(crate::RecordingModelError::Decode)?;
@@ -365,6 +439,7 @@ mod tests {
                 output_height: 1080,
                 output_fps: 30,
                 effects: EffectsConfig {
+                    mouse_highlight_radius: 96,
                     keyboard: Some(KeyboardOverlayConfig {
                         font: Some(
                             KeyboardOverlayFont::new("Captured font", "Captured Han", 500).unwrap(),
@@ -392,5 +467,48 @@ mod tests {
         std::fs::write(&path, bytes).unwrap();
         assert!(read_render_metadata(&path).is_err());
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn version_one_metadata_keeps_original_highlight_geometry() {
+        let legacy = LegacyRenderMetadata {
+            render: LegacyRenderConfig {
+                output_width: 1920,
+                output_height: 1080,
+                output_fps: 30,
+                playback_overlay: PlaybackOverlay::ProgressBar { rgba: [1, 2, 3, 4] },
+                effects: LegacyEffectsConfig {
+                    show_cursor: true,
+                    keyboard: None,
+                    show_keyboard: false,
+                    record_mouse_clicks: false,
+                    mouse_trail_rgba: [0; 4],
+                    mouse_trail_duration_ms: 500,
+                    mouse_click_rgba: [0; 4],
+                    mouse_highlight_rgba: [255, 255, 0, 128],
+                },
+            },
+            timeline: FinalizedTimeline::new(1000, 30).unwrap(),
+            coded_width: 1920,
+            coded_height: 1080,
+        };
+        let mut bytes = LEGACY_RENDER_METADATA_MAGIC.to_vec();
+        bincode::serialize_into(&mut bytes, &legacy).unwrap();
+        let decoded = decode_render_metadata(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.render.effects.mouse_highlight_radius, 41);
+        assert_eq!(
+            decoded.render.effects.mouse_highlight_rgba,
+            [255, 255, 0, 128]
+        );
+        assert_eq!(
+            decoded.render.playback_overlay,
+            legacy.render.playback_overlay
+        );
+        assert_eq!(decoded.timeline, legacy.timeline);
+        for radius in [0, 7, 129, u32::MAX] {
+            let mut effects = decoded.render.effects.clone();
+            effects.mouse_highlight_radius = radius;
+            assert!(effects.validate().is_err());
+        }
     }
 }

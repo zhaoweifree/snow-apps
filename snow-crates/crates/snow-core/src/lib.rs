@@ -16,3 +16,5 @@ pub mod cancellation;
 pub mod keycap_layout;
 
 pub mod qos;
+
+pub mod raster_admission;

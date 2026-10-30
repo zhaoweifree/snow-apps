@@ -48,11 +48,11 @@ try {
         }
     }
     Require ((@(Get-SnowShotReleaseArchitectures $script:release '2.0.0') -join ',') -ceq 'x64,arm64') 'Both architectures must be detected.'
+    $directory = New-SnowShotWingetManifest $tag $root
+    $yaml = Get-Content (Join-Path $directory 'mg-chao.snow-shot.installer.yaml') -Raw
+    Require ($yaml.Contains('Architecture: arm64') -and $yaml.Contains('Architecture: x64')) 'Full WinGet must contain both native architectures.'
     foreach ($edition in @('Full', 'Mini')) {
         $product = Get-SnowShotEdition $edition
-        $directory = New-SnowShotWingetManifest $tag $root $edition
-        $yaml = Get-Content (Join-Path $directory "$($product.Winget).installer.yaml") -Raw
-        Require ($yaml.Contains('Architecture: arm64') -and $yaml.Contains('Architecture: x64')) 'WinGet must contain both native architectures.'
         $path = New-SnowShotScoopManifest $tag (Join-Path $root "$edition.json") $edition
         $manifest = Get-Content $path -Raw | ConvertFrom-Json
         if ($SchemaPath) {
@@ -62,6 +62,17 @@ try {
         Require ($manifest.autoupdate.architecture.arm64.url.Contains('windows-arm64')) 'Scoop ARM64 autoupdate is required.'
     }
     $saved = $script:release.assets
+    # WinGet depends only on Full offline installers, independently of Mini feeds/payloads.
+    $script:release.assets = @($saved | Where-Object { $_.name -clike 'snow-shot-2.0.0-windows-*-offline.exe' })
+    Require ((@(Get-SnowShotWingetArchitectures $script:release '2.0.0') -join ',') -ceq 'x64,arm64') 'Full-only releases must retain both WinGet architectures.'
+    $fullOnly = New-SnowShotWingetManifest $tag $root
+    Require ((Get-Content (Join-Path $fullOnly 'mg-chao.snow-shot.installer.yaml') -Raw) -ceq $yaml) 'Mini assets must not affect Full WinGet manifests.'
+    $script:release.assets += $script:release.assets[1]
+    Must-Fail { Get-SnowShotWingetArchitectures $script:release '2.0.0' }
+    $script:release.assets = @($saved | Where-Object { $_.name -ceq 'snow-shot-2.0.0-windows-x64-offline.exe' -or $_.name -clike 'snow-shot-mini-*' })
+    Require ((@(Get-SnowShotWingetArchitectures $script:release '2.0.0') -join ',') -ceq 'x64') 'Mini ARM64 assets must not imply Full ARM64 support.'
+    $script:release.assets += [pscustomobject]@{ name = 'snow-shot-2.0.0-windows-arm64-portable.zip' }
+    Must-Fail { Get-SnowShotWingetArchitectures $script:release '2.0.0' }
     $script:release.assets = @($saved | Where-Object { $_.name -cne 'latest-version-mini-windows-arm64.json' })
     Must-Fail { Get-SnowShotReleaseArchitectures $script:release '2.0.0' }
     $script:release.assets = @($saved | Where-Object { $_.name -notlike 'snow-shot-mini-*' -and $_.name -notlike 'latest-version-mini*.json' })
@@ -79,6 +90,10 @@ try {
     Must-Fail { Assert-SnowShotNativeValidation $audit $artifact 'windows-arm64' }
     $proof.Artifacts[0].Sha256 = (Get-FileHash $artifact).Hash.ToLowerInvariant(); $proof.Passed = $false
     Must-Fail { Assert-SnowShotNativeValidation $audit $artifact 'windows-arm64' }
+    $waiver = Assert-SnowShotNativeValidation $audit $artifact 'windows-arm64' -SkipArm64NativeValidation
+    Require ($waiver.Waived -and -not $waiver.Passed -and
+        $waiver.Artifacts[0].Sha256 -ceq (Get-FileHash $artifact).Hash.ToLowerInvariant()) 'An explicit waiver must retain exact bytes without claiming a native pass.'
+    Must-Fail { Assert-SnowShotNativeValidation $audit $artifact 'windows-x64' -SkipArm64NativeValidation }
     Write-Output 'PASS: ARM64 WinGet/Scoop completeness and exact-byte native publication proof.'
 } finally {
     $resolved = [IO.Path]::GetFullPath($root)

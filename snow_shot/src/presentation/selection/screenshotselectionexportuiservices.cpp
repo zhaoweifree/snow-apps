@@ -52,6 +52,7 @@ void startAutomaticPinSave(std::shared_ptr<ScreenshotExportArtifact> artifact,
                 callback(std::move(result));
             }
         };
+    artifact->setWindowNames(request->windowNames);
     if (!artifact->requestAutomaticSaveToConfiguredDirectory(
             request->receiver, std::move(request->configuredSaveDirectory), request->format,
             std::move(request->filenameFormat), request->encoding, completion, request->pdf,
@@ -533,11 +534,12 @@ class ScreenshotPendingPinCoordinator final : public QObject {
 };
 
 namespace {
-bool presentPinnedWindowAndSynchronize(ScreenshotPinnedWindowPool* pool,
-                                       ScreenshotPinnedWindow* window,
-                                       const ScreenshotPinnedWindow::Config& requestedConfig,
-                                       const std::function<void()>& showMainWindowRequested,
-                                       std::function<void(bool, QImage)> completion = {}) {
+bool presentPinnedWindowAndSynchronize(
+    ScreenshotPinnedWindowPool* pool, ScreenshotPinnedWindow* window,
+    const ScreenshotPinnedWindow::Config& requestedConfig,
+    const std::function<void()>& showMainWindowRequested,
+    const std::function<void(const ScreenshotPinnedImageSnapshot&)>& imageSplittingRequested,
+    std::function<void(bool, QImage)> completion = {}) {
     ScreenshotPinnedWindow::Config config = requestedConfig;
     if (!config.placement.isValid() && config.screen)
         config.placement =
@@ -549,6 +551,11 @@ bool presentPinnedWindowAndSynchronize(ScreenshotPinnedWindowPool* pool,
     if (showMainWindowRequested) {
         QObject::connect(window, &ScreenshotPinnedWindow::showMainWindowRequested, window,
                          showMainWindowRequested);
+    }
+    QObject::disconnect(window, &ScreenshotPinnedWindow::splitRequested, window, nullptr);
+    if (imageSplittingRequested) {
+        QObject::connect(window, &ScreenshotPinnedWindow::splitRequested, window,
+                         imageSplittingRequested);
     }
     SNOW_SHOT_PIN_PERF_MILESTONE("ui.pinned_window_constructed");
     const QPointer<ScreenshotPinnedWindowPool> guardedPool(pool);
@@ -586,10 +593,13 @@ ScreenshotSelectionExportUiServices::ScreenshotSelectionExportUiServices(
     ScreenshotOcrRecognitionPort* recognition, ScreenshotQrRecognitionPort* qrRecognition,
     SnowShotApiClient* tableRecognition, std::function<void()> showMainWindowRequested,
     std::function<ScreenshotPinnedRecognitionProviders()> recognitionProvider,
-    snow_shot::presentation::PinnedWindowGroupManager* groupManager)
+    snow_shot::presentation::PinnedWindowGroupManager* groupManager,
+    std::function<void(const QVector<ScreenshotPinnedImageSnapshot>&)> imageStitchingRequested,
+    std::function<void(const ScreenshotPinnedImageSnapshot&)> imageSplittingRequested)
     : m_recognition(recognition), m_qrRecognition(qrRecognition),
       m_tableRecognition(tableRecognition),
       m_showMainWindowRequested(std::move(showMainWindowRequested)),
+      m_imageSplittingRequested(std::move(imageSplittingRequested)),
       m_recognitionProvider(std::move(recognitionProvider)), m_groupManager(groupManager),
       m_selectionController(
           std::make_unique<snow_shot::presentation::PinnedWindowSelectionController>(
@@ -597,6 +607,11 @@ ScreenshotSelectionExportUiServices::ScreenshotSelectionExportUiServices(
       m_windowPool(std::make_unique<ScreenshotPinnedWindowPool>()),
       m_pendingPinCoordinator(std::make_unique<ScreenshotPendingPinCoordinator>(
           [this]() { restorePersistedWindows(); })) {
+    if (imageStitchingRequested)
+        QObject::connect(
+            m_selectionController.get(),
+            &snow_shot::presentation::PinnedWindowSelectionController::imageStitchingRequested,
+            m_selectionController.get(), std::move(imageStitchingRequested));
     if (m_groupManager) {
         QObject::connect(
             m_groupManager,
@@ -702,8 +717,8 @@ bool ScreenshotSelectionExportUiServices::presentPinnedArtifact(
     // The worker loader returns a fully composited result image. Keep the live
     // renderer neutral so the result style is not applied twice after loading.
     config.resultStyle = ScreenshotResultStyle{};
-    config.borderAppearance =
-        screenshotSelectionBorderAppearance(request.selection.size(), request.resultStyle);
+    config.borderAppearance = screenshotSelectionBorderAppearance(
+        request.selection.size(), request.resultStyle, request.layoutCompaction);
     config.checkerboardEnabled = screenshotSelectionNeedsCheckerboard(config.borderAppearance);
     config.initialWindowSize = request.initialWindowSize;
     config.screen = request.screen;
@@ -714,9 +729,11 @@ bool ScreenshotSelectionExportUiServices::presentPinnedArtifact(
     config.recognitionProvider = m_recognitionProvider;
     // The pinned image retains the source canvas coordinates, including shadow padding.
     // Cached OCR quads must stay in that same space to align with the image.
-    config.recognitionResults = request.recognitionResults;
-    config.recognitionVisible = request.recognitionVisible;
-    config.translationVisible = request.translationVisible;
+    const bool layoutChanged = request.layoutPlan && request.layoutPlan->changed;
+    config.recognitionResults =
+        layoutChanged ? ScreenshotRecognitionResults{} : request.recognitionResults;
+    config.recognitionVisible = !layoutChanged && request.recognitionVisible;
+    config.translationVisible = !layoutChanged && request.translationVisible;
     config.formattedTextDocument.reset();
     config.formattedPlainText.clear();
     applyPinRuntimeSettings(&config);
@@ -770,9 +787,9 @@ bool ScreenshotSelectionExportUiServices::presentPinnedArtifact(
         }
     };
     trackSourceWindow(pinnedWindow, config.sourceIdentity);
-    const bool presented = presentPinnedWindowAndSynchronize(m_windowPool.get(), pinnedWindow,
-                                                             config, m_showMainWindowRequested,
-                                                             std::move(synchronizedCompletion));
+    const bool presented = presentPinnedWindowAndSynchronize(
+        m_windowPool.get(), pinnedWindow, config, m_showMainWindowRequested,
+        m_imageSplittingRequested, std::move(synchronizedCompletion));
     if (!presented) {
         artifact->cancel();
         m_pendingPinCoordinator->cancel(config.persistenceId);
@@ -869,9 +886,9 @@ bool ScreenshotSelectionExportUiServices::presentPinnedImageArtifact(
             }
         };
     trackSourceWindow(pinnedWindow, config.sourceIdentity);
-    const bool presented = presentPinnedWindowAndSynchronize(m_windowPool.get(), pinnedWindow,
-                                                             config, m_showMainWindowRequested,
-                                                             std::move(synchronizedCompletion));
+    const bool presented = presentPinnedWindowAndSynchronize(
+        m_windowPool.get(), pinnedWindow, config, m_showMainWindowRequested,
+        m_imageSplittingRequested, std::move(synchronizedCompletion));
     if (!presented) {
         artifact->cancel();
         m_pendingPinCoordinator->cancel(config.persistenceId);
@@ -947,8 +964,8 @@ bool ScreenshotSelectionExportUiServices::presentCompositedSelectionImage(
         request.surfaceCanvasRect.size() != QSizeF(request.initialWindowSize)) {
         return false;
     }
-    const auto appearance =
-        screenshotSelectionBorderAppearance(request.selection.size(), request.resultStyle);
+    const auto appearance = screenshotSelectionBorderAppearance(
+        request.selection.size(), request.resultStyle, request.layoutCompaction);
     return presentPinnedImageOnCanvas(
         image, request.screen.data(), request.geometry.nativeGeometry, request.initialWindowSize,
         request.surfaceCanvasRect, {}, {}, 1.0, {}, {}, std::move(completion), appearance,
@@ -1080,9 +1097,9 @@ bool ScreenshotSelectionExportUiServices::presentPinnedImageOnCanvas(
         }
     };
     trackSourceWindow(pinnedWindow, config.sourceIdentity);
-    const bool presented = presentPinnedWindowAndSynchronize(m_windowPool.get(), pinnedWindow,
-                                                             config, m_showMainWindowRequested,
-                                                             std::move(synchronizedCompletion));
+    const bool presented = presentPinnedWindowAndSynchronize(
+        m_windowPool.get(), pinnedWindow, config, m_showMainWindowRequested,
+        m_imageSplittingRequested, std::move(synchronizedCompletion));
     if (!presented) {
         artifact->cancel();
         m_pendingPinCoordinator->cancel(config.persistenceId);
@@ -1463,8 +1480,11 @@ bool ScreenshotSelectionExportUiServices::presentRestoredRecord(
         ScreenshotClipboardOriginalContent original;
         original.html = record.originalHtml;
         original.text = record.originalText;
+        original.textStyle = record.textStyle;
+        original.textFormat = record.textFormat;
         const auto rendered = ScreenshotClipboardContentReader::renderOriginalText(
-            original, record.firstCreationTextDpi, QApplication::palette().color(QPalette::Base));
+            original, record.firstCreationTextDpi, QApplication::palette().color(QPalette::Base),
+            {}, capturePinnedColorSwatchStyle());
         if (!rendered.has_value() || !rendered->isValid()) {
             return false;
         }
@@ -1494,7 +1514,7 @@ bool ScreenshotSelectionExportUiServices::presentRestoredRecord(
     m_restoringIds[record.id].window = window;
     trackSourceWindow(window, config.sourceIdentity);
     const bool presented = presentPinnedWindowAndSynchronize(
-        m_windowPool.get(), window, config, m_showMainWindowRequested,
+        m_windowPool.get(), window, config, m_showMainWindowRequested, m_imageSplittingRequested,
         [this, lifetime, id = record.id, generation, windowGuard, repositoryGuard](bool success,
                                                                                    QImage) {
             if (lifetime.isNull())

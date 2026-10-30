@@ -40,7 +40,6 @@ struct LayoutKey {
     double zoom = 1.0;
     double width = 1.0;
     double height = 1.0;
-    double inkReserve = 0.0;
     SnowTextHorizontalAlign horizontalAlignment = SNOW_TEXT_HORIZONTAL_ALIGN_LEFT;
     SnowTextVerticalAlign verticalAlignment = SNOW_TEXT_VERTICAL_ALIGN_TOP;
     RenderPhase phase = RenderPhase::Geometry;
@@ -53,7 +52,7 @@ struct LayoutKey {
     bool operator==(const LayoutKey& other) const {
         return text == other.text && font == other.font && scale == other.scale &&
                zoom == other.zoom && width == other.width && height == other.height &&
-               inkReserve == other.inkReserve && horizontalAlignment == other.horizontalAlignment &&
+               horizontalAlignment == other.horizontalAlignment &&
                verticalAlignment == other.verticalAlignment && phase == other.phase &&
                color == other.color && strokeWidth == other.strokeWidth &&
                devicePixelRatio == other.devicePixelRatio && logicalDpiX == other.logicalDpiX &&
@@ -64,7 +63,7 @@ struct LayoutKey {
 struct LayoutKeyHash {
     std::size_t operator()(const LayoutKey& key) const {
         return snowHashMulti(0, key.text, key.font, key.scale, key.zoom, key.width, key.height,
-                          key.inkReserve, static_cast<int>(key.horizontalAlignment),
+                             static_cast<int>(key.horizontalAlignment),
                           static_cast<int>(key.verticalAlignment), static_cast<int>(key.phase),
                           key.color, key.strokeWidth, key.devicePixelRatio, key.logicalDpiX,
                           key.logicalDpiY);
@@ -128,7 +127,6 @@ preparedLayout(QPainter& painter, const SnowSceneDisplayItem& item, const QFont&
     key.zoom = safeZoom;
     key.width = qMax(1.0, item.width * safeZoom);
     key.height = qMax(1.0, item.height * safeZoom);
-    key.inkReserve = item.text_ink_reserve;
     key.horizontalAlignment = item.text_horizontal_align;
     key.verticalAlignment = item.text_vertical_align;
     key.phase = phase;
@@ -247,7 +245,8 @@ void drawContents(QPainter& painter, const SnowSceneDisplayItem& item, const QFo
 
 void drawBackground(QPainter& painter, const SnowSceneDisplayItem& item, const QFont& baseFont,
                     const QRectF& localRect, double zoom) {
-    if (item.fill.a == 0 || item.font_size <= 0.0) {
+    if (!snow_canvas_fill_render::hasVisibleFill(item.fill, item.fill_style) ||
+        item.font_size <= 0.0) {
         return;
     }
 

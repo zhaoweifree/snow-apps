@@ -1,6 +1,8 @@
 #include "snow_shot/presentation/screenrecordingfolder.h"
 
 #include "snow_shot/storage/settingsadapters.h"
+#include "snow_shot/storage/exportfilename.h"
+#include "snow_shot/storage/timevariables.h"
 
 #include <QDesktopServices>
 #include <QDir>
@@ -24,12 +26,16 @@ QStringList defaultRecordingDirectories() {
 }
 } // namespace
 
-QStringList screenRecordingDirectories() {
+QStringList screenRecordingDirectories(const QDateTime& timestamp,
+                                       const storage::ScreenshotWindowNames& names) {
     QStringList directories;
-    const QString configured =
-        QDir::cleanPath(storage::RecordingSettings().videoSaveDirectory().trimmed());
+    const QString configuredTemplate = storage::RecordingSettings().videoSaveDirectory();
+    const QString expanded =
+        storage::expandScreenshotExportVariables(configuredTemplate, timestamp, names);
+    const QString configured = expanded.isEmpty() ? QString() : QDir::cleanPath(expanded);
     const QFileInfo configuredInfo(configured);
-    if (!configured.isEmpty() && configuredInfo.isDir() && configuredInfo.isWritable()) {
+    if (!configured.isEmpty() && ((configuredInfo.isDir() && configuredInfo.isWritable()) ||
+                                  storage::containsTimeVariables(configuredTemplate))) {
         directories.push_back(configured);
     }
     for (const QString& fallback : defaultRecordingDirectories()) {
@@ -40,8 +46,9 @@ QStringList screenRecordingDirectories() {
     return directories;
 }
 
-QString screenRecordingDirectory() {
-    const QStringList directories = screenRecordingDirectories();
+QString screenRecordingDirectory(const QDateTime& timestamp,
+                                 const storage::ScreenshotWindowNames& names) {
+    const QStringList directories = screenRecordingDirectories(timestamp, names);
     for (const QString& candidate : directories) {
         QDir directory(candidate);
         if ((directory.exists() || directory.mkpath(QStringLiteral("."))) &&
@@ -62,18 +69,19 @@ QString screenRecordingOutputPath(const QStringList& directories, const QString&
             !QFileInfo(directory.absolutePath()).isWritable()) {
             continue;
         }
-        QString path = directory.filePath(baseName + normalizedExtension);
+        QString path =
+            directory.filePath(storage::composeExportFileName(baseName, normalizedExtension));
         for (int suffix = 1; QFileInfo::exists(path); ++suffix) {
-            path = directory.filePath(
-                QStringLiteral("%1_%2%3").arg(baseName).arg(suffix).arg(normalizedExtension));
+            path = directory.filePath(storage::composeExportFileName(
+                baseName, QStringLiteral("_%1%2").arg(suffix).arg(normalizedExtension)));
         }
         return path;
     }
     return {};
 }
 
-bool openScreenRecordingFolder() {
-    const QString path = screenRecordingDirectory();
+bool openScreenRecordingFolder(const storage::ScreenshotWindowNames& names) {
+    const QString path = screenRecordingDirectory(QDateTime::currentDateTime(), names);
     return !path.isEmpty() && QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 

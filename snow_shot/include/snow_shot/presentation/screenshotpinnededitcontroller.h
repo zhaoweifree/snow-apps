@@ -19,7 +19,7 @@
 class QScreen;
 class QEvent;
 class QImage;
-class ScreenshotCanvasColorSamplerWindow;
+class ScreenshotCanvasColorSamplingSession;
 class ScreenshotFloatingToolPaletteWindow;
 class ScreenshotPinnedWindow;
 class ScreenshotToolPaletteHost;
@@ -65,6 +65,7 @@ class ScreenshotPinnedEditController final : public QObject {
     void cancelAutomationAutoFilter();
 
   signals:
+    void automationAutoFilterStateChanged() const;
     void toolbarCreated(ScreenshotFloatingToolPaletteWindow* toolbarWindow);
     void editModeChanged(bool enabled);
     void textRecognitionRequested();
@@ -109,10 +110,8 @@ class ScreenshotPinnedEditController final : public QObject {
     QMap<QString, quint64> m_drawingShortcutBindings;
     QMap<QString, quint64> m_screenshotShortcutBindings;
     ScreenshotFloatingToolPaletteWindow* m_toolbarWindow = nullptr;
-    std::unique_ptr<ScreenshotCanvasColorSamplerWindow> m_canvasColorSamplerWindow;
+    std::unique_ptr<ScreenshotCanvasColorSamplingSession> m_canvasColorSampling;
     ScreenshotCanvasColorSampler m_canvasColorSampler;
-    QPointer<adqt::widgets::AdColorPicker> m_canvasColorSamplingTarget;
-    QMetaObject::Connection m_canvasColorSamplingDestroyedConnection;
     QPoint m_globalContentPosition;
     std::unique_ptr<ScreenshotAutoFilterController> m_autoFilterController;
     bool m_editMode = false;
@@ -120,6 +119,8 @@ class ScreenshotPinnedEditController final : public QObject {
     bool m_updatingPlacement = false;
     bool m_resizeWindowToolActive = false;
     bool m_nativeWindowInteractionActive = false;
+    bool m_tabletFrameGesture = false;
+    bool m_tabletSamplingReleasePending = false;
     bool m_recognitionToolActivationPending = false;
     std::optional<int> m_toolBeforeWindowResize;
     bool m_canvasColorSamplingCursorOverridden = false;

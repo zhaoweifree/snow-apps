@@ -107,6 +107,15 @@ void unsupportedSettingsRemainInert(settings::BuiltInSettingsBackend& backend) {
     require(!storage::ConfigurationSchema::contains(
                 QStringLiteral("screenshot_translation/secondary_target_language")),
             "Mini schema must omit secondary translation targets");
+    require(
+        !storage::ConfigurationSchema::contains(
+            QStringLiteral("screenshot_translation/language_detection_confidence_threshold")) &&
+            backend.integerValue(settings::SettingsIntegerBinding::
+                                     TranslationLanguageDetectionConfidenceThreshold) == 0 &&
+            !backend.applyIntegerValue(
+                settings::SettingsIntegerBinding::TranslationLanguageDetectionConfidenceThreshold,
+                60),
+        "Mini schema and backend must omit language detection confidence settings");
     for (const auto reset :
          {settings::SettingsSectionReset::Translation, settings::SettingsSectionReset::Server,
           settings::SettingsSectionReset::CustomAiModels,

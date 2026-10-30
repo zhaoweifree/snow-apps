@@ -76,6 +76,7 @@ mod tests {
     use crate::*;
     use rayon::prelude::*;
     use snow_core::qos::{ApplicationQos, apply_current_thread, initialize_application_qos};
+    use std::thread;
 
     fn native_qos() -> u32 {
         unsafe extern "C" {

@@ -314,6 +314,14 @@ void drawFillStyleIcon(QPainter* painter, const QRectF& iconRect, SnowCanvasFill
         return;
     }
 
+    if (fillStyle == SnowCanvasFillStyle::Border) {
+        const QPixmap icon = snow_shot::presentation::icons::renderTintedIconPixmap(
+            snow_shot::presentation::icons::custom::outlined::FillBorder(),
+            iconRect.size().toSize(), painter->device()->devicePixelRatioF(), color);
+        painter->drawPixmap(iconRect.toRect(), icon);
+        return;
+    }
+
     painter->save();
     painter->translate(iconRect.topLeft());
     painter->scale(iconRect.width() / 20.0, iconRect.height() / 20.0);
@@ -538,9 +546,10 @@ void drawFillStylePreview(QPainter* painter, const QWidget* widget, const QColor
     }
 
     const auto scheme = snow_shot::presentation::styles::generateThemeColorScheme();
-    const bool showTransparentColor = color.isValid() && color.alpha() == 0;
+    const bool borderStyle = fillStyle == SnowCanvasFillStyle::Border;
+    const bool showTransparentColor = !borderStyle && color.isValid() && color.alpha() == 0;
     QColor contentColor;
-    if (color.isValid() && !showTransparentColor) {
+    if (!borderStyle && color.isValid() && !showTransparentColor) {
         contentColor = color;
     } else if (highlighted) {
         contentColor = scheme.map.colorPrimary;
@@ -958,13 +967,6 @@ void ColorPickerTrigger::setStrokeStyle(SnowCanvasStrokeStyle style) {
     }
 }
 
-void ColorPickerTrigger::setFillStyle(SnowCanvasFillStyle style) {
-    if (m_fillStyle != style) {
-        m_fillStyle = style;
-        update();
-    }
-}
-
 void ColorPickerTrigger::setStrokeWidth(double width) {
     width = std::clamp(width, 0.0, MAX_RECTANGLE_STROKE_WIDTH);
     if (!qFuzzyCompare(m_strokeWidth + 1.0, width + 1.0)) {
@@ -991,7 +993,7 @@ void ColorPickerTrigger::updateAccessibleValue() {
 }
 
 void ColorPickerTrigger::paintEvent(QPaintEvent* event) {
-    if (m_preview == Preview::Swatch && !m_mixed) {
+    if ((m_preview == Preview::Swatch || m_preview == Preview::Fill) && !m_mixed) {
         ColorSwatchButton::paintEvent(event);
         return;
     }
@@ -1013,8 +1015,6 @@ void ColorPickerTrigger::paintEvent(QPaintEvent* event) {
     }
     if (m_preview == Preview::Stroke) {
         drawStrokeStylePreview(&painter, this, swatchColor(), m_strokeStyle, scale, false, false);
-    } else {
-        drawFillStylePreview(&painter, this, swatchColor(), m_fillStyle, scale, false, false);
     }
 }
 
@@ -1050,6 +1050,63 @@ void StrokeStylePreviewButton::paintEvent(QPaintEvent* event) {
                            buttonStyle() != adqt::widgets::AdButton::ButtonStyle::Text &&
                                accentRole() == adqt::widgets::AdButton::AccentRole::Primary,
                            false);
+}
+
+StrokeRenderingStylePreviewButton::StrokeRenderingStylePreviewButton(
+    SnowCanvasStrokeRenderingStyle style, QWidget* parent)
+    : adqt::widgets::AdButton(parent), m_style(style) {}
+
+void StrokeRenderingStylePreviewButton::commitControlScale(
+    const adqt::widgets::AdControlScaleContext& context) {
+    adqt::widgets::AdButton::commitControlScale(context);
+    m_physicalScale = context.logicalScale;
+    update();
+}
+
+void StrokeRenderingStylePreviewButton::paintEvent(QPaintEvent* event) {
+    adqt::widgets::AdButton::paintEvent(event);
+    const auto scheme = snow_shot::presentation::styles::generateThemeColorScheme();
+    const bool active = buttonStyle() != adqt::widgets::AdButton::ButtonStyle::Text &&
+                        accentRole() == adqt::widgets::AdButton::AccentRole::Primary;
+    QColor color = active ? scheme.map.colorPrimary : scheme.map.colorTextSecondary;
+    if (!isEnabled()) {
+        color.setAlphaF(color.alphaF() * 0.45F);
+    }
+    const qreal side = std::min<qreal>(STYLE_PREVIEW_ICON_SIZE * m_physicalScale,
+                                       std::min(width(), height()) - 4.0 * m_physicalScale);
+    if (side <= 0.0) {
+        return;
+    }
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.translate((width() - side) / 2.0, (height() - side) / 2.0);
+    painter.scale(side / 20.0, side / 20.0);
+    painter.setPen(QPen(color, 1.25, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    QPainterPath path;
+    path.moveTo(2.5, 13.0);
+    if (m_style == SnowCanvasStrokeRenderingStyle::Architect) {
+        path.lineTo(10.7, 7.0);
+        path.lineTo(10.7, 12.0);
+        path.lineTo(17.5, 8.5);
+    } else if (m_style == SnowCanvasStrokeRenderingStyle::Artist) {
+        path.cubicTo(5.5, 11.3, 8.5, 7.3, 11.0, 7.2);
+        path.cubicTo(12.0, 7.0, 9.5, 12.1, 11.0, 12.0);
+        path.cubicTo(12.8, 12.0, 15.2, 9.9, 17.5, 8.5);
+        path.moveTo(3.0, 12.3);
+        path.cubicTo(6.0, 11.0, 8.8, 6.5, 10.5, 7.0);
+        path.cubicTo(11.8, 7.3, 9.8, 11.3, 11.5, 11.6);
+        path.cubicTo(13.0, 12.0, 15.5, 9.4, 17.0, 8.2);
+    } else {
+        path.cubicTo(6.0, 12.0, 10.1, 5.6, 12.0, 6.5);
+        path.cubicTo(13.2, 7.1, 9.8, 13.0, 11.4, 12.8);
+        path.cubicTo(13.5, 12.6, 15.4, 9.0, 17.5, 8.5);
+        path.moveTo(2.8, 11.0);
+        path.cubicTo(6.0, 9.7, 8.8, 5.8, 10.2, 6.8);
+        path.cubicTo(11.5, 7.8, 9.4, 10.9, 11.7, 11.5);
+        path.cubicTo(13.8, 12.1, 15.0, 8.3, 17.0, 7.8);
+    }
+    painter.drawPath(path);
 }
 
 FillStylePreviewButton::FillStylePreviewButton(QWidget* parent) : adqt::widgets::AdButton(parent) {}
@@ -1983,6 +2040,10 @@ void configureScreenshotToolPaletteScrollingIntervalEditor(
         return;
     }
     configureScreenshotToolPaletteStyleButton(button, nullptr, metrics);
+    // These editors use the taller action row and paint their own value labels.
+    QFont valueFont = button->font();
+    valueFont.setPixelSize(15);
+    button->setReferenceFont(valueFont);
     constexpr int referenceWidth = 96;
     button->setFixedWidth(scaledMetric(referenceWidth, metrics.physicalScale));
     stampScreenshotToolbarReferenceWidth(button, referenceWidth);

@@ -4,8 +4,20 @@
     <context>
         <name>ScreenshotTranslationSettingsDialog</name>
         <message>
+            <source>%</source>
+            <translation>%</translation>
+        </message>
+        <message>
             <source>Cancel</source>
             <translation>取消</translation>
+        </message>
+        <message>
+            <source>Language Detection Confidence Threshold</source>
+            <translation>语言检测置信度阈值</translation>
+        </message>
+        <message>
+            <source>Minimum confidence required to switch to the secondary target language</source>
+            <translation>切换到次目标语言所需的最低置信度</translation>
         </message>
         <message>
             <source>OK</source>

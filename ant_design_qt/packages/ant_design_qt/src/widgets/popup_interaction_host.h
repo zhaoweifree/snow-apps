@@ -27,6 +27,7 @@ class PopupInteractionOwner {
   virtual QWidget* popupScopeWindow() const = 0;
   virtual QWidget* popupSurfaceWidget() const { return nullptr; }
   virtual bool popupIsVisible() const = 0;
+  virtual bool popupIsRequestedVisible() const { return popupIsVisible(); }
   virtual bool popupWantsHostFrameRelayout() const { return true; }
   virtual bool popupContainsGlobalPos(const QPoint& globalPos) const = 0;
   virtual void popupCloseFromHost(PopupCloseReason reason) = 0;
@@ -34,6 +35,9 @@ class PopupInteractionOwner {
 };
 
 void setPopupInteractionHostOpen(PopupInteractionOwner* owner, bool open);
+// Open popup interactions in a scope, including requests awaiting surface show approval.
+// The requested visibility of live active and suspended owners keeps the scope in use.
+bool popupInteractionActive(const QWidget* scopeWindow);
 // Visible popup interaction regions in a scope, including nested QtTool scopes.
 // Each owner supplies its hit test, so shadows and other input-transparent pixels stay outside.
 bool popupInteractionContainsGlobalPos(const QWidget* scopeWindow, const QPoint& globalPosition);

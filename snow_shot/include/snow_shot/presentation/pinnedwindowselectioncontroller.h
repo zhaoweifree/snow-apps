@@ -3,6 +3,7 @@
 
 #include "snow_draw_engine_qt/snow_canvas_types.h"
 #include "snow_shot/storage/storageresult.h"
+#include "snow_shot/presentation/screenshotpinnedimagesnapshot.h"
 
 #include <QObject>
 #include <QList>
@@ -62,6 +63,7 @@ class PinnedWindowSelectionController final : public QObject {
 
   signals:
     void selectionChanged();
+    void imageStitchingRequested(const QVector<ScreenshotPinnedImageSnapshot>& snapshots);
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

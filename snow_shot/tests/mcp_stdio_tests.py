@@ -19,9 +19,10 @@ SCREENSHOT_TOOLS = {
     "snow_shot_screenshot_auto_filter", "snow_shot_screenshot_operation", "snow_shot_screenshot_edit_recognition",
     "snow_shot_screenshot_export_recognition", "snow_shot_screenshot_draw_template",
 }
+SUPPORTED_VERSIONS = ["2026-07-28", "2025-11-25"]
 
 
-def exercise(executable):
+def exercise(executable, recognition_only=False):
     version = "2026-07-28"
     with tempfile.TemporaryDirectory(prefix="snow-shot-mcp-smoke-") as directory:
         environment = dict(os.environ)
@@ -61,7 +62,7 @@ def exercise(executable):
         try:
             send({"jsonrpc":"2.0","id":1,"method":"server/discover","params":{}})
             discovery = response(1)
-            assert discovery["supportedVersions"] == [version], discovery
+            assert discovery["supportedVersions"] == SUPPORTED_VERSIONS, discovery
             assert discovery["ttlMs"] >= 0, discovery
             for capability in ["tools", "resources", "prompts", "completions"]:
                 assert capability in discovery["capabilities"], discovery
@@ -76,6 +77,27 @@ def exercise(executable):
             schemas = {tool["name"]:tool["inputSchema"] for tool in tools}
             assert "expected_revision" in schemas["snow_shot_screenshot_apply_annotations"]["required"]
             assert "operations" in schemas["snow_shot_screenshot_apply_annotations"]["required"]
+            for name in ("snow_shot_screenshot_recognize", "snow_shot_document_recognize"):
+                kind_schema = schemas[name]["properties"]["kind"]
+                if "$ref" in kind_schema:
+                    kind_schema = schemas[name]["$defs"][kind_schema["$ref"].rsplit("/", 1)[1]]
+                assert kind_schema["enum"] == [
+                    "text", "table", "qr", "markdown", "html", "latex"], schemas[name]
+            for identifier, name, arguments in (
+                    (16, "snow_shot_screenshot_recognize",
+                     {"session_id":"s", "expected_revision":1, "kind":"latex"}),
+                    (17, "snow_shot_document_recognize",
+                     {"document_id":"d", "expected_revision":1, "kind":"latex"})):
+                send({"jsonrpc":"2.0", "id":identifier, "method":"tools/call",
+                      "params":{"name":name, "arguments":arguments}})
+                unavailable = response(identifier)
+                assert unavailable["isError"] is True, unavailable
+                assert unavailable["structuredContent"]["error"]["code"] == "unavailable", unavailable
+            if recognition_only:
+                process.stdin.close()
+                assert process.wait(timeout=10) == 0, diagnostics
+                print("MCP recognition schemas and LaTeX dispatch passed through the stdio bridge.")
+                return
             send({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
                 "name":"snow_shot_mcp_status","arguments":{}}})
             status = response(3)
@@ -129,6 +151,9 @@ def exercise(executable):
 
 def main():
     executable = Path(sys.argv[1]).resolve(strict=True)
+    if "--recognition-only" in sys.argv[2:]:
+        exercise(executable, recognition_only=True)
+        return
     help_result = subprocess.run([str(executable), "--help"], capture_output=True, timeout=5)
     assert help_result.returncode == 0 and not help_result.stdout and b"--launch-app" in help_result.stderr
     invalid_result = subprocess.run([str(executable), "--unknown"], capture_output=True, timeout=5)
@@ -141,15 +166,18 @@ def main():
     assert premature_result.returncode != 0
     assert startup_secret.encode() not in premature_result.stderr, "Initialization errors exposed a rejected request"
     exercise(executable)
-    obsolete_initialize = {"jsonrpc":"2.0","id":1,"method":"initialize","params":{
-        "protocolVersion":"2025-11-25","capabilities":{},
-        "clientInfo":{"name":"obsolete-client","version":"1"}}}
-    obsolete_result = subprocess.run([str(executable)],
-                                    input=(json.dumps(obsolete_initialize) + "\n").encode(),
-                                    capture_output=True, timeout=5)
-    rejection = json.loads(obsolete_result.stdout)
-    assert rejection["error"]["code"] == -32022, rejection
-    assert rejection["error"]["data"]["supported"] == ["2026-07-28"], rejection
+    # The bridge retains a legacy revision for stdio initialize negotiation. An older
+    # client receives that supported fallback and decides whether it can continue.
+    for version in ("2025-11-25", "2024-11-05"):
+        initialize = {"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "protocolVersion":version,"capabilities":{},
+            "clientInfo":{"name":"legacy-client","version":"1"}}}
+        initialized = subprocess.run([str(executable)],
+                                     input=(json.dumps(initialize) + "\n").encode(),
+                                     capture_output=True, timeout=5)
+        negotiated = json.loads(initialized.stdout)
+        assert initialized.returncode == 0 and "error" not in negotiated, negotiated
+        assert negotiated["result"]["protocolVersion"] == "2025-11-25", negotiated
     # Large SDK input lines must be bounded before JSON parsing or local dispatch.
     process = subprocess.Popen([str(executable)], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)

@@ -293,6 +293,9 @@ mod tests {
 
     fn test_rectangle(center: Point<f64>) -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center,
@@ -349,6 +352,8 @@ mod tests {
 
     fn pointer_down_at(position: Point<f64>) -> InputEvent {
         InputEvent::Pointer(PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 1,
             event_type: PointerEventType::Down,
             device: PointerDevice::Mouse,
@@ -361,6 +366,8 @@ mod tests {
 
     fn pointer_hover_at(position: Point<f64>) -> InputEvent {
         InputEvent::Pointer(PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 1,
             event_type: PointerEventType::Move,
             device: PointerDevice::Mouse,
@@ -646,6 +653,7 @@ mod tests {
             vec![snow_draw_engine_core::PathSegmentMode::Curve],
             false,
             snow_draw_engine_document::FreeDrawStyle {
+                brush_mode: Default::default(),
                 stroke: ColorRgba8::default(),
                 stroke_width: 2.0,
                 stroke_style: snow_draw_engine_document::StrokeStyle::Solid,
@@ -687,6 +695,7 @@ mod tests {
             vec![snow_draw_engine_core::PathSegmentMode::Curve],
             false,
             snow_draw_engine_document::FreeDrawStyle {
+                brush_mode: Default::default(),
                 stroke: ColorRgba8::default(),
                 stroke_width: 2.0,
                 stroke_style: snow_draw_engine_document::StrokeStyle::Solid,

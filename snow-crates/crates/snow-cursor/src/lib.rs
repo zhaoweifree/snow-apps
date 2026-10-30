@@ -8,6 +8,7 @@
 //! Windows (Win32) and Linux (X11) are supported. Other platforms return
 //! [`CursorCaptureError::UnsupportedPlatform`].
 
+mod crosshair;
 mod error;
 mod model;
 mod platform;
@@ -15,6 +16,7 @@ mod projector;
 mod sampler;
 mod stream;
 
+pub use crosshair::{WindowsCrosshairNormalizer, crosshair_cursor_shape};
 pub use error::CursorCaptureError;
 pub use model::{
     AttachedCursorSample, CursorCompositionMode, CursorShape, CursorShapeCapture, CursorShapeId,

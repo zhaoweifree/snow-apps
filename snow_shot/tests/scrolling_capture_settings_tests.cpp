@@ -6,6 +6,7 @@
 #include "snow_shot/presentation/screenshotoverlayeventsink.h"
 #include "snow_shot/presentation/screenshotoverlaywindow.h"
 #include "snow_shot/presentation/screenshotscrollingcapturecontroller.h"
+#include "snow_shot/presentation/imagesplitwindow.h"
 #include "snow_shot/presentation/screenshottoolbarcommands.h"
 #include "snow_shot/presentation/screenshottoolbarwindow.h"
 #include "snow_shot/presentation/windowshortcutmanager.h"
@@ -18,9 +19,11 @@
 #include "widgets/switch.h"
 
 #include <QApplication>
+#include <QColorSpace>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QPointer>
+#include <QPainter>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QWindow>
@@ -199,6 +202,7 @@ class ToolbarCommands final : public ScreenshotToolbarCommandSink,
     void setSelectionAspectRatioPresetFromToolbar(ScreenshotSelectionAspectRatioPreset) override {}
     void openSelectionResizeModalFromToolbar() override {}
     void adjustSelectionFromToolbar(int, int, int, int) override {}
+    void adjustSelectionEffectsFromWheel(int, int) override {}
     void setSelectionCornerRadiusFromToolbar(int) override {}
     void setSelectionShadowWidthFromToolbar(int) override {}
     void setSelectionToolbarHovered(bool) override {}
@@ -367,6 +371,99 @@ void changedSettingsRecapture(ScreenshotScrollingRecognitionMode mode, bool auto
     until([] { return liveSources == 0 && excludedWindows.isEmpty(); },
           "teardown must release capture sources and window exclusions");
 }
+
+void detachedScrollingResultLoadsIntoImageSplitter(ScreenshotScrollingRecognitionMode mode) {
+    using namespace snow_shot::presentation;
+    requests.clear();
+    OverlayEvents events;
+    SnowCanvasRuntime runtime;
+    WindowShortcutManager shortcuts;
+    ScreenshotOverlayWindow overlay(events, new SnowCanvasWidget);
+    overlay.setCaptureGeometry(QRect(0, 0, 800, 700));
+    overlay.show();
+    CapturedDisplayModel display;
+    display.logicalRect = overlay.captureGeometry();
+    display.physicalRect = display.logicalRect;
+    display.canvasRect = display.physicalRect;
+    display.active = true;
+    display.geometryResolved = true;
+    display.image = QImage(display.physicalRect.size(), QImage::Format_RGB32);
+    display.image.fill(Qt::red);
+    ScreenshotDisplaySession displays;
+    displays.appendDisplay(display, &overlay);
+    ScreenshotGeometryMapper geometry;
+    geometry.rebuild(displays);
+    ToolbarCommands commands;
+    ScreenshotOverlayCoordinator coordinator(events, runtime, shortcuts);
+    coordinator.setToolbarCommandSinks(commands, commands);
+    coordinator.attachToolbarToOverlay(&overlay);
+    ScreenshotScrollingCaptureController capture(
+        {displays, geometry, coordinator, [] { return false; }, [] { return false; },
+         [] { require(false, "split capture must not fail"); }, [] { return true; }});
+    require(!capture.requestTrimmedSnapshot([](auto) {}),
+            "inactive scrolling capture must not produce a split source");
+    const QRect selection(40, 30, 400, 400);
+    require(capture.start(selection, mode), "start scrolling image split fixture");
+    require(!capture.requestTrimmedSnapshot([](auto) {}),
+            "scrolling capture without a result must not produce a split source");
+    capture.setAutoScrollIntervalMs(kScreenshotScrollingAutoScrollIntervalMaximum);
+    capture.setAutoScroll(true);
+    until([] { return liveSources == 1; });
+    const bool horizontal = mode == ScreenshotScrollingRecognitionMode::Horizontal;
+    QImage original(horizontal ? QSize(450, 400) : QSize(400, 450), QImage::Format_RGBA8888);
+    original.setColorSpace(QColorSpace::SRgb);
+    original.fill(Qt::white);
+    {
+        QPainter painter(&original);
+        quint32 random = 1234567;
+        for (int y = 0; y < original.height(); y += 7) {
+            for (int x = 0; x < original.width(); x += 7) {
+                random ^= random << 13;
+                random ^= random >> 17;
+                random ^= random << 5;
+                painter.fillRect(x, y, 5, 5, QColor::fromRgb(random | 0xff000000U));
+            }
+        }
+    }
+    requests.back().source->push(original.copy(QRect(QPoint(), selection.size())));
+    until([&] { return capture.state().value(QStringLiteral("ready")).toBool(); });
+    requests.back().source->push(
+        original.copy(QRect(horizontal ? QPoint(50, 0) : QPoint(0, 50), selection.size())));
+    until([&] { return capture.trimmedSize() == original.size(); },
+          "the split source must contain both stitched frames");
+    require(capture.setTrimRange(12, 438), "trim the stitched image before splitting");
+    const QImage expected =
+        original.copy(horizontal ? QRect(12, 0, 426, 400) : QRect(0, 12, 400, 426));
+    ImageSplitWindow splitWindow;
+    bool delivered = false;
+    const auto createdUtc = QDateTime::currentDateTimeUtc();
+    require(capture.requestTrimmedSnapshot([&](ScreenshotScrollingSnapshot result) {
+        require(!capture.active() && !capture.state().value(QStringLiteral("auto_scroll")).toBool(),
+                "capture and auto-scroll must end before the result is imported");
+        require(result.isValid(), "the accepted result must survive capture teardown");
+        splitWindow.presentSource({ScreenshotExportSource::fromScrollingSnapshot(std::move(result)),
+                                   {},
+                                   createdUtc,
+                                   {},
+                                   expected.size()});
+        delivered = true;
+    }),
+            "request the current scrolling image for splitting");
+    capture.detachPendingResultRequest();
+    coordinator.hideToolbar();
+    overlay.hide();
+    capture.stop(false);
+    require(!capture.active() && !overlay.isVisible() && !splitWindow.modal()->isOpen(),
+            "capture presentation must close before asynchronous import starts");
+    until([&] { return delivered && !splitWindow.loading(); },
+          "the image splitting window must finish loading the scrolling result");
+    require(splitWindow.modal()->isOpen() && splitWindow.lastError().isEmpty() &&
+                splitWindow.document()->image() == expected,
+            "the splitting window must import the current stitched pixels and trim range");
+    splitWindow.shutdown();
+    until([] { return liveSources == 0 && excludedWindows.isEmpty(); },
+          "image splitting must release capture sources and window exclusions");
+}
 } // namespace
 
 namespace snow_shot::capture_detail {
@@ -427,9 +524,15 @@ int main(int argc, char** argv) {
     require(temporary.isValid() &&
                 storage.initialize({temporary.path(), temporary.path(), 60000}).success,
             "scrolling settings tests require isolated storage");
-    destructionKeepsControllerAvailableToStateObservers();
-    changedSettingsRecapture(ScreenshotScrollingRecognitionMode::Vertical, false);
-    changedSettingsRecapture(ScreenshotScrollingRecognitionMode::Horizontal, true);
+    if (app.arguments().contains(QStringLiteral("--image-split-only"))) {
+        detachedScrollingResultLoadsIntoImageSplitter(ScreenshotScrollingRecognitionMode::Vertical);
+        detachedScrollingResultLoadsIntoImageSplitter(
+            ScreenshotScrollingRecognitionMode::Horizontal);
+    } else {
+        destructionKeepsControllerAvailableToStateObservers();
+        changedSettingsRecapture(ScreenshotScrollingRecognitionMode::Vertical, false);
+        changedSettingsRecapture(ScreenshotScrollingRecognitionMode::Horizontal, true);
+    }
     storage.shutdown();
     return 0;
 }

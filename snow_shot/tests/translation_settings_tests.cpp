@@ -543,6 +543,40 @@ void textDetectionProcessingDefaultsPersistsAndResets() {
                 imported.value(key).toString() == QStringLiteral("accuracy_first"),
             "older configuration snapshots missing OCR processing must use Accuracy First");
 }
+void languageDetectionConfidenceDefaultsPersistsAndResets() {
+    namespace settings = snow_shot::presentation::settings;
+    namespace storage = snow_shot::storage;
+    snow_shot::presentation::GlobalShortcutManager shortcuts;
+    settings::BuiltInSettingsBackend backend(shortcuts);
+    settings::SettingsRuntimeSession session(settings::builtInSettingsRegistry(), backend);
+    const storage::ScreenshotTranslationSettings translation;
+    const auto binding =
+        settings::SettingsIntegerBinding::TranslationLanguageDetectionConfidenceThreshold;
+    const QString id = QStringLiteral("translation.language-detection-confidence-threshold");
+    require(backend.integerValue(binding) == 60 && session.state(id).acceptedValue.toInt() == 60 &&
+                session.applyIntegerValue(binding, 30) && backend.integerValue(binding) == 30 &&
+                session.applyIntegerValue(binding, 100) &&
+                !backend.applyIntegerValue(binding, 29) &&
+                !backend.applyIntegerValue(binding, 101) &&
+                translation.configuration().languageDetectionConfidenceThreshold == 100,
+            "confidence settings expose the default and persist only percentages in range");
+    require(backend.resetSection(settings::SettingsSectionReset::Translation),
+            "reset translation confidence");
+    session.refreshAll();
+    require(backend.integerValue(binding) == 60 && session.state(id).acceptedValue.toInt() == 60 &&
+                translation.configuration().languageDetectionConfidenceThreshold == 60,
+            "translation reset restores the confidence threshold across settings views");
+    const QString key =
+        QStringLiteral("screenshot_translation/language_detection_confidence_threshold");
+    storage::ConfigurationStore imported(
+        QDir(storage::ApplicationStorage::instance().configurationDirectory())
+            .filePath(QStringLiteral("translation-confidence-import.json")),
+        false, true, 60000);
+    require(imported.applySnapshot({{key, 29}}) && imported.value(key).toInt() == 60 &&
+                imported.setValue(key, 90) && imported.applySnapshot({}) &&
+                imported.value(key).toInt() == 60,
+            "invalid and older imported configurations use the default confidence threshold");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -559,6 +593,11 @@ int main(int argc, char** argv) {
     auto& applicationStorage = storage::ApplicationStorage::instance();
     require(applicationStorage.initialize({executable, temporary.path(), 60000}).success,
             "initialize translation settings storage");
+    if (application.arguments().contains(QStringLiteral("--translation-confidence-only"))) {
+        languageDetectionConfidenceDefaultsPersistsAndResets();
+        applicationStorage.shutdown();
+        return 0;
+    }
     if (application.arguments().contains(QStringLiteral("--ocr-highlighting-only"))) {
         ocrHighlightingDefaultsPersistsAndResets();
         applicationStorage.shutdown();
@@ -577,6 +616,7 @@ int main(int argc, char** argv) {
     ocrHighlightingDefaultsPersistsAndResets();
     originalImagePreviewDefaultsPersistsAndResets();
     textDetectionProcessingDefaultsPersistsAndResets();
+    languageDetectionConfidenceDefaultsPersistsAndResets();
     selectedTextShortcutSettings();
     {
         snow_shot::presentation::GlobalShortcutManager shortcuts;
@@ -651,11 +691,6 @@ int main(int argc, char** argv) {
                     QStringLiteral("text_recognition/fill_style"), oldFill),
                 "restore recognition appearance fixture");
 
-        require(!applicationStorage.configuration()
-                        .value(QStringLiteral("text_recognition/direct_ml_acceleration"))
-                        .toBool() &&
-                    !backend.switchValue(settings::SettingsSwitchBinding::DirectMlAcceleration),
-                "DirectML acceleration should be disabled by default");
         const auto binding = settings::SettingsSwitchBinding::OriginalImageTranslation;
         const storage::ScreenshotTranslationSettings translation;
         settings::SettingsRuntimeSession session(settings::builtInSettingsRegistry(), backend);
@@ -705,13 +740,15 @@ int main(int argc, char** argv) {
                     session.state(pinId).enabled,
                 "pinned double-click defaults to the enabled thumbnail selector");
         for (const QString& action :
-             {QStringLiteral("none"), QStringLiteral("thumbnail_mode"), QStringLiteral("close")}) {
+             {QStringLiteral("none"), QStringLiteral("reset_zoom"),
+              QStringLiteral("thumbnail_mode"), QStringLiteral("hide_to_top"),
+              QStringLiteral("close"), QStringLiteral("destroy")}) {
             require(backend.applySelectValue(pinBinding, action) &&
                         backend.selectValue(pinBinding).toString() == action,
                     "pinned double-click backend must apply every option");
         }
         require(!backend.applySelectValue(pinBinding, QStringLiteral("unsupported")) &&
-                    backend.selectValue(pinBinding).toString() == QStringLiteral("close"),
+                    backend.selectValue(pinBinding).toString() == QStringLiteral("destroy"),
                 "pinned double-click backend must reject invalid actions");
         require(backend.resetSection(settings::SettingsSectionReset::PinToScreenBehavior) &&
                     backend.selectValue(pinBinding).toString() == QStringLiteral("thumbnail_mode"),
@@ -721,14 +758,16 @@ int main(int argc, char** argv) {
         require(backend.selectValue(middleBinding).toString() == QStringLiteral("reset_zoom") &&
                     session.state(middleId).enabled,
                 "pinned middle-click defaults to the enabled reset zoom selector");
-        for (const QString& action : {QStringLiteral("none"), QStringLiteral("reset_zoom"),
-                                      QStringLiteral("thumbnail_mode"), QStringLiteral("close")}) {
+        for (const QString& action :
+             {QStringLiteral("none"), QStringLiteral("reset_zoom"),
+              QStringLiteral("thumbnail_mode"), QStringLiteral("hide_to_top"),
+              QStringLiteral("close"), QStringLiteral("destroy")}) {
             require(backend.applySelectValue(middleBinding, action) &&
                         backend.selectValue(middleBinding).toString() == action,
                     "pinned middle-click backend must apply every option");
         }
         require(!backend.applySelectValue(middleBinding, QStringLiteral("unsupported")) &&
-                    backend.selectValue(middleBinding).toString() == QStringLiteral("close"),
+                    backend.selectValue(middleBinding).toString() == QStringLiteral("destroy"),
                 "pinned middle-click backend must reject invalid actions");
         require(backend.resetSection(settings::SettingsSectionReset::PinToScreenBehavior) &&
                     backend.selectValue(middleBinding).toString() == QStringLiteral("reset_zoom"),
@@ -768,7 +807,9 @@ int main(int argc, char** argv) {
                     translation.layoutProcessing() == QStringLiteral("smart_merge"),
                 "reset enables original-image translation and restores Smart Merge");
         const storage::ScreenshotTranslationConfiguration languages{
-            QStringLiteral("ja"), QStringLiteral("zh-Hant"), QStringLiteral("chosen-model")};
+            QStringLiteral("ja"),           QStringLiteral("zh-Hant"),
+            QStringLiteral("chosen-model"), QStringLiteral("smart_merge"),
+            QStringLiteral("en"),           75};
         require(backend.switchEnabled(binding) && backend.switchValue(binding),
                 "backend should expose an enabled, default-on translation switch");
         require(translation.setConfiguration(languages) &&
@@ -779,9 +820,10 @@ int main(int argc, char** argv) {
                     translation.configuration().sourceLanguage == QStringLiteral("auto") &&
                     translation.configuration().targetLanguage.isEmpty() &&
                     translation.configuration().secondaryTargetLanguage == QStringLiteral("en") &&
+                    translation.configuration().languageDetectionConfidenceThreshold == 60 &&
                     translation.configuration().modelId.isEmpty() &&
                     translation.configuration().layoutProcessing == QStringLiteral("smart_merge"),
-                "reset Translation restores all six settings");
+                "reset Translation restores all seven settings");
 
         const auto resizeBinding = settings::SettingsSelectBinding::OcrDetectorResizePolicy;
         require(backend.selectValue(resizeBinding).toString() == QStringLiteral("max") &&
@@ -790,24 +832,25 @@ int main(int argc, char** argv) {
                     !backend.applySelectValue(resizeBinding, QStringLiteral("unsupported")) &&
                     backend.selectValue(resizeBinding).toString() == QStringLiteral("min"),
                 "detector scaling must default to max and persist only supported policies");
-        require(backend.applySelectValue(settings::SettingsSelectBinding::OcrModelType,
-                                         QStringLiteral("medium")) &&
-                    backend.selectValue(settings::SettingsSelectBinding::OcrModelType).toString() ==
-                        QStringLiteral("medium") &&
-                    applicationStorage.configuration().setValue(
-                        QStringLiteral("text_recognition/direct_ml_acceleration"), true) &&
-                    backend.resetSection(settings::SettingsSectionReset::TextRecognition) &&
-                    backend.selectValue(settings::SettingsSelectBinding::OcrModelType).toString() ==
-                        QStringLiteral("small") &&
-                    backend.selectValue(resizeBinding).toString() == QStringLiteral("max") &&
-                    !applicationStorage.configuration()
-                         .value(QStringLiteral("text_recognition/direct_ml_acceleration"))
-                         .toBool(),
-                "reset Text Recognition should restore Small, max scaling, and CPU mode");
+        require(
+            backend.applySelectValue(settings::SettingsSelectBinding::OcrModelType,
+                                     QStringLiteral("medium")) &&
+                backend.selectValue(settings::SettingsSelectBinding::OcrModelType).toString() ==
+                    QStringLiteral("medium") &&
+                !applicationStorage.configuration().setValue(
+                    QStringLiteral("text_recognition/direct_ml_acceleration"), true) &&
+                backend.resetSection(settings::SettingsSectionReset::TextRecognition) &&
+                backend.selectValue(settings::SettingsSelectBinding::OcrModelType).toString() ==
+                    QStringLiteral("small") &&
+                backend.selectValue(resizeBinding).toString() == QStringLiteral("max") &&
+                !applicationStorage.configuration()
+                     .value(QStringLiteral("text_recognition/direct_ml_acceleration"))
+                     .toBool(),
+            "obsolete acceleration settings are rejected and reset restores Small and max scaling");
     }
-    require(storage::PinToScreenSettings().setDoubleClickAction(QStringLiteral("close")),
+    require(storage::PinToScreenSettings().setDoubleClickAction(QStringLiteral("reset_zoom")),
             "save pinned double-click action before restart");
-    require(storage::PinToScreenSettings().setMiddleMouseButtonAction(QStringLiteral("none")),
+    require(storage::PinToScreenSettings().setMiddleMouseButtonAction(QStringLiteral("destroy")),
             "save pinned middle-click action before restart");
     const snow_shot::shortcuts::ShortcutBindingList selectedTextKeys{
         QStringLiteral("Ctrl+Alt+T"), QStringLiteral("Ctrl+Shift+T")};
@@ -815,13 +858,13 @@ int main(int argc, char** argv) {
             "save selected text shortcut bindings before restart");
     applicationStorage.shutdown();
     require(applicationStorage.initialize({executable, temporary.path(), 60000}).success &&
-                storage::PinToScreenSettings().doubleClickAction() == QStringLiteral("close"),
+                storage::PinToScreenSettings().doubleClickAction() == QStringLiteral("reset_zoom"),
             "pinned double-click action must survive a storage restart");
     require(storage::ExtendedFeaturesSettings().translationPageEnabled(),
             "feature opt-in survives storage restart");
     require(storage::ShortcutSettings().translateSelectedText() == selectedTextKeys,
             "both selected text shortcut bindings survive a storage restart");
-    require(storage::PinToScreenSettings().middleMouseButtonAction() == QStringLiteral("none"),
+    require(storage::PinToScreenSettings().middleMouseButtonAction() == QStringLiteral("destroy"),
             "pinned middle-click action must survive a storage restart");
     applicationStorage.shutdown();
     return 0;

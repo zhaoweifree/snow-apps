@@ -5,6 +5,8 @@
 #include "snow_shot/presentation/screenshotselectionaspectratio.h"
 #include "snow_shot/image/screenshotregiongeometry.h"
 
+#include "snow_shot/image/screenshotlayoutcompaction.h"
+
 #include <QColor>
 #include <QObject>
 #include <QPoint>
@@ -30,6 +32,10 @@ struct ScreenshotToolbarPresentationState {
     bool selectionEditable = true;
     bool selectionResizable = true;
     bool cornerRadiusApplicable = true;
+    bool layoutCompactionAvailable = false;
+    int backgroundOpacityPercent = 0;
+    bool backgroundOpacityAvailable = false;
+    ScreenshotLayoutCompaction layoutCompaction = {};
     bool aspectRatioLocked = false;
     ScreenshotSelectionAspectRatioPreset aspectRatioPreset =
         ScreenshotSelectionAspectRatioPreset::Free;

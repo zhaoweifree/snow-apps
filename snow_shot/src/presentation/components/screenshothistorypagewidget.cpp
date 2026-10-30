@@ -738,12 +738,15 @@ class HistoryEntryWidget final : public QFrame {
                        adqt::widgets::AdImageViewer* viewer, bool selected,
                        std::function<void(bool)> selectionChanged,
                        std::function<void()> editRequested, std::function<void()> copyRequested,
-                       std::function<void()> pinRequested, std::function<void()> deleteRequested,
+                       std::function<void()> pinRequested, std::function<void()> stitchRequested,
+                       std::function<void()> splitRequested, std::function<void()> deleteRequested,
                        QWidget* parent = nullptr)
         : QFrame(parent), m_record(record), m_assets(assets),
           m_selectionChanged(std::move(selectionChanged)),
           m_editRequested(std::move(editRequested)), m_copyRequested(std::move(copyRequested)),
-          m_pinRequested(std::move(pinRequested)), m_deleteRequested(std::move(deleteRequested)) {
+          m_pinRequested(std::move(pinRequested)), m_stitchRequested(std::move(stitchRequested)),
+          m_splitRequested(std::move(splitRequested)),
+          m_deleteRequested(std::move(deleteRequested)) {
         setObjectName(QStringLiteral("screenshotHistoryEntry-%1").arg(record.id));
         setFrameShape(QFrame::NoFrame);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
@@ -893,6 +896,8 @@ class HistoryEntryWidget final : public QFrame {
 
         m_deleteConfirmation = new adqt::widgets::AdPopconfirm(this);
         m_deleteConfirmation->setObjectName(QStringLiteral("screenshotHistoryEntryDeleteConfirm"));
+        // More anchors the confirmation; only the Delete action may open it.
+        m_deleteConfirmation->setTriggers({});
         m_deleteConfirmation->setSourceWidget(m_moreButton);
         m_deleteConfirmation->setPlacement(adqt::widgets::AdPopconfirm::Placement::Top);
         m_deleteConfirmation->setPopupLayerMode(
@@ -1090,6 +1095,16 @@ class HistoryEntryWidget final : public QFrame {
                     ? HistoryEntryWidget::tr("Pin this screenshot to the screen")
                     : HistoryEntryWidget::tr("This screenshot cannot be pinned"));
         }
+        if (m_stitchAction != nullptr) {
+            m_stitchAction->setText(HistoryEntryWidget::tr("Stitch Image"));
+            m_stitchAction->setToolTip(HistoryEntryWidget::tr("Stitch Image"));
+        }
+        if (m_splitAction != nullptr) {
+            const QString label = QCoreApplication::translate(
+                "ImageSplitWindow", QT_TRANSLATE_NOOP("ImageSplitWindow", "Image Splitting"));
+            m_splitAction->setText(label);
+            m_splitAction->setToolTip(label);
+        }
         if (m_deleteAction != nullptr) {
             m_deleteAction->setText(HistoryEntryWidget::tr("Delete"));
             m_deleteAction->setToolTip(HistoryEntryWidget::tr("Delete history entry"));
@@ -1104,6 +1119,14 @@ class HistoryEntryWidget final : public QFrame {
         pin->setObjectName(QStringLiteral("screenshotHistoryEntryPin"));
         pin->setEnabled(m_record.result.has_value());
         m_pinAction = pin;
+        auto* stitch = menu->addItem(QString(), custom_outlined_icons::ImageStitching());
+        stitch->setObjectName(QStringLiteral("screenshotHistoryEntryStitch"));
+        stitch->setEnabled(m_record.result.has_value());
+        m_stitchAction = stitch;
+        auto* split = menu->addItem(QString(), custom_outlined_icons::ImageSplitting());
+        split->setObjectName(QStringLiteral("screenshotHistoryEntrySplit"));
+        split->setEnabled(m_record.result.has_value());
+        m_splitAction = split;
         auto* remove = menu->addItem(QString(), outlined_icons::IconDelete());
         remove->setObjectName(QStringLiteral("screenshotHistoryEntryDelete"));
         m_deleteAction = remove;
@@ -1112,6 +1135,16 @@ class HistoryEntryWidget final : public QFrame {
         connect(pin, &QAction::triggered, this, [this]() {
             if (m_pinRequested) {
                 m_pinRequested();
+            }
+        });
+        connect(stitch, &QAction::triggered, this, [this]() {
+            if (m_stitchRequested) {
+                m_stitchRequested();
+            }
+        });
+        connect(split, &QAction::triggered, this, [this]() {
+            if (m_splitRequested) {
+                m_splitRequested();
             }
         });
         connect(remove, &QAction::triggered, this, [this]() {
@@ -1138,6 +1171,8 @@ class HistoryEntryWidget final : public QFrame {
     std::function<void()> m_editRequested;
     std::function<void()> m_copyRequested;
     std::function<void()> m_pinRequested;
+    std::function<void()> m_stitchRequested;
+    std::function<void()> m_splitRequested;
     std::function<void()> m_deleteRequested;
     QBoxLayout* m_layout = nullptr;
     adqt::widgets::AdCheckbox* m_selectionCheckbox = nullptr;
@@ -1149,6 +1184,8 @@ class HistoryEntryWidget final : public QFrame {
     adqt::widgets::AdButton* m_moreButton = nullptr;
     QPointer<adqt::widgets::AdContextMenu> m_moreMenu;
     QPointer<QAction> m_pinAction;
+    QPointer<QAction> m_stitchAction;
+    QPointer<QAction> m_splitAction;
     QPointer<QAction> m_deleteAction;
     adqt::widgets::AdPopconfirm* m_deleteConfirmation = nullptr;
     adqt::widgets::AdCarousel* m_carousel = nullptr;
@@ -1269,6 +1306,10 @@ ScreenshotHistoryPageWidget::ScreenshotHistoryPageWidget(
     m_deleteSelectedButton->setObjectName(QStringLiteral("screenshotHistoryDeleteSelected"));
     history_page::configureSelectionAction(m_deleteSelectedButton, true);
     selectionActionsLayout->addWidget(m_deleteSelectedButton);
+    m_collageButton = new adqt::widgets::AdButton(m_selectionActions);
+    m_collageButton->setObjectName(QStringLiteral("screenshotHistoryCollage"));
+    history_page::configureSelectionAction(m_collageButton, false);
+    selectionActionsLayout->addWidget(m_collageButton);
     m_selectAllButton = new adqt::widgets::AdButton(m_selectionActions);
     m_selectAllButton->setObjectName(QStringLiteral("screenshotHistorySelectAll"));
     history_page::configureSelectionAction(m_selectAllButton, false);
@@ -1345,6 +1386,15 @@ ScreenshotHistoryPageWidget::ScreenshotHistoryPageWidget(
             &ScreenshotHistoryPageWidget::requestDeleteSelected);
     connect(m_selectAllButton, &QAbstractButton::clicked, this,
             &ScreenshotHistoryPageWidget::selectCurrentPage);
+    connect(m_collageButton, &QAbstractButton::clicked, this, [this] {
+        QVector<storage::CaptureHistoryRecord> selected;
+        for (const auto& record : std::as_const(m_records)) {
+            if (m_selectedRecordIds.contains(record.id))
+                selected.append(record);
+        }
+        if (!selected.isEmpty())
+            emit collageRequested(selected);
+    });
     connect(m_deselectAllButton, &QAbstractButton::clicked, this,
             &ScreenshotHistoryPageWidget::clearSelection);
     connect(m_pagination, &adqt::widgets::AdPagination::currentPageChanged, this, [this](int) {
@@ -1640,6 +1690,8 @@ void ScreenshotHistoryPageWidget::rebuildEntries() {
                 [this, id = record.id]() { emit editRequested(id); },
                 [this, record]() { copyEntry(record); },
                 [this, id = record.id]() { emit pinRequested(id); },
+                [this, record]() { emit collageRequested({record}); },
+                [this, record]() { emit splitRequested(record); },
                 [this, id = record.id]() { removeEntry(id); }, m_entriesHost);
             entry->applyTheme(m_colorScheme);
             m_entryWidgetsById.insert(record.id, entry);
@@ -1847,6 +1899,9 @@ void ScreenshotHistoryPageWidget::retranslateUi() {
     m_deleteSelectedButton->setToolTip(tr("Delete selected history entries"));
     m_deleteSelectedButton->setAccessibleName(tr("Delete selected history entries"));
     m_selectAllButton->setText(tr("Select all"));
+    m_collageButton->setText(tr("Collage"));
+    m_collageButton->setToolTip(tr("Create a collage from selected screenshots"));
+    m_collageButton->setAccessibleName(tr("Create a collage from selected screenshots"));
     m_selectAllButton->setToolTip(tr("Select all entries on this page"));
     m_selectAllButton->setAccessibleName(tr("Select all entries on this page"));
     m_deselectAllButton->setText(tr("Deselect all"));

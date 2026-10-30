@@ -198,6 +198,8 @@ QString fillStyleLabel(SnowCanvasFillStyle fillStyle) {
         return "Cross Line";
     case SnowCanvasFillStyle::Solid:
         return "Solid";
+    case SnowCanvasFillStyle::Border:
+        return QCoreApplication::translate("DemoWindow", "Border");
     }
     return "Unknown";
 }
@@ -277,6 +279,7 @@ void populateFillStyleComboBox(QComboBox* comboBox) {
 
     comboBox->addItem("Mixed", -1);
     const SnowCanvasFillStyle fillStyles[] = {
+        SnowCanvasFillStyle::Border,
         SnowCanvasFillStyle::Solid,
         SnowCanvasFillStyle::Line,
         SnowCanvasFillStyle::CrossLine,

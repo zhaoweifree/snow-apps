@@ -45,7 +45,7 @@ void searchTagsUseSpaceLeftByShortTitles() {
 
     QStandardItemModel model(1, 1);
     const QModelIndex index = model.index(0, 0);
-    const QStringList titles{QStringLiteral("DirectML"), QStringLiteral("\u6309\u94ae")};
+    const QStringList titles{QStringLiteral("PaddleOCR"), QStringLiteral("\u6309\u94ae")};
     const QStringList categories{
         QStringLiteral("Recognition & translation / OCR models & performance"),
         QStringLiteral("\u9f20\u6807\u5de6\u952e / "

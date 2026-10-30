@@ -5,7 +5,7 @@ class QWindow;
 
 namespace adqt::widgets::detail {
 
-void applyMacWindowSurfaceChrome(QWidget* surface);
+void applyMacWindowSurfaceChrome(QWidget* surface, bool minimizeEnabled, bool maximizeEnabled);
 void updateMacWindowSurfaceShadow(QWidget* surface);
 void releaseMacWindowSurfaceCursor(QWindow* surface);
 

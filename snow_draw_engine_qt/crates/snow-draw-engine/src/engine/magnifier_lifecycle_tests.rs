@@ -16,6 +16,8 @@ fn pointer(
         .process_input(
             viewport,
             InputEvent::Pointer(PointerEvent {
+                pressure: None,
+                timestamp_ms: 0,
                 pointer_id: 1,
                 event_type,
                 device: PointerDevice::Mouse,
@@ -416,6 +418,8 @@ fn magnifier_lifecycle_cancelled_capture_release_survives_batched_moves() {
     assert!(engine.undo().unwrap());
     let events = [495.0, 505.0].map(|x| {
         InputEvent::Pointer(PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 1,
             event_type: PointerEventType::Move,
             device: PointerDevice::Mouse,

@@ -580,7 +580,7 @@ class SettingsPageWidget::Impl {
                         config.registrationState = displayState;
                         config.rowState = QStringLiteral("normal");
                         config.useStableBorder = false;
-                        config.maxShortcutCount = 2;
+                        config.maxShortcutCount = payload.maximumShortcutCount;
                         config.shortcutValidator = [this, scope = payload.scope,
                                                     shortcutId =
                                                         payload.shortcutId](const auto& shortcut) {
@@ -595,6 +595,9 @@ class SettingsPageWidget::Impl {
                                 ? ShortcutKeyRowConfig::ValidationScope::DrawingShortcut
                             : payload.scope == settings::SettingsLocalShortcutScope::ScreenRecording
                                 ? ShortcutKeyRowConfig::ValidationScope::RecordingShortcut
+                            : payload.scope ==
+                                    settings::SettingsLocalShortcutScope::WindowsContextMenu
+                                ? ShortcutKeyRowConfig::ValidationScope::WindowsContextMenu
                                 : ShortcutKeyRowConfig::ValidationScope::PinnedWindowShortcut;
                         config.allowModifierOnlyAlt =
                             payload.scope == settings::SettingsLocalShortcutScope::Screenshot &&

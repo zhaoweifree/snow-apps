@@ -16,6 +16,7 @@
 #include <QPointer>
 #include <QSize>
 #include <QThread>
+#include <QTimer>
 
 #include <algorithm>
 #include <atomic>
@@ -79,14 +80,7 @@ bool readModelFile(const QDir& modelsDirectory, const QString& name, std::vector
     return true;
 }
 
-// The WeChat detector owns two DNN sessions; constructing it once per worker
-// thread avoids reloading the models for every queued request.
-const BarcodeDecoders& threadDecoders(const QString& modelsDirectoryPath) {
-    thread_local std::optional<BarcodeDecoders> decoders;
-    if (decoders.has_value()) {
-        return *decoders;
-    }
-
+BarcodeDecoders loadDecoders(const QString& modelsDirectoryPath) {
     BarcodeDecoders created;
     created.barcode = cv::makePtr<cv::barcode::BarcodeDetector>();
     const QDir modelsDirectory(
@@ -114,12 +108,12 @@ const BarcodeDecoders& threadDecoders(const QString& modelsDirectoryPath) {
     } else {
         created.loadError = recognitionModelsMissingMessage();
     }
-    decoders = std::move(created);
-    return *decoders;
+    return created;
 }
 
 ScreenshotQrRecognitionResult recognizeImage(QImage source, const std::atomic_bool& cancellation,
                                              const QString& modelsDirectoryPath,
+                                             std::optional<BarcodeDecoders>& cachedDecoders,
                                              ScreenshotQrRecognitionMode mode) {
     try {
         const QSize originalSize = source.size();
@@ -141,7 +135,11 @@ ScreenshotQrRecognitionResult recognizeImage(QImage source, const std::atomic_bo
             return {};
         }
 
-        const BarcodeDecoders& decoders = threadDecoders(modelsDirectoryPath);
+        // Cache only successful initialization, so restoring damaged/missing model files can
+        // recover immediately. Every service owns its decoder cache on its serialized worker.
+        if (!cachedDecoders.has_value() || cachedDecoders->qr.empty())
+            cachedDecoders = loadDecoders(modelsDirectoryPath);
+        const BarcodeDecoders& decoders = *cachedDecoders;
         if (decoders.qr.empty()) {
             return {{}, decoders.loadError, {}};
         }
@@ -212,12 +210,34 @@ ScreenshotQrRecognitionResult recognizeImage(QImage source, const std::atomic_bo
     }
     return {{}, recognitionFailedMessage(), {}};
 }
+
+class QrWorker final : public QObject {
+  public:
+    explicit QrWorker(QString modelsDirectory) : m_modelsDirectory(std::move(modelsDirectory)) {}
+
+    ScreenshotQrRecognitionResult recognize(QImage image, const std::atomic_bool& cancellation,
+                                            ScreenshotQrRecognitionMode mode) {
+        return recognizeImage(std::move(image), cancellation, m_modelsDirectory, m_decoders, mode);
+    }
+
+  private:
+    const QString m_modelsDirectory;
+    std::optional<BarcodeDecoders> m_decoders;
+};
 } // namespace
 
 class ScreenshotQrRecognitionService::Impl final {
   public:
-    Impl(ScreenshotQrRecognitionService* owner, QString modelsDirectory)
-        : m_owner(owner), m_modelsDirectory(std::move(modelsDirectory)) {}
+    Impl(ScreenshotQrRecognitionService* owner, QString modelsDirectory,
+         int idleTimeoutMilliseconds)
+        : m_owner(owner), m_modelsDirectory(std::move(modelsDirectory)), m_idleTimer(owner) {
+        m_idleTimer.setSingleShot(true);
+        m_idleTimer.setInterval(std::max(0, idleTimeoutMilliseconds));
+        QObject::connect(&m_idleTimer, &QTimer::timeout, m_owner, [this] {
+            if (m_runningRequest == nullptr)
+                stopWorker();
+        });
+    }
 
     ~Impl() {
         shutdown();
@@ -286,7 +306,7 @@ class ScreenshotQrRecognitionService::Impl final {
     using RequestHandle = std::shared_ptr<Request>;
 
     void startNext() {
-        if (m_stopping || m_workerThread != nullptr) {
+        if (m_stopping || m_runningRequest != nullptr) {
             return;
         }
         RequestHandle request;
@@ -300,40 +320,42 @@ class ScreenshotQrRecognitionService::Impl final {
             request.reset();
         }
         if (request == nullptr) {
+            if (m_workerThread != nullptr)
+                m_idleTimer.start();
             return;
         }
 
-        QThread* const thread = QThread::create([request, modelsDirectory = m_modelsDirectory]() {
-            if (!request->cancellation->load(std::memory_order_acquire)) {
-                request->result = recognizeImage(std::move(request->image), *request->cancellation,
-                                                 modelsDirectory, request->mode);
-            }
-        });
-        thread->setObjectName(QStringLiteral("ScreenshotQrWorker"));
-        thread->setParent(m_owner);
-        m_workerThread = thread;
+        m_idleTimer.stop();
+        if (m_workerThread == nullptr) {
+            m_workerThread = new QThread(m_owner);
+            m_workerThread->setObjectName(QStringLiteral("ScreenshotQrWorker"));
+            m_worker = new QrWorker(m_modelsDirectory);
+            m_worker->moveToThread(m_workerThread);
+            QObject::connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
+            snow_shot::platform::configureApplicationQoSThread(m_workerThread);
+            m_workerThread->start();
+        }
         m_runningRequest = request;
-        QPointer<ScreenshotQrRecognitionService> service(m_owner);
-        QObject::connect(
-            thread, &QThread::finished, m_owner,
-            [this, service, request, thread]() mutable {
-                if (service != nullptr) {
-                    finish(request, thread);
+        QMetaObject::invokeMethod(
+            m_worker,
+            [this, owner = m_owner, worker = m_worker, request] {
+                if (!request->cancellation->load(std::memory_order_acquire)) {
+                    request->result = worker->recognize(std::move(request->image),
+                                                        *request->cancellation, request->mode);
                 }
+                // shutdown() joins the worker before the owner can be destroyed. Completion
+                // touches service state only on the owner's thread and is discarded on teardown.
+                QMetaObject::invokeMethod(
+                    owner, [this, request] { finish(request); }, Qt::QueuedConnection);
             },
             Qt::QueuedConnection);
-        snow_shot::platform::configureApplicationQoSThread(thread);
-        thread->start();
     }
 
-    void finish(const RequestHandle& request, QThread* thread) {
-        if (thread != m_workerThread) {
+    void finish(const RequestHandle& request) {
+        if (m_stopping || request != m_runningRequest) {
             return;
         }
-        m_workerThread = nullptr;
         m_runningRequest.reset();
-        thread->wait();
-        delete thread;
 
         startNext();
         deliver(request);
@@ -369,10 +391,17 @@ class ScreenshotQrRecognitionService::Impl final {
         }
         m_requests.clear();
         m_queue.clear();
+        stopWorker();
+        m_runningRequest.reset();
+    }
+
+    void stopWorker() {
+        m_idleTimer.stop();
         QThread* const thread = m_workerThread;
         m_workerThread = nullptr;
-        m_runningRequest.reset();
+        m_worker = nullptr;
         if (thread != nullptr) {
+            thread->quit();
             thread->wait();
             delete thread;
         }
@@ -383,13 +412,17 @@ class ScreenshotQrRecognitionService::Impl final {
     QHash<RequestToken, RequestHandle> m_requests;
     std::deque<RequestHandle> m_queue;
     QThread* m_workerThread = nullptr;
+    QrWorker* m_worker = nullptr;
+    QTimer m_idleTimer;
     RequestHandle m_runningRequest;
     bool m_stopping = false;
 };
 
 ScreenshotQrRecognitionService::ScreenshotQrRecognitionService(QObject* parent,
-                                                               const QString& modelsDirectory)
-    : ScreenshotQrRecognitionPort(parent), m_impl(std::make_unique<Impl>(this, modelsDirectory)) {}
+                                                               const QString& modelsDirectory,
+                                                               int idleTimeoutMilliseconds)
+    : ScreenshotQrRecognitionPort(parent),
+      m_impl(std::make_unique<Impl>(this, modelsDirectory, idleTimeoutMilliseconds)) {}
 
 ScreenshotQrRecognitionService::~ScreenshotQrRecognitionService() = default;
 

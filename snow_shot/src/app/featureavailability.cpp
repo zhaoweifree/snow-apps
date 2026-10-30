@@ -9,6 +9,7 @@ std::optional<FeatureFamily> featureFamilyFor(presentation::GlobalShortcutAction
     case Action::Screenshot:
     case Action::ScreenshotDelay:
     case Action::ScreenshotOcr:
+    case Action::ScreenshotOcrCopy:
     case Action::ScreenshotTranslation:
     case Action::ScreenshotCopy:
     case Action::ScreenshotSave:
@@ -28,6 +29,8 @@ std::optional<FeatureFamily> featureFamilyFor(presentation::GlobalShortcutAction
     case Action::OpenScreenRecordingFolder:
     case Action::OpenCaptureHistory:
     case Action::GlobalCanvas:
+    case Action::StitchSelectedImages:
+    case Action::SplitSelectedImages:
     case Action::SwitchWindowGroup:
     case Action::OpenPinToScreenManagement:
     case Action::OpenSettings:
@@ -48,6 +51,7 @@ FeatureFamily featureFamilyFor(presentation::settings::SettingsGlobalMouseAction
         return FeatureFamily::ScreenRecording;
     case Action::ScreenshotCopy:
     case Action::ScreenshotOcr:
+    case Action::ScreenshotOcrCopy:
     case Action::ScreenshotTranslation:
     case Action::ScreenshotQuickSave:
     case Action::ScreenshotSave:

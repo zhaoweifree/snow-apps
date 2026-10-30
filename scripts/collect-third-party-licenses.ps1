@@ -165,11 +165,15 @@ foreach ($manifest in $CargoOptions.Keys) {
     $path = Resolve-ExistingPath -Path $manifest -Description "Cargo options manifest" -PathType Leaf
     $optionsByManifest[$path] = @($CargoOptions[$manifest])
 }
+. (Join-Path $PSScriptRoot 'snow-ocr-toolchain.ps1')
 foreach ($cargoManifestPath in $cargoManifestPaths) {
+    $compiler = @(if ((Split-Path -Leaf (Split-Path -Parent $cargoManifestPath)) -eq 'snow-ocr-process') {
+        @("+$(Get-SnowOcrToolchain)")
+    } else { @() })
     $options = if ($optionsByManifest.ContainsKey($cargoManifestPath)) {
         $optionsByManifest[$cargoManifestPath]
     } else { @() }
-    $metadataOutput = @(& $cargoCommand.Source metadata --locked --offline `
+    $metadataOutput = @(& $cargoCommand.Source @compiler metadata --locked --offline `
         --filter-platform $CargoTarget --format-version 1 `
         --manifest-path $cargoManifestPath @options)
     if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed for $cargoManifestPath" }
@@ -186,7 +190,7 @@ foreach ($cargoManifestPath in $cargoManifestPaths) {
         if (!$packagesByNameVersion.ContainsKey($key)) { $packagesByNameVersion[$key] = @() }
         $packagesByNameVersion[$key] += @($package)
     }
-    $tree = @(& $cargoCommand.Source tree --locked --offline --target $CargoTarget `
+    $tree = @(& $cargoCommand.Source @compiler tree --locked --offline --target $CargoTarget `
         --manifest-path $cargoManifestPath --package $rootPackage.id `
         --edges normal,build --prefix none --format '{p}' @options)
     if ($LASTEXITCODE -ne 0) { throw "cargo tree failed for $cargoManifestPath" }
@@ -202,7 +206,7 @@ foreach ($cargoManifestPath in $cargoManifestPaths) {
 
 $missingCargoNotices = [System.Collections.Generic.List[string]]::new()
 $externalCargoPackages = @($reachable | ForEach-Object { $packageById[$_] } |
-    Where-Object { -not [string]::IsNullOrWhiteSpace($_.source) } |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_.source) -or $_.name -eq 'simd-paddle-ocr-rs' } |
     Sort-Object name, version)
 foreach ($package in $externalCargoPackages) {
     $packageDirectory = Split-Path -Parent $package.manifest_path
@@ -210,6 +214,9 @@ foreach ($package in $externalCargoPackages) {
         Where-Object {
             $_.Name -match '^(?i:LICENSE|LICENCE|COPYING|NOTICE|UNLICENSE)(?:[._-].*)?$'
         } | Sort-Object Name)
+    if ($package.name -eq 'simd-paddle-ocr-rs') {
+        $licenseFiles += @(Get-ChildItem -LiteralPath (Join-Path $packageDirectory 'licenses') -File -Filter '*.txt')
+    }
     if ($licenseFiles.Count -eq 0) {
         # Some published crates omit their workspace-root license. The repository
         # stores the original upstream text and revision, never a generic MIT template.

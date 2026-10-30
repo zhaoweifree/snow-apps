@@ -3,6 +3,7 @@
 #include "snow_shot/network/s3uploadprotocol.h"
 #include "snow_shot/presentation/screenshotencodingsettings.h"
 #include "snow_shot/storage/settingsadapters.h"
+#include "snow_shot/storage/exportfilename.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QFile>
@@ -132,10 +133,10 @@ void ScreenshotCloudUploadJob::prepare() {
                   tr("The cloud upload configuration or image is unavailable.")});
         return;
     }
-    const QString filename =
-        ScreenshotImageFileService::suggestedBaseName(m_impl->options.filenameFormat) + u'-' +
-        QUuid::createUuid().toString(QUuid::WithoutBraces) + u'.' +
-        ScreenshotImageFileService::extension(m_impl->options.format);
+    const QString filename = snow_shot::storage::composeExportFileName(
+        ScreenshotImageFileService::suggestedBaseName(m_impl->options.filenameFormat),
+        u'-' + QUuid::createUuid().toString(QUuid::WithoutBraces) + u'.' +
+            ScreenshotImageFileService::extension(m_impl->options.format));
     QString prefix = m_impl->config.keyPrefix;
     while (prefix.startsWith(u'/'))
         prefix.remove(0, 1);

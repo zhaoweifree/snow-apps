@@ -207,6 +207,10 @@ void tablePreparationPreservesSessionAndSiblingPopovers() {
         first.click();
         require(tableBusy && session.busy(Mode::Table),
                 "table becomes busy before encoding completes");
+        const auto pendingFile = session.fileExportSnapshot();
+        require(pendingFile && pendingFile->kind == ScreenshotRecognitionFileKind::Table &&
+                    !pendingFile->hasContent(),
+                "pending table recognition must keep Excel save routing without image fallback");
         require(entered.tryAcquire(1, 5000), "table worker starts");
         session.activate(Mode::Table);
         require(preparations == 1, "repeated activation does not duplicate pending preparation");
@@ -234,6 +238,10 @@ void tablePreparationPreservesSessionAndSiblingPopovers() {
         if (scenario == 4) {
             require(session.cachedRecognitionResults().table.has_value(),
                     "successful table result is retained");
+            const auto file = session.fileExportSnapshot();
+            require(file && file->hasContent() &&
+                        file->table->cellText(0, 0) == QStringLiteral("1"),
+                    "successful table recognition exposes an Excel document snapshot");
         }
         require(!session.busy(Mode::Table), "terminal preparation clears table busy state");
         require(errors == (scenario == 0 ? 1 : 0),

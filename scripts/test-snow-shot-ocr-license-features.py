@@ -9,12 +9,12 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER_MANIFEST = ROOT / 'snow-crates/crates/snow-ocr-process/Cargo.toml'
-LEGACY_DEPENDENCIES = {'clap', 'kamadak-exif', 'reqwest', 'rustls', 'serde_yaml', 'sha2'}
+LEGACY_DEPENDENCIES = {'clap', 'kamadak-exif', 'reqwest', 'rustls', 'serde_yaml', 'sha2', 'rapid-ocr-rs', 'ort', 'ort-sys'}
 
 
 def packages(target, features):
     result = subprocess.run(
-        ['cargo', 'tree', '--locked', '--offline', '--manifest-path', str(WORKER_MANIFEST),
+        ['cargo', '+nightly-2026-09-08', 'tree', '--locked', '--offline', '--manifest-path', str(WORKER_MANIFEST),
          '--package', 'snow-ocr-process', '--target', target, '--no-default-features',
          '--features', features, '--edges', 'normal,build', '--prefix', 'none',
          '--format', '{p}'],
@@ -36,16 +36,14 @@ class OcrLicenseFeatures(unittest.TestCase):
         self.assertTrue(LEGACY_DEPENDENCIES.isdisjoint(selected),
                         f'Unused worker notices were retained: {LEGACY_DEPENDENCIES & selected}')
         self.assertTrue({'png', 'zune-jpeg', 'turbojpeg', 'ravif', 'image-webp'}.isdisjoint(selected))
-        self.assertIn('ort', selected)
-        self.assertIn('ort-sys', selected)
+        self.assertIn('simd-paddle-ocr-rs', selected)
 
     def test_local_macos_worker_omits_unused_convenience_notices(self):
-        selected = packages('aarch64-apple-darwin', 'static-onnx-runtime,crash-diagnostics')
+        selected = packages('aarch64-apple-darwin', 'crash-diagnostics')
         self.assertTrue(LEGACY_DEPENDENCIES.isdisjoint(selected),
                         f'Unused local worker notices were retained: {LEGACY_DEPENDENCIES & selected}')
         self.assertTrue({'png', 'zune-jpeg', 'turbojpeg', 'ravif'}.isdisjoint(selected))
-        self.assertIn('ort', selected)
-        self.assertIn('ort-sys', selected)
+        self.assertIn('simd-paddle-ocr-rs', selected)
 
 
 if __name__ == '__main__':

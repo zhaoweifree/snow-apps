@@ -1,6 +1,8 @@
 #include <QApplication>
 #include <QAbstractEventDispatcher>
 #include <QEventLoop>
+#include <QDialog>
+#include <QFileDialog>
 #include <QLayout>
 #include <QPointer>
 #include <QPushButton>
@@ -76,6 +78,20 @@ bool orderedAbove(NSWindow* window, NSWindow* owner) {
   return windowIndex != NSNotFound && ownerIndex != NSNotFound && windowIndex < ownerIndex;
 }
 #endif
+
+bool nativeWindowControlsAreHidden(QWidget* surface) {
+#ifdef Q_OS_MACOS
+  if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
+    NSWindow* window = reinterpret_cast<NSView*>(surface->winId()).window;
+    return window && [window standardWindowButton:NSWindowCloseButton].hidden &&
+           [window standardWindowButton:NSWindowMiniaturizeButton].hidden &&
+           [window standardWindowButton:NSWindowZoomButton].hidden;
+  }
+#else
+  Q_UNUSED(surface)
+#endif
+  return true;
+}
 
 class SurfaceLifecycleObserver : public QObject {
  public:
@@ -884,6 +900,184 @@ class TstModalWindow : public QObject {
     QVERIFY(!modal->isOpen());
   }
 
+  void windowChromeSurvivesModalBlocking_data() {
+    QTest::addColumn<Qt::WindowModality>("modality");
+    QTest::addColumn<bool>("accept");
+    QTest::newRow("owner-reject") << Qt::WindowModal << false;
+    QTest::newRow("owner-accept") << Qt::WindowModal << true;
+    QTest::newRow("application-reject") << Qt::ApplicationModal << false;
+    QTest::newRow("application-accept") << Qt::ApplicationModal << true;
+  }
+
+  void windowChromeSurvivesModalBlocking() {
+    QFETCH(Qt::WindowModality, modality);
+    QFETCH(bool, accept);
+    AdModal modal;
+    modal.setMode(AdModal::Mode::Window);
+    modal.setWindowModeDetached(true);
+    modal.setWindowModality(Qt::NonModal);
+    modal.setWindowTaskbarVisible(true);
+    modal.setWindowResizable(true);
+    modal.setWindowMinimizeButtonVisible(true);
+    modal.setWindowMaximizeButtonVisible(true);
+    modal.setWindowTitle(QStringLiteral("Blocking chrome"));
+    modal.open();
+    QWidget* surface = visibleOverlaySurface(modal.windowTitle());
+    QVERIFY(surface);
+    QVERIFY(QTest::qWaitForWindowExposed(surface));
+    QVERIFY(nativeWindowControlsAreHidden(surface));
+    ModalityObserver observer;
+    surface->windowHandle()->installEventFilter(&observer);
+    QDialog child(surface);
+    child.setWindowModality(modality);
+    child.show();
+    QVERIFY(observer.blocked);
+    QVERIFY(nativeWindowControlsAreHidden(surface));
+#ifdef Q_OS_MACOS
+    if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
+      NSWindow* window = reinterpret_cast<NSView*>(surface->winId()).window;
+      QVERIFY(![window standardWindowButton:NSWindowCloseButton].enabled);
+      QVERIFY([window standardWindowButton:NSWindowMiniaturizeButton].enabled);
+      QVERIFY([window standardWindowButton:NSWindowZoomButton].enabled);
+    }
+#endif
+    if (accept) {
+      child.accept();
+    } else {
+      child.reject();
+    }
+    QVERIFY(!observer.blocked);
+    QVERIFY(modal.isOpen());
+    QVERIFY(nativeWindowControlsAreHidden(surface));
+#ifdef Q_OS_MACOS
+    if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
+      NSWindow* window = reinterpret_cast<NSView*>(surface->winId()).window;
+      QVERIFY([window standardWindowButton:NSWindowCloseButton].enabled);
+      QVERIFY([window standardWindowButton:NSWindowMiniaturizeButton].enabled);
+      QVERIFY([window standardWindowButton:NSWindowZoomButton].enabled);
+    }
+#endif
+    modal.close();
+  }
+
+  void windowChromeSurvivesSizeHintChanges_data() {
+    QTest::addColumn<bool>("minimize");
+    QTest::addColumn<bool>("maximize");
+    QTest::newRow("neither") << false << false;
+    QTest::newRow("minimize") << true << false;
+    QTest::newRow("maximize") << false << true;
+    QTest::newRow("both") << true << true;
+  }
+
+  void windowChromeSurvivesSizeHintChanges() {
+    QFETCH(bool, minimize);
+    QFETCH(bool, maximize);
+    AdModal modal;
+    modal.setMode(AdModal::Mode::Window);
+    modal.setWindowModeDetached(true);
+    modal.setWindowModality(Qt::NonModal);
+    modal.setWindowTaskbarVisible(true);
+    modal.setWindowResizable(true);
+    modal.setWindowMinimizeButtonVisible(minimize);
+    modal.setWindowMaximizeButtonVisible(maximize);
+    modal.setWindowTitle(QStringLiteral("Size hint chrome"));
+    modal.open();
+    QWidget* surface = visibleOverlaySurface(modal.windowTitle());
+    QVERIFY(surface);
+    QVERIFY(QTest::qWaitForWindowExposed(surface));
+    QVERIFY(nativeWindowControlsAreHidden(surface));
+    surface->setMinimumSize(surface->minimumSize() + QSize(10, 10));
+    QVERIFY(nativeWindowControlsAreHidden(surface));
+    surface->setMaximumSize(surface->size() + QSize(50, 50));
+    QVERIFY(nativeWindowControlsAreHidden(surface));
+    surface->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+    QVERIFY(nativeWindowControlsAreHidden(surface));
+    modal.close();
+  }
+
+  void windowChromeSurvivesFileDialogCancellation_data() {
+    QTest::addColumn<bool>("directory");
+    QTest::newRow("reload-image") << false;
+    QTest::newRow("export-directory") << true;
+  }
+
+  void windowChromeLeavesNativeControlsUntouched() {
+    AdModal modal;
+    modal.setMode(AdModal::Mode::Window);
+    modal.setWindowModeDetached(true);
+    modal.setWindowModality(Qt::NonModal);
+    modal.open();
+    modal.close();
+
+    QWidget native(nullptr, Qt::Window | Qt::WindowTitleHint | Qt::WindowCloseButtonHint |
+                                Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint);
+    native.resize(400, 300);
+    native.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&native));
+#ifdef Q_OS_MACOS
+    if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
+      NSWindow* window = reinterpret_cast<NSView*>(native.winId()).window;
+      for (const NSWindowButton kind :
+           {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton}) {
+        NSButton* button = [window standardWindowButton:kind];
+        QVERIFY(button);
+        QVERIFY(!button.hidden);
+        button.hidden = YES;
+        QVERIFY(button.hidden);
+        button.hidden = NO;
+        QVERIFY(!button.hidden);
+      }
+      native.setMinimumSize(200, 150);
+      QVERIFY(![window standardWindowButton:NSWindowCloseButton].hidden);
+      QVERIFY(![window standardWindowButton:NSWindowMiniaturizeButton].hidden);
+      QVERIFY(![window standardWindowButton:NSWindowZoomButton].hidden);
+    }
+#endif
+  }
+
+  void windowChromeSurvivesFileDialogCancellation() {
+    QFETCH(bool, directory);
+    AdModal modal;
+    modal.setMode(AdModal::Mode::Window);
+    modal.setWindowModeDetached(true);
+    modal.setWindowModality(Qt::NonModal);
+    modal.setWindowTaskbarVisible(true);
+    modal.setWindowResizable(true);
+    modal.setWindowMinimizeButtonVisible(true);
+    modal.setWindowMaximizeButtonVisible(true);
+    modal.setWindowTitle(QStringLiteral("File picker chrome"));
+    modal.open();
+    QWidget* surface = visibleOverlaySurface(modal.windowTitle());
+    QVERIFY(surface);
+    QVERIFY(QTest::qWaitForWindowExposed(surface));
+    QVERIFY(nativeWindowControlsAreHidden(surface));
+    for (int attempt = 0; attempt < 2; ++attempt) {
+      QFileDialog dialog(surface);
+      dialog.setFileMode(directory ? QFileDialog::Directory : QFileDialog::ExistingFile);
+      QSignalSpy finished(&dialog, &QDialog::finished);
+      dialog.open();
+      bool hiddenWhileChoosing = nativeWindowControlsAreHidden(surface);
+#ifdef Q_OS_MACOS
+      if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
+        NSWindow* window = reinterpret_cast<NSView*>(surface->winId()).window;
+        QTRY_VERIFY([window.attachedSheet isKindOfClass:NSOpenPanel.class]);
+        hiddenWhileChoosing = nativeWindowControlsAreHidden(surface);
+        [static_cast<NSOpenPanel*>(window.attachedSheet) cancel:nil];
+      } else
+#endif
+      {
+        dialog.reject();
+      }
+      QTRY_COMPARE(finished.count(), 1);
+      QCOMPARE(finished.first().first().toInt(), int(QDialog::Rejected));
+      QVERIFY(modal.isOpen());
+      QVERIFY(surface->isVisible());
+      QVERIFY(nativeWindowControlsAreHidden(surface));
+      QVERIFY(hiddenWhileChoosing);
+    }
+    modal.close();
+  }
+
   void resizableWindowRetainsGeometryAndReopensAtDefault() {
     AdModal modal;
     modal.setMode(AdModal::Mode::Window);
@@ -1213,6 +1407,170 @@ class TstModalWindow : public QObject {
 #endif
     }
     surface->removeEventFilter(&observer);
+    modal.close();
+  }
+
+  void windowMaximizeRestoreAndIcon() {
+    QWidget mainWindow;
+    mainWindow.resize(600, 400);
+    mainWindow.show();
+    QObject lifetime(&mainWindow);
+    AdModal modal(&lifetime);
+    modal.setMode(AdModal::Mode::Window);
+    modal.setWindowModeDetached(true);
+    modal.setWindowModality(Qt::NonModal);
+    modal.setWindowScreen(qApp->primaryScreen());
+    modal.setWindowPreferredSize(QSize(480, 360));
+    modal.setWindowMinimumSize(QSize(240, 180));
+    modal.setWindowResizable(true);
+    modal.setWindowTaskbarVisible(true);
+    modal.setWindowMinimizeButtonVisible(true);
+    modal.setWindowMaximizeButtonVisible(true);
+    modal.setWindowTitle(QStringLiteral("Independent window chrome"));
+    auto* content = new QLabel(QStringLiteral("Content"));
+    modal.setContentWidget(content);
+    QPixmap firstPixmap(16, 16);
+    firstPixmap.fill(Qt::red);
+    const QIcon firstIcon(firstPixmap);
+    QSignalSpy iconChanged(&modal, &AdModal::windowIconChanged);
+    modal.setWindowIcon(firstIcon);
+    QCOMPARE(iconChanged.count(), 1);
+    modal.setWindowIcon(firstIcon);
+    QCOMPARE(iconChanged.count(), 1);
+    modal.open();
+    QWidget* surface = content->window();
+    QVERIFY(QTest::qWaitForWindowExposed(surface));
+    QVERIFY(surface != &mainWindow);
+    QVERIFY(surface->parentWidget() == nullptr);
+    QVERIFY(modal.ownerWindow() == nullptr);
+    QCOMPARE(surface->windowModality(), Qt::NonModal);
+    QCOMPARE(surface->windowFlags() & Qt::WindowType_Mask, Qt::Window);
+    QCOMPARE(surface->windowIcon().cacheKey(), firstIcon.cacheKey());
+    auto* icon = surface->findChild<QLabel*>(QStringLiteral("ad-modal-window-icon"));
+    auto* maximize = surface->findChild<QToolButton*>(QStringLiteral("ad-modal-maximize"));
+    auto* minimize = surface->findChild<QToolButton*>(QStringLiteral("ad-modal-minimize"));
+    QVERIFY(icon && icon->isVisible() && !icon->pixmap().isNull());
+    QVERIFY(maximize && maximize->isVisible() && maximize->isEnabled());
+    QVERIFY(minimize && minimize->isVisible());
+    QCOMPARE(maximize->focusPolicy(), Qt::StrongFocus);
+    QCOMPARE(maximize->accessibleName(), QStringLiteral("Maximize"));
+    QCOMPARE(maximize->toolTip(), QStringLiteral("Maximize"));
+#ifdef Q_OS_WIN
+    if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+      const auto hwnd = reinterpret_cast<HWND>(surface->winId());
+      const LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+      QCOMPARE(style & (WS_MINIMIZEBOX | WS_MAXIMIZEBOX),
+               LONG_PTR(WS_MINIMIZEBOX | WS_MAXIMIZEBOX));
+      QCOMPARE(GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW, LONG_PTR(0));
+      QVERIFY(GetWindow(hwnd, GW_OWNER) == nullptr);
+      QVERIFY(SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0) != 0);
+      QVERIFY(SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0) != 0);
+    }
+#endif
+#ifdef Q_OS_MACOS
+    if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
+      NSWindow* window = reinterpret_cast<NSView*>(surface->winId()).window;
+      QVERIFY(window.styleMask & NSWindowStyleMaskClosable);
+      QVERIFY(window.styleMask & NSWindowStyleMaskMiniaturizable);
+      QVERIFY(window.styleMask & NSWindowStyleMaskResizable);
+      QVERIFY([window standardWindowButton:NSWindowMiniaturizeButton].enabled);
+      QVERIFY([window standardWindowButton:NSWindowZoomButton].enabled);
+      QVERIFY([window standardWindowButton:NSWindowMiniaturizeButton].hidden);
+      QVERIFY([window standardWindowButton:NSWindowZoomButton].hidden);
+    }
+#endif
+    const QRect normal = surface->geometry();
+    maximize->click();
+    QTRY_VERIFY(surface->isMaximized());
+    QCOMPARE(maximize->accessibleName(), QStringLiteral("Restore"));
+    QCOMPARE(maximize->toolTip(), QStringLiteral("Restore"));
+    QCOMPARE(surface->normalGeometry(), normal);
+#ifdef Q_OS_WIN
+    if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+      const auto hwnd = reinterpret_cast<HWND>(surface->winId());
+      MONITORINFO monitor{};
+      monitor.cbSize = sizeof(monitor);
+      QVERIFY(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor));
+      RECT bounds{};
+      QVERIFY(GetClientRect(hwnd, &bounds));
+      POINT origin{};
+      QVERIFY(ClientToScreen(hwnd, &origin));
+      QCOMPARE(origin.x, monitor.rcWork.left);
+      QCOMPARE(origin.y, monitor.rcWork.top);
+      QCOMPARE(origin.x + bounds.right, monitor.rcWork.right);
+      QCOMPARE(origin.y + bounds.bottom, monitor.rcWork.bottom);
+    }
+#endif
+    minimize->click();
+    QTRY_VERIFY(surface->isMinimized());
+    modal.present();
+    QTRY_VERIFY(surface->isMaximized() && !surface->isMinimized());
+    maximize->click();
+    QTRY_VERIFY(!surface->isMaximized());
+    QTRY_COMPARE(surface->geometry(), normal);
+    QCOMPARE(maximize->accessibleName(), QStringLiteral("Maximize"));
+#ifdef Q_OS_WIN
+    if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+      const auto hwnd = reinterpret_cast<HWND>(surface->winId());
+      SendMessageW(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+      QTRY_VERIFY(surface->isMaximized());
+      QCOMPARE(maximize->accessibleName(), QStringLiteral("Restore"));
+      SendMessageW(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+      QTRY_VERIFY(!surface->isMaximized());
+      QTRY_COMPARE(surface->geometry(), normal);
+      QCOMPARE(maximize->accessibleName(), QStringLiteral("Maximize"));
+    }
+#endif
+
+    QPixmap replacementPixmap(16, 16);
+    replacementPixmap.fill(Qt::blue);
+    const QIcon replacement(replacementPixmap);
+    modal.setWindowIcon(replacement);
+    QCOMPARE(iconChanged.count(), 2);
+    QCOMPARE(surface->windowIcon().cacheKey(), replacement.cacheKey());
+    QCOMPARE(icon->pixmap().toImage().pixelColor(0, 0), QColor(Qt::blue));
+    QEvent densityChange(QEvent::DevicePixelRatioChange);
+    QApplication::sendEvent(surface, &densityChange);
+    QCOMPARE(surface->geometry(), normal);
+    mainWindow.hide();
+    QVERIFY(modal.isOpen() && surface->isVisible());
+    modal.setWindowIcon({});
+    QVERIFY(modal.windowIcon().isNull());
+    QVERIFY(icon->isHidden());
+    modal.close();
+  }
+
+  void defaultWindowChromePreservesDialogCapabilities() {
+    AdModal modal;
+    modal.setMode(AdModal::Mode::Window);
+    modal.setWindowModeDetached(true);
+    modal.setWindowTitle(QStringLiteral("Default dialog chrome"));
+    QVERIFY(!modal.windowMaximizeButtonVisible());
+    QVERIFY(modal.windowIcon().isNull());
+    auto* content = new QLabel(QStringLiteral("Content"));
+    modal.setContentWidget(content);
+    modal.open();
+    QWidget* surface = content->window();
+    auto* maximize = surface->findChild<QToolButton*>(QStringLiteral("ad-modal-maximize"));
+    auto* icon = surface->findChild<QLabel*>(QStringLiteral("ad-modal-window-icon"));
+    QVERIFY(maximize && maximize->isHidden());
+    QVERIFY(icon && icon->isHidden());
+    QVERIFY(!surface->windowFlags().testFlag(Qt::WindowMaximizeButtonHint));
+#ifdef Q_OS_WIN
+    if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+      const auto hwnd = reinterpret_cast<HWND>(surface->winId());
+      QCOMPARE(GetWindowLongPtr(hwnd, GWL_STYLE) & (WS_MINIMIZEBOX | WS_MAXIMIZEBOX), LONG_PTR(0));
+    }
+#endif
+    modal.setWindowMaximizeButtonVisible(true);
+    QVERIFY(maximize->isVisible() && !maximize->isEnabled());
+    QVERIFY(!surface->windowFlags().testFlag(Qt::WindowMaximizeButtonHint));
+    modal.setWindowResizable(true);
+    QVERIFY(maximize->isEnabled());
+    QVERIFY(surface->windowFlags().testFlag(Qt::WindowMaximizeButtonHint));
+    modal.setWindowMaximizeButtonVisible(false);
+    QVERIFY(maximize->isHidden());
+    QVERIFY(!surface->windowFlags().testFlag(Qt::WindowMaximizeButtonHint));
     modal.close();
   }
 

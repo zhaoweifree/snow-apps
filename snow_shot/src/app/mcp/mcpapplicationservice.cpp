@@ -324,6 +324,8 @@ struct McpApplicationService::Impl {
                  {QStringLiteral("source_language"), preferences.sourceLanguage},
                  {QStringLiteral("target_language"), preferences.targetLanguage},
                  {QStringLiteral("secondary_target_language"), preferences.secondaryTargetLanguage},
+                 {QStringLiteral("language_detection_confidence_threshold"),
+                  preferences.languageDetectionConfidenceThreshold},
                  {QStringLiteral("model_id"), preferences.modelId}})) {
             ports.jobs->fail(id, QStringLiteral("capacity_exceeded"));
             return;
@@ -1469,9 +1471,12 @@ void McpApplicationService::Impl::handle(const ScreenshotMcpRequest& request,
             preferences.sourceLanguage = input.value(QStringLiteral("source_language")).toString();
         if (input.contains(QStringLiteral("target_language")))
             preferences.targetLanguage = input.value(QStringLiteral("target_language")).toString();
-        if (params.contains(QStringLiteral("retry_job_id")))
+        if (params.contains(QStringLiteral("retry_job_id"))) {
             preferences.secondaryTargetLanguage =
                 input.value(QStringLiteral("secondary_target_language")).toString();
+            preferences.languageDetectionConfidenceThreshold =
+                input.value(QStringLiteral("language_detection_confidence_threshold")).toInt(60);
+        }
         if (input.contains(QStringLiteral("model_id")))
             preferences.modelId = input.value(QStringLiteral("model_id")).toString();
         auto canceled = std::make_shared<bool>(false);

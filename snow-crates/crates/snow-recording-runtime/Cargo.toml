@@ -11,7 +11,7 @@ tempfile.workspace = true
 snow-media = { path = "../snow-media" }
 snow-recording-effects = { path = "../snow-recording-effects" }
 snow-core = { path = "../snow-core" }
-snow-pipeline = { path = "../snow-pipeline" }
+snow-pipeline = { path = "../snow-pipeline", optional = true }
 snow-capture = { path = "../snow-capture" }
 snow-cursor = { path = "../snow-cursor" }
 snow-audio-recorder = { path = "../snow-audio-recorder" }
@@ -69,6 +69,9 @@ windows = { workspace = true, features = [
 ] }
 
 [features]
+default = ["legacy-capture"]
+# Compatibility capture APIs are excluded from the Snow Shot archive.
+legacy-capture = ["dep:snow-pipeline"]
 # Compile-time metric groups for the realtime recording benchmark. Each group
 # is independently selectable so one measurement is not perturbed by the
 # instrumentation overhead of the others, and production builds (which enable
@@ -93,3 +96,7 @@ bench-synthetic-input = ["snow-recording-effects/bench-synthetic-input", "snow-r
 
 [target.'cfg(target_os = "macos")'.dependencies]
 snow-macos = { path = "../snow-macos" }
+
+[[example]]
+name = "macos_record"
+required-features = ["legacy-capture"]

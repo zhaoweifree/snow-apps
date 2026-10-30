@@ -1,4 +1,5 @@
 #include "snow_shot/presentation/screenshotrecognitionwindow.h"
+#include "snow_shot/presentation/crosshaircursor.h"
 #include "snow_shot/presentation/screenshotocrtextlayout.h"
 #include <QAbstractTextDocumentLayout>
 #include <QAbstractItemDelegate>
@@ -738,7 +739,8 @@ ScreenshotRecognitionWindow::imageSnapshot(QImage image, const QRectF& canvasRec
 QImage ScreenshotRecognitionWindow::printViewportSnapshot(QImage background,
                                                           const QRectF& canvasRect, QImage filtered,
                                                           const QRectF& filteredRect,
-                                                          qreal contentOpacity) {
+                                                          qreal contentOpacity,
+                                                          QSize outputPixelSize) {
     if (m_showOriginalImage || !m_stack->currentWidget())
         return {};
     QWidget* content = m_stack->currentWidget();
@@ -762,13 +764,18 @@ QImage ScreenshotRecognitionWindow::printViewportSnapshot(QImage background,
         viewport = scroll->viewport();
     if (text)
         viewport = text->viewport();
+    if (viewport->size().isEmpty())
+        return {};
     const qreal dpr = viewport->devicePixelRatioF();
-    QImage snapshot(viewport->size() * dpr, QImage::Format_ARGB32_Premultiplied);
+    const bool explicitSize = !outputPixelSize.isEmpty();
+    QImage snapshot(explicitSize ? outputPixelSize : viewport->size() * dpr,
+                    QImage::Format_ARGB32_Premultiplied);
     if (snapshot.isNull())
         return {};
     snapshot.fill(Qt::transparent);
     QPainter painter(&snapshot);
-    painter.scale(dpr, dpr);
+    painter.scale(explicitSize ? qreal(snapshot.width()) / viewport->width() : dpr,
+                  explicitSize ? qreal(snapshot.height()) / viewport->height() : dpr);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
     if (content == m_textLayer) {
@@ -2517,7 +2524,7 @@ void ScreenshotRecognitionWindow::mouseMoveEvent(QMouseEvent* event) {
             cancelLineBoxSelection();
         } else {
             updateLineBoxSelection(snowPos(event));
-            setCursor(Qt::CrossCursor);
+            setCursor(snow_shot::presentation::crosshairCursor(devicePixelRatioF()));
             event->accept();
             return;
         }

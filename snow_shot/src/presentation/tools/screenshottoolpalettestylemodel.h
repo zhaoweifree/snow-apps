@@ -19,9 +19,11 @@ class ScreenshotToolPaletteRectangleStyleModel final {
     [[nodiscard]] double strokeWidth() const;
     [[nodiscard]] const QColor& strokeColor() const;
     [[nodiscard]] SnowCanvasStrokeStyle strokeStyle() const;
+    [[nodiscard]] SnowCanvasStrokeRenderingStyle strokeRenderingStyle() const;
     [[nodiscard]] const QColor& fillColor() const;
     [[nodiscard]] SnowCanvasFillStyle fillStyle() const;
     [[nodiscard]] SnowCanvasArrowType arrowType() const;
+    [[nodiscard]] SnowCanvasBrushMode brushMode() const;
     [[nodiscard]] int cornerRadius() const;
     [[nodiscard]] SnowCanvasRectangleShape shape() const;
     [[nodiscard]] const QVector<double>& strokeWidthValues() const;
@@ -33,9 +35,11 @@ class ScreenshotToolPaletteRectangleStyleModel final {
     [[nodiscard]] bool cycleStrokeWidth();
     [[nodiscard]] bool setStrokeColor(const QColor& color);
     [[nodiscard]] bool setStrokeStyle(SnowCanvasStrokeStyle strokeStyle);
+    [[nodiscard]] bool setStrokeRenderingStyle(SnowCanvasStrokeRenderingStyle style);
     [[nodiscard]] bool setFillColor(const QColor& color);
     [[nodiscard]] bool setFillStyle(SnowCanvasFillStyle fillStyle);
     [[nodiscard]] bool setArrowType(SnowCanvasArrowType arrowType);
+    [[nodiscard]] bool setBrushMode(SnowCanvasBrushMode brushMode);
     [[nodiscard]] bool stepCornerRadius(int direction);
     [[nodiscard]] bool setCornerRadius(int cornerRadius);
     [[nodiscard]] bool setShape(SnowCanvasRectangleShape shape);
@@ -49,9 +53,12 @@ class ScreenshotToolPaletteRectangleStyleModel final {
     double m_strokeWidth = 2.0;
     QColor m_strokeColor;
     SnowCanvasStrokeStyle m_strokeStyle = SnowCanvasStrokeStyle::Solid;
+    SnowCanvasStrokeRenderingStyle m_strokeRenderingStyle =
+        SnowCanvasStrokeRenderingStyle::Architect;
     QColor m_fillColor;
     SnowCanvasFillStyle m_fillStyle = SnowCanvasFillStyle::Solid;
     SnowCanvasArrowType m_arrowType = SnowCanvasArrowType::Straight;
+    SnowCanvasBrushMode m_brushMode = SnowCanvasBrushMode::Regular;
     SnowCanvasCornerRadii m_cornerRadii;
     double m_opacity = 1.0;
     SnowCanvasHighlightShape m_highlightShape = SnowCanvasHighlightShape::Rectangle;

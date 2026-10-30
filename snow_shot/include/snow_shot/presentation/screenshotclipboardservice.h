@@ -20,7 +20,6 @@
 class QClipboard;
 class QMimeData;
 class QObject;
-class QTemporaryDir;
 struct ScreenshotClipboardPayloadTestAccess;
 struct ScreenshotClipboardCommitState;
 struct ScreenshotClipboardCommitScopeState;
@@ -122,6 +121,9 @@ class ScreenshotClipboardService final {
     prepareEncoded(const ScreenshotImageRowSource& source, const QByteArray& png,
                    std::optional<ScreenshotClipboardPlacement> placement = {},
                    std::optional<ScreenshotClipboardAppearance> appearance = {});
+    // Duplicate native ownership for simultaneous consumers without producing image rows again.
+    [[nodiscard]] static ScreenshotClipboardPayload
+    clonePrepared(const ScreenshotClipboardPayload& payload);
     [[nodiscard]] static ScreenshotClipboardCommitHandle commit(QClipboard* clipboard,
                                                                 QObject* receiver,
                                                                 ScreenshotClipboardPayload payload,
@@ -135,9 +137,6 @@ class ScreenshotClipboardService final {
     [[nodiscard]] static ScreenshotClipboardCommitHandle
     commitMimeData(QClipboard* clipboard, QObject* receiver, QMimeData* mimeData,
                    PublicationId publicationId, CommitCompletion completion);
-    // Clipboard ownership, including publication retries, retains the temporary file.
-    [[nodiscard]] static std::unique_ptr<QMimeData>
-    temporaryFileMimeData(const QString& path, std::shared_ptr<QTemporaryDir> directory);
     [[nodiscard]] static bool publish(QClipboard* clipboard, ScreenshotClipboardPayload payload);
     [[nodiscard]] static bool publishImage(QClipboard* clipboard, const QImage& image,
                                            ScreenshotImageEncodingOptions encoding = {});

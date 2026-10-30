@@ -12,6 +12,7 @@
 #include <QEvent>
 #include <QEventLoop>
 #include <QHideEvent>
+#include <QHoverEvent>
 #include <QImage>
 #include <QKeyEvent>
 #include <QLabel>
@@ -65,6 +66,9 @@ class NoOpSelectionToolbarCommands final : public ScreenshotSelectionToolbarComm
     }
     void adjustSelectionFromToolbar(int minDx, int minDy, int maxDx, int maxDy) override {
         lastAdjustment = {minDx, minDy, maxDx, maxDy};
+        ++interactionCount;
+    }
+    void adjustSelectionEffectsFromWheel(int, int) override {
         ++interactionCount;
     }
     void setSelectionCornerRadiusFromToolbar(int) override {
@@ -873,6 +877,55 @@ void aspectRatioPopupFollowsPointerHover() {
     toolbar.setSelectionEditCapabilities(false, false);
     sendEnter(select);
     require(!select->popupVisible(), "a disabled ratio Select must not open on hover");
+}
+
+void aspectRatioPopupRecoversFromHoverMovement() {
+    NoOpSelectionToolbarCommands commands;
+    QWidget host;
+    host.resize(800, 400);
+    ScreenshotSelectionToolbarWidget toolbar(commands, &host);
+    toolbar.setSelectionState(QRect(50, 50, 320, 180), false, 0, 0);
+    host.show();
+    toolbar.show();
+    QCoreApplication::processEvents();
+    auto* select = ratioSelect(toolbar);
+    const auto hover = [](QWidget* receiver, QEvent::Type type, const QPoint& point) {
+        QHoverEvent event(type, point, receiver->mapToGlobal(point), QPointF(-1, -1),
+                          Qt::NoModifier);
+        QApplication::sendEvent(receiver, &event);
+    };
+    const auto advanceDismissal = [] {
+        QEventLoop loop;
+        QTimer::singleShot(200, &loop, &QEventLoop::quit);
+        loop.exec();
+    };
+    for (QWidget* trigger :
+         {static_cast<QWidget*>(select), static_cast<QWidget*>(select->lineEdit())}) {
+        hover(trigger, QEvent::HoverMove, QPoint(-1, -1));
+        require(!select->popupVisible(), "hover outside the ratio trigger must not open its popup");
+        hover(trigger, QEvent::HoverMove, trigger->rect().center());
+        require(select->popupVisible(),
+                "hover movement without Enter must open the ratio popup immediately");
+        const auto transitions = commands.popupVisibility;
+        hover(trigger, QEvent::HoverEnter, trigger->rect().center());
+        hover(trigger, QEvent::HoverMove, trigger->rect().center());
+        require(commands.popupVisibility == transitions,
+                "continued ratio hover must preserve the existing popup session");
+        QWidget* popup = select->view()->window();
+        QEvent leave(QEvent::HoverLeave);
+        QApplication::sendEvent(select, &leave);
+        hover(popup, QEvent::HoverMove, popup->rect().center());
+        advanceDismissal();
+        require(select->popupVisible(),
+                "hover movement into ratio options must cancel pending dismissal");
+        QApplication::sendEvent(popup, &leave);
+        advanceDismissal();
+        require(!select->popupVisible() && commands.selectedPresets.empty(),
+                "leaving ratio options must dismiss without changing the selection");
+    }
+    toolbar.setSelectionEditCapabilities(false, false);
+    hover(select, QEvent::HoverMove, select->rect().center());
+    require(!select->popupVisible(), "disabled ratio input must ignore hover movement");
 }
 
 void aspectRatioTriggerInputStaysWithSelect() {
@@ -1691,6 +1744,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     if (arguments.contains(QStringLiteral("--popup-regression-tests"))) {
+        aspectRatioPopupRecoversFromHoverMovement();
         aspectRatioTriggerInputStaysWithSelect();
         selectionQuickSetRefreshReleasesPreviousOptionsModel();
         selectionQuickSetsApplyFullParamsAndRefreshOnOpen();
@@ -1710,6 +1764,7 @@ int main(int argc, char* argv[]) {
     smartSelectionToolbarShedsNativeWindowForcedByNativeSiblingEmbed();
     aspectRatioSelectSynchronizesWithoutDispatchingCommands();
     aspectRatioPopupFollowsPointerHover();
+    aspectRatioPopupRecoversFromHoverMovement();
     aspectRatioTriggerInputStaysWithSelect();
     selectionQuickSetRefreshReleasesPreviousOptionsModel();
     selectionQuickSetsApplyFullParamsAndRefreshOnOpen();

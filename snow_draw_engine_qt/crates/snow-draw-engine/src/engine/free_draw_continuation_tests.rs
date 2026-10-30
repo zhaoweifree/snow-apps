@@ -29,6 +29,7 @@ fn stroke(points: &[Point]) -> FreeDrawData {
         vec![PathSegmentMode::Straight; points.len() - 1],
         false,
         FreeDrawStyle {
+            brush_mode: Default::default(),
             stroke: ColorRgba8 {
                 r: 200,
                 g: 20,
@@ -65,6 +66,8 @@ fn pointer(e: &mut Engine, v: ViewportId, kind: PointerEventType, p: Point, shif
     e.process_input(
         v,
         InputEvent::Pointer(PointerEvent {
+            pressure: None,
+            timestamp_ms: 0,
             pointer_id: 1,
             event_type: kind,
             device: PointerDevice::Mouse,
@@ -208,7 +211,7 @@ fn free_draw_continuation_append_prepend_preview_and_history() {
         };
         assert_eq!(preview.id.index, id.index);
         assert_eq!(preview.opacity, 0.5);
-        let preview_commands = preview.path_commands.clone();
+        let preview_commands = preview.geometry.flattened_commands();
         pointer(&mut e, v, PointerEventType::Up, next, true);
         let result = e.model.free_draw(id).unwrap().clone();
         assert_eq!(e.model.paint_order(), &[id, other]);
@@ -423,7 +426,10 @@ fn free_draw_continuation_closes_at_opposite_endpoint_and_never_merges() {
         let result = e.model.free_draw(id).unwrap();
         assert!(result.closed);
         assert_eq!(result.segment_modes.len(), result.vertices.len());
-        assert_eq!(preview.path_commands, result.path_commands());
+        assert_eq!(
+            preview.geometry.flattened_commands(),
+            result.path_commands()
+        );
         pointer(&mut e, v, PointerEventType::Move, to, false);
         assert_eq!(marker(&e, v), None);
     }

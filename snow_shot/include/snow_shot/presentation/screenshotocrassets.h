@@ -11,10 +11,6 @@ enum class ScreenshotOcrModelType {
     ExtraSmall,
     Small,
     Medium,
-    SmallV5,
-    MediumV5,
-    SmallV4,
-    MediumV4,
 };
 
 [[nodiscard]] QString screenshotOcrModelTypeValue(ScreenshotOcrModelType type);
@@ -46,7 +42,6 @@ struct ScreenshotOcrResolvedAssets {
     QString detectorModelPath;
     QString recognizerModelPath;
     QString dictionaryPath;
-    QString stateDirectory;
     bool offline = false;
 
     [[nodiscard]] bool valid() const;

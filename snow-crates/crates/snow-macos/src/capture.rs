@@ -238,6 +238,9 @@ pub(crate) fn prepare_with(
             .byte_len(8)
             .map_err(|e| MacError::InvalidConfig(e.to_string()))?;
         let config = SCStreamConfiguration::new();
+        if !snow_core::raster_admission::allows(output.width, output.height) {
+            return Err(MacError::InvalidConfig("raster admission rejected".into()));
+        }
         config.setWidth(output.width as usize);
         config.setHeight(output.height as usize);
         config.setQueueDepth(3);

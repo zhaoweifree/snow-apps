@@ -3,6 +3,7 @@
 #include "snow_shot/presentation/screenrecordingshortcutcontroller.h"
 #include "snow_shot/presentation/screenrecordingtoolbarwindow.h"
 #include "snow_shot/presentation/screenshotgeometry.h"
+#include "snow_shot/presentation/screenshottoolpalettehost.h"
 #include "snow_shot/presentation/screenshottoolbarlayoutmodel.h"
 #include "snow_shot/storage/applicationstorage.h"
 #include "snow_shot/storage/settingsadapters.h"
@@ -19,7 +20,10 @@
 #include <QLineEdit>
 #include <QLayout>
 #include <QMouseEvent>
+#include <QScopeGuard>
+#include <QScreen>
 #include <QTemporaryDir>
+#include <QTimer>
 
 #ifdef Q_OS_MACOS
 #import <AppKit/AppKit.h>
@@ -64,6 +68,14 @@ class ScreenRecordingAreaWindowTestAccess {
   public:
     static QByteArray history(const ScreenRecordingAreaWindow& area) {
         return area.m_canvasRuntime->serializeDocumentHistory();
+    }
+};
+
+class ScreenRecordingToolbarWindowTestAccess {
+  public:
+    static void cursor(ScreenRecordingToolbarWindow& toolbar, const QPoint& position) {
+        toolbar.m_autoHideCursorPositionOverride = position;
+        toolbar.refreshAutoHideControl();
     }
 };
 
@@ -542,6 +554,138 @@ void recordingControlShortcutsFollowButtonsAndSettings() {
     require(settings.setAllShortcutsAtomic(defaults), "recording defaults must be restorable");
 }
 
+void autoHiddenRecordingToolbarRetainsAreaShortcuts() {
+    namespace storage = snow_shot::storage;
+    namespace layout = snow_shot::presentation::toolbar_layout;
+    const storage::RecordingSettings recording;
+    const storage::ScreenshotToolbarSettings toolbarSettings;
+    const storage::DrawingShortcutSettings drawing;
+    const storage::ScreenRecordingShortcutSettings shortcutsSettings;
+    constexpr auto drawingKind = storage::ScreenshotToolbarLayoutKind::DrawingTools;
+    constexpr auto actionKind = storage::ScreenshotToolbarLayoutKind::RecordingActionTools;
+    const bool savedAutoHide = recording.autoHideToolbar();
+    const auto savedDrawing = toolbarSettings.layout(drawingKind);
+    const auto savedActions = toolbarSettings.layout(actionKind);
+    const auto savedShapeShortcut = drawing.shape();
+    const auto savedRecordingShortcuts = shortcutsSettings.allShortcuts();
+    const auto restore = qScopeGuard([&] {
+        require(recording.setAutoHideToolbar(savedAutoHide) &&
+                    toolbarSettings.setLayout(drawingKind, savedDrawing) &&
+                    toolbarSettings.setLayout(actionKind, savedActions) &&
+                    drawing.setShape(savedShapeShortcut) &&
+                    shortcutsSettings.setAllShortcutsAtomic(savedRecordingShortcuts),
+                "restore auto-hidden toolbar shortcut fixture settings");
+    });
+    auto hiddenActions = layout::defaultOrder(actionKind);
+    hiddenActions.removeAll(QStringLiteral("start-stop"));
+    require(
+        recording.setAutoHideToolbar(true) &&
+            toolbarSettings.setLayout(drawingKind, {{}, layout::defaultOrder(drawingKind)}) &&
+            toolbarSettings.setLayout(actionKind,
+                                      {{{QStringLiteral("start-stop")}}, hiddenActions}) &&
+            drawing.setShape({QStringLiteral("F6")}) &&
+            shortcutsSettings.setShortcuts(QStringLiteral("toggle_recording"),
+                                           {QStringLiteral("F8")}) &&
+            shortcutsSettings.setShortcuts(QStringLiteral("end_recording"), {QStringLiteral("F9")}),
+        "configure compact recording controls and independent hidden-toolbar shortcuts");
+
+    ScreenRecordingAreaWindow area;
+    ScreenRecordingToolbarWindow toolbar;
+    QScreen* screen = QGuiApplication::primaryScreen();
+    require(screen != nullptr, "hidden-toolbar shortcut fixture requires a screen");
+    const QRect bounds = screen->geometry();
+    const QRect logicalRegion(bounds.topLeft() + QPoint(80, 80), QSize(320, 240));
+#ifdef Q_OS_MACOS
+    const QRect region = logicalRegion;
+#else
+    const QRect region = ScreenshotGeometryMapper::nativeRectForLogicalRect(
+        logicalRegion, bounds, ScreenshotGeometryMapper::physicalRectForScreen(*screen));
+#endif
+    area.setRecordingRegion(region);
+    area.setInputMode(ScreenRecordingAreaWindow::InputMode::Drawing);
+    toolbar.setTransientOwnerWindow(&area);
+    toolbar.setAutoHideControlOwner(&area);
+    toolbar.placeForRecordingRegion(region);
+    auto* palette = toolbar.palette();
+    int shapes = 0;
+    int pauses = 0;
+    int resumes = 0;
+    int closes = 0;
+    QObject::connect(palette, &ScreenshotToolPalette::shapeRequested, &area, [&] { ++shapes; });
+    QObject::connect(palette, &ScreenshotToolPalette::recordingPauseRequested, &area,
+                     [&] { ++pauses; });
+    QObject::connect(palette, &ScreenshotToolPalette::recordingResumeRequested, &area,
+                     [&] { ++resumes; });
+    QObject::connect(palette, &ScreenshotToolPalette::recordingCloseRequested, &area,
+                     [&] { ++closes; });
+    ScreenRecordingShortcutController shortcuts(area, toolbar);
+    palette->setRecordingState(ScreenshotToolPalette::RecordingState::Recording);
+    area.show();
+    toolbar.showWithoutActivating();
+    QCoreApplication::processEvents();
+
+    const QRect relativeRow = toolbar.paletteHost()->mainToolbarContentRect();
+    const QPoint dockedPosition(bounds.left(), bounds.top() + bounds.height() / 3);
+    toolbar.paletteHost()->dragStarted(toolbar.contentPosition() + relativeRow.center());
+    toolbar.moveContentTo(dockedPosition - relativeRow.topLeft());
+    toolbar.paletteHost()->dragFinished(dockedPosition);
+    ScreenRecordingToolbarWindowTestAccess::cursor(toolbar,
+                                                   bounds.bottomRight() + QPoint(100, 100));
+    auto* retreat = toolbar.findChild<QTimer*>(QStringLiteral("recordingToolbarRetreatTimer"));
+    require(retreat != nullptr && retreat->isActive(),
+            "an unhovered docked recording toolbar must schedule retreat");
+    retreat->stop();
+    require(QMetaObject::invokeMethod(retreat, "timeout", Qt::DirectConnection),
+            "hidden-toolbar shortcut fixture can expire retreat deterministically");
+    require(!toolbar.isVisible() && toolbar.autoHideControlWindow()->isVisible() &&
+                toolbar.recordingUiPresented(),
+            "the toolbar must be auto-hidden while its recording UI remains presented");
+
+    for (QWidget* receiver : {static_cast<QWidget*>(&area), static_cast<QWidget*>(area.canvas())}) {
+        focus(*receiver);
+        palette->clearActiveTool();
+        const int beforeShapes = shapes;
+        press(*receiver, Qt::Key_F6);
+        require(shapes == beforeShapes + 1 && !toolbar.isVisible(),
+                "drawing shortcuts must activate exactly once from the area while auto-hidden");
+        palette->setRecordingState(ScreenshotToolPalette::RecordingState::Recording);
+        const int beforePauses = pauses;
+        press(*receiver, Qt::Key_F8);
+        require(pauses == beforePauses + 1 && !toolbar.isVisible(),
+                "recording pause must remain available from both area surfaces while auto-hidden");
+        palette->setRecordingState(ScreenshotToolPalette::RecordingState::Paused);
+        const int beforeResumes = resumes;
+        press(*receiver, Qt::Key_F8);
+        require(resumes == beforeResumes + 1 && !toolbar.isVisible(),
+                "recording resume must remain available from both area surfaces while auto-hidden");
+        const int beforeCloses = closes;
+        press(*receiver, Qt::Key_F9);
+        require(closes == beforeCloses + 1,
+                "recording close must dispatch once on release while its toolbar is auto-hidden");
+    }
+
+    const auto totals = [&] { return std::array{shapes, pauses, resumes, closes}; };
+    const auto before = totals();
+    toolbar.hide();
+    require(!toolbar.recordingUiPresented() && !toolbar.autoHideControlWindow()->isVisible(),
+            "explicit dismissal must retire the auto-hidden toolbar and its control");
+    for (const Qt::Key key : {Qt::Key_F6, Qt::Key_F8, Qt::Key_F9})
+        press(area, key);
+    require(totals() == before,
+            "a dismissed recording UI must reject the same area-scoped shortcuts");
+    toolbar.showWithoutActivating();
+    toolbar.beginRegionInteraction();
+    for (const Qt::Key key : {Qt::Key_F6, Qt::Key_F8, Qt::Key_F9})
+        press(area, key);
+    require(totals() == before && !toolbar.recordingUiPresented(),
+            "region movement suppression must block recording shortcuts");
+    toolbar.endRegionInteraction(region);
+    focus(area);
+    press(area, Qt::Key_F9);
+    require(closes == before[3] + 1,
+            "finishing region interaction must restore the recording shortcut scope");
+}
+
 void hiddenRecordingToolsRetainShortcuts() {
     namespace storage = snow_shot::storage;
     const storage::ScreenshotToolbarSettings settings;
@@ -947,6 +1091,11 @@ int main(int argc, char* argv[]) {
     auto& storage = snow_shot::storage::ApplicationStorage::instance();
     require(storage.initialize({executableDirectory, temporary.path(), 60000}).success,
             "isolated recording shortcut settings must initialize");
+    if (app.arguments().contains(QStringLiteral("--auto-hide-shortcuts-only"))) {
+        autoHiddenRecordingToolbarRetainsAreaShortcuts();
+        storage.shutdown();
+        return 0;
+    }
     if (app.arguments().contains(QStringLiteral("--hidden-tools-only"))) {
         hiddenRecordingToolsRetainShortcuts();
         storage.shutdown();
@@ -988,6 +1137,7 @@ int main(int argc, char* argv[]) {
     recordingSelectionEditsAnnotationsAndPreservesPassThrough();
     recordingControlShortcutsFollowButtonsAndSettings();
     recordingShortcutsFollowBothWindowsAndConfiguredKeys();
+    autoHiddenRecordingToolbarRetainsAreaShortcuts();
     storage.shutdown();
     return 0;
 }

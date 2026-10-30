@@ -9,6 +9,7 @@
 #include "icon_renderer.h"
 #include "widgets/button.h"
 #include "widgets/navigation_menu.h"
+#include "widgets/window_size_icon.h"
 
 #include <algorithm>
 #include <cmath>
@@ -22,7 +23,6 @@
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <QPalette>
 #include <QLabel>
 #ifdef Q_OS_WIN
@@ -198,26 +198,8 @@ class WindowControlButton final : public QAbstractButton {
             painter.fillRect(QRectF(0, (extent - stroke) / 2, extent, stroke), foreground);
             break;
         case WindowButtonKind::Maximize:
-            painter.setRenderHint(QPainter::Antialiasing);
-            if (m_maximized) {
-                const int offset = std::max(stroke + 1, qRound(2 * scale));
-                QPainterPath back;
-                back.moveTo(offset + inset, offset - stroke);
-                back.lineTo(offset + inset, inset + 1);
-                back.quadTo(offset + inset, inset, offset + inset + 1, inset);
-                back.lineTo(extent - inset - 1, inset);
-                back.quadTo(extent - inset, inset, extent - inset, inset + 1);
-                back.lineTo(extent - inset, extent - offset - inset - 1);
-                back.quadTo(extent - inset, extent - offset - inset, extent - inset - 1,
-                            extent - offset - inset);
-                back.lineTo(extent - offset + stroke, extent - offset - inset);
-                painter.drawPath(back);
-                painter.drawRoundedRect(QRectF(inset, offset + inset, extent - offset - stroke,
-                                               extent - offset - stroke),
-                                        1, 1);
-            } else {
-                painter.drawRoundedRect(box, 1, 1);
-            }
+            adqt::widgets::paintWindowSizeIcon(
+                painter, extent, stroke, std::max(stroke + 1, qRound(2 * scale)), m_maximized);
             break;
         case WindowButtonKind::Close:
             painter.setRenderHint(QPainter::Antialiasing);

@@ -3,14 +3,14 @@ if(NOT TARGET snow_selected_text_c)
         # Fat LTO can internalize runtime functions in one archive while another
         # archive still needs the original std object. Compile Full's Rust code
         # together so Rust resolves its runtime once. Separate Cargo outputs
-        # keep Mini's default archive free of selected-text dependencies.
+        # keep Mini's default archive free of selected-text and language-detection dependencies.
         function(_snow_add_full_rust_bundle)
             set(SNOW_RUST_CARGO_TARGET_DIR "${SNOW_RUST_CARGO_TARGET_DIR}/full")
             snow_add_rust_static_library(snow_shot_full_rust_ffi_bundle
                 PACKAGE snow-shot-rust-ffi
                 MANIFEST_DIR "${SNOW_SHOT_CAPTURE_CRATES_DIR}/../snow_rust_ffi"
                 OUTPUT_NAME snow_shot_rust_ffi
-                FEATURES selected-text ${_snow_scrolling_perf_features}
+                FEATURES selected-text language-detection ${_snow_scrolling_perf_features}
                 STRIP_MSVC_DIRECTIVES)
         endfunction()
         _snow_add_full_rust_bundle()
@@ -28,6 +28,7 @@ if(NOT TARGET snow_selected_text_c)
             PACKAGE snow-selected-text-c
             MANIFEST_DIR "${SNOW_SHOT_CAPTURE_CRATES_DIR}"
             OUTPUT_NAME snow_selected_text_c
+            FEATURES language-detection
             STRIP_MSVC_DIRECTIVES)
     endif()
     target_include_directories(snow_selected_text_c INTERFACE
@@ -43,5 +44,22 @@ if(NOT TARGET snow_selected_text_c)
             "${SNOW_SELECTED_TEXT_APPLICATION_SERVICES_FRAMEWORK}"
             "${SNOW_SELECTED_TEXT_CORE_FOUNDATION_FRAMEWORK}"
             "${SNOW_SELECTED_TEXT_CORE_GRAPHICS_FRAMEWORK}")
+    endif()
+endif()
+
+if(NOT TARGET snow_language_detection_c)
+    add_library(snow_language_detection_c INTERFACE)
+    target_include_directories(snow_language_detection_c INTERFACE
+        "${SNOW_SHOT_CAPTURE_CRATES_DIR}/crates/snow-language-detection-c/include")
+    if(TARGET snow_shot_full_rust_ffi_bundle)
+        target_link_libraries(snow_language_detection_c INTERFACE
+            snow_shot_full_rust_ffi_bundle)
+        cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+            CALL snow_select_rust_bundle_consumers
+                snow_language_detection_c snow_shot_full_rust_ffi_bundle)
+    else()
+        # The standalone selected-text archive re-exports detection too, avoiding
+        # a second Rust runtime archive for these two Full-only capabilities.
+        target_link_libraries(snow_language_detection_c INTERFACE snow_selected_text_c)
     endif()
 endif()

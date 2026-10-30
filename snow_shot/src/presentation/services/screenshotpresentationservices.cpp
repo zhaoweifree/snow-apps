@@ -65,22 +65,29 @@ selectionVisualState(const ScreenshotPresentationServicesContext& context, bool 
     visualState.present = visualState.bounds.isValid() && !visualState.bounds.isEmpty();
     visualState.handlesVisible = !context.interaction.intelligentSelecting() &&
                                  context.interaction.selectionHandlesVisible() &&
-                                 context.selection.rectangular();
+                                 context.selection.resizable();
+    visualState.backgroundOpacityPercent = context.selection.backgroundOpacityPercent();
     visualState.cornerRadius = context.selection.cornerRadius();
     visualState.shadowWidth = context.selection.shadowWidth();
     visualState.shadowColor = context.selection.shadowColor();
     visualState.toolbarHovered = toolbarHovered;
     visualState.effectEditorsVisible =
         context.interaction.movingSelection() && context.interaction.moveToolActive() &&
-        context.selection.rectangular() && context.selection.cornerRadiusApplicable() &&
+        context.selection.resizable() && context.selection.cornerRadiusApplicable() &&
         !toolbarHovered;
     visualState.hoveredEffectHandle = context.interaction.hoveredEffectHandle();
     if (context.interaction.effectGesture())
         visualState.activeEffectHandle = context.interaction.effectGesture()->handle;
     visualState.effectPreviewVisible =
-        visualState.effectEditorsVisible &&
-        (visualState.hoveredEffectHandle == ScreenshotSelectionEffectHandle::Shadow ||
-         visualState.activeEffectHandle == ScreenshotSelectionEffectHandle::Shadow);
+        context.interaction.selectionBackgroundPreviewVisible() ||
+        (visualState.effectEditorsVisible &&
+         (visualState.hoveredEffectHandle == ScreenshotSelectionEffectHandle::Shadow ||
+          visualState.activeEffectHandle == ScreenshotSelectionEffectHandle::Shadow));
+    if (context.interaction.moveToolActive()) {
+        visualState.highlightedRegion = context.selection.highlightedRegion();
+        visualState.stationaryRegions = context.selection.stationaryRegionsDuringMove();
+        visualState.snapGuides = context.selection.moveSnapGuides();
+    }
     visualState.draftPath = context.selection.draftPath();
     visualState.draftVertices = context.selection.draftVertices();
     if (shaped) {
@@ -149,6 +156,7 @@ struct ScreenshotPresentationServices::State {
     bool presentationDirty = false;
     bool semanticDirty = false;
     bool selectionDragDirty = false;
+    bool selectionEffectsDirty = false;
     bool geometryDirty = false;
     bool pointerDirty = false;
     bool pointerKnown = false;
@@ -165,8 +173,8 @@ ScreenshotPresentationServices::ScreenshotPresentationServices(
         [this] {
             const qint64 now = nowNanoseconds();
             if (!m_state->semanticDirty && !m_state->selectionDragDirty &&
-                !m_state->geometryDirty && !m_state->pointerDirty &&
-                m_state->colorPickerSource == ColorPickerSource::None &&
+                !m_state->selectionEffectsDirty && !m_state->geometryDirty &&
+                !m_state->pointerDirty && m_state->colorPickerSource == ColorPickerSource::None &&
                 !m_smartSelectionTransition.isRunning()) {
                 m_state->scheduler->cancelDeadline();
                 return;
@@ -243,7 +251,8 @@ void ScreenshotPresentationServices::setUiPreferences(const ScreenshotUiPreferen
         return;
     m_uiPreferences = normalized;
     m_state->preferencesDirty = true;
-    m_smartSelectionTransition.setEnabled(m_uiPreferences.selectionTransitionAnimationEnabled);
+    m_smartSelectionTransition.setAnimation(m_uiPreferences.selectionTransitionAnimation,
+                                            nowNanoseconds() / 1000000);
     updateOverlayState();
 }
 
@@ -315,6 +324,7 @@ void ScreenshotPresentationServices::resetPresentation() {
     m_state->presentationDirty = false;
     m_state->semanticDirty = false;
     m_state->selectionDragDirty = false;
+    m_state->selectionEffectsDirty = false;
     m_state->geometryDirty = false;
     m_state->pointerDirty = false;
     m_state->pointerKnown = false;
@@ -353,8 +363,24 @@ void ScreenshotPresentationServices::requestSelectionDragPresentation() {
     scheduleFrame();
 }
 
+void ScreenshotPresentationServices::requestSelectionEffectPresentation() {
+    if (!m_state->initialized || m_state->sessionId != m_context.captureState.sessionId ||
+        m_context.interaction.dragging() || m_context.interaction.inactive() ||
+        m_context.interaction.intelligentSelecting() ||
+        m_context.interaction.mode() != m_state->hints.captureMode ||
+        m_context.interaction.dragMode() != m_state->dragMode ||
+        presentationLifecycle(m_context) != m_state->lifecycle || m_state->preferencesDirty ||
+        m_state->presentationDirty) {
+        updateOverlayState();
+        return;
+    }
+    m_state->selectionEffectsDirty = true;
+    scheduleFrame();
+}
+
 ScreenshotPresentationServices::Preparation ScreenshotPresentationServices::prepareOverlayState() {
     m_state->selectionDragDirty = false;
+    m_state->selectionEffectsDirty = false;
     const bool newSession =
         !m_state->initialized || m_state->sessionId != m_context.captureState.sessionId;
     if (newSession)
@@ -381,6 +407,9 @@ ScreenshotPresentationServices::Preparation ScreenshotPresentationServices::prep
                                         m_context.quickSelectionDisabledTools};
     hints.configuredShortcuts = m_configuredShortcuts;
     hints.smartSelectionEnabled = m_context.intelligentSelection.smartSelectionEnabled();
+    hints.multiRegionEditing = m_context.selection.multiRegionEditing();
+    hints.regionOperationActive = m_context.selection.regionOperationActive();
+    hints.regionConstructionActive = m_context.selection.constructionActive();
     const bool firstSelection =
         !m_state->toolbar.selectionCanvas.isValid() && toolbar.selectionCanvas.isValid();
     const bool modeChanged =
@@ -527,7 +556,8 @@ void ScreenshotPresentationServices::flushPendingFrame() {
         resetPresentation();
         return;
     }
-    if (m_state->selectionDragDirty || m_state->hints.captureMode != m_context.interaction.mode() ||
+    if (m_state->selectionDragDirty || m_state->selectionEffectsDirty ||
+        m_state->hints.captureMode != m_context.interaction.mode() ||
         m_state->dragMode != m_context.interaction.dragMode() ||
         m_state->lifecycle != presentationLifecycle(m_context)) {
         (void)prepareOverlayState();
@@ -590,8 +620,9 @@ void ScreenshotPresentationServices::flushPendingFrame() {
     m_state->frameClock.advancePast(nowNanoseconds());
     if (m_context.interaction.inactive()) {
         m_state->scheduler->stop();
-    } else if (m_state->semanticDirty || m_state->selectionDragDirty || m_state->geometryDirty ||
-               m_state->pointerDirty || m_state->colorPickerSource != ColorPickerSource::None ||
+    } else if (m_state->semanticDirty || m_state->selectionDragDirty ||
+               m_state->selectionEffectsDirty || m_state->geometryDirty || m_state->pointerDirty ||
+               m_state->colorPickerSource != ColorPickerSource::None ||
                m_smartSelectionTransition.isRunning()) {
         scheduleFrame();
     } else {

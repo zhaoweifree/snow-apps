@@ -42,3 +42,6 @@ pub use video_index::{
 };
 
 pub mod media;
+
+#[doc(hidden)]
+pub mod video_quality;

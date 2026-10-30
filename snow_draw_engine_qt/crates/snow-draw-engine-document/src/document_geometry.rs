@@ -1,8 +1,8 @@
 use crate::{
     ElementData, ElementRecord, FillStyle, FilterData, PenFilterData, RectangleData,
     SerialNumberData, SerialNumberTextConnection, SerialNumberType, StrokeStyle, TextData,
-    TextHorizontalAlign, TextLayoutRect, TextLayoutSize, TextVerticalAlign, arrow_bounds,
-    arrow_is_degenerate, validate_arrow, validate_free_draw,
+    TextHorizontalAlign, TextLayoutRect, TextLayoutSize, TextVerticalAlign, arrow_is_degenerate,
+    validate_arrow, validate_free_draw,
 };
 use snow_draw_engine_core::{
     ColorRgba8, CornerRadii, DrawRect, ErrorCode, Point, rotated_rect_extents,
@@ -21,6 +21,11 @@ const TEXT_BACKGROUND_HORIZONTAL_PADDING_PER_LINE_HEIGHT: f64 = 0.32;
 const TEXT_BACKGROUND_VERTICAL_PADDING_PER_LINE_HEIGHT: f64 = 0.1;
 
 pub fn validate_rectangle(rect: &RectangleData) -> Result<(), ErrorCode> {
+    if rect.text_element_id.is_some()
+        && rect.rectangle_kind != crate::RectangleElementKind::Rectangle
+    {
+        return Err(ErrorCode::InvalidArgument);
+    }
     let scalar_fields = [
         rect.center.x,
         rect.center.y,
@@ -108,6 +113,26 @@ fn scale_constraint(limit: f64, sum: f64) -> f64 {
     }
 }
 
+/// Conservative ink bounds; logical frames and snapping continue using rect_bounds.
+pub fn rect_paint_bounds(rect: &RectangleData) -> DrawRect {
+    let bounds = rect_bounds(rect);
+    let outset = rectangle_stroke_rendering_outset(rect);
+    DrawRect::new(
+        bounds.min_x - outset,
+        bounds.min_y - outset,
+        bounds.max_x + outset,
+        bounds.max_y + outset,
+    )
+}
+
+fn rectangle_stroke_rendering_outset(rect: &RectangleData) -> f64 {
+    if rect.is_highlight() || rect.is_spotlight() || rect.stroke.a == 0 || rect.stroke_width <= 0.0
+    {
+        return 0.0;
+    }
+    snow_draw_engine_core::arrow::stroke_rendering_outset(rect.stroke_rendering_style, f64::MAX)
+}
+
 pub fn rect_bounds(rect: &RectangleData) -> DrawRect {
     let (extent_x, extent_y) =
         rotated_rect_extents(rect.width, rect.height, rect.rotation, rect.stroke_width);
@@ -176,6 +201,8 @@ impl Default for SerialNumberData {
             font_family: None,
             stroke_width: 2.0,
             stroke_style: StrokeStyle::Solid,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             opacity: 1.0,
             text_element_id: None,
         }
@@ -372,6 +399,7 @@ pub struct TextPaintGeometry {
     pub has_text: bool,
     pub font_size: f64,
     pub fill: ColorRgba8,
+    pub fill_style: FillStyle,
     pub stroke: ColorRgba8,
     pub stroke_width: f64,
     pub text_ink_reserve: f64,
@@ -392,6 +420,7 @@ impl TextPaintGeometry {
             has_text: !text.text.is_empty(),
             font_size: text.font_size,
             fill: text.fill,
+            fill_style: text.fill_style,
             stroke: text.stroke,
             stroke_width: text.stroke_width,
             text_ink_reserve: text.text_ink_reserve,
@@ -460,6 +489,154 @@ pub fn resolve_serial_number_text_connection(
         &SerialPaintGeometry::from_serial(serial),
         &TextPaintGeometry::from_text(text),
     )
+}
+
+pub fn resolve_shape_text_connection(
+    shape: &RectangleData,
+    text: &TextData,
+) -> Option<SerialNumberTextConnection> {
+    resolve_shape_paint_text_connection(shape, &TextPaintGeometry::from_text(text))
+}
+
+/// Resolve an external label against the actual rotated, stroked shape contour.
+/// The text attachment follows the same ink-box and underline rules as serial labels.
+pub fn resolve_shape_paint_text_connection(
+    shape: &RectangleData,
+    text: &TextPaintGeometry,
+) -> Option<SerialNumberTextConnection> {
+    if shape.rectangle_kind != crate::RectangleElementKind::Rectangle
+        || shape.stroke_width <= 0.0
+        || shape.width <= 0.0
+        || shape.height <= 0.0
+        || text.width <= 0.0
+        || text.height <= 0.0
+    {
+        return None;
+    }
+    let text_bounds = text_bounds_with_outset(text, 0.0, 0.0);
+    if draw_rect_width(text_bounds) <= 0.0 || draw_rect_height(text_bounds) <= 0.0 {
+        return None;
+    }
+    let attachment = serial_text_attachment(rect_bounds(shape), text_bounds, shape.center.x);
+    let dx = attachment.anchor.x - shape.center.x;
+    let dy = attachment.anchor.y - shape.center.y;
+    let distance = dx.hypot(dy);
+    let half_line_width = shape.stroke_width / 2.0;
+    if distance <= half_line_width {
+        return None;
+    }
+    let (sin, cos) = shape.rotation.sin_cos();
+    let ux = dx / distance;
+    let uy = dy / distance;
+    let local_x = ux * cos + uy * sin;
+    let local_y = -ux * sin + uy * cos;
+    let edge = shape_stroke_ray_edge_distance(shape, Point::new(local_x, local_y));
+    // The connector has a round cap; its painted end must clear the contour.
+    let start_offset = edge + SHAPE_CONNECTOR_GAP + half_line_width;
+    if distance <= start_offset + half_line_width {
+        return None;
+    }
+    Some(SerialNumberTextConnection {
+        start: Point::new(
+            shape.center.x + ux * start_offset,
+            shape.center.y + uy * start_offset,
+        ),
+        end: Point::new(
+            attachment.anchor.x - ux * half_line_width,
+            attachment.anchor.y - uy * half_line_width,
+        ),
+        text_baseline_start: attachment.text_baseline_start,
+        text_baseline_end: attachment.text_baseline_end,
+    })
+}
+
+fn ray_exit_distance(
+    direction: Point<f64>,
+    mut high: f64,
+    contains: impl Fn(Point<f64>) -> bool,
+) -> f64 {
+    let mut low = 0.0;
+    for _ in 0..48 {
+        let middle = f64::midpoint(low, high);
+        if contains(Point::new(direction.x * middle, direction.y * middle)) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    high
+}
+
+fn shape_stroke_ray_edge_distance(shape: &RectangleData, direction: Point<f64>) -> f64 {
+    use crate::HighlightShape;
+    let a = shape.width / 2.0;
+    let b = shape.height / 2.0;
+    let outset = shape.stroke_width / 2.0;
+    let radii = crate::normalize_shape_corner_radii(
+        shape.highlight_shape,
+        shape.width,
+        shape.height,
+        shape.corner_radii,
+    );
+    if shape.highlight_shape == HighlightShape::Ellipse
+        || shape.stroke_rendering_style
+            != snow_draw_engine_core::arrow::StrokeRenderingStyle::Architect
+    {
+        // Smooth ellipses and the sketch renderer's round joins use a normal
+        // offset, unlike the architect renderer's sharp mitered corners.
+        return ray_exit_distance(direction, a.hypot(b) + outset, |point| {
+            crate::magnifier::contour_distance(shape.highlight_shape, a, b, radii, point.x, point.y)
+                <= outset
+        });
+    }
+    let expand_radius = |radius: f64| if radius > 0.0 { radius + outset } else { 0.0 };
+    let outer_radii = CornerRadii {
+        top_left: expand_radius(radii.top_left),
+        top_right: expand_radius(radii.top_right),
+        bottom_right: expand_radius(radii.bottom_right),
+        bottom_left: expand_radius(radii.bottom_left),
+    };
+    if shape.highlight_shape == HighlightShape::Rectangle {
+        let outer_a = a + outset;
+        let outer_b = b + outset;
+        return ray_exit_distance(direction, outer_a.hypot(outer_b), |point| {
+            crate::magnifier::contour_distance(
+                HighlightShape::Rectangle,
+                outer_a,
+                outer_b,
+                outer_radii,
+                point.x,
+                point.y,
+            ) == 0.0
+        });
+    }
+
+    // Offsetting a rhombus preserves its edge directions. Existing circular
+    // corners grow around the same centers; zero-radius tips stay sharp.
+    let edge = a.hypot(b);
+    let outer_a = a + outset * (edge / b);
+    let outer_b = b + outset * (edge / a);
+    let contour = crate::RoundedDiamond::new(outer_a * 2.0, outer_b * 2.0, outer_radii);
+    // Qt::MiterJoin limits extension along each offset edge to two pen widths.
+    // Acute, unrounded tips are clipped by the line between those endpoints.
+    let tip_limit = |half_size: f64, sine: f64, cosine: f64, radius: f64| {
+        if radius > 0.0 || cosine <= 4.0 * sine {
+            half_size + outset / sine
+        } else {
+            half_size + outset * (sine + 4.0 * cosine)
+        }
+    };
+    let left = tip_limit(a, b / edge, a / edge, radii.bottom_left);
+    let right = tip_limit(a, b / edge, a / edge, radii.top_right);
+    let top = tip_limit(b, a / edge, b / edge, radii.top_left);
+    let bottom = tip_limit(b, a / edge, b / edge, radii.bottom_right);
+    ray_exit_distance(direction, left.max(right).hypot(top.max(bottom)), |point| {
+        point.x >= -left
+            && point.x <= right
+            && point.y >= -top
+            && point.y <= bottom
+            && contour.contains(point)
+    })
 }
 
 pub fn resolve_serial_paint_text_connection(
@@ -610,7 +787,7 @@ fn serial_text_attachment(
 /// `snow_scene_text_fill_outset` instead of measuring its own padding. One
 /// definition, so the painted pill and the dirty regions cannot drift apart.
 pub fn text_fill_outset(text: &TextPaintGeometry) -> (f64, f64) {
-    if text.fill.a != 0 && text.font_size > 0.0 {
+    if text.fill_style.is_visible(text.fill) && text.font_size > 0.0 {
         let line_height = text_line_height(text.font_size);
         (
             line_height * TEXT_BACKGROUND_HORIZONTAL_PADDING_PER_LINE_HEIGHT,
@@ -679,8 +856,34 @@ pub fn serial_number_bounds(serial: &SerialNumberData) -> DrawRect {
     serial_paint_bounds(&SerialPaintGeometry::from_serial(serial))
 }
 
+fn serial_number_stroke_rendering_outset(serial: &SerialNumberData) -> f64 {
+    if !matches!(
+        serial.serial_number_type,
+        SerialNumberType::OutlinedCircle | SerialNumberType::OutlinedSquare
+    ) || serial.color.a == 0
+        || resolve_serial_number_stroke_width(serial) <= 0.0
+    {
+        return 0.0;
+    }
+    snow_draw_engine_core::arrow::stroke_rendering_outset(serial.stroke_rendering_style, f64::MAX)
+}
+
+pub fn serial_number_paint_bounds(serial: &SerialNumberData) -> DrawRect {
+    let bounds = serial_number_bounds(serial);
+    let outset = serial_number_stroke_rendering_outset(serial);
+    DrawRect::new(
+        bounds.min_x - outset,
+        bounds.min_y - outset,
+        bounds.max_x + outset,
+        bounds.max_y + outset,
+    )
+}
+
 pub fn serial_number_rect_proxy(serial: &SerialNumberData) -> RectangleData {
     RectangleData {
+        text_element_id: None,
+        stroke_rendering_seed: 0,
+        stroke_rendering_style: Default::default(),
         rectangle_kind: crate::RectangleElementKind::Rectangle,
         highlight_shape: crate::HighlightShape::Rectangle,
         center: serial.center,
@@ -825,7 +1028,9 @@ pub fn serial_number_hit_test(
     if radius <= 0.0 {
         return false;
     }
-    let outset = resolve_serial_number_stroke_width(serial) / 2.0 + hit_tolerance.max(0.0);
+    let outset = resolve_serial_number_stroke_width(serial) / 2.0
+        + hit_tolerance.max(0.0)
+        + serial_number_stroke_rendering_outset(serial);
     let effective_radius = radius + outset;
     if effective_radius <= 0.0 {
         return false;
@@ -936,6 +1141,7 @@ fn sanitize_positive(value: f64, fallback: f64) -> f64 {
 }
 
 pub fn rectangle_hit_test(rect: &RectangleData, point: Point<f64>, hit_tolerance: f64) -> bool {
+    let hit_tolerance = hit_tolerance.max(0.0) + rectangle_stroke_rendering_outset(rect);
     if rect.highlight_shape == crate::HighlightShape::Diamond
         && !rect.is_highlight()
         && [
@@ -952,7 +1158,7 @@ pub fn rectangle_hit_test(rect: &RectangleData, point: Point<f64>, hit_tolerance
         if rect.is_spotlight() {
             return contour.exterior_distance(local) <= hit_tolerance.max(0.0);
         }
-        return (rect.fill.a != 0 && contour.contains(local))
+        return (rect.fill_style.is_visible(rect.fill) && contour.contains(local))
             || (rect.stroke.a != 0
                 && rect.stroke_width > 0.0
                 && contour.outline_distance(local)
@@ -1011,7 +1217,7 @@ pub fn rectangle_hit_test(rect: &RectangleData, point: Point<f64>, hit_tolerance
                 crate::HighlightShape::Rectangle => unreachable!(),
             }
         };
-        if rect.fill.a != 0 && contains(0.0) {
+        if rect.fill_style.is_visible(rect.fill) && contains(0.0) {
             return true;
         }
         if rect.stroke.a == 0 || rect.stroke_width <= 0.0 {
@@ -1020,13 +1226,16 @@ pub fn rectangle_hit_test(rect: &RectangleData, point: Point<f64>, hit_tolerance
         let band = rect.stroke_width / 2.0 + hit_tolerance;
         return contains(band) && !contains(-band);
     }
-    let fill_hit = rect.fill.a != 0
+    let fill_hit = rect.fill_style.is_visible(rect.fill)
         && rounded_rect_contains_local_point(rect.width, rect.height, rect.corner_radii, local);
     fill_hit || rectangle_stroke_hit_test(rect, local, hit_tolerance)
 }
 
 pub fn filter_rect_proxy(filter: &FilterData) -> RectangleData {
     RectangleData {
+        text_element_id: None,
+        stroke_rendering_seed: 0,
+        stroke_rendering_style: Default::default(),
         rectangle_kind: crate::RectangleElementKind::Rectangle,
         highlight_shape: crate::HighlightShape::Rectangle,
         center: filter.center,
@@ -1087,6 +1296,9 @@ pub fn pen_filter_bounds(filter: &PenFilterData) -> DrawRect {
 /// the boundary of the painted outer contour, including the stroke width.
 pub fn pen_filter_rect_proxy(filter: &PenFilterData) -> RectangleData {
     RectangleData {
+        text_element_id: None,
+        stroke_rendering_seed: 0,
+        stroke_rendering_style: Default::default(),
         rectangle_kind: crate::RectangleElementKind::Rectangle,
         highlight_shape: crate::HighlightShape::Rectangle,
         center: filter.center(),
@@ -1336,23 +1548,190 @@ pub(crate) fn element_visible_bounds(element: &ElementRecord) -> Option<DrawRect
 
     match &element.data {
         ElementData::Rectangle(rect) if rect.width > 0.0 && rect.height > 0.0 => {
-            Some(rect_bounds(rect))
+            Some(rect_paint_bounds(rect))
         }
         ElementData::Magnifier(value) => Some(crate::magnifier_bounds(value)),
-        ElementData::Arrow(arrow) if !arrow_is_degenerate(arrow) => Some(arrow_bounds(arrow)),
+        ElementData::Arrow(arrow) if !arrow_is_degenerate(arrow) => {
+            Some(crate::arrow_paint_bounds(arrow))
+        }
         ElementData::FreeDraw(free_draw) => Some(crate::free_draw_bounds(free_draw)),
         ElementData::Text(text) if text.width() > 0.0 && text.height() > 0.0 => {
             Some(text_bounds(text))
         }
         ElementData::SerialNumber(serial) if serial.diameter > 0.0 => {
-            Some(serial_number_bounds(serial))
+            Some(serial_number_paint_bounds(serial))
         }
         _ => None,
     }
 }
 
 #[cfg(test)]
+mod shape_text_connection_tests {
+    use super::*;
+
+    #[test]
+    fn shape_text_connection_clears_sharp_miters_and_round_line_caps() {
+        let mut shape = crate::MagnifierData::default().magnified_rect();
+        shape.center = Point::new(0.0, 0.0);
+        shape.width = 100.0;
+        shape.height = 100.0;
+        shape.corner_radii = CornerRadii::default();
+        shape.stroke_width = 72.0;
+        let mut text = TextData {
+            center: Point::new(350.0, 285.0),
+            layout: TextLayoutSize::new(100.0, 30.0),
+            ..Default::default()
+        };
+        let connection = resolve_shape_text_connection(&shape, &text).unwrap();
+        let expected = 86.0 * std::f64::consts::SQRT_2 + 36.0 + SHAPE_CONNECTOR_GAP;
+        assert!((connection.start.x.hypot(connection.start.y) - expected).abs() < 1e-7);
+        shape.highlight_shape = crate::HighlightShape::Diamond;
+        text.center = Point::new(0.0, -300.0);
+        let connection = resolve_shape_text_connection(&shape, &text).unwrap();
+        let expected = 50.0 + 36.0 * std::f64::consts::SQRT_2 + 36.0 + SHAPE_CONNECTOR_GAP;
+        assert!((-connection.start.y - expected).abs() < 1e-7);
+    }
+
+    #[test]
+    fn shape_text_connection_tracks_rotated_stroked_contours_and_ink() {
+        for kind in [
+            crate::HighlightShape::Rectangle,
+            crate::HighlightShape::Ellipse,
+            crate::HighlightShape::Diamond,
+        ] {
+            for rotation in [0.0, 0.7] {
+                for radius in [0.0, 12.0] {
+                    let mut shape = crate::MagnifierData::default().magnified_rect();
+                    shape.center = Point::new(0.0, 0.0);
+                    shape.width = 100.0;
+                    shape.height = 60.0;
+                    shape.rotation = rotation;
+                    shape.stroke_width = 6.0;
+                    shape.highlight_shape = kind;
+                    shape.corner_radii = CornerRadii::splat(radius);
+                    let text = TextData {
+                        center: Point::new(180.0, 130.0),
+                        layout: TextLayoutSize::new(80.0, 24.0),
+                        text: "label".into(),
+                        ..TextData::default()
+                    };
+                    let connection = resolve_shape_text_connection(&shape, &text).unwrap();
+                    let length = connection.start.x.hypot(connection.start.y);
+                    let contour_scale = (length - SHAPE_CONNECTOR_GAP - 3.0) / length;
+                    let edge = Point::new(
+                        connection.start.x * contour_scale,
+                        connection.start.y * contour_scale,
+                    );
+                    let (sin, cos) = rotation.sin_cos();
+                    let exterior = crate::magnifier::contour_distance(
+                        kind,
+                        50.0,
+                        30.0,
+                        crate::normalize_shape_corner_radii(kind, 100.0, 60.0, shape.corner_radii),
+                        edge.x * cos + edge.y * sin,
+                        -edge.x * sin + edge.y * cos,
+                    );
+                    assert!(
+                        (exterior - 3.0).abs() < 1e-7,
+                        "{kind:?} {rotation} {radius}"
+                    );
+                    assert!(connection.text_baseline_start.is_some());
+                    let mut filled = text.clone();
+                    filled.fill = ColorRgba8 {
+                        r: 0,
+                        g: 255,
+                        b: 0,
+                        a: 255,
+                    };
+                    filled.stroke_width = 20.0;
+                    assert_eq!(
+                        resolve_shape_text_connection(&shape, &filled),
+                        Some(connection)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shape_text_connection_uses_top_edge_below_owner_and_omits_overlap() {
+        let mut shape = crate::MagnifierData::default().magnified_rect();
+        shape.center = Point::new(0.0, 0.0);
+        shape.width = 100.0;
+        shape.height = 60.0;
+        shape.stroke_width = 4.0;
+        let mut text = TextData {
+            center: Point::new(0.0, 120.0),
+            layout: TextLayoutSize::new(80.0, 24.0),
+            ..TextData::default()
+        };
+        let connection = resolve_shape_text_connection(&shape, &text).unwrap();
+        assert!((connection.start.y - 42.0).abs() < 1e-7);
+        assert_eq!(connection.end, Point::new(0.0, 106.0));
+        assert!(connection.text_baseline_start.is_none());
+        text.center = shape.center;
+        assert!(resolve_shape_text_connection(&shape, &text).is_none());
+        shape.stroke_width = 0.0;
+        assert!(resolve_shape_text_connection(&shape, &text).is_none());
+    }
+}
+
+#[cfg(test)]
 mod tests {
+
+    #[test]
+    fn border_fill_has_no_interior_hits_or_text_background_padding() {
+        let color = ColorRgba8 {
+            r: 255,
+            g: 204,
+            b: 199,
+            a: 255,
+        };
+        for shape in [
+            crate::HighlightShape::Rectangle,
+            crate::HighlightShape::Ellipse,
+            crate::HighlightShape::Diamond,
+        ] {
+            for radius in [0.0, 6.0] {
+                let mut rect = RectangleData {
+                    text_element_id: None,
+                    stroke_rendering_style: Default::default(),
+                    stroke_rendering_seed: 0,
+                    rectangle_kind: crate::RectangleElementKind::Rectangle,
+                    highlight_shape: shape,
+                    center: Point::default(),
+                    width: 100.0,
+                    height: 80.0,
+                    rotation: 0.0,
+                    fill: color,
+                    fill_style: FillStyle::Border,
+                    stroke: color,
+                    stroke_width: 2.0,
+                    stroke_style: StrokeStyle::Solid,
+                    corner_radii: CornerRadii::splat(radius),
+                    opacity: 1.0,
+                };
+                assert!(!rectangle_hit_test(&rect, Point::default(), 0.0));
+                let edge = if shape == crate::HighlightShape::Diamond {
+                    Point::new(25.0, -20.0)
+                } else {
+                    Point::new(0.0, -40.0)
+                };
+                assert!(rectangle_hit_test(&rect, edge, 0.0));
+                rect.fill_style = FillStyle::Solid;
+                assert!(rectangle_hit_test(&rect, Point::default(), 0.0));
+            }
+        }
+        let mut text = centered_text_geometry(0.0, 0.0, 100.0, 40.0);
+        assert!(text_fill_outset(&text).0 > 0.0);
+        text.fill_style = FillStyle::Border;
+        assert_eq!(text_fill_outset(&text), (0.0, 0.0));
+        let bounds = text_paint_bounds(&text);
+        text.fill_style = FillStyle::Solid;
+        text.fill.a = 0;
+        assert_eq!(text_paint_bounds(&text), bounds);
+    }
+
     use super::*;
     use crate::InkBox;
 
@@ -1382,6 +1761,7 @@ mod tests {
                 b: 0xff,
                 a: 0xff,
             },
+            fill_style: FillStyle::Solid,
             stroke: ColorRgba8::default(),
             stroke_width: 0.0,
         }
@@ -2175,6 +2555,9 @@ mod tests {
                 ..SerialNumberData::default()
             },
             RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 rectangle_kind: crate::RectangleElementKind::Rectangle,
                 highlight_shape: crate::HighlightShape::Rectangle,
                 center: Point::default(),
@@ -2204,6 +2587,9 @@ mod tests {
                 ..SerialNumberData::default()
             },
             RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 rectangle_kind: crate::RectangleElementKind::Rectangle,
                 highlight_shape: crate::HighlightShape::Rectangle,
                 center: Point::default(),
@@ -2227,6 +2613,9 @@ mod tests {
     #[test]
     fn transparent_rotated_highlight_interior_is_hittable_for_both_shapes() {
         let base = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: crate::RectangleElementKind::RectangleHighlight,
             highlight_shape: crate::HighlightShape::Rectangle,
             center: Point::new(20.0, 30.0),
@@ -2268,6 +2657,9 @@ mod tests {
     #[test]
     fn spotlight_rounded_corners_hit_test_and_validate_like_shapes() {
         let rect = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: crate::RectangleElementKind::Rectangle,
             highlight_shape: crate::HighlightShape::Rectangle,
             center: Point::new(50.0, 50.0),
@@ -2314,6 +2706,9 @@ mod tests {
             crate::HighlightShape::Diamond,
         ] {
             let rect = RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 rectangle_kind: crate::RectangleElementKind::Rectangle,
                 highlight_shape: shape,
                 center: Point::new(30.0, 40.0),

@@ -170,6 +170,10 @@
             <translation>Cancel</translation>
         </message>
         <message>
+            <source>Excel workbook (*.xlsx)</source>
+            <translation>Excel workbook (*.xlsx)</translation>
+        </message>
+        <message>
             <source>HTML document (*.html)</source>
             <translation>HTML document (*.html)</translation>
         </message>
@@ -186,8 +190,8 @@
             <translation>No output file was selected</translation>
         </message>
         <message>
-            <source>No recognition text is available to save</source>
-            <translation>No recognition text is available to save</translation>
+            <source>No recognition result is available to save</source>
+            <translation>No recognition result is available to save</translation>
         </message>
         <message>
             <source>Replace</source>
@@ -204,12 +208,28 @@
 %1</translation>
         </message>
         <message>
+            <source>Table</source>
+            <translation>Table</translation>
+        </message>
+        <message>
             <source>Text document (*.txt)</source>
             <translation>Text document (*.txt)</translation>
         </message>
         <message>
+            <source>The Excel workbook could not be created</source>
+            <translation>The Excel workbook could not be created</translation>
+        </message>
+        <message>
             <source>The output directory could not be created</source>
             <translation>The output directory could not be created</translation>
+        </message>
+        <message>
+            <source>The result file could not be published</source>
+            <translation>The result file could not be published</translation>
+        </message>
+        <message>
+            <source>The result file could not be staged</source>
+            <translation>The result file could not be staged</translation>
         </message>
         <message>
             <source>The save directory is not configured</source>
@@ -218,14 +238,6 @@
         <message>
             <source>The screenshot filename format is invalid</source>
             <translation>The screenshot filename format is invalid</translation>
-        </message>
-        <message>
-            <source>The text file could not be published</source>
-            <translation>The text file could not be published</translation>
-        </message>
-        <message>
-            <source>The text file could not be staged</source>
-            <translation>The text file could not be staged</translation>
         </message>
     </context>
     <context>
@@ -257,6 +269,10 @@
         <message>
             <source>100%</source>
             <translation>100%</translation>
+        </message>
+        <message>
+            <source>A file with this name already exists</source>
+            <translation>A file with this name already exists</translation>
         </message>
         <message>
             <source>A save path with this name already exists</source>

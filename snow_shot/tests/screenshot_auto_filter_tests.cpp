@@ -156,6 +156,70 @@ void emptyFailureAndDisposal() {
     f.complete();
     require(!f.canvas.autoFilterRegions(), "disposed session rejects completion");
 }
+
+void everyDetectionReleasesItsWorkflow() {
+    Fixture f;
+    int finished = 0;
+    QString failure;
+    QObject::connect(&f.controller, &ScreenshotAutoFilterController::detectionFinished,
+                     &f.controller, [&](const QString& error) {
+                         require(!f.controller.detecting(), "terminal detection is no longer busy");
+                         ++finished;
+                         failure = error;
+                     });
+    f.activate();
+    f.complete(true);
+    require(finished == 1 && failure.isEmpty(), "empty results still finish their workflow");
+    require(f.canvas.undo(), "remove the empty identification before retrying");
+    f.controller.validate();
+    f.canvas.setCanvasTool(SnowCanvasTool::Select);
+    auto failed = std::move(f.completion);
+    failed({}, QStringLiteral("deterministic inactive failure"));
+    require(finished == 2 && failure == QStringLiteral("deterministic inactive failure"),
+            "a provider failure finishes ownership even after leaving the filter tool");
+    f.activate();
+    require(f.canvas.setAutoFilterRegions(SnowCanvasAutoFilterRecord{f.bounds, {}}) &&
+                f.canvas.undo(),
+            "advance detection generation while preserving the unidentified canvas");
+    f.complete();
+    require(finished == 3 && !f.canvas.autoFilterRegions(),
+            "discarding a stale generation still finishes the workflow");
+    f.controller.validate();
+    f.controller.resetSession();
+    require(finished == 4, "reset synchronously finishes outstanding detection");
+    f.complete();
+    f.controller.resetSession();
+    require(finished == 4, "late completion and idle reset cannot finish the same work twice");
+}
+void reentrantAvailabilityKeepsReplacementDetectionBusy() {
+    Fixture f;
+    int finished = 0;
+    bool restarted = false;
+    QObject::connect(&f.controller, &ScreenshotAutoFilterController::detectionFinished,
+                     &f.controller, [&](const QString&) {
+                         require(!f.controller.detecting(),
+                                 "a retired detection cannot finish a replacement workflow");
+                         ++finished;
+                     });
+    QObject::connect(&f.controller, &ScreenshotAutoFilterController::availabilityChanged,
+                     &f.controller, [&](bool available) {
+                         if (!available || restarted)
+                             return;
+                         restarted = true;
+                         f.controller.resetSession();
+                         require(f.canvas.setAutoFilterRegions(std::nullopt),
+                                 "clear the previous result during its availability callback");
+                         f.controller.validate();
+                     });
+    f.activate();
+    f.complete();
+    require(restarted && f.runs == 2 && f.controller.detecting() && finished == 0,
+            "synchronous result observers may start new work before old publication returns");
+    f.complete();
+    require(finished == 1 && !f.controller.detecting(),
+            "only the replacement's own completion finishes the current workflow");
+}
+
 void sourceChangePreservesCompletedAnnotations() {
     Fixture f;
     f.activate();
@@ -405,6 +469,8 @@ int main(int argc, char** argv) {
     lifecycle();
     races();
     emptyFailureAndDisposal();
+    everyDetectionReleasesItsWorkflow();
+    reentrantAvailabilityKeepsReplacementDetectionBusy();
     sourceChangePreservesCompletedAnnotations();
     styles();
     renderingAndExport();

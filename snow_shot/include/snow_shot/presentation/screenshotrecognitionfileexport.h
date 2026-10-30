@@ -4,23 +4,41 @@
 #include "snow_shot/app/edition.h"
 
 #include <QString>
+#if SNOW_SHOT_ENABLE_TABLE_RECOGNITION
+#include "snow_shot/presentation/screenshottabledocument.h"
+#include <optional>
+#endif
 #if SNOW_SHOT_ENABLE_IMAGE_CONVERSION || SNOW_SHOT_ENABLE_LATEX_RECOGNITION ||                     \
-    SNOW_SHOT_ENABLE_QR_RECOGNITION
+    SNOW_SHOT_ENABLE_QR_RECOGNITION || SNOW_SHOT_ENABLE_TABLE_RECOGNITION
 #include <QStringList>
 
 class QWidget;
 #endif
 class ScreenshotRecognitionFileExport;
 
-enum class ScreenshotRecognitionFileKind { Html, Markdown, Qr, Latex };
+enum class ScreenshotRecognitionFileKind { Html, Markdown, Qr, Latex, Table };
 
 struct ScreenshotRecognitionFileSnapshot {
     ScreenshotRecognitionFileKind kind = ScreenshotRecognitionFileKind::Qr;
     QString source;
+#if SNOW_SHOT_ENABLE_TABLE_RECOGNITION
+    std::optional<ScreenshotTableDocument> table = std::nullopt;
+#endif
+
+    [[nodiscard]] bool hasContent() const {
+        if (kind == ScreenshotRecognitionFileKind::Table) {
+#if SNOW_SHOT_ENABLE_TABLE_RECOGNITION
+            return table.has_value() && !table->empty();
+#else
+            return false;
+#endif
+        }
+        return !source.isEmpty();
+    }
 };
 
 #if SNOW_SHOT_ENABLE_IMAGE_CONVERSION || SNOW_SHOT_ENABLE_LATEX_RECOGNITION ||                     \
-    SNOW_SHOT_ENABLE_QR_RECOGNITION
+    SNOW_SHOT_ENABLE_QR_RECOGNITION || SNOW_SHOT_ENABLE_TABLE_RECOGNITION
 struct ScreenshotRecognitionFileSaveResult {
     QString path;
     QString error;

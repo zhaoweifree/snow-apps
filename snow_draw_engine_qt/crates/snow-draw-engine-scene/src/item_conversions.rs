@@ -113,6 +113,7 @@ pub(crate) fn scene_item_from_magnifier(
 pub(crate) fn scene_item_from_rect(id: ElementId, rect: RectangleData) -> SceneDisplayItem {
     SceneDisplayItem::Rectangle(RectangleDisplayItem {
         id: display_item_id(id),
+        bound_text_id: rect.text_element_id.map(display_item_id),
         center_x: rect.center.x,
         center_y: rect.center.y,
         width: rect.width,
@@ -123,6 +124,12 @@ pub(crate) fn scene_item_from_rect(id: ElementId, rect: RectangleData) -> SceneD
         stroke: rect.stroke,
         stroke_width: rect.stroke_width,
         stroke_style: rect.stroke_style,
+        stroke_rendering_style: if rect.is_highlight() || rect.is_spotlight() {
+            Default::default()
+        } else {
+            rect.stroke_rendering_style
+        },
+        stroke_rendering_seed: rect.stroke_rendering_seed,
         corner_radii: rect.corner_radii,
         opacity: rect.opacity,
         shape: match rect.highlight_shape {
@@ -157,6 +164,8 @@ pub(crate) fn scene_item_from_arrow(id: ElementId, arrow: ArrowData) -> SceneDis
     ));
     let arrowhead_primitives = arrowhead_display_primitives(&arrow, shaft.as_ref());
     SceneDisplayItem::Arrow(ArrowDisplayItem {
+        brush_mode: Default::default(),
+        pressure_geometry: None,
         bound_text_id: None,
         label_bounds: None,
         bound_text_overlay: arrow.is_angle(),
@@ -180,6 +189,12 @@ pub(crate) fn scene_item_from_arrow(id: ElementId, arrow: ArrowData) -> SceneDis
         stroke: arrow.stroke,
         stroke_width: arrow.stroke_width,
         stroke_style: arrow.stroke_style,
+        stroke_rendering_style: if arrow.is_regular_arrow() || arrow.is_line() {
+            arrow.stroke_rendering_style
+        } else {
+            Default::default()
+        },
+        stroke_rendering_seed: arrow.stroke_rendering_seed,
         fill: arrow.fill,
         fill_style: display_fill_style(arrow.fill_style),
         arrowhead_primitives,
@@ -215,7 +230,14 @@ pub(crate) fn scene_item_from_free_draw(
     free_draw: FreeDrawData,
     geometry: Arc<snow_draw_engine_core::PathGeometry>,
 ) -> SceneDisplayItem {
+    let pressure_geometry = free_draw
+        .pressure_geometry(geometry.revision, &geometry)
+        .map(Arc::new);
     SceneDisplayItem::Arrow(ArrowDisplayItem {
+        stroke_rendering_style: Default::default(),
+        stroke_rendering_seed: 0,
+        brush_mode: free_draw.brush_mode,
+        pressure_geometry,
         bound_text_id: None,
         label_bounds: None,
         bound_text_overlay: false,
@@ -249,12 +271,16 @@ pub(crate) fn scene_item_from_free_draw_preview(
     preview: &FreeDrawPreview,
 ) -> SceneDisplayItem {
     SceneDisplayItem::Arrow(ArrowDisplayItem {
+        stroke_rendering_style: Default::default(),
+        stroke_rendering_seed: 0,
+        brush_mode: preview.brush_mode,
+        pressure_geometry: preview.pressure_geometry.clone(),
         bound_text_id: None,
         label_bounds: None,
         bound_text_overlay: false,
         id: display_item_id(id),
         points: Vec::new(),
-        path_commands: preview.geometry.flattened_commands(),
+        path_commands: Vec::new(),
         geometry: preview.geometry.clone(),
         arrow_type: snow_draw_engine_core::arrow::ArrowType::Curve,
         arrow_shaft_type: Default::default(),
@@ -275,7 +301,11 @@ pub(crate) fn scene_item_from_free_draw_preview(
 
 pub(crate) fn free_draw_preview_bounds(preview: &FreeDrawPreview) -> DrawRect {
     let bounds = preview.geometry.canvas_bounds;
-    let outset = preview.stroke_width.max(0.0) * 0.5;
+    let outset = if preview.brush_mode == snow_draw_engine_core::BrushMode::PressureSensitive {
+        snow_draw_engine_core::pressure_radius(preview.stroke_width, 1.0)
+    } else {
+        preview.stroke_width.max(0.0) * 0.5
+    };
     DrawRect::new(
         bounds[0] - outset,
         bounds[1] - outset,
@@ -310,6 +340,7 @@ fn arrowhead_display_primitive(primitive: ArrowheadRenderPrimitive) -> Arrowhead
             points: vec![line.from, line.to],
             center: [0.0, 0.0],
             diameter: 0.0,
+            roughness_cap: line.roughness_cap,
             fill_mode: ArrowheadDisplayFillMode::Stroke,
             dash_mode: arrowhead_display_dash_mode(line.dash_mode),
         },
@@ -318,6 +349,7 @@ fn arrowhead_display_primitive(primitive: ArrowheadRenderPrimitive) -> Arrowhead
             points: polygon.points,
             center: [0.0, 0.0],
             diameter: 0.0,
+            roughness_cap: polygon.roughness_cap,
             fill_mode: arrowhead_display_fill_mode(polygon.fill_mode),
             dash_mode: arrowhead_display_dash_mode(polygon.dash_mode),
         },
@@ -326,6 +358,7 @@ fn arrowhead_display_primitive(primitive: ArrowheadRenderPrimitive) -> Arrowhead
             points: Vec::new(),
             center: circle.center,
             diameter: circle.diameter,
+            roughness_cap: circle.roughness_cap,
             fill_mode: arrowhead_display_fill_mode(circle.fill_mode),
             dash_mode: arrowhead_display_dash_mode(circle.dash_mode),
         },
@@ -405,6 +438,8 @@ pub(crate) fn scene_item_from_serial_number(
         font_family: serial.font_family,
         stroke_width,
         stroke_style: serial.stroke_style,
+        stroke_rendering_style: serial.stroke_rendering_style,
+        stroke_rendering_seed: serial.stroke_rendering_seed,
         corner_radii: snow_draw_engine_core::CornerRadii::splat(corner_radius),
         opacity: serial.opacity,
         bound_text_id: bound_text_id.map(display_item_id),
@@ -490,6 +525,12 @@ pub(crate) fn text_paint_geometry_from_display_item(text: &TextDisplayItem) -> T
         has_text: !text.text.is_empty(),
         font_size: text.font_size,
         fill: text.fill,
+        fill_style: match text.fill_style {
+            DisplayFillStyle::Line => FillStyle::Line,
+            DisplayFillStyle::CrossLine => FillStyle::CrossLine,
+            DisplayFillStyle::Solid => FillStyle::Solid,
+            DisplayFillStyle::Border => FillStyle::Border,
+        },
         stroke: text.stroke,
         stroke_width: text.stroke_width,
     }
@@ -521,6 +562,45 @@ pub(crate) fn serial_paint_geometry_from_display_item(
         serial_number_type: document_serial_number_type(serial.serial_number_type),
         stroke_width: serial.stroke_width,
         corner_radius: serial.corner_radii.top_left,
+    }
+}
+
+pub(crate) fn shape_geometry_from_display_item(shape: &RectangleDisplayItem) -> RectangleData {
+    RectangleData {
+        text_element_id: shape.bound_text_id.map(|id| ElementId {
+            index: id.index,
+            generation: id.generation,
+        }),
+        rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
+        highlight_shape: match shape.shape {
+            snow_draw_engine_display::DisplayRectangleShape::Rectangle => {
+                snow_draw_engine_document::HighlightShape::Rectangle
+            }
+            snow_draw_engine_display::DisplayRectangleShape::Ellipse => {
+                snow_draw_engine_document::HighlightShape::Ellipse
+            }
+            snow_draw_engine_display::DisplayRectangleShape::Diamond => {
+                snow_draw_engine_document::HighlightShape::Diamond
+            }
+        },
+        center: Point::new(shape.center_x, shape.center_y),
+        width: shape.width,
+        height: shape.height,
+        rotation: shape.rotation,
+        fill: shape.fill,
+        fill_style: match shape.fill_style {
+            DisplayFillStyle::Solid => FillStyle::Solid,
+            DisplayFillStyle::Line => FillStyle::Line,
+            DisplayFillStyle::CrossLine => FillStyle::CrossLine,
+            DisplayFillStyle::Border => FillStyle::Border,
+        },
+        stroke: shape.stroke,
+        stroke_width: shape.stroke_width,
+        stroke_style: shape.stroke_style,
+        stroke_rendering_style: shape.stroke_rendering_style,
+        stroke_rendering_seed: shape.stroke_rendering_seed,
+        corner_radii: shape.corner_radii,
+        opacity: shape.opacity,
     }
 }
 
@@ -655,6 +735,7 @@ fn display_fill_style(style: FillStyle) -> DisplayFillStyle {
         FillStyle::Line => DisplayFillStyle::Line,
         FillStyle::CrossLine => DisplayFillStyle::CrossLine,
         FillStyle::Solid => DisplayFillStyle::Solid,
+        FillStyle::Border => DisplayFillStyle::Border,
     }
 }
 
@@ -855,6 +936,9 @@ pub(crate) fn arrow_handle_item(handle: ArrowHandleState, zoom: f64) -> UiRectan
             ArrowHandleKind::Segment => UiShapeKind::ArrowSegmentHandle,
         },
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: handle.center,
@@ -870,36 +954,6 @@ pub(crate) fn arrow_handle_item(handle: ArrowHandleState, zoom: f64) -> UiRectan
             opacity: 1.0,
         },
     )
-}
-
-pub(crate) fn snap_guide_display_item(
-    guide: &SnapGuide,
-    config: SnapConfig,
-) -> SnapGuideDisplayItem {
-    let mut markers = [Point::default(), Point::default()];
-    let marker_count = guide.markers.len().min(markers.len());
-    for (index, marker) in guide.markers.iter().take(marker_count).enumerate() {
-        markers[index] = *marker;
-    }
-
-    SnapGuideDisplayItem {
-        kind: guide.kind,
-        axis: guide.axis,
-        start: guide.start,
-        end: guide.end,
-        marker_count: marker_count as u8,
-        markers,
-        label: if config.show_gap_size {
-            guide.label
-        } else {
-            None
-        },
-        color: config.line_color,
-        line_width: config.line_width,
-        marker_size: config.marker_size,
-        gap_dash_length: config.gap_dash_length,
-        gap_dash_gap: config.gap_dash_gap,
-    }
 }
 
 pub(crate) fn display_item_id(id: ElementId) -> DisplayItemId {
@@ -1012,6 +1066,8 @@ mod tests {
             diameter: 24.0,
             font_size: 40.0,
             stroke_width: 2.0,
+            stroke_rendering_style: snow_draw_engine_core::arrow::StrokeRenderingStyle::Artist,
+            stroke_rendering_seed: 45,
             ..SerialNumberData::default()
         };
         let SceneDisplayItem::SerialNumber(display) = scene_item_from_serial_number(
@@ -1026,12 +1082,20 @@ mod tests {
         };
 
         let paint = serial_paint_geometry_from_display_item(&display);
+        assert_eq!(
+            display.stroke_rendering_style,
+            serial.stroke_rendering_style
+        );
+        assert_eq!(display.stroke_rendering_seed, serial.stroke_rendering_seed);
         assert_eq!(paint, SerialPaintGeometry::from_serial(&serial));
         assert!((paint.stroke_width - 4.0).abs() < 1e-9);
     }
 
     fn preview_rect(center: Point<f64>, width: f64, height: f64) -> RectangleData {
         RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center,
@@ -1112,6 +1176,9 @@ mod tests {
                 generation: 2,
             },
             RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
                 highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
                 center: Point::default(),
@@ -1141,6 +1208,9 @@ mod tests {
         let item = ui_rect_item(
             UiShapeKind::SelectionCandidateFrame,
             RectangleData {
+                text_element_id: None,
+                stroke_rendering_style: Default::default(),
+                stroke_rendering_seed: 0,
                 rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
                 highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
                 center: Point::default(),
@@ -1206,6 +1276,9 @@ mod tests {
     #[test]
     fn rectangle_highlight_display_item_uses_multiply_blending() {
         let highlight = RectangleData {
+            text_element_id: None,
+            stroke_rendering_style: Default::default(),
+            stroke_rendering_seed: 0,
             rectangle_kind: snow_draw_engine_document::RectangleElementKind::Rectangle,
             highlight_shape: snow_draw_engine_document::HighlightShape::Rectangle,
             center: Point::default(),
@@ -1292,8 +1365,8 @@ mod tests {
 
         assert_eq!(item.filter.filter_type, DisplayFilterType::GaussianBlur);
         assert_eq!(item.filter.strength, 1.0);
-        assert_eq!(item.filter.blur_sigma, 18.5);
-        assert_eq!(item.filter.sampling_radius, 56.5);
+        assert_eq!(item.filter.blur_sigma, 36.5);
+        assert_eq!(item.filter.sampling_radius, 110.5);
         assert_eq!(item.opacity, 0.65);
         assert_eq!((item.center_x, item.center_y), (12.0, 18.0));
         assert_eq!((item.width, item.height), (80.0, 40.0));
@@ -1630,6 +1703,10 @@ pub(crate) fn scene_item_from_speech_bubble(
         .flat_map(|chunk| chunk.commands.iter().copied())
         .collect();
     let path = ArrowDisplayItem {
+        stroke_rendering_style: Default::default(),
+        stroke_rendering_seed: 0,
+        brush_mode: Default::default(),
+        pressure_geometry: None,
         id: display_item_id(id),
         bound_text_id: bubble.text_element_id.map(display_item_id),
         label_bounds: None,

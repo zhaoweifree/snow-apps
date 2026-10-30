@@ -28,7 +28,6 @@ struct DocumentLayout {
     double itemWidth = 1.0;
     double itemHeight = 1.0;
     double topOffset = 0.0;
-    double inkReserve = 0.0;
     FontResolution resolution;
     std::unique_ptr<QTextDocument> document;
 
@@ -99,7 +98,6 @@ DocumentLayout createDocumentLayout(const SnowSceneDisplayItem& item, const QFon
                                     double zoom, const QString& text, bool substituteEmptyText);
 QTransform documentToViewTransform(const SnowSceneDisplayItem& item, const QPointF& centerView,
                                    const DocumentLayout& layout);
-QRectF documentContentsRect(const DocumentLayout& layout);
 void drawDocument(QPainter& painter, const DocumentLayout& layout,
                   const QColor& textColor = QColor());
 QRectF documentRectToLocalItemRect(const QRectF& documentRect, const DocumentLayout& layout);

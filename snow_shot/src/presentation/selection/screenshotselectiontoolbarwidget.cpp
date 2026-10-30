@@ -2,6 +2,7 @@
 
 #include "screenshotselectiontoolbarwidgets.h"
 #include "snow_shot/presentation/components/icons/snowshoticons.h"
+#include "snow_shot/presentation/components/pointerhoverevents.h"
 #include "snow_shot/presentation/screenshotselectionlimits.h"
 #include "snow_shot/presentation/screenshottoolbarcommands.h"
 #include "widgets/select.h"
@@ -544,9 +545,13 @@ bool ScreenshotSelectionToolbarWidget::eventFilter(QObject* watched, QEvent* eve
                 return true;
             }
         }
-        if (watched == m_aspectRatioSelect && event != nullptr &&
-            (event->type() == QEvent::Enter || event->type() == QEvent::Leave)) {
-            m_aspectRatioSelectHovered = event->type() == QEvent::Enter && selectionInputEnabled();
+        const bool hover = snow_shot::presentation::pointerHoverPositionWithin(
+                               qobject_cast<QWidget*>(watched), event)
+                               .has_value();
+        const bool leave = watched == m_aspectRatioSelect && event != nullptr &&
+                           (event->type() == QEvent::Leave || event->type() == QEvent::HoverLeave);
+        if (hover || leave) {
+            m_aspectRatioSelectHovered = hover && selectionInputEnabled();
             updateAspectRatioSelectStyle();
             if (m_aspectRatioSelectHovered) {
                 m_aspectRatioHoverCloseTimer->stop();
@@ -560,13 +565,15 @@ bool ScreenshotSelectionToolbarWidget::eventFilter(QObject* watched, QEvent* eve
         // Select and its editor own input; only the other panel controls open the resize modal.
         return QWidget::eventFilter(watched, event);
     }
-    if (watched == m_aspectRatioPopupWindow && event != nullptr &&
-        (event->type() == QEvent::Enter || event->type() == QEvent::Leave)) {
-        m_aspectRatioPopupHovered = event->type() == QEvent::Enter;
-        if (m_aspectRatioPopupHovered) {
+    if (watched == m_aspectRatioPopupWindow && event != nullptr) {
+        if (snow_shot::presentation::pointerHoverPositionWithin(m_aspectRatioPopupWindow, event)) {
+            m_aspectRatioPopupHovered = true;
             m_aspectRatioHoverCloseTimer->stop();
-        } else if (m_aspectRatioSelect->popupVisible()) {
-            m_aspectRatioHoverCloseTimer->start();
+        } else if (event->type() == QEvent::Leave || event->type() == QEvent::HoverLeave) {
+            m_aspectRatioPopupHovered = false;
+            if (m_aspectRatioSelect->popupVisible()) {
+                m_aspectRatioHoverCloseTimer->start();
+            }
         }
     }
     if (watched == m_aspectRatioPopupView && event != nullptr &&
@@ -819,6 +826,7 @@ void ScreenshotSelectionToolbarWidget::prepareAspectRatioPopupInput() {
     }
     m_aspectRatioPopupView = view;
     m_aspectRatioPopupWindow = view->window();
+    m_aspectRatioPopupWindow->setAttribute(Qt::WA_Hover);
     m_aspectRatioPopupWindow->installEventFilter(this);
     view->installEventFilter(this);
     connect(view, &QListView::pressed, this, [this](const QModelIndex&) {
@@ -951,10 +959,10 @@ void ScreenshotSelectionToolbarWidget::handleFieldWheel(Field field, int deltaY)
         m_commands.adjustSelectionFromToolbar(0, 0, 0, direction);
         break;
     case Field::Radius:
-        m_commands.setSelectionCornerRadiusFromToolbar(m_cornerRadius + direction);
+        m_commands.adjustSelectionEffectsFromWheel(direction, 0);
         break;
     case Field::Shadow:
-        m_commands.setSelectionShadowWidthFromToolbar(m_shadowWidth + direction);
+        m_commands.adjustSelectionEffectsFromWheel(0, direction);
         break;
     default:
         break;

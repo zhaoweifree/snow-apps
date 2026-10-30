@@ -15,8 +15,9 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_CREATE_SUB_KEY, KEY_QUERY_VALUE,
-    KEY_SET_VALUE, KEY_WOW64_32KEY, REG_OPTION_NON_VOLATILE, REG_SZ, REG_VALUE_TYPE, RRF_RT_REG_SZ,
-    RRF_SUBKEY_WOW6432KEY, RegCloseKey, RegCreateKeyExW, RegGetValueW, RegOpenKeyExW,
+    KEY_SET_VALUE, KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_OPTION_NON_VOLATILE, REG_ROUTINE_FLAGS,
+    REG_SAM_FLAGS, REG_SZ, REG_VALUE_TYPE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6432KEY,
+    RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegCreateKeyExW, RegGetValueW, RegOpenKeyExW,
     RegSetValueExW,
 };
 use windows::Win32::System::Threading::{
@@ -149,8 +150,48 @@ pub fn path_has_reparse(path: &Path) -> bool {
 const INSTALL_KEY: &str = crate::edition::INSTALL_KEY;
 const UNINSTALL_KEY: &str = crate::edition::UNINSTALL_KEY;
 
-fn registry_error(hive: HKEY, key: &str, operation: &str, status: WIN32_ERROR) -> UpdateError {
-    let hive = if hive == HKEY_LOCAL_MACHINE {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RegistryView {
+    Native64,
+    Legacy32,
+}
+
+impl RegistryView {
+    fn access(self) -> REG_SAM_FLAGS {
+        match self {
+            Self::Native64 => KEY_WOW64_64KEY,
+            Self::Legacy32 => KEY_WOW64_32KEY,
+        }
+    }
+
+    fn read(self) -> REG_ROUTINE_FLAGS {
+        match self {
+            Self::Native64 => RRF_SUBKEY_WOW6464KEY,
+            Self::Legacy32 => RRF_SUBKEY_WOW6432KEY,
+        }
+    }
+
+    fn bits(self) -> u32 {
+        match self {
+            Self::Native64 => 64,
+            Self::Legacy32 => 32,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RegisteredInstallation {
+    hive: HKEY,
+    view: RegistryView,
+}
+
+fn registry_error(
+    registration: RegisteredInstallation,
+    key: &str,
+    operation: &str,
+    status: WIN32_ERROR,
+) -> UpdateError {
+    let hive = if registration.hive == HKEY_LOCAL_MACHINE {
         "HKLM"
     } else {
         "HKCU"
@@ -160,22 +201,27 @@ fn registry_error(hive: HKEY, key: &str, operation: &str, status: WIN32_ERROR) -
         "Could not update the registered application version",
     )
     .detail(format!(
-        "{operation} {hive}\\{key} (32-bit view): Win32 error {}",
+        "{operation} {hive}\\{key} ({}-bit view): Win32 error {}",
+        registration.view.bits(),
         status.0
     ))
 }
 
-fn read_registry_string(hive: HKEY, key: &str, name: &str) -> Result<Option<String>> {
+fn read_registry_string(
+    registration: RegisteredInstallation,
+    key: &str,
+    name: &str,
+) -> Result<Option<String>> {
     let subkey = wide(key);
     let name = wide(name);
     let mut buffer = vec![0_u16; 32_768];
     let mut bytes = (buffer.len() * size_of::<u16>()) as u32;
     let status = unsafe {
         RegGetValueW(
-            hive,
+            registration.hive,
             PCWSTR(subkey.as_ptr()),
             PCWSTR(name.as_ptr()),
-            RRF_RT_REG_SZ | RRF_SUBKEY_WOW6432KEY,
+            RRF_RT_REG_SZ | registration.view.read(),
             None,
             Some(buffer.as_mut_ptr().cast()),
             Some(&mut bytes),
@@ -185,7 +231,7 @@ fn read_registry_string(hive: HKEY, key: &str, name: &str) -> Result<Option<Stri
         return Ok(None);
     }
     if status != ERROR_SUCCESS {
-        return Err(registry_error(hive, key, "RegGetValueW", status));
+        return Err(registry_error(registration, key, "RegGetValueW", status));
     }
     let length = bytes as usize / size_of::<u16>();
     Ok(Some(String::from_utf16_lossy(
@@ -193,13 +239,23 @@ fn read_registry_string(hive: HKEY, key: &str, name: &str) -> Result<Option<Stri
     )))
 }
 
-fn registered_hive(root: &Path) -> Result<Option<HKEY>> {
+fn registered_installation_for_key(
+    root: &Path,
+    install_key: &str,
+) -> Result<Option<RegisteredInstallation>> {
     let mut discovery_error = None;
     for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
-        match read_registry_string(hive, INSTALL_KEY, "") {
-            Ok(Some(registered)) if path_eq(Path::new(&registered), root) => return Ok(Some(hive)),
-            Err(error) => discovery_error = Some(error),
-            _ => {}
+        // The installer uses SetRegView 64. Preserve older 32-bit registrations too,
+        // carrying the selected view through permission checks and version writes.
+        for view in [RegistryView::Native64, RegistryView::Legacy32] {
+            let registration = RegisteredInstallation { hive, view };
+            match read_registry_string(registration, install_key, "") {
+                Ok(Some(registered)) if path_eq(Path::new(&registered), root) => {
+                    return Ok(Some(registration));
+                }
+                Err(error) => discovery_error = Some(error),
+                _ => {}
+            }
         }
     }
     // An inaccessible registration is not evidence of a portable installation.
@@ -210,26 +266,32 @@ fn registered_hive(root: &Path) -> Result<Option<HKEY>> {
 }
 
 pub fn registered_target_matches(root: &Path) -> Result<bool> {
-    registered_hive(root).map(|hive| hive.is_some())
+    registered_installation_for_key(root, INSTALL_KEY).map(|registration| registration.is_some())
 }
 
 // No registry mutation: for a missing key, check creation rights on its nearest
 // existing ancestor. A successful check is repeated in the elevated bootstrap.
 pub fn registered_version_requires_elevation(root: &Path) -> Result<bool> {
-    let Some(hive) = registered_hive(root)? else {
+    let Some(registration) = registered_installation_for_key(root, INSTALL_KEY)? else {
         return Ok(false);
     };
-    let mut path = UNINSTALL_KEY;
+    registered_version_requires_elevation_for_key(registration, UNINSTALL_KEY)
+}
+
+fn registered_version_requires_elevation_for_key(
+    registration: RegisteredInstallation,
+    mut path: &str,
+) -> Result<bool> {
     let mut rights = KEY_QUERY_VALUE | KEY_SET_VALUE;
     loop {
         let subkey = wide(path);
         let mut key = HKEY::default();
         let status = unsafe {
             RegOpenKeyExW(
-                hive,
+                registration.hive,
                 PCWSTR(subkey.as_ptr()),
                 None,
-                rights | KEY_WOW64_32KEY,
+                rights | registration.view.access(),
                 &mut key,
             )
         };
@@ -247,28 +309,38 @@ pub fn registered_version_requires_elevation(root: &Path) -> Result<bool> {
             rights = KEY_CREATE_SUB_KEY;
             continue;
         }
-        return Err(registry_error(hive, path, "RegOpenKeyExW", status));
+        return Err(registry_error(registration, path, "RegOpenKeyExW", status));
     }
 }
 
 pub fn write_registered_version(root: &Path, version: &str) -> Result<()> {
-    let Some(hive) = registered_hive(root)? else {
+    let Some(registration) = registered_installation_for_key(root, INSTALL_KEY)? else {
         return Ok(());
     };
+    write_registered_version_for_key(registration, UNINSTALL_KEY, version)
+}
+
+fn write_registered_version_for_key(
+    registration: RegisteredInstallation,
+    uninstall_key: &str,
+    version: &str,
+) -> Result<()> {
     // Also lets legacy recovery finish when a denied write left the old value intact.
-    if read_registry_string(hive, UNINSTALL_KEY, "DisplayVersion")?.as_deref() == Some(version) {
+    if read_registry_string(registration, uninstall_key, "DisplayVersion")?.as_deref()
+        == Some(version)
+    {
         return Ok(());
     }
-    let subkey = wide(UNINSTALL_KEY);
+    let subkey = wide(uninstall_key);
     let mut key = HKEY::default();
     let status = unsafe {
         RegCreateKeyExW(
-            hive,
+            registration.hive,
             PCWSTR(subkey.as_ptr()),
             None,
             PCWSTR::null(),
             REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE | KEY_WOW64_32KEY,
+            KEY_SET_VALUE | registration.view.access(),
             None,
             &mut key,
             None,
@@ -276,8 +348,8 @@ pub fn write_registered_version(root: &Path, version: &str) -> Result<()> {
     };
     if status != ERROR_SUCCESS {
         return Err(registry_error(
-            hive,
-            UNINSTALL_KEY,
+            registration,
+            uninstall_key,
             "RegCreateKeyExW",
             status,
         ));
@@ -299,8 +371,8 @@ pub fn write_registered_version(root: &Path, version: &str) -> Result<()> {
     let _ = unsafe { RegCloseKey(key) };
     if status != ERROR_SUCCESS {
         return Err(registry_error(
-            hive,
-            UNINSTALL_KEY,
+            registration,
+            uninstall_key,
             "RegSetValueExW",
             status,
         ));
@@ -455,6 +527,198 @@ mod tests {
     use std::io::{BufRead, BufReader};
     use std::process::Command;
     use std::process::Stdio;
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
+    use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+    use windows::Win32::System::Registry::{KEY_ALL_ACCESS, RegDeleteKeyExW, RegSetKeySecurity};
+
+    const VIEWS: [RegistryView; 2] = [RegistryView::Native64, RegistryView::Legacy32];
+
+    struct RegistrationFixture {
+        path: String,
+        keys: [HKEY; 2],
+    }
+
+    impl RegistrationFixture {
+        fn new() -> Self {
+            // CLSID is redirected in HKCU too, so both views are genuinely distinct.
+            // RegOverridePredefKey sandboxes alias the views and cannot catch this bug.
+            let path = format!("Software\\Classes\\CLSID\\{{{}}}", uuid::Uuid::new_v4());
+            let subkey = wide(&path);
+            let keys = VIEWS.map(|view| {
+                let mut key = HKEY::default();
+                unsafe {
+                    RegCreateKeyExW(
+                        HKEY_CURRENT_USER,
+                        PCWSTR(subkey.as_ptr()),
+                        None,
+                        PCWSTR::null(),
+                        REG_OPTION_NON_VOLATILE,
+                        KEY_ALL_ACCESS | view.access(),
+                        None,
+                        &mut key,
+                        None,
+                    )
+                    .ok()
+                    .unwrap();
+                }
+                key
+            });
+            Self { path, keys }
+        }
+
+        fn set(&self, view: RegistryView, name: &str, value: &str) {
+            let index = VIEWS
+                .iter()
+                .position(|candidate| *candidate == view)
+                .unwrap();
+            let name = wide(name);
+            let value = wide(value);
+            unsafe {
+                RegSetValueExW(
+                    self.keys[index],
+                    PCWSTR(name.as_ptr()),
+                    None,
+                    REG_SZ,
+                    Some(std::slice::from_raw_parts(
+                        value.as_ptr().cast(),
+                        value.len() * 2,
+                    )),
+                )
+                .ok()
+                .unwrap();
+            }
+        }
+    }
+
+    impl RegistrationFixture {
+        fn deny_version_write(&self, view: RegistryView, denied: bool) {
+            let index = VIEWS
+                .iter()
+                .position(|candidate| *candidate == view)
+                .unwrap();
+            let rights = if denied { KEY_SET_VALUE.0 } else { 0 };
+            let sddl = wide(format!("D:P(D;;0x{rights:x};;;WD)(A;;KA;;;WD)"));
+            let mut descriptor = PSECURITY_DESCRIPTOR::default();
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    PCWSTR(sddl.as_ptr()),
+                    1,
+                    &mut descriptor,
+                    None,
+                )
+                .unwrap();
+                let status =
+                    RegSetKeySecurity(self.keys[index], DACL_SECURITY_INFORMATION, descriptor);
+                LocalFree(Some(HLOCAL(descriptor.0)));
+                status.ok().unwrap();
+            }
+        }
+    }
+
+    impl Drop for RegistrationFixture {
+        fn drop(&mut self) {
+            let path = wide(&self.path);
+            for (view, key) in VIEWS.into_iter().zip(self.keys) {
+                unsafe {
+                    RegCloseKey(key).ok().unwrap();
+                    RegDeleteKeyExW(
+                        HKEY_CURRENT_USER,
+                        PCWSTR(path.as_ptr()),
+                        view.access().0,
+                        None,
+                    )
+                    .ok()
+                    .unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn registered_installation_preserves_the_matching_registry_view() {
+        let fixture = RegistrationFixture::new();
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("SnowShot");
+        let other_root = directory.path().join("other");
+        assert!(
+            registered_installation_for_key(&root, &fixture.path)
+                .unwrap()
+                .is_none()
+        );
+        for expected_view in VIEWS {
+            for view in VIEWS {
+                fixture.set(
+                    view,
+                    "",
+                    if view == expected_view {
+                        &root
+                    } else {
+                        &other_root
+                    }
+                    .to_str()
+                    .unwrap(),
+                );
+                fixture.set(view, "DisplayVersion", "1.0.0");
+            }
+            let registration = registered_installation_for_key(&root, &fixture.path)
+                .unwrap()
+                .expect("an installed target must be recognized in either registry view");
+            assert_eq!(registration.hive, HKEY_CURRENT_USER);
+            assert_eq!(registration.view, expected_view);
+            assert!(
+                !registered_version_requires_elevation_for_key(registration, &fixture.path)
+                    .unwrap()
+            );
+            fixture.deny_version_write(expected_view, true);
+            assert!(
+                registered_version_requires_elevation_for_key(registration, &fixture.path).unwrap()
+            );
+            // Rollback to an unchanged version does not require write access.
+            write_registered_version_for_key(registration, &fixture.path, "1.0.0").unwrap();
+            let error =
+                write_registered_version_for_key(registration, &fixture.path, "2.0.0").unwrap_err();
+            assert_eq!(error.code, "registered_version_update_failed");
+            assert!(
+                error
+                    .detail
+                    .unwrap()
+                    .contains(&format!("{}-bit view", expected_view.bits()))
+            );
+            fixture.deny_version_write(expected_view, false);
+            write_registered_version_for_key(registration, &fixture.path, "2.0.0").unwrap();
+            for view in VIEWS {
+                assert_eq!(
+                    read_registry_string(
+                        RegisteredInstallation {
+                            hive: HKEY_CURRENT_USER,
+                            view
+                        },
+                        &fixture.path,
+                        "DisplayVersion",
+                    )
+                    .unwrap()
+                    .as_deref(),
+                    Some(if view == expected_view {
+                        "2.0.0"
+                    } else {
+                        "1.0.0"
+                    }),
+                );
+            }
+        }
+        // Match the installer's native view when both registrations point to the target.
+        for view in VIEWS {
+            fixture.set(view, "", root.to_str().unwrap());
+        }
+        assert_eq!(
+            registered_installation_for_key(&root, &fixture.path)
+                .unwrap()
+                .unwrap()
+                .view,
+            RegistryView::Native64,
+        );
+    }
 
     #[test]
     fn application_file_changes_preserve_running_images() {

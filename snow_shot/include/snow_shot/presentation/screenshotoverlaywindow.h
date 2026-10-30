@@ -144,6 +144,9 @@ class ScreenshotOverlayWindow final : public QWidget {
     [[nodiscard]] bool showPreparedFrameForPresentation(quint64 generation,
                                                         bool deferFirstPaint = false);
     void setVisible(bool visible) override;
+    // Terminal hide: detach the compositor frame before hiding, even when native
+    // surface destruction must wait for an active export. Temporary hides use hide().
+    void hideForNativeSurfaceRelease();
     // Release the native window and backing store while retaining the QObject,
     // canvas, renderer, and signal wiring for the next capture.
     void releaseNativeSurface();
@@ -162,6 +165,7 @@ class ScreenshotOverlayWindow final : public QWidget {
     void resizeEvent(QResizeEvent* event) override;
 
   private:
+    bool forwardCanvasInputEvent(QEvent* event);
     bool handleCanvasEvent(QEvent* event);
     bool handleCanvasKeyPress(QKeyEvent* event);
     bool handleCanvasMouseEvent(QMouseEvent* event);
@@ -180,6 +184,8 @@ class ScreenshotOverlayWindow final : public QWidget {
     QMargins m_captureFrameMargins;
     snow_shot::presentation::MouseReleaseActionController m_mouseReleaseAction;
     SnowCanvasWidget* m_canvas = nullptr;
+    const QEvent* m_forwardedCanvasInputEvent = nullptr;
+    bool m_forwardedCanvasInputGenuine = false;
     ScreenshotRegionTypeControl* m_regionTypeControl = nullptr;
     ScreenshotScrollingThumbnailWidget* m_scrollingThumbnail = nullptr;
     CanvasStatusReadout* m_scrollingResultPreviewReadout = nullptr;

@@ -1,9 +1,11 @@
+#include "snow_shot/presentation/directcapturebudget.h"
 #include "captureframeimage.h"
 
 #include <QColorSpace>
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 
 struct SnowCaptureFrameLeaseImpl {
     std::array<uint8_t, 16> pixels{};
@@ -26,6 +28,31 @@ extern "C" void snow_capture_frame_lease_release(SnowCaptureFrameLease* lease) {
 
 int main() {
     using namespace snow_shot::presentation::capture;
+    using snow_shot::presentation::directCapturePeakRasterBytes;
+    require(directCapturePeakRasterBytes(QSize(3840, 2160), 1.0) == qint64{3840} * 2160 * 8,
+            "unscaled direct capture budgets the prepared target without an output duplicate");
+    require(directCapturePeakRasterBytes(QSize(4000, 1000), 0.5) ==
+                qint64{4000} * 1000 * 8 + qint64{2000} * 500 * 8,
+            "scaled direct capture reserves both native and output rasters");
+    require(directCapturePeakRasterBytes(QSize(3, 5), 0.5) == (qint64{15} + 6) * 8,
+            "scaled target budgets round each output extent upward");
+    require(directCapturePeakRasterBytes(QSize(8000, 8000), 1.0) == 64000000LL * 8 &&
+                directCapturePeakRasterBytes(QSize(4000, 4000), 2.0) == 80000000LL * 8,
+            "native and scaled output admit the 64 MP boundary independently");
+    require(
+        directCapturePeakRasterBytes(QSize(), 1.0) < 0 &&
+            directCapturePeakRasterBytes(QSize(-1, -1), 1.0) < 0 &&
+            directCapturePeakRasterBytes(
+                QSize(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()), 1.0) < 0 &&
+            directCapturePeakRasterBytes(QSize(8001, 8000), 1.0) < 0 &&
+            directCapturePeakRasterBytes(QSize(4001, 4000), 2.0) < 0 &&
+            directCapturePeakRasterBytes(QSize(10, 10), 4.1) < 0 &&
+            directCapturePeakRasterBytes(QSize(10, 10), std::numeric_limits<double>::infinity()) <
+                0 &&
+            directCapturePeakRasterBytes(QSize(10, 10), std::numeric_limits<double>::quiet_NaN()) <
+                0,
+        "targeted capture preserves invalid-geometry, scale and 64 MP limits");
+
     auto* lease = new SnowCaptureFrameLease;
     lease->pixels = {123, 123, 123, 255, 123, 123, 123, 255,
                      123, 123, 123, 255, 123, 123, 123, 255};

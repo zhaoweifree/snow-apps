@@ -7,6 +7,7 @@
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
 #include "snow_shot/presentation/components/icons/iconrenderutils.h"
 #include "snow_shot/presentation/components/icons/snowshoticons.h"
+#include "snow_shot/presentation/components/pointerhoverevents.h"
 #include "theme/theme_manager.h"
 #include "widgets/button.h"
 #include "widgets/scroll_area.h"
@@ -111,6 +112,7 @@ class ScreenshotQrPopover final : public QWidget {
         setObjectName(QStringLiteral("screenshotQrPopover"));
         setAttribute(Qt::WA_ShowWithoutActivating);
         setAttribute(Qt::WA_TranslucentBackground);
+        setAttribute(Qt::WA_Hover);
         auto* outer = new QVBoxLayout(this);
         outer->setContentsMargins(0, 0, 0, 0);
         body = new ScreenshotQrBubble(this);
@@ -641,9 +643,10 @@ bool ScreenshotQrController::eventFilter(QObject* watched, QEvent* event) {
         return true;
     }
     if (inPopover) {
-        if (event->type() == QEvent::Enter)
+        if (snow_shot::presentation::pointerHoverPositionWithin(widget, event))
             m_dismissTimer.stop();
-        else if (event->type() == QEvent::Leave || event->type() == QEvent::FocusOut)
+        else if (event->type() == QEvent::Leave || event->type() == QEvent::HoverLeave ||
+                 event->type() == QEvent::FocusOut)
             scheduleDismiss();
         else if (event->type() == QEvent::LanguageChange) {
             m_popover->retranslate();
@@ -656,11 +659,15 @@ bool ScreenshotQrController::eventFilter(QObject* watched, QEvent* event) {
     for (auto marker : m_markers) {
         if (marker != watched)
             continue;
-        if (event->type() == QEvent::Enter) {
+        if (snow_shot::presentation::pointerHoverPositionWithin(marker, event)) {
             m_dismissTimer.stop();
+            if (m_hoverMarker != marker)
+                m_hoverTimer.stop();
             m_hoverMarker = marker;
-            m_hoverTimer.start();
-        } else if (event->type() == QEvent::Leave) {
+            if (!m_hoverTimer.isActive() &&
+                (!m_popover || !m_popover->isVisible() || m_popoverMarker != marker))
+                m_hoverTimer.start();
+        } else if (event->type() == QEvent::Leave || event->type() == QEvent::HoverLeave) {
             scheduleDismiss();
         } else if (event->type() == QEvent::LanguageChange) {
             marker->setAccessibleName(tr("QR Code %1").arg(marker->detection + 1));

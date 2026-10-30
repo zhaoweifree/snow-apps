@@ -629,6 +629,19 @@
         "libsrt"
       ]
     },
+    "snow-recording-compat": {
+      "description": "Extend the Snow Shot profile for standalone legacy capture and AVI export",
+      "supports": "windows & !uwp",
+      "dependencies": [
+        {
+          "name": "ffmpeg",
+          "default-features": false,
+          "features": [
+            "snow-shot-minimal"
+          ]
+        }
+      ]
+    },
     "snow-shot-minimal": {
       "description": "Build only the codecs, containers, and hardware paths used by Snow Shot",
       "supports": "windows & !uwp",

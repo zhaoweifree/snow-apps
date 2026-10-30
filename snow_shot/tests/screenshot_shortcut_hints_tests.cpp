@@ -200,6 +200,8 @@ void configuredShortcutRowsUseActualValues() {
          shortcutBindings({QStringLiteral("G"), QStringLiteral("Ctrl+Alt+Q")})},
         {QStringLiteral("select_previously_selected_area"),
          shortcutBindings({QStringLiteral("P")})},
+        {QStringLiteral("select_next_previously_selected_area"),
+         shortcutBindings({QStringLiteral("Shift+P")})},
         {QStringLiteral("print"), shortcutBindings({QStringLiteral("Ctrl+Alt+P")})},
         {QStringLiteral("copy_color"), shortcutBindings({QStringLiteral("Alt+C")})},
         {QStringLiteral("toggle_coordinate_mode"), shortcutBindings({QStringLiteral("Alt+P")})},
@@ -210,7 +212,7 @@ void configuredShortcutRowsUseActualValues() {
     };
 
     const QVector<ScreenshotShortcutHintRow> rows = screenshotShortcutHintRows(context);
-    require(rows.size() == 13, "manual-selection configured hint row count changed");
+    require(rows.size() == 12, "manual-selection configured hint row count changed");
     require(rows.at(0).label == QStringLiteral("Move cursor up") &&
                 rows.at(0).shortcut ==
                     shortcutDisplay({QStringLiteral("Ctrl+Alt+I"), QStringLiteral("Up")}) &&
@@ -226,23 +228,22 @@ void configuredShortcutRowsUseActualValues() {
                 rows.at(6).label == QStringLiteral("Selection Aspect Ratio Snap") &&
                 rows.at(6).shortcut ==
                     shortcutDisplay({QStringLiteral("G"), QStringLiteral("Ctrl+Alt+Q")}) &&
-                rows.at(7).shortcut == shortcutDisplay({QStringLiteral("P")}) &&
-                rows.at(8).shortcut == shortcutDisplay({QStringLiteral("Alt+C")}),
+                rows.at(7).shortcut == shortcutDisplay({QStringLiteral("Alt+C")}),
             "selection action hints must use configured shortcuts");
-    require(rows.at(9).label == QStringLiteral("Toggle Global/Relative Coordinates") &&
-                rows.at(9).shortcut == shortcutDisplay({QStringLiteral("Alt+P")}),
+    require(rows.at(8).label == QStringLiteral("Toggle Global/Relative Coordinates") &&
+                rows.at(8).shortcut == shortcutDisplay({QStringLiteral("Alt+P")}),
             "coordinate toggle must follow Copy color and show the configured binding");
-    require(rows.at(10).label == QStringLiteral("Toggle cursor visibility") &&
-                rows.at(10).shortcut == shortcutDisplay({QStringLiteral("`")}),
+    require(rows.at(9).label == QStringLiteral("Toggle cursor visibility") &&
+                rows.at(9).shortcut == shortcutDisplay({QStringLiteral("`")}),
             "cursor visibility must show its configurable backtick default");
-    require(rows.at(11).label == QStringLiteral("Switch color format") &&
-                rows.at(11).shortcut == shortcutDisplay({QStringLiteral("Shift")}),
+    require(rows.at(10).label == QStringLiteral("Switch color format") &&
+                rows.at(10).shortcut == shortcutDisplay({QStringLiteral("Shift")}),
             "the fixed color-format shortcut must remain visible");
-    require(rows.at(12).label == QStringLiteral("Switch screenshot history") &&
-                rows.at(12).shortcut ==
+    require(rows.at(11).label == QStringLiteral("Switch screenshot history") &&
+                rows.at(11).shortcut ==
                     shortcutDisplay({QStringLiteral("PgUp"), QStringLiteral("["),
                                      QStringLiteral("PgDown"), QStringLiteral("]")}) &&
-                rows.at(12).shortcutChips ==
+                rows.at(11).shortcutChips ==
                     QStringList{shortcutDisplay({QStringLiteral("PgUp"), QStringLiteral("[")}),
                                 shortcutDisplay({QStringLiteral("PgDown"), QStringLiteral("]")})},
             "history hint must split the previous and next shortcuts into separate chips");
@@ -292,6 +293,30 @@ void printShortcutIsNotHinted() {
     }
 }
 
+void previousSelectionShortcutsAreNotHinted() {
+    const snow_shot::shortcuts::ShortcutBindingMap configured{
+        {QStringLiteral("select_previously_selected_area"),
+         shortcutBindings({QStringLiteral("Alt+F9")})},
+        {QStringLiteral("select_next_previously_selected_area"),
+         shortcutBindings({QStringLiteral("Alt+F10")})},
+    };
+    for (const auto mode :
+         {ScreenshotShortcutHintMode::Selection, ScreenshotShortcutHintMode::SmartSelection}) {
+        for (const auto& rows :
+             {screenshotShortcutHintRows(mode), screenshotShortcutHintRows(mode, configured)}) {
+            require(std::none_of(rows.cbegin(), rows.cend(),
+                                 [](const auto& row) {
+                                     return row.label ==
+                                                QStringLiteral("Previous selection area") ||
+                                            row.label == QStringLiteral("Next selection area") ||
+                                            row.label ==
+                                                QStringLiteral("Select previously selected area");
+                                 }),
+                    "selection hints must omit both previous-area navigation shortcuts");
+        }
+    }
+}
+
 void defaultHistoryShortcutUsesSeparateChips() {
     const QVector<ScreenshotShortcutHintRow> rows =
         screenshotShortcutHintRows(ScreenshotShortcutHintMode::Selection);
@@ -334,7 +359,6 @@ void unconfiguredRowsFallBackToSchemaDefaults() {
         QStringLiteral("switch_selection_between_window_and_window_sub_element"),
         QStringLiteral("previous_screenshot_history"),
         QStringLiteral("next_screenshot_history"),
-        QStringLiteral("select_previously_selected_area"),
         QStringLiteral("copy_color"),
         QStringLiteral("toggle_coordinate_mode"),
     };
@@ -458,6 +482,132 @@ void emptyContextsUseHiddenMode() {
             "non-editing drawing contexts should not leave stale tool hints visible");
 }
 
+void multiRegionHintsExposeMovementWithoutResizeControls() {
+    ScreenshotShortcutHintContext context;
+    context.captureMode = ScreenshotCaptureMode::MovingSelection;
+    context.multiRegionEditing = true;
+    require(
+        screenshotShortcutHintLines(context) ==
+            withDefaultCursorHints({
+                shortcutLine(QStringLiteral("Move entire selection"), {QStringLiteral("Space")}),
+                shortcutLine(QStringLiteral("Copy color"), {QStringLiteral("C")}),
+                shortcutLine(QStringLiteral("Toggle Global/Relative Coordinates"),
+                             {QStringLiteral("Shift+P")}),
+                shortcutLine(QStringLiteral("Toggle cursor visibility"), {QStringLiteral("`")}),
+                modifierLine(QStringLiteral("Switch color format"), Qt::ShiftModifier),
+                shortcutLine(QStringLiteral("Switch screenshot history"),
+                             {QStringLiteral(","), QStringLiteral(".")}),
+                shortcutLine(QStringLiteral("Duplicate latest region"), {QStringLiteral("R")}),
+            }),
+        "settled multi-region hints must show whole-selection movement without resize controls");
+
+    context.multiRegionEditing = false;
+    require(screenshotShortcutHintLines(context) ==
+                screenshotShortcutHintLines(ScreenshotShortcutHintMode::Selection),
+            "replacing the multi-region selection must restore single-selection hints");
+}
+
+void regionOperationHintsMatchAvailableInputs() {
+    ScreenshotShortcutHintContext context;
+    context.multiRegionEditing = true;
+    context.regionOperationActive = true;
+    for (const auto mode :
+         {ScreenshotCaptureMode::ManualSelecting, ScreenshotCaptureMode::IntelligentSelecting}) {
+        context.captureMode = mode;
+        QStringList expected = withDefaultCursorHints({});
+        if (mode == ScreenshotCaptureMode::IntelligentSelecting) {
+            expected.push_back(QStringLiteral("Switch element level: mouse wheel"));
+        }
+        expected.push_back(modifierLine(QStringLiteral("Switch color format"), Qt::ShiftModifier));
+        expected.push_back(
+            shortcutLine(QStringLiteral("Duplicate latest region"), {QStringLiteral("R")}));
+        require(screenshotShortcutHintLines(context) == expected,
+                "region operations must omit shortcuts blocked by the input controller");
+        context.smartSelectionEnabled = false;
+        require(screenshotShortcutHintLines(context) == expected,
+                "region operations never advertise the blocked window/sub-element shortcut");
+        context.smartSelectionEnabled = true;
+    }
+
+    context.captureMode = ScreenshotCaptureMode::ManualSelecting;
+    context.regionConstructionActive = true;
+    const QStringList constructionHints = withDefaultCursorHints(
+        {modifierLine(QStringLiteral("Switch color format"), Qt::ShiftModifier)});
+    require(screenshotShortcutHintLines(context) == constructionHints,
+            "custom region construction must hide duplication until the draft is finished");
+    context.multiRegionEditing = false;
+    context.regionOperationActive = false;
+    require(screenshotShortcutHintLines(context) == constructionHints,
+            "standalone custom region construction shares the same blocked configured commands");
+}
+
+void multiRegionHintsRespectConfiguredAndDisabledShortcuts() {
+    ScreenshotShortcutHintContext context;
+    context.captureMode = ScreenshotCaptureMode::ManualSelecting;
+    context.multiRegionEditing = true;
+    context.regionOperationActive = true;
+    context.configuredShortcuts = snow_shot::shortcuts::ShortcutBindingMap{
+        {QStringLiteral("move_cursor_up"), shortcutBindings({QStringLiteral("Alt+I")})},
+        {QStringLiteral("move_cursor_down"), {}},
+        {QStringLiteral("move_cursor_left"), {}},
+        {QStringLiteral("move_cursor_right"), {}},
+        {QStringLiteral("duplicate_latest_region"), shortcutBindings({QStringLiteral("K")})},
+        {QStringLiteral("move_entire_selection"), shortcutBindings({QStringLiteral("Alt+M")})},
+        {QStringLiteral("copy_color"), shortcutBindings({QStringLiteral("Alt+C")})},
+        {QStringLiteral("selection_aspect_ratio_snap"), shortcutBindings({QStringLiteral("G")})},
+    };
+    require(screenshotShortcutHintLines(context) ==
+                QStringList{
+                    shortcutLine(QStringLiteral("Move cursor up"), {QStringLiteral("Alt+I")}),
+                    modifierLine(QStringLiteral("Switch color format"), Qt::ShiftModifier),
+                    shortcutLine(QStringLiteral("Duplicate latest region"), {QStringLiteral("K")}),
+                },
+            "multi-region hints must follow remapping and disabled bindings without reviving "
+            "blocked actions");
+    context.configuredShortcuts->insert(QStringLiteral("duplicate_latest_region"), {});
+    require(screenshotShortcutHintRows(context).size() == 2,
+            "disabling duplication must remove its region-operation hint");
+    context.regionOperationActive = false;
+    for (const auto mode :
+         {ScreenshotCaptureMode::ManualSelecting, ScreenshotCaptureMode::MovingSelection}) {
+        context.captureMode = mode;
+        require(screenshotShortcutHintLines(context).contains(shortcutLine(
+                    QStringLiteral("Move entire selection"), {QStringLiteral("Alt+M")})),
+                "settled multi-region hints must show the configured whole-selection shortcut");
+    }
+    context.configuredShortcuts->insert(QStringLiteral("move_entire_selection"), {});
+    const auto rows = screenshotShortcutHintRows(context);
+    require(std::none_of(rows.cbegin(), rows.cend(),
+                         [](const auto& row) {
+                             return row.label == QStringLiteral("Move entire selection");
+                         }),
+            "disabling whole-selection movement must remove its multi-region hint");
+}
+
+void duplicateHintFollowsEditingContextAndConfiguration() {
+    ScreenshotShortcutHintContext context;
+    context.captureMode = ScreenshotCaptureMode::MovingSelection;
+    const auto hasDuplicate = [](const auto& rows) {
+        return std::any_of(rows.begin(), rows.end(), [](const auto& row) {
+            return row.label == QStringLiteral("Duplicate latest region");
+        });
+    };
+    require(!hasDuplicate(screenshotShortcutHintRows(context)),
+            "single selection has no copy hint");
+    context.multiRegionEditing = true;
+    auto rows = screenshotShortcutHintRows(context);
+    require(hasDuplicate(rows) && rows.last().shortcut == shortcutDisplay({QStringLiteral("R")}),
+            "multi-region editing advertises the configured duplicate command");
+    context.configuredShortcuts = snow_shot::shortcuts::ShortcutBindingMap{
+        {QStringLiteral("duplicate_latest_region"), {QStringLiteral("K")}}};
+    rows = screenshotShortcutHintRows(context);
+    require(rows.last().shortcut == shortcutDisplay({QStringLiteral("K")}),
+            "duplicate hint follows remapping");
+    context.configuredShortcuts->insert(QStringLiteral("duplicate_latest_region"), {});
+    require(!hasDuplicate(screenshotShortcutHintRows(context)),
+            "disabled duplicate hides its hint");
+}
+
 void hintAreaHidesForSelectionOverlapOrCursorHover() {
     const QRectF hintArea(16.0, 300.0, 240.0, 180.0);
     require(!screenshotShortcutHintAreaIsObscured(hintArea, QRectF(300.0, 100.0, 200.0, 150.0),
@@ -478,6 +628,7 @@ int main(int argc, char** argv) {
     configuredShortcutRowsUseActualValues();
     coordinateHintFollowsCopyColor();
     printShortcutIsNotHinted();
+    previousSelectionShortcutsAreNotHinted();
     defaultHistoryShortcutUsesSeparateChips();
     unassignedConfiguredShortcutIsNotHinted();
     unconfiguredRowsFallBackToSchemaDefaults();
@@ -486,5 +637,9 @@ int main(int argc, char** argv) {
     disabledSmartSelectionHidesTheTargetSwitchHint();
     emptyContextsUseHiddenMode();
     hintAreaHidesForSelectionOverlapOrCursorHover();
+    multiRegionHintsExposeMovementWithoutResizeControls();
+    regionOperationHintsMatchAvailableInputs();
+    multiRegionHintsRespectConfiguredAndDisabledShortcuts();
+    duplicateHintFollowsEditingContextAndConfiguration();
     return 0;
 }

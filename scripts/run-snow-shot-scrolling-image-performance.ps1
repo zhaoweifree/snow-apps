@@ -6,7 +6,8 @@ param(
     [double]$ScrollFps = 30,
     [int]$MaxSteps = -1,
     [string]$OutputDirectory = "",
-    [switch]$DetailedTiming
+    [switch]$DetailedTiming,
+    [ValidateSet("x64", "arm64")][string]$Architecture = "x64"
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,12 +15,13 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $previousEnvironment = [Environment]::GetEnvironmentVariables("Process")
 Push-Location $repoRoot
 try {
-    . (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-    Set-SnowBuildEnvironment -Preset windows-msvc-performance | Out-Null
+    . (Join-Path $PSScriptRoot "../snow_shot/scripts/performance-environment.ps1")
+    $target = Get-SnowPerformanceTarget -Architecture $Architecture -RequireNative
+    Set-SnowBuildEnvironment -Preset $target.Preset | Out-Null
     $detail = if ($DetailedTiming) { "ON" } else { "OFF" }
-    & cmake --preset windows-msvc-performance "-DSNOW_SHOT_SCROLLING_PERF_DETAIL=$detail"
+    & cmake --preset $target.Preset "-DSNOW_SHOT_SCROLLING_PERF_DETAIL=$detail"
     if ($LASTEXITCODE -ne 0) { throw "Scrolling benchmark configuration failed." }
-    & cmake --build --preset build-windows-msvc-performance --target `
+    & cmake --build --preset "build-$($target.Preset)" --target `
         snow-shot-scrolling-image-performance-benchmark --parallel
     if ($LASTEXITCODE -ne 0) { throw "Scrolling benchmark build failed." }
 
@@ -28,15 +30,12 @@ try {
     }
     if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
         $mode = if ($DetailedTiming) { "detailed" } else { "coarse" }
-        $OutputDirectory = Join-Path $repoRoot "build/windows-msvc-performance/scrolling-image-performance/$mode"
+        $OutputDirectory = Join-Path $repoRoot "build/$($target.Preset)/scrolling-image-performance/$mode"
     }
-    $env:QT_QPA_PLATFORM = "offscreen"
-    $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $env:QTDIR "plugins/platforms"
-    $runtime = Join-Path $repoRoot ".tools/vcpkg/installed/dynamic/bin"
-    $qtBin = Join-Path $env:QTDIR "bin"
-    $env:PATH = "$qtBin;$runtime;$env:PATH"
+    Set-SnowPerformanceQtRuntime -Platform offscreen -Architecture $Architecture | Out-Null
     $executable = Join-Path $repoRoot `
-        "build/windows-msvc-performance/snow_shot/test-bin/Release/snow-shot-scrolling-image-performance-benchmark.exe"
+        "build/$($target.Preset)/snow_shot/test-bin/Release/snow-shot-scrolling-image-performance-benchmark.exe"
+    Assert-SnowPerformanceExecutable -Path $executable -Architecture $Architecture
     $arguments = @(
         "--image", $Image, "--viewport-height", $ViewportHeight.ToString(),
         "--step-px", $StepPx.ToString(),

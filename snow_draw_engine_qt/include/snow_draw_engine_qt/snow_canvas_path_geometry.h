@@ -17,6 +17,8 @@ class SnowCanvasStrokeFilter {
     SnowCanvasStrokeFilter(const SnowCanvasStrokeFilter&) = delete;
     SnowCanvasStrokeFilter& operator=(const SnowCanvasStrokeFilter&) = delete;
 
+    // Ends the stroke and releases native state and queued pointer-event storage.
+    void clear() noexcept;
     void reset(const QPointF& start, qreal scale = 1.0);
     void append(const QPointF& point);
     QVector<QPointF> takePoints(bool finish = false);

@@ -26,6 +26,15 @@
 #define SNOW_IMAGE_HAS_SSE2 1
 #endif
 
+#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <arm64_neon.h>
+#else
+#include <arm_neon.h>
+#endif
+#define SNOW_IMAGE_HAS_NEON 1
+#endif
+
 namespace snow::image {
 namespace {
 
@@ -325,13 +334,11 @@ Result<std::vector<std::pair<int, float>>> weights(int source_extent, int target
         if (weight == 0.0F)
             continue;
         const int clamped = std::clamp(source, 0, source_extent - 1);
-        const auto existing =
-            std::find_if(result.begin(), result.end(),
-                         [clamped](const auto& item) { return item.first == clamped; });
-        if (existing == result.end())
+        // Source indices, including the repeated clamped edge samples, are monotonic.
+        if (result.empty() || result.back().first != clamped)
             result.emplace_back(clamped, weight);
         else
-            existing->second += weight;
+            result.back().second += weight;
         total += weight;
     }
     if (std::abs(total) > 0.000001F) {
@@ -568,11 +575,54 @@ bool exceeds_worker_cache(std::size_t ring_bytes, std::size_t ring_rows, std::ui
     return ring_rows > remaining / kIndexBytesPerRow;
 }
 
+struct ResizeTables final {
+    PackedWeights horizontal;
+    PackedWeights vertical;
+    std::optional<SourceMajorWeights> source_major;
+    std::size_t ring_rows = 0;
+    std::size_t ring_bytes = 0;
+};
+
+Result<ResizeTables> prepare_resize_tables(std::uint32_t source_width, std::uint32_t source_height,
+                                           const ResizeOptions& options, std::stop_token stop) {
+    ResizeTables tables;
+    if (source_width == options.width && source_height == options.height)
+        return tables;
+    auto horizontal = pack_weights(static_cast<int>(source_width), static_cast<int>(options.width),
+                                   options.method, stop);
+    if (!horizontal)
+        return horizontal.error();
+    tables.horizontal = std::move(horizontal).value();
+    auto vertical = pack_weights(static_cast<int>(source_height), static_cast<int>(options.height),
+                                 options.method, stop);
+    if (!vertical)
+        return vertical.error();
+    tables.vertical = std::move(vertical).value();
+    tables.ring_rows = std::max<std::size_t>(1, tables.vertical.maximum_count);
+    if (options.width > std::numeric_limits<std::size_t>::max() / sizeof(Pixel) / tables.ring_rows)
+        return Status::error(ErrorCode::limit_exceeded, "Resize row-ring size overflows.");
+    tables.ring_bytes = static_cast<std::size_t>(options.width) * sizeof(Pixel) * tables.ring_rows;
+    const bool unbounded =
+        options.maximum_worker_cache_bytes == std::numeric_limits<std::uint64_t>::max();
+    if (!unbounded && source_height > options.height &&
+        (tables.ring_rows > kDefaultResizeMaximumCachedRows ||
+         exceeds_worker_cache(tables.ring_bytes, tables.ring_rows,
+                              options.maximum_worker_cache_bytes))) {
+        auto inverted = invert_weights(tables.vertical, source_height, options.height, stop);
+        if (!inverted)
+            return inverted.error();
+        tables.source_major = std::move(inverted).value();
+        tables.vertical = {};
+    }
+    return tables;
+}
+
 Result<void> resize_packed_into(const ImageView* image_source, const RasterSource* raster_source,
                                 std::uint32_t source_width, std::uint32_t source_height,
                                 const PixelFormat& source_format, const ResizeOptions& options,
                                 std::span<std::byte> output_pixels, std::size_t output_stride,
-                                std::stop_token stop) {
+                                std::stop_token stop, const ResizeTables* prepared = nullptr,
+                                std::uint32_t output_first = 0, std::uint32_t output_count = 0) {
     if ((image_source == nullptr) == (raster_source == nullptr)) {
         return Status::error(ErrorCode::internal_error,
                              "Resize requires exactly one pixel source.");
@@ -580,6 +630,11 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
     if (options.width == 0 || options.height == 0) {
         return Status::error(ErrorCode::invalid_argument, "Resize dimensions must be non-zero.");
     }
+    if (output_count == 0)
+        output_count = options.height;
+    if (output_first >= options.height || output_count > options.height - output_first)
+        return Status::error(ErrorCode::invalid_argument, "Resize output row range is invalid.");
+    const std::uint32_t output_last = output_first + output_count;
     const std::uint64_t count = static_cast<std::uint64_t>(options.width) * options.height;
     if (count > (std::uint64_t{1} << 32U)) {
         return Status::error(ErrorCode::limit_exceeded, "Resized image exceeds the pixel limit.");
@@ -603,69 +658,57 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
     }
     const std::size_t row_bytes = static_cast<std::size_t>(options.width) * bytes_per_pixel.value();
     if (output_stride < row_bytes || output_pixels.size() < row_bytes ||
-        options.height - 1U > (output_pixels.size() - row_bytes) / output_stride) {
+        output_count - 1U > (output_pixels.size() - row_bytes) / output_stride) {
         return Status::error(ErrorCode::invalid_argument, "Resize output storage is too small.");
     }
     if (source_width == options.width && source_height == options.height) {
         if (image_source != nullptr) {
-            for (std::uint32_t y = 0; y < options.height; ++y) {
+            for (std::uint32_t y = 0; y < output_count; ++y) {
                 if (stop.stop_requested()) {
                     return Status::error(ErrorCode::cancelled, "Image operation was cancelled.");
                 }
                 std::memcpy(output_pixels.data() + static_cast<std::size_t>(y) * output_stride,
                             image_source->pixels.data() +
-                                static_cast<std::size_t>(y) * image_source->row_stride,
+                                static_cast<std::size_t>(output_first + y) *
+                                    image_source->row_stride,
                             row_bytes);
             }
             return {};
         }
         constexpr std::uint32_t kRowsPerRead = 64;
-        for (std::uint32_t first = 0; first < options.height; first += kRowsPerRead) {
-            const std::uint32_t row_count = std::min(kRowsPerRead, options.height - first);
+        for (std::uint32_t first = 0; first < output_count; first += kRowsPerRead) {
+            const std::uint32_t row_count = std::min(kRowsPerRead, output_count - first);
             const std::size_t offset = static_cast<std::size_t>(first) * output_stride;
             const std::size_t capacity =
                 static_cast<std::size_t>(row_count - 1U) * output_stride + row_bytes;
             Result<void> read =
-                raster_source->read_rows(0, 0, first, row_count, output_stride,
+                raster_source->read_rows(0, 0, output_first + first, row_count, output_stride,
                                          output_pixels.subspan(offset, capacity), stop);
             if (!read)
                 return read;
         }
         return {};
     }
-    Result<PackedWeights> horizontal = pack_weights(
-        static_cast<int>(source_width), static_cast<int>(options.width), options.method, stop);
-    if (!horizontal)
-        return horizontal.error();
-    Result<PackedWeights> vertical = pack_weights(
-        static_cast<int>(source_height), static_cast<int>(options.height), options.method, stop);
-    if (!vertical)
-        return vertical.error();
-
-    const std::size_t ring_rows = std::max<std::size_t>(1, vertical.value().maximum_count);
-    if (options.width > std::numeric_limits<std::size_t>::max() / sizeof(Pixel) / ring_rows) {
-        return Status::error(ErrorCode::limit_exceeded, "Resize row-ring size overflows.");
+    std::optional<ResizeTables> owned_tables;
+    if (prepared == nullptr) {
+        auto tables = prepare_resize_tables(source_width, source_height, options, stop);
+        if (!tables)
+            return tables.error();
+        owned_tables = std::move(tables).value();
+        prepared = &*owned_tables;
     }
-    const std::size_t ring_bytes =
-        static_cast<std::size_t>(options.width) * sizeof(Pixel) * ring_rows;
+    const auto& horizontal = prepared->horizontal;
+    const auto& vertical = prepared->vertical;
+    const std::size_t ring_rows = prepared->ring_rows;
+    const std::size_t ring_bytes = prepared->ring_bytes;
     const bool rgba8 = source_format == kRgba8;
     const bool bgra8 = source_format == kBgra8;
     const bool specialized_rgba8 = rgba8 || bgra8;
 
-    const bool unbounded_cache =
-        options.maximum_worker_cache_bytes == std::numeric_limits<std::uint64_t>::max();
-    const bool source_major =
-        !unbounded_cache && source_height > options.height &&
-        (ring_rows > kDefaultResizeMaximumCachedRows ||
-         exceeds_worker_cache(ring_bytes, ring_rows, options.maximum_worker_cache_bytes));
-    if (source_major) {
-        Result<SourceMajorWeights> inverted =
-            invert_weights(vertical.value(), source_height, options.height, stop);
-        if (!inverted)
-            return inverted.error();
-        vertical = PackedWeights{};
-
-        const std::size_t active_rows = inverted.value().maximum_active_targets;
+    if (prepared->source_major) {
+        const auto& inverted = *prepared->source_major;
+        const std::size_t active_rows =
+            std::min<std::size_t>(inverted.maximum_active_targets, output_count);
         if (active_rows == 0 ||
             options.width > std::numeric_limits<std::size_t>::max() / sizeof(Pixel) / active_rows) {
             return Status::error(ErrorCode::limit_exceeded,
@@ -676,30 +719,44 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
             snow::memory::PixelArray<std::byte> source_row;
             snow::memory::PixelArray<Pixel> accumulators(active_rows * options.width);
             constexpr std::size_t kNoSlot = std::numeric_limits<std::size_t>::max();
-            std::vector<std::size_t> target_slots(options.height, kNoSlot);
+            std::vector<std::size_t> target_slots(output_count, kNoSlot);
             std::vector<std::size_t> free_slots;
             free_slots.reserve(active_rows);
             for (std::size_t slot = active_rows; slot > 0; --slot)
                 free_slots.push_back(slot - 1U);
 
-            for (std::uint32_t source_y = 0; source_y < source_height; ++source_y) {
+            int first_source = static_cast<int>(source_height);
+            int last_source = -1;
+            for (std::uint32_t target = output_first; target < output_last; ++target) {
+                first_source = std::min(first_source, inverted.first_sources[target]);
+                last_source = std::max(last_source, inverted.last_sources[target]);
+            }
+            for (std::uint32_t source_y = static_cast<std::uint32_t>(first_source);
+                 source_y <= static_cast<std::uint32_t>(last_source); ++source_y) {
                 if (stop.stop_requested()) {
                     return Status::error(ErrorCode::cancelled, "Image operation was cancelled.");
                 }
-                const std::size_t first = inverted.value().offsets[source_y];
-                const std::size_t last = inverted.value().offsets[source_y + 1U];
+                const auto begin = inverted.targets.begin() +
+                                   static_cast<std::ptrdiff_t>(inverted.offsets[source_y]);
+                const auto end = inverted.targets.begin() +
+                                 static_cast<std::ptrdiff_t>(inverted.offsets[source_y + 1U]);
+                const std::size_t first = static_cast<std::size_t>(
+                    std::lower_bound(begin, end, output_first) - inverted.targets.begin());
+                const std::size_t last = static_cast<std::size_t>(
+                    std::lower_bound(begin, end, output_last) - inverted.targets.begin());
                 if (first == last)
                     continue;
                 Result<void> filtered = filter_horizontal_input_row(
                     image_source, raster_source, source_width, source_format,
                     static_cast<std::size_t>(source_width) * bytes_per_pixel.value(), source_y,
-                    horizontal.value(), options, specialized_rgba8, bgra8, horizontal_row,
-                    source_row, stop);
+                    horizontal, options, specialized_rgba8, bgra8, horizontal_row, source_row,
+                    stop);
                 if (!filtered)
                     return filtered;
                 for (std::size_t coefficient = first; coefficient < last; ++coefficient) {
-                    const std::uint32_t target = inverted.value().targets[coefficient];
-                    if (inverted.value().first_sources[target] == static_cast<int>(source_y)) {
+                    const std::uint32_t target = inverted.targets[coefficient];
+                    const auto local_target = target - output_first;
+                    if (inverted.first_sources[target] == static_cast<int>(source_y)) {
                         if (free_slots.empty()) {
                             return Status::error(
                                 ErrorCode::internal_error,
@@ -707,17 +764,17 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
                         }
                         const std::size_t slot = free_slots.back();
                         free_slots.pop_back();
-                        target_slots[target] = slot;
+                        target_slots[local_target] = slot;
                         std::fill_n(accumulators.data() + slot * options.width, options.width,
                                     Pixel{});
                     }
-                    const std::size_t slot = target_slots[target];
+                    const std::size_t slot = target_slots[local_target];
                     if (slot == kNoSlot) {
                         return Status::error(ErrorCode::internal_error,
                                              "Streaming resize target has no accumulator.");
                     }
                     Pixel* accumulator = accumulators.data() + slot * options.width;
-                    const float weight = inverted.value().values[coefficient];
+                    const float weight = inverted.values[coefficient];
                     for (std::uint32_t x = 0; x < options.width; ++x) {
                         if ((x & 1023U) == 0U && stop.stop_requested()) {
                             return Status::error(ErrorCode::cancelled,
@@ -726,15 +783,15 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
                         accumulator[x] = add_weighted(accumulator[x], horizontal_row[x], weight,
                                                       options.premultiply_alpha);
                     }
-                    if (inverted.value().last_sources[target] == static_cast<int>(source_y)) {
-                        if (!write_resize_row(output_pixels, output_stride, target,
+                    if (inverted.last_sources[target] == static_cast<int>(source_y)) {
+                        if (!write_resize_row(output_pixels, output_stride, local_target,
                                               bytes_per_pixel.value(), source_format, options,
                                               specialized_rgba8, bgra8,
                                               std::span<Pixel>(accumulator, options.width), stop)) {
                             return Status::error(ErrorCode::cancelled,
                                                  "Image operation was cancelled.");
                         }
-                        target_slots[target] = kNoSlot;
+                        target_slots[local_target] = kNoSlot;
                         free_slots.push_back(slot);
                     }
                 }
@@ -754,7 +811,7 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
         raster_source != nullptr &&
                 !has_access(raster_source->access(), RasterAccess::concurrent_reads)
             ? 1U
-            : resize_thread_count(options, ring_bytes);
+            : std::min(resize_thread_count(options, ring_bytes), output_count);
     std::stop_source failure_stop;
     std::stop_callback external_stop(stop, [&failure_stop] { failure_stop.request_stop(); });
     std::atomic<bool> failed = false;
@@ -776,11 +833,11 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
                 return stop.stop_requested() || failure_stop.stop_requested();
             };
             for (std::uint32_t y = first_y; y < last_y && !cancelled(); ++y) {
-                const std::size_t vertical_first = vertical.value().offsets[y];
-                const std::size_t vertical_last = vertical.value().offsets[y + 1U];
+                const std::size_t vertical_first = vertical.offsets[y];
+                const std::size_t vertical_last = vertical.offsets[y + 1U];
                 for (std::size_t coefficient = vertical_first; coefficient < vertical_last;
                      ++coefficient) {
-                    const int source_y = vertical.value().indices[coefficient];
+                    const int source_y = vertical.indices[coefficient];
                     const bool already_cached =
                         indexed_slots ? source_slots.contains(source_y)
                                       : std::find(ring_sources.begin(), ring_sources.end(),
@@ -791,14 +848,12 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
                     std::size_t slot = next_slot++ % ring_rows;
                     for (std::size_t attempt = 0; attempt < ring_rows; ++attempt) {
                         const int candidate = ring_sources[slot];
-                        const auto required =
-                            std::lower_bound(vertical.value().indices.begin() +
-                                                 static_cast<std::ptrdiff_t>(vertical_first),
-                                             vertical.value().indices.begin() +
-                                                 static_cast<std::ptrdiff_t>(vertical_last),
-                                             candidate);
+                        const auto required = std::lower_bound(
+                            vertical.indices.begin() + static_cast<std::ptrdiff_t>(vertical_first),
+                            vertical.indices.begin() + static_cast<std::ptrdiff_t>(vertical_last),
+                            candidate);
                         if (candidate < 0 ||
-                            required == vertical.value().indices.begin() +
+                            required == vertical.indices.begin() +
                                             static_cast<std::ptrdiff_t>(vertical_last) ||
                             *required != candidate) {
                             break;
@@ -815,7 +870,7 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
                     Result<void> filtered = filter_horizontal_input_row(
                         image_source, raster_source, source_width, source_format,
                         static_cast<std::size_t>(source_width) * bytes_per_pixel.value(),
-                        static_cast<std::uint32_t>(source_y), horizontal.value(), options,
+                        static_cast<std::uint32_t>(source_y), horizontal, options,
                         specialized_rgba8, bgra8, std::span<Pixel>(horizontal_row, options.width),
                         source_row, failure_stop.get_token());
                     if (!filtered) {
@@ -830,7 +885,7 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
                 // Resolve them once, keeping the coefficient accumulation order.
                 for (std::size_t coefficient = vertical_first; coefficient < vertical_last;
                      ++coefficient) {
-                    const int source_y = vertical.value().indices[coefficient];
+                    const int source_y = vertical.indices[coefficient];
                     const std::size_t slot =
                         indexed_slots
                             ? source_slots.at(source_y)
@@ -840,17 +895,17 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
                     vertical_rows[coefficient - vertical_first] =
                         ring.data() + slot * options.width;
                 }
-                std::byte* output_row =
-                    output_pixels.data() + static_cast<std::size_t>(y) * output_stride;
+                std::byte* output_row = output_pixels.data() +
+                                        static_cast<std::size_t>(y - output_first) * output_stride;
                 for (std::uint32_t x = 0; x < options.width; ++x) {
                     if ((x & 255U) == 0U && cancelled())
                         return;
                     Pixel value{};
                     for (std::size_t coefficient = vertical_first; coefficient < vertical_last;
                          ++coefficient) {
-                        value = add_weighted(value, vertical_rows[coefficient - vertical_first][x],
-                                             vertical.value().values[coefficient],
-                                             options.premultiply_alpha);
+                        value =
+                            add_weighted(value, vertical_rows[coefficient - vertical_first][x],
+                                         vertical.values[coefficient], options.premultiply_alpha);
                     }
                     finish_pixel(&value, options.premultiply_alpha);
                     std::byte* destination =
@@ -881,13 +936,21 @@ Result<void> resize_packed_into(const ImageView* image_source, const RasterSourc
 
     std::vector<std::jthread> workers;
     try {
-        workers.reserve(thread_count);
-        for (std::uint32_t index = 0; index < thread_count; ++index) {
-            const std::uint32_t first = static_cast<std::uint32_t>(
-                static_cast<std::uint64_t>(options.height) * index / thread_count);
-            const std::uint32_t last = static_cast<std::uint32_t>(
-                static_cast<std::uint64_t>(options.height) * (index + 1U) / thread_count);
-            workers.emplace_back(run_band, first, last);
+        if (thread_count == 1) {
+            run_band(output_first, output_last);
+        } else {
+            workers.reserve(thread_count);
+            for (std::uint32_t index = 0; index < thread_count; ++index) {
+                const std::uint32_t first =
+                    output_first +
+                    static_cast<std::uint32_t>(static_cast<std::uint64_t>(output_count) * index /
+                                               thread_count);
+                const std::uint32_t last =
+                    output_first +
+                    static_cast<std::uint32_t>(static_cast<std::uint64_t>(output_count) *
+                                               (index + 1U) / thread_count);
+                workers.emplace_back(run_band, first, last);
+            }
         }
     } catch (const std::system_error&) {
         failure_stop.request_stop();
@@ -1421,6 +1484,100 @@ Result<void> resize_raster_into(const RasterSource& source, const ResizeOptions&
     }
 }
 
+namespace {
+class PreparedResizeRaster final : public RasterSource {
+  public:
+    PreparedResizeRaster(std::shared_ptr<const RasterSource> source, ResizeOptions options,
+                         ResizeTables tables)
+        : source_(std::move(source)), options_(options), tables_(std::move(tables)),
+          descriptor_(source_->descriptor()) {
+        auto& frame = descriptor_.frames.front();
+        descriptor_.canvas_width = frame.width = options_.width;
+        descriptor_.canvas_height = frame.height = options_.height;
+        frame.layout.planes.front().width = options_.width;
+        frame.layout.planes.front().height = options_.height;
+    }
+
+    const DocumentDescriptor& descriptor() const noexcept override {
+        return descriptor_;
+    }
+    RasterAccess access() const noexcept override {
+        const auto reads = RasterAccess::random_rows | RasterAccess::random_regions;
+        return has_access(source_->access(), RasterAccess::concurrent_reads)
+                   ? reads | RasterAccess::concurrent_reads
+                   : reads;
+    }
+    Result<void> read_rows(std::uint32_t frame, std::uint32_t plane, std::uint32_t first,
+                           std::uint32_t count, std::size_t stride,
+                           std::span<std::byte> destination, std::stop_token stop) const override {
+        if (frame != 0 || plane != 0 || count == 0 || first >= options_.height ||
+            count > options_.height - first)
+            return Status::error(ErrorCode::invalid_argument,
+                                 "Resize output row range is invalid.");
+        if (stop.stop_requested())
+            return Status::error(ErrorCode::cancelled, "Image operation was cancelled.");
+        const auto& input = source_->descriptor().frames.front().layout.planes.front();
+        return resize_packed_into(nullptr, source_.get(), input.width, input.height, input.format,
+                                  options_, destination, stride, stop, &tables_, first, count);
+    }
+
+  private:
+    std::shared_ptr<const RasterSource> source_;
+    ResizeOptions options_;
+    ResizeTables tables_;
+    DocumentDescriptor descriptor_;
+};
+} // namespace
+
+Result<std::shared_ptr<const RasterSource>>
+prepare_resized_raster(std::shared_ptr<const RasterSource> source, const ResizeOptions& options,
+                       std::stop_token stop) {
+    try {
+        if (!source)
+            return Status::error(ErrorCode::invalid_argument, "Resize source is unavailable.");
+        auto valid = source->descriptor().validate();
+        if (!valid)
+            return valid.error();
+        const auto& document = source->descriptor();
+        if (document.kind != DocumentKind::raster || document.frames.size() != 1U)
+            return Status::error(ErrorCode::unsupported_feature,
+                                 "Resize requires exactly one raster frame.");
+        const auto& frame = document.frames.front();
+        if (frame.x != 0 || frame.y != 0 || frame.width != document.canvas_width ||
+            frame.height != document.canvas_height || frame.layout.planes.size() != 1U)
+            return Status::error(ErrorCode::unsupported_feature,
+                                 "Resize requires one full-canvas packed plane.");
+        const auto& plane = frame.layout.planes.front();
+        if (plane.semantic != PlaneSemantic::packed || plane.width != frame.width ||
+            plane.height != frame.height ||
+            !has_access(source->access(), RasterAccess::random_rows))
+            return Status::error(ErrorCode::unsupported_feature,
+                                 "Prepared resize requires one packed plane with random rows.");
+        valid = validate_processable_format(plane.format);
+        if (!valid)
+            return valid.error();
+        if (options.width == 0 || options.height == 0 ||
+            frame.width > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+            frame.height > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+            options.width > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+            options.height > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+            std::uint64_t{options.width} * options.height > (std::uint64_t{1} << 32U))
+            return Status::error(ErrorCode::limit_exceeded,
+                                 "Resize dimensions exceed the filter limits.");
+        if (stop.stop_requested())
+            return Status::error(ErrorCode::cancelled, "Image operation was cancelled.");
+        auto tables = prepare_resize_tables(frame.width, frame.height, options, stop);
+        if (!tables)
+            return tables.error();
+        return std::shared_ptr<const RasterSource>(std::make_shared<PreparedResizeRaster>(
+            std::move(source), options, std::move(tables).value()));
+    } catch (const std::bad_alloc&) {
+        return Status::error(ErrorCode::out_of_memory, "Resize preparation ran out of memory.");
+    } catch (...) {
+        return Status::error(ErrorCode::internal_error, "Resize preparation failed unexpectedly.");
+    }
+}
+
 Result<Document> transform(const Document& document, const TransformOptions& options,
                            std::stop_token stop) {
     try {
@@ -1684,11 +1841,12 @@ Result<AlphaContent> classify_alpha(ImageView image, std::stop_token stop) {
         }
         const std::byte* row = image.pixels.data() + static_cast<std::size_t>(y) * image.row_stride;
         std::uint32_t scalar_start = 0;
-#if defined(SNOW_IMAGE_HAS_SSE2)
+#if defined(SNOW_IMAGE_HAS_SSE2) || defined(SNOW_IMAGE_HAS_NEON)
         if (format.sample_type == SampleType::unsigned_integer &&
             (sample_bytes == 1 || sample_bytes == 2) && pixel_bytes <= 16 &&
             16 % pixel_bytes == 0) {
             const std::uint32_t pixels_per_vector = static_cast<std::uint32_t>(16 / pixel_bytes);
+#if defined(SNOW_IMAGE_HAS_SSE2)
             unsigned expected_mask = 0;
             for (std::size_t pixel = 0; pixel < 16; pixel += pixel_bytes) {
                 for (std::size_t byte = 0; byte < sample_bytes; ++byte)
@@ -1705,6 +1863,24 @@ Result<AlphaContent> classify_alpha(ImageView image, std::stop_token stop) {
                     return AlphaContent::non_opaque;
                 scalar_start += pixels_per_vector;
             }
+#else
+            std::array<std::uint8_t, 16> ignored_bytes;
+            ignored_bytes.fill(0xFF);
+            for (std::size_t pixel = 0; pixel < 16; pixel += pixel_bytes) {
+                for (std::size_t byte = 0; byte < sample_bytes; ++byte) {
+                    ignored_bytes[pixel + alpha_offset + byte] = 0;
+                }
+            }
+            const uint8x16_t ignored = vld1q_u8(ignored_bytes.data());
+            while (image.width - scalar_start >= pixels_per_vector) {
+                const uint8x16_t samples = vld1q_u8(reinterpret_cast<const std::uint8_t*>(
+                    row + static_cast<std::size_t>(scalar_start) * pixel_bytes));
+                if (vminvq_u8(vorrq_u8(samples, ignored)) != 0xFF) {
+                    return AlphaContent::non_opaque;
+                }
+                scalar_start += pixels_per_vector;
+            }
+#endif
         }
 #endif
         for (std::uint32_t x = scalar_start; x < image.width; ++x) {

@@ -1,3 +1,7 @@
+#include "snow_shot/app/supportedpinfiles.h"
+#include "snow_shot/presentation/screenshotcontentdrop.h"
+#include <QTextTable>
+#include <QFontDatabase>
 #include "snow_shot/presentation/screenshotclipboardcontent.h"
 #include "../src/presentation/services/screenshotclipboardcontentsnapshot.h"
 #include "snowimageqtcodec.h"
@@ -6,6 +10,7 @@
 #include "pinned_animation_native_fixtures.h"
 #include "snow_draw_engine_qt/snow_canvas_image.h"
 #include "snow_shot/image/supportedimagefiles.h"
+#include "bmp_import_fixtures.h"
 #include "../../test-support/virtualmemory.h"
 
 #include <QAbstractTextDocumentLayout>
@@ -51,9 +56,52 @@ void imageFileExtensionsMatchShellRegistration() {
     require(ScreenshotClipboardContentReader::supportedImageFileExtensions() == images,
             "image reader and shell registration share the authoritative image suffixes");
     auto allFiles = images;
-    allFiles.append({QStringLiteral("txt"), QStringLiteral("html"), QStringLiteral("htm")});
+    allFiles.append({QStringLiteral("txt"), QStringLiteral("html"), QStringLiteral("htm"),
+                     QStringLiteral("md"), QStringLiteral("markdown"), QStringLiteral("css")});
     require(ScreenshotClipboardContentReader::supportedFileExtensions() == allFiles,
             "existing file pinning retains its additional formatted-text formats");
+}
+
+void bmpFilesPreservePixelsAndIdentity() {
+    QTemporaryDir directory;
+    require(directory.isValid(), "BMP import fixture directory must exist");
+    QImage opaque(3, 2, QImage::Format_RGB888);
+    opaque.fill(Qt::green);
+    opaque.setPixelColor(0, 0, Qt::red);
+    opaque.setPixelColor(2, 1, Qt::blue);
+    QImage alpha = opaque.convertToFormat(QImage::Format_RGBA8888);
+    alpha.setPixelColor(1, 0, QColor(10, 20, 30, 40));
+    alpha.setPixelColor(0, 1, QColor(90, 80, 70, 0));
+    const QStringList paths{directory.filePath(QStringLiteral("opaque.bmp")),
+                            directory.filePath(QStringLiteral("透明 image.BMP"))};
+    require(opaque.save(paths[0], "BMP") && bmp_import_fixtures::write(paths[1], alpha),
+            "write 24-bit opaque and 32-bit alpha BMP fixtures");
+    const auto files = ScreenshotClipboardContentReader::snapshotLocalFiles(paths);
+    require(files.size() == 2 && files[0].suffix == QStringLiteral("bmp") &&
+                files[1].suffix == QStringLiteral("bmp"),
+            "BMP snapshots accept lowercase and uppercase suffixes in source order");
+    for (qsizetype index = 0; index < paths.size(); ++index) {
+        QMimeData mime;
+        mime.setUrls({QUrl::fromLocalFile(paths[index])});
+        const auto content = ScreenshotClipboardContentReader::readMimeData(&mime, 1.0);
+        require(content && !content->isFormattedText() && !content->animationSource &&
+                    bmp_import_fixtures::samePixels(content->image, index == 0 ? opaque : alpha) &&
+                    content->originalContent.localFilePath == paths[index] &&
+                    content->sourceIdentity == files[index].sourceIdentity,
+                "BMP file imports preserve dimensions, RGBA pixels and original file identity");
+    }
+    const auto corrupt = directory.filePath(QStringLiteral("corrupt.bmp"));
+    QFile file(corrupt);
+    require(file.open(QIODevice::WriteOnly) && file.write("not a bitmap") > 0,
+            "write malformed BMP fixture");
+    file.close();
+    const auto corruptFiles = ScreenshotClipboardContentReader::snapshotLocalFiles({corrupt});
+    require(corruptFiles.size() == 1, "malformed BMP fixture must reach the decoder");
+    ScreenshotClipboardContentSnapshot snapshot;
+    snapshot.localImage = corruptFiles.first();
+    snapshot.devicePixelRatio = 1;
+    require(!ScreenshotClipboardContentReader::decode(std::move(snapshot)),
+            "malformed BMP files must fail decoding");
 }
 
 void animatedSourcesSurviveImport() {
@@ -130,6 +178,67 @@ QByteArray profiledApng(const QColorSpace& profile) {
     auto result = pinned_animation_fixtures::images().back().bytes;
     result.insert(33, metadata);
     return result;
+}
+
+void firstFrameFilesKeepCompositionProfilesAndRevisionChecks() {
+    QTemporaryDir directory;
+    require(directory.isValid(), "first-frame fixture directory must exist");
+    auto fixtures = pinned_animation_native_fixtures::images();
+    fixtures.append(pinned_animation_fixtures::hiddenPosterAnimation());
+    fixtures.append(pinned_animation_fixtures::singleFrameImages());
+    fixtures.append({QStringLiteral("apng"), QStringLiteral("image/apng"),
+                     profiledApng(QColorSpace(QColorSpace::DisplayP3))});
+    for (qsizetype index = 0; index < fixtures.size(); ++index) {
+        const auto& fixture = fixtures[index];
+        const auto path =
+            directory.filePath(QStringLiteral("first-%1.%2").arg(index).arg(fixture.suffix));
+        QFile file(path);
+        require(file.open(QIODevice::WriteOnly) &&
+                    file.write(fixture.bytes) == fixture.bytes.size(),
+                "write first-frame file fixture");
+        file.close();
+        const auto files = ScreenshotClipboardContentReader::snapshotLocalFiles({path});
+        require(files.size() == 1, "snapshot first-frame file fixture");
+        ScreenshotClipboardContentSnapshot snapshot;
+        snapshot.localImage = files.first();
+        const auto complete = ScreenshotClipboardContentReader::decode(snapshot);
+        const auto budgeted =
+            ScreenshotClipboardContentReader::decode(snapshot, {}, [](qint64) { return true; });
+        const auto image = ScreenshotClipboardContentReader::decodeImageFile(
+            files.first(), {}, [](qint64) { return true; });
+        require(
+            complete && budgeted && budgeted->image == complete->image &&
+                image == complete->image && image.colorSpace() == complete->image.colorSpace(),
+            "budgeted full/first-frame files preserve animated canvas composition and profiles");
+        require(
+            ScreenshotClipboardContentReader::decodeImageFile(files.first(), [] { return true; })
+                .isNull(),
+            "first-frame file decode honors cancellation before reading");
+        int calls = 0;
+        require(ScreenshotClipboardContentReader::decodeImageFile(
+                    files.first(), {},
+                    [&](qint64) {
+                        ++calls;
+                        return false;
+                    }).isNull() &&
+                    calls == 1,
+                "first-frame file decoding admits encoded bytes before allocation");
+        require(file.open(QIODevice::Append) && file.write("changed") == 7,
+                "mutate a captured first-frame source");
+        file.close();
+        require(ScreenshotClipboardContentReader::decodeImageFile(files.first()).isNull() &&
+                    !image.isNull(),
+                "changed file revisions fail while previously decoded first frames remain valid");
+    }
+    const auto malformed = directory.filePath(QStringLiteral("malformed.apng"));
+    QFile file(malformed);
+    require(file.open(QIODevice::WriteOnly) && file.write("not an image") > 0,
+            "write malformed first-frame fixture");
+    file.close();
+    const auto files = ScreenshotClipboardContentReader::snapshotLocalFiles({malformed});
+    require(files.size() == 1 &&
+                ScreenshotClipboardContentReader::decodeImageFile(files.first()).isNull(),
+            "first-frame-only decoding rejects malformed image files");
 }
 
 void animationReplacementPreparationIsAtomicAndWorkerSafe() {
@@ -393,10 +502,14 @@ void localTextFilesAreSupported() {
     QTemporaryDir directory;
     require(directory.isValid(), "text file directory exists");
     for (const auto& suffix :
-         {QStringLiteral("TXT"), QStringLiteral("html"), QStringLiteral("htm")}) {
-        const bool html = suffix != QStringLiteral("TXT");
-        const QString source = html ? QStringLiteral("<b>Unicode \u4e2d\u6587</b>")
-                                    : QStringLiteral("Unicode \u4e2d\u6587");
+         {QStringLiteral("TXT"), QStringLiteral("html"), QStringLiteral("htm"),
+          QStringLiteral("MD"), QStringLiteral("markdown"), QStringLiteral("CSS")}) {
+        const auto format = snow_shot::app::pinDocumentFileFormat(suffix);
+        const bool html = format == snow_shot::app::PinDocumentFormat::Html;
+        const bool markdown = format == snow_shot::app::PinDocumentFormat::Markdown;
+        const QString source = html       ? QStringLiteral("<b>Unicode \u4e2d\u6587</b>")
+                               : markdown ? QStringLiteral("**Unicode \u4e2d\u6587**")
+                                          : QStringLiteral("Unicode \u4e2d\u6587");
         const QString path = directory.filePath(QStringLiteral("content.") + suffix);
         QFile file(path);
         require(file.open(QIODevice::WriteOnly), "text file opens");
@@ -410,6 +523,9 @@ void localTextFilesAreSupported() {
         snapshot.baseColor = Qt::white;
         auto decoded = ScreenshotClipboardContentReader::decode(snapshot);
         require(decoded && decoded->isFormattedText() &&
+                    decoded->originalContent.textFormat ==
+                        (markdown ? snow_shot::storage::PinnedTextFormat::Markdown
+                                  : snow_shot::storage::PinnedTextFormat::PlainText) &&
                     decoded->plainText == QStringLiteral("Unicode \u4e2d\u6587") &&
                     decoded->formattedTextDevicePixelRatio == 2.0 &&
                     decoded->sourceIdentity == files.first().sourceIdentity &&
@@ -417,6 +533,17 @@ void localTextFilesAreSupported() {
                     (html ? decoded->originalContent.html : decoded->originalContent.text) ==
                         source,
                 "local text renders at requested density with original source and file identity");
+        QMimeData mime;
+        mime.setUrls({QUrl::fromLocalFile(path)});
+        require(acceptsScreenshotDrop(&mime) && screenshotDropFilePaths(&mime) == QStringList{path},
+                "all document suffixes are admitted for file drops");
+        const auto clipboard = ScreenshotClipboardContentReader::readMimeData(&mime, 2.0);
+        require(clipboard && clipboard->plainText == decoded->plainText &&
+                    clipboard->originalContent.textFormat == decoded->originalContent.textFormat,
+                "clipboard file URLs use the same document decoder");
+        require(ScreenshotClipboardContentReader::localImageFilePaths(&mime).isEmpty() &&
+                    ScreenshotClipboardContentReader::decodeImageFile(files.first()).isNull(),
+                "image-only imports must continue rejecting document files");
         require(!ScreenshotClipboardContentReader::decode(snapshot, [] { return true; }),
                 "text file decode honors cancellation");
         require(
@@ -428,16 +555,132 @@ void localTextFilesAreSupported() {
         require(!ScreenshotClipboardContentReader::decode(snapshot),
                 "text file mutation after snapshot is rejected");
     }
-    const QString path = directory.filePath(QStringLiteral("utf16.txt"));
-    QFile file(path);
-    require(file.open(QIODevice::WriteOnly), "UTF-16 file opens");
-    file.write(QByteArray::fromHex("fffe4800690020002d4e8765"));
-    file.close();
-    ScreenshotClipboardContentSnapshot snapshot;
-    snapshot.localImage = ScreenshotClipboardContentReader::snapshotLocalFiles({path}).first();
-    auto decoded = ScreenshotClipboardContentReader::decode(snapshot);
-    require(decoded && decoded->plainText == QStringLiteral("Hi \u4e2d\u6587"),
-            "BOM-marked UTF-16 text decodes correctly");
+    for (const auto& format : snow_shot::app::kPinDocumentFileFormats) {
+        for (const bool utf16 : {false, true}) {
+            const auto path =
+                directory.filePath(QStringLiteral("bom.") + QLatin1String(format.suffix));
+            QFile file(path);
+            require(file.open(QIODevice::WriteOnly), "BOM file opens");
+            file.write(utf16 ? QByteArray::fromHex("fffe4800690020002d4e8765")
+                             : QByteArray::fromHex("efbbbf") +
+                                   QStringLiteral("Hi \u4e2d\u6587").toUtf8());
+            file.close();
+            ScreenshotClipboardContentSnapshot snapshot;
+            snapshot.localImage =
+                ScreenshotClipboardContentReader::snapshotLocalFiles({path}).first();
+            const auto decoded = ScreenshotClipboardContentReader::decode(snapshot);
+            require(decoded && decoded->plainText == QStringLiteral("Hi \u4e2d\u6587"),
+                    "BOM-marked UTF-8 and UTF-16 decode for every document format");
+        }
+    }
+}
+
+void documentFilesPreserveLiteralAndRenderedContent() {
+    using snow_shot::storage::PinnedTextFormat;
+    QTemporaryDir directory;
+    const auto imagePath = directory.filePath(QStringLiteral("external.png"));
+    QImage externalImage(8, 8, QImage::Format_RGB32);
+    externalImage.fill(Qt::red);
+    require(externalImage.save(imagePath), "write readable external image fixture");
+    const QString externalUrl = QUrl::fromLocalFile(imagePath).toString(QUrl::FullyEncoded);
+    const QString markdown =
+        QStringLiteral("# Heading\n\nA **bold** paragraph with [link](https://example.com).\n\n"
+                       "- item\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n"
+                       "```css\n  body { color: red; }\n  <b>literal</b>\n```\n\n"
+                       "![blocked](%1)\n")
+            .arg(externalUrl);
+    snow_shot::storage::PinnedTextStyle style;
+    style.fontFamily = QFontDatabase::systemFont(QFontDatabase::GeneralFont).family();
+    style.maximumWidth = 320;
+    style.fontSize = 20;
+    style.textColor = QColor(230, 220, 210);
+    style.backgroundColor = QColor(20, 30, 40);
+    for (const auto& suffix : {QStringLiteral("txt"), QStringLiteral("css"), QStringLiteral("md"),
+                               QStringLiteral("markdown")}) {
+        const auto path = directory.filePath(QStringLiteral("document.") + suffix);
+        QFile file(path);
+        require(file.open(QIODevice::WriteOnly) && file.write(markdown.toUtf8()) > 0,
+                "write document fixture");
+        file.close();
+        ScreenshotClipboardContentSnapshot snapshot;
+        snapshot.localImage = ScreenshotClipboardContentReader::snapshotLocalFiles({path}).first();
+        snapshot.textStyle = style;
+        snapshot.devicePixelRatio = 1.5;
+        const auto content = ScreenshotClipboardContentReader::decode(snapshot);
+        const bool formatted =
+            suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown");
+        require(content && content->originalContent.text == markdown &&
+                    content->originalContent.textStyle == style && content->image.width() <= 480 &&
+                    qFuzzyCompare(content->image.devicePixelRatio(), 1.5),
+                "documents retain exact source, captured style and fractional DPI");
+        if (formatted) {
+            auto* document = content->formattedDocument.get();
+            bool heading = false, bold = false, list = false, table = false, code = false;
+            bool link = false;
+            for (auto block = document->begin(); block.isValid(); block = block.next()) {
+                heading = heading || block.blockFormat().headingLevel() == 1;
+                list = list || block.textList() != nullptr;
+                table = table || QTextCursor(block).currentTable() != nullptr;
+                if (block.text().contains(QStringLiteral("body {"))) {
+                    const auto characters = block.begin().fragment().charFormat();
+                    code = characters.fontFamilies().toStringList().contains(
+                               QFontDatabase::systemFont(QFontDatabase::FixedFont).family()) &&
+                           block.blockFormat().background().style() != Qt::NoBrush;
+                }
+                for (auto it = block.begin(); !it.atEnd(); ++it) {
+                    if (it.fragment().text() == QStringLiteral("bold"))
+                        bold = it.fragment().charFormat().fontWeight() >= QFont::Bold;
+                    if (it.fragment().text() == QStringLiteral("link")) {
+                        const auto format = it.fragment().charFormat();
+                        link = format.isAnchor() &&
+                               format.anchorHref() == QStringLiteral("https://example.com") &&
+                               format.foreground().color() == QColor(105, 177, 255);
+                    }
+                }
+            }
+            require(heading && bold && list && table && code && link &&
+                        !content->plainText.contains(QStringLiteral("**bold**")) &&
+                        content->plainText.contains(QStringLiteral("<b>literal</b>")),
+                    "Markdown renders headings, emphasis, lists, tables and literal fenced code");
+            for (const auto& url : {externalUrl, QStringLiteral("https://example.com/image.png")})
+                require(document->resource(QTextDocument::ImageResource, QUrl(url))
+                            .value<QImage>()
+                            .isNull(),
+                        "Markdown resources cannot read local files or access the network");
+        } else {
+            require(content->plainText == markdown &&
+                        content->originalContent.textFormat == PinnedTextFormat::PlainText,
+                    "TXT and CSS preserve markup, indentation and line breaks literally");
+        }
+        require(QFile::remove(path), "remove the external source after import");
+        const auto restored = ScreenshotClipboardContentReader::renderOriginalText(
+            content->originalContent, 1.5, Qt::red);
+        require(restored && restored->plainText == content->plainText &&
+                    restored->image == content->image,
+                "restoring captured documents preserves rendering without the external file");
+    }
+    for (const auto& suffix : {QStringLiteral("txt"), QStringLiteral("css"), QStringLiteral("md"),
+                               QStringLiteral("html")}) {
+        const auto path = directory.filePath(QStringLiteral("invalid.") + suffix);
+        QFile file(path);
+        require(file.open(QIODevice::WriteOnly), "open empty document");
+        file.close();
+        require(ScreenshotClipboardContentReader::snapshotLocalFiles({path}).isEmpty(),
+                "empty documents retain existing rejection behavior");
+        require(file.open(QIODevice::WriteOnly) && file.write(QByteArray(1024 * 1024 + 1, 'x')) > 0,
+                "write oversized document");
+        file.close();
+        require(ScreenshotClipboardContentReader::snapshotLocalFiles({path}).isEmpty(),
+                "all document formats retain the one MiB source limit");
+        require(file.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+                    file.write(QByteArray::fromHex("ff")) == 1,
+                "write invalid UTF-8");
+        file.close();
+        ScreenshotClipboardContentSnapshot snapshot;
+        snapshot.localImage = ScreenshotClipboardContentReader::snapshotLocalFiles({path}).first();
+        require(!ScreenshotClipboardContentReader::decode(snapshot),
+                "malformed document encoding is rejected");
+    }
 }
 
 void directImageSharesImmutableOwner() {
@@ -1024,10 +1267,11 @@ void htmlIsSelectableAndExternalResourcesAreBlocked() {
         }
     }
     require(foundBold, "HTML formatting should be retained by the Qt document");
-    require(!content->formattedDocument
-                 ->resource(QTextDocument::ImageResource,
-                            QUrl(QStringLiteral("https://example.invalid/a.png")))
-                 .isValid(),
+    require(content->formattedDocument
+                ->resource(QTextDocument::ImageResource,
+                           QUrl(QStringLiteral("https://example.invalid/a.png")))
+                .value<QImage>()
+                .isNull(),
             "external HTML resources must not be fetched");
 }
 
@@ -1128,6 +1372,91 @@ void htmlSourceBackgroundOverridesApplicationTheme() {
     QApplication::setPalette(originalPalette);
 }
 
+void pinnedTextStylesPreserveFormattingAndSnapshots() {
+    snow_shot::storage::PinnedTextStyle style;
+    style.maximumWidth = 320;
+    style.fontFamily = QApplication::font().family();
+    style.fontSize = 28;
+    style.textColor = QColor(255, 0, 255, 128);
+    style.backgroundColor = Qt::transparent;
+    ScreenshotClipboardContentSnapshot snapshot;
+    snapshot.text = QStringLiteral("Pinned text ").repeated(100);
+    snapshot.textStyle = style;
+    snapshot.devicePixelRatio = 2.0;
+    const auto content = ScreenshotClipboardContentReader::decode(snapshot);
+    require(content && content->formattedDocument->defaultFont().pixelSize() == 28 &&
+                content->formattedDocument->defaultFont().family() == style.fontFamily &&
+                content->image.width() == 640 && content->image.devicePixelRatio() == 2.0 &&
+                content->image.pixelColor(0, 0).alpha() == 0 &&
+                content->originalContent.textStyle == style,
+            "pinned text uses captured dimensions, font, transparent background, and DPI");
+    require(
+        content->formattedDocument->begin().begin().fragment().charFormat().foreground().color() ==
+            style.textColor,
+        "unstyled text materializes the captured foreground including alpha");
+    const auto restored = ScreenshotClipboardContentReader::renderOriginalText(
+        content->originalContent, 2.0, Qt::red);
+    require(restored && restored->image == content->image &&
+                restored->originalContent.text == snapshot.text,
+            "restoring captured text ignores later palette defaults and retains original source");
+    for (const int width : {100, 2000}) {
+        snapshot.textStyle->maximumWidth = width;
+        const auto wrapped = ScreenshotClipboardContentReader::decode(snapshot);
+        require(wrapped && wrapped->image.width() == width * 2,
+                "configured width boundaries cap long text in logical pixels");
+    }
+    for (const int size : {8, 96}) {
+        snapshot.text = QStringLiteral("Text");
+        snapshot.textStyle->fontSize = size;
+        const auto sized = ScreenshotClipboardContentReader::decode(snapshot);
+        require(sized && sized->formattedDocument->defaultFont().pixelSize() == size,
+                "configured font-size boundaries render successfully");
+    }
+    snapshot.textStyle->maximumWidth = 99;
+    require(!ScreenshotClipboardContentReader::decode(snapshot),
+            "invalid captured styles cannot reach raster allocation");
+
+    snapshot.textStyle = style;
+    snapshot.html =
+        QStringLiteral("<p>Default <span style=\"font-family: serif; font-size: 11px; color: "
+                       "#00ff00; background-color: #ffff00\">Explicit</span></p>");
+    const auto html = ScreenshotClipboardContentReader::decode(snapshot);
+    require(html && html->originalContent.html == snapshot.html, "HTML keeps its original source");
+    bool inherited = false, explicitStyle = false;
+    for (auto block = html->formattedDocument->begin(); block.isValid(); block = block.next()) {
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+            const auto fragment = it.fragment();
+            if (fragment.text().contains(QStringLiteral("Default")))
+                inherited = fragment.charFormat().foreground().color() == style.textColor;
+            if (fragment.text().contains(QStringLiteral("Explicit"))) {
+                const auto format = fragment.charFormat();
+                explicitStyle =
+                    format.foreground().color() == QColor(Qt::green) &&
+                    format.background().color() == QColor(Qt::yellow) &&
+                    format.intProperty(QTextFormat::FontPixelSize) == 11 &&
+                    format.fontFamilies().toStringList().contains(QStringLiteral("serif"));
+            }
+        }
+    }
+    require(inherited && explicitStyle,
+            "explicit HTML styles override inherited defaults without affecting unstyled text");
+    snapshot.html =
+        QStringLiteral("<body style=\"background-color: #123456\"><p>Source background</p></body>");
+    const auto body = ScreenshotClipboardContentReader::decode(snapshot);
+    require(body && body->image.pixelColor(0, 0) == QColor(QStringLiteral("#123456")),
+            "HTML body background overrides a configured default");
+
+    snapshot.html.clear();
+    snapshot.text = QStringLiteral("Worker captured text");
+    auto future = std::async(std::launch::async, [snapshot] {
+        return ScreenshotClipboardContentReader::decode(snapshot);
+    });
+    const auto worker = future.get();
+    require(worker && worker->originalContent.textStyle == style &&
+                worker->formattedDocument->thread() == qApp->thread(),
+            "workers consume immutable style snapshots and return GUI-affine documents");
+}
+
 void formattedTextUsesOwningDisplayDevicePixelRatio() {
     QMimeData mime;
     mime.setHtml(
@@ -1195,6 +1524,44 @@ void standardRgbDibOrientationAndAlphaAreHandled() {
     require(top->image.pixelColor(0, 0).alpha() == 255 &&
                 top->image.pixelColor(size.width() - 1, size.height() - 1).alpha() == 255,
             "BI_RGB DIB pixels should be treated as opaque");
+}
+
+void unalignedDibStorageAndPixelOffsetsDecodeCorrectly() {
+    const QSize size(17, 2);
+    for (const bool bitfields : {false, true}) {
+        QByteArray bytes = makeRgbDib(size.width(), size.height(), true);
+        if (bitfields) {
+            BITMAPINFOHEADER header{};
+            std::memcpy(&header, bytes.constData(), sizeof(header));
+            header.biCompression = BI_BITFIELDS;
+            std::memcpy(bytes.data(), &header, sizeof(header));
+            const DWORD masks[]{0x000000ff, 0x0000ff00, 0x00ff0000};
+            bytes.insert(sizeof(header), reinterpret_cast<const char*>(masks), sizeof(masks));
+        }
+        const auto expected =
+            ScreenshotClipboardContentReader::decode(nativeDibSnapshot(bytes, size));
+        require(expected.has_value(), "the aligned DIB reference decodes");
+        for (int offset = 1; offset < 4; ++offset) {
+            const QByteArray backing = QByteArray(offset, 0) + bytes;
+            const QByteArray borrowed =
+                QByteArray::fromRawData(backing.constData() + offset, bytes.size());
+            const auto decoded =
+                ScreenshotClipboardContentReader::decode(nativeDibSnapshot(borrowed, size));
+            require(decoded.has_value() && decoded->image == expected->image,
+                    "borrowed DIB headers, masks and pixel rows need no alignment");
+        }
+        if (!bitfields) {
+            // The decoder accepts extended header sizes. Their pixel arrays need
+            // not begin on the same alignment as the owning QByteArray.
+            bytes.insert(sizeof(BITMAPINFOHEADER), 1, '\0');
+            const DWORD headerSize = sizeof(BITMAPINFOHEADER) + 1;
+            std::memcpy(bytes.data(), &headerSize, sizeof(headerSize));
+            const auto decoded =
+                ScreenshotClipboardContentReader::decode(nativeDibSnapshot(bytes, size));
+            require(decoded.has_value() && decoded->image == expected->image,
+                    "unaligned pixel offsets preserve the DIB image");
+        }
+    }
 }
 
 void malformedAndLargeDibsAreHandled() {
@@ -1309,11 +1676,28 @@ void nativeDibMaskColoredPixelsRemainPixels() {
     }
 }
 #endif
+#include "pinned_color_swatch_content_tests.h"
 } // namespace
 
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
     QApplication::setQuitOnLastWindowClosed(false);
+#if defined(Q_OS_WIN)
+    require(
+        QFontDatabase::addApplicationFont(QStringLiteral("C:/Windows/Fonts/segoeui.ttf")) >= 0 &&
+            QFontDatabase::addApplicationFont(QStringLiteral("C:/Windows/Fonts/consola.ttf")) >= 0,
+        "offscreen document tests require proportional and monospace fonts");
+    QApplication::setFont(QFont(QStringLiteral("Segoe UI")));
+#endif
+    if (application.arguments().contains(QStringLiteral("--color-swatch-only"))) {
+        pinnedColorSwatchContentTests();
+        return EXIT_SUCCESS;
+    }
+    if (application.arguments().contains(QStringLiteral("--first-frame-only"))) {
+        firstFrameFilesKeepCompositionProfilesAndRevisionChecks();
+        bmpFilesPreservePixelsAndIdentity();
+        return EXIT_SUCCESS;
+    }
     imageFileExtensionsMatchShellRegistration();
     embeddedImagesUseManagedCachedPixels();
     if (application.arguments().contains(QStringLiteral("--embedded-images-only"))) {
@@ -1323,7 +1707,10 @@ int main(int argc, char** argv) {
         liveSnapshotRetainsBitmapFallback();
     }
     localTextFilesAreSupported();
+    documentFilesPreserveLiteralAndRenderedContent();
+    bmpFilesPreservePixelsAndIdentity();
     animatedSourcesSurviveImport();
+    firstFrameFilesKeepCompositionProfilesAndRevisionChecks();
     animationReplacementPreparationIsAtomicAndWorkerSafe();
     animationOffersPrecedeStaticThumbnails();
     singleFrameAnimationContainersStayStatic();
@@ -1347,9 +1734,11 @@ int main(int argc, char** argv) {
     formattedTextHasPaddingOnEverySide();
     formattedTextBackgroundFollowsApplicationTheme();
     htmlSourceBackgroundOverridesApplicationTheme();
+    pinnedTextStylesPreserveFormattingAndSnapshots();
     formattedTextUsesOwningDisplayDevicePixelRatio();
 #if defined(Q_OS_WIN) || defined(_WIN32)
     standardRgbDibOrientationAndAlphaAreHandled();
+    unalignedDibStorageAndPixelOffsetsDecodeCorrectly();
     malformedAndLargeDibsAreHandled();
     nativeDibSnapshotDecodesOffClipboard();
     nativeDibMaskColoredPixelsRemainPixels();

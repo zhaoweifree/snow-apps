@@ -229,13 +229,17 @@ void ScreenshotAutoFilterController::refresh() {
     updateAvailability();
 }
 void ScreenshotAutoFilterController::resetSession() {
-    ++m_session;
+    const bool wasBusy = m_busy;
+    const QPointer<ScreenshotAutoFilterController> lifetime(this);
+    const quint64 session = ++m_session;
     m_detectionJob.cancel();
     m_detectionJob = {};
     m_busy = false;
     m_flashUntil = 0;
     m_flashRegions.clear();
     refresh();
+    if (lifetime && wasBusy && m_session == session && !m_busy)
+        emit detectionFinished({});
 }
 void ScreenshotAutoFilterController::validate() {
     auto* target = canvas();
@@ -261,7 +265,7 @@ void ScreenshotAutoFilterController::validate() {
     }
     m_busy = true;
     const quint64 generation = target->autoFilterGeneration();
-    const quint64 session = m_session;
+    const quint64 session = ++m_session;
     refresh();
     const QPointer<ScreenshotAutoFilterController> receiver(this);
     m_source([receiver, generation, session, bounds](QImage image) {
@@ -288,12 +292,20 @@ void ScreenshotAutoFilterController::finish(quint64 session, quint64 generation,
     if (session != m_session) {
         return;
     }
+    const QPointer<ScreenshotAutoFilterController> lifetime(this);
+    const auto publishFinished = [lifetime, session](const QString& failure = {}) {
+        if (!lifetime || lifetime->m_session != session)
+            return;
+        lifetime->refresh();
+        if (lifetime && lifetime->m_session == session && !lifetime->m_busy)
+            emit lifetime->detectionFinished(failure);
+    };
     m_detectionJob = {};
     const qint64 arrived = elapsed();
     m_busy = false;
     auto* target = canvas();
     if (!target || generation != target->autoFilterGeneration() || target->autoFilterRegions()) {
-        refresh();
+        publishFinished();
         return;
     }
     if (!error.isEmpty() || pixels.isEmpty()) {
@@ -304,7 +316,8 @@ void ScreenshotAutoFilterController::finish(quint64 session, quint64 generation,
         } else {
             qWarning() << message;
         }
-        refresh();
+        if (lifetime && m_session == session)
+            publishFinished(message);
         return;
     }
     for (auto& region : regions) {
@@ -315,13 +328,16 @@ void ScreenshotAutoFilterController::finish(quint64 session, quint64 generation,
                             .intersected(bounds);
     }
     snow::compat::removeIf(regions, [](const auto& region) { return region.bounds.isEmpty(); });
-    if (target->setAutoFilterRegions(SnowCanvasAutoFilterRecord{bounds, regions}) && active()) {
+    const bool accepted = target->setAutoFilterRegions(SnowCanvasAutoFilterRecord{bounds, regions});
+    if (!lifetime || m_session != session)
+        return;
+    if (accepted && active()) {
         m_flashRegions = std::move(regions);
         m_flashUntil = arrived + 300;
         QTimer::singleShot(static_cast<int>(qMax<qint64>(0, m_flashUntil - elapsed())),
                            Qt::PreciseTimer, this, &ScreenshotAutoFilterController::refresh);
     }
-    refresh();
+    publishFinished();
 }
 void ScreenshotAutoFilterController::fillCategory(const QString& category) {
     if (available()) {

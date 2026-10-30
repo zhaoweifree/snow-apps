@@ -92,6 +92,8 @@ set(SNOW_IMAGE_SOURCES
     src/processing.cpp
     src/raster.cpp
     src/raster_buffer.cpp
+    src/raster_serialization.cpp
+    src/raster_serialization.h
     src/raster_conversion.cpp
     src/resource_estimate.cpp
     src/resource_plan.cpp
@@ -368,10 +370,13 @@ if(SNOW_IMAGE_BUILD_STATIC)
     # These translation units intentionally use the same private helper names
     # in separate anonymous namespaces. Keep them out of the unity source so
     # those private definitions do not collide when included into one TU.
+    # Isolate the shared serializer as well to preserve the existing codec
+    # unity batches when adding its out-of-line implementation.
     set_source_files_properties(
         src/raster.cpp
         src/animation.cpp
         src/raster_buffer.cpp
+        src/raster_serialization.cpp
         src/codecs/heif_codec.cpp
         src/codecs/jxl_codec.cpp
         PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON

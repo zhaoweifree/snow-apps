@@ -29,16 +29,18 @@ param(
     [switch]$SkipUnneededCursor,
     [string]$RegionSize = "",
     [switch]$BuildOnly,
-    [string]$Executable = ""
+    [string]$Executable = "",
+    [ValidateSet("x64", "arm64")][string]$Architecture = "x64"
 )
 
 $ErrorActionPreference = "Stop"
 if ($AlignCapture -and $FreeRunningCapture) { throw 'Choose one capture pacing override.' }
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-Set-SnowBuildEnvironment -Preset windows-msvc-performance | Out-Null
+. (Join-Path $PSScriptRoot "../snow_shot/scripts/performance-environment.ps1")
+$target = Get-SnowPerformanceTarget -Architecture $Architecture -RequireNative:(-not $BuildOnly)
+Set-SnowBuildEnvironment -Preset $target.Preset | Out-Null
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$env:FFMPEG_DIR = Join-Path $repoRoot ".tools/vcpkg/installed/dynamic/x64-windows"
-$env:VCPKGRS_TRIPLET = "x64-windows"
+$env:FFMPEG_DIR = Join-Path $target.InstalledRoot $target.Triplet
+$env:VCPKGRS_TRIPLET = $target.Triplet
 $env:VCPKGRS_DYNAMIC = "1"
 $env:Path = "$(Join-Path $env:FFMPEG_DIR 'bin');$env:Path"
 
@@ -89,19 +91,21 @@ $featureArguments = @("--features", ($features -join ','))
 Push-Location (Join-Path $repoRoot "snow-crates")
 try {
     if ([string]::IsNullOrWhiteSpace($Executable)) {
-        & cargo build -p snow-recording-runtime --release --target x86_64-pc-windows-msvc `
-            --target-dir (Join-Path $repoRoot "build/windows-msvc-performance/cargo") `
+        & cargo build -p snow-recording-runtime --release --target $target.RustTarget `
+            --target-dir (Join-Path $repoRoot "build/$($target.Preset)/cargo") `
             @featureArguments --example realtime_recording_benchmark
         if ($LASTEXITCODE -ne 0) { throw "Realtime recording benchmark build failed." }
-        $Executable = Join-Path $repoRoot "build/windows-msvc-performance/cargo/x86_64-pc-windows-msvc/release/examples/realtime_recording_benchmark.exe"
+        $Executable = Join-Path $repoRoot "build/$($target.Preset)/cargo/$($target.RustTarget)/release/examples/realtime_recording_benchmark.exe"
     }
     if ($BuildOnly) { Write-Output $Executable; return }
+    Assert-SnowPerformanceExecutable -Path $Executable -Architecture $Architecture
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     [ordered]@{
         schema_version = 1
         executable = [System.IO.Path]::GetFullPath($Executable)
         executable_sha256 = (Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash
-        preset = 'windows-msvc-performance'
+        preset = $target.Preset
+        architecture = $target.Architecture
         arguments = $benchmarkArguments
     } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 (Join-Path $OutputDirectory 'build-identity.json')
     Write-Host "Realtime recording benchmark report: $OutputDirectory"

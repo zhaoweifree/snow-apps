@@ -186,7 +186,7 @@ bool focusWindow(HWND window) {
     }
     return waitFor([&] { return GetForegroundWindow() == window; });
 }
-void smoke() {
+void smoke(bool testExplorerTabs) {
     ComPtr<IShellWindows> windows;
     require(SUCCEEDED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER,
                                        IID_PPV_ARGS(&windows))),
@@ -238,67 +238,71 @@ void smoke() {
     verifyCapture(files, false);
     std::cout << "Explorer multi-selection and clipboard preservation passed\n";
 
-    // Keep the first tab selected while opening a different folder in a new tab.
-    QTemporaryDir tabDirectory;
-    const QString tabPath = tabDirectory.filePath(QStringLiteral("active-tab.png"));
-    QFile tabFile(tabPath);
-    require(tabFile.open(QIODevice::WriteOnly), "tab fixture must open");
-    tabFile.write("fixture");
-    tabFile.close();
-    const auto previousTarget = createSelectedFileBackend()->captureTarget();
-    chord('T');
-    require(waitFor([&] {
-                const auto target = createSelectedFileBackend()->captureTarget();
-                return target.window == previousTarget.window && target.tab != previousTarget.tab;
-            }),
-            "new Explorer tab must become active");
-    ComPtr<IWebBrowser2> activeBrowser;
-    require(waitFor([&] {
-                const auto target = createSelectedFileBackend()->captureTarget();
-                long count = 0;
-                windows->get_Count(&count);
-                for (long index = 0; index < count; ++index) {
-                    VARIANT position{};
-                    position.vt = VT_I4;
-                    position.lVal = index;
-                    ComPtr<IDispatch> candidate;
-                    if (FAILED(windows->Item(position, &candidate))) {
-                        continue;
+    if (testExplorerTabs) {
+        // Keep the first tab selected while opening a different folder in a new tab.
+        QTemporaryDir tabDirectory;
+        const QString tabPath = tabDirectory.filePath(QStringLiteral("active-tab.png"));
+        QFile tabFile(tabPath);
+        require(tabFile.open(QIODevice::WriteOnly), "tab fixture must open");
+        tabFile.write("fixture");
+        tabFile.close();
+        const auto previousTarget = createSelectedFileBackend()->captureTarget();
+        chord('T');
+        require(waitFor([&] {
+                    const auto target = createSelectedFileBackend()->captureTarget();
+                    return target.window == previousTarget.window &&
+                           target.tab != previousTarget.tab;
+                }),
+                "new Explorer tab must become active");
+        ComPtr<IWebBrowser2> activeBrowser;
+        require(waitFor([&] {
+                    const auto target = createSelectedFileBackend()->captureTarget();
+                    long count = 0;
+                    windows->get_Count(&count);
+                    for (long index = 0; index < count; ++index) {
+                        VARIANT position{};
+                        position.vt = VT_I4;
+                        position.lVal = index;
+                        ComPtr<IDispatch> candidate;
+                        if (FAILED(windows->Item(position, &candidate))) {
+                            continue;
+                        }
+                        auto candidateView = shellView(candidate.Get());
+                        HWND candidateWindow = nullptr;
+                        if (candidateView &&
+                            SUCCEEDED(candidateView->GetWindow(&candidateWindow)) &&
+                            reinterpret_cast<quintptr>(candidateWindow) == target.view) {
+                            candidate.As(&activeBrowser);
+                            return activeBrowser != nullptr;
+                        }
                     }
-                    auto candidateView = shellView(candidate.Get());
-                    HWND candidateWindow = nullptr;
-                    if (candidateView && SUCCEEDED(candidateView->GetWindow(&candidateWindow)) &&
-                        reinterpret_cast<quintptr>(candidateWindow) == target.view) {
-                        candidate.As(&activeBrowser);
-                        return activeBrowser != nullptr;
-                    }
-                }
-                return false;
-            }),
-            "new tab must expose its automation interface");
-    VARIANT destination{};
-    destination.vt = VT_BSTR;
-    destination.bstrVal =
-        SysAllocString(QDir::toNativeSeparators(tabDirectory.path()).toStdWString().c_str());
-    VARIANT empty{};
-    const HRESULT navigated =
-        activeBrowser->Navigate2(&destination, &empty, &empty, &empty, &empty);
-    VariantClear(&destination);
-    require(SUCCEEDED(navigated), "tab navigation failed");
-    ComPtr<IDispatch> tabDispatch;
-    require(waitFor([&] {
-                tabDispatch = explorerAt(windows.Get(), tabDirectory.path());
-                return tabDispatch != nullptr;
-            }),
-            "new Explorer tab must navigate to its fixture folder");
-    auto tabView = shellView(tabDispatch.Get());
-    HWND tabWindow = nullptr;
-    require(tabView && SUCCEEDED(tabView->GetWindow(&tabWindow)) && IsChild(window, tabWindow),
-            "second folder must be in the same Explorer window");
-    require(waitFor([&] { return selectPaths(tabView.Get(), {tabPath}); }),
-            "active tab fixture must be selectable");
-    verifyCapture({tabPath}, false);
-    std::cout << "Active Explorer tab isolation passed\n";
+                    return false;
+                }),
+                "new tab must expose its automation interface");
+        VARIANT destination{};
+        destination.vt = VT_BSTR;
+        destination.bstrVal =
+            SysAllocString(QDir::toNativeSeparators(tabDirectory.path()).toStdWString().c_str());
+        VARIANT empty{};
+        const HRESULT navigated =
+            activeBrowser->Navigate2(&destination, &empty, &empty, &empty, &empty);
+        VariantClear(&destination);
+        require(SUCCEEDED(navigated), "tab navigation failed");
+        ComPtr<IDispatch> tabDispatch;
+        require(waitFor([&] {
+                    tabDispatch = explorerAt(windows.Get(), tabDirectory.path());
+                    return tabDispatch != nullptr;
+                }),
+                "new Explorer tab must navigate to its fixture folder");
+        auto tabView = shellView(tabDispatch.Get());
+        HWND tabWindow = nullptr;
+        require(tabView && SUCCEEDED(tabView->GetWindow(&tabWindow)) && IsChild(window, tabWindow),
+                "second folder must be in the same Explorer window");
+        require(waitFor([&] { return selectPaths(tabView.Get(), {tabPath}); }),
+                "active tab fixture must be selectable");
+        verifyCapture({tabPath}, false);
+        std::cout << "Active Explorer tab isolation passed\n";
+    }
 
     VARIANT location{};
     location.vt = VT_I4;
@@ -345,7 +349,7 @@ int main(int argc, char** argv) {
     }
     int result = 0;
     try {
-        smoke();
+        smoke(!app.arguments().contains(QStringLiteral("--basic-only")));
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         result = 1;

@@ -11,6 +11,8 @@
 #include <vector>
 #endif
 
+#include <atomic>
+#include <limits>
 #include <memory>
 #include <QCoreApplication>
 #include <utility>
@@ -125,7 +127,8 @@ DirectCaptureFrame captureDirectTarget(const DirectCaptureRequest& request) {
     config.pixel_format = SNOW_CAPTURE_PIXEL_FORMAT_BGRA8;
     const std::unique_ptr<SnowCaptureDesktopSession,
                           decltype(&snow_capture_desktop_session_destroy)>
-        session(snow_capture_desktop_session_create(&config), snow_capture_desktop_session_destroy);
+        session(request.historyEnabled ? snow_capture_desktop_session_create(&config) : nullptr,
+                snow_capture_desktop_session_destroy);
     SnowCaptureScreenshotRequest nativeRequest{};
     nativeRequest.version = SNOW_CAPTURE_SCREENSHOT_REQUEST_VERSION;
     nativeRequest.struct_size = sizeof(nativeRequest);
@@ -146,13 +149,63 @@ DirectCaptureFrame captureDirectTarget(const DirectCaptureRequest& request) {
     // desktop.
     nativeRequest.focused_window = 0;
 #endif
+    const QByteArray monitorIdentity = request.monitorName.toUtf8();
+    SnowCaptureTargetScreenshotRequest targetRequest{};
+    targetRequest.version = SNOW_CAPTURE_TARGET_SCREENSHOT_REQUEST_VERSION;
+    targetRequest.struct_size = sizeof(targetRequest);
+    targetRequest.screenshot = nativeRequest;
+    targetRequest.monitor_utf8 = request.target == DirectCaptureTarget::CurrentMonitor
+                                     ? monitorIdentity.constData()
+                                     : nullptr;
+    targetRequest.pixel_format = config.pixel_format;
+    struct Admission {
+        const DirectCaptureRequest& request;
+        std::atomic_bool rejected{false};
+    } admission{request};
+    if (request.admitRaster) {
+        targetRequest.admission_context = &admission;
+        targetRequest.admit_raster = [](void* context, uint32_t width,
+                                        uint32_t height) noexcept -> uint8_t {
+            auto& state = *static_cast<Admission*>(context);
+            if (state.rejected.load(std::memory_order_acquire))
+                return 0;
+            bool accepted = false;
+            try {
+                if (width > 0 && height > 0 &&
+                    width <= static_cast<uint32_t>(std::numeric_limits<int>::max()) &&
+                    height <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+                    accepted = state.request.admitRaster(
+                        QSize(static_cast<int>(width), static_cast<int>(height)));
+                }
+            } catch (...) {
+                // Exceptions must never unwind through the native C ABI.
+            }
+            if (!accepted)
+                state.rejected.store(true, std::memory_order_release);
+            return accepted ? 1 : 0;
+        };
+    }
+#ifdef Q_OS_LINUX
+    // X11 has no window-level capture: a window target is cut out of the desktop
+    // capture below, which needs every display. Only the monitor target can use
+    // the one-shot API, and only when no history session will be opened anyway.
+    const bool oneShot = !request.historyEnabled &&
+                         request.target == DirectCaptureTarget::CurrentMonitor;
+#else
+    const bool oneShot = !request.historyEnabled;
+#endif
     const std::unique_ptr<SnowCaptureScreenshotResult,
                           decltype(&snow_capture_screenshot_result_destroy)>
-        snapshot(session ? snow_capture_desktop_session_capture(session.get(), &nativeRequest)
-                         : nullptr,
+        snapshot(oneShot ? snow_capture_target_screenshot(&targetRequest)
+                         : (session
+                                ? snow_capture_desktop_session_capture(session.get(),
+                                                                      &nativeRequest)
+                                : nullptr),
                  snow_capture_screenshot_result_destroy);
-    if (!snapshot) {
-        result.error = nativeError();
+    if (!snapshot || admission.rejected.load(std::memory_order_acquire)) {
+        result.error = admission.rejected.load(std::memory_order_acquire)
+                           ? QStringLiteral("resource_limit")
+                           : nativeError();
         return result;
     }
     const size_t count = snow_capture_screenshot_result_display_count(snapshot.get());
@@ -207,7 +260,9 @@ DirectCaptureFrame captureDirectTarget(const DirectCaptureRequest& request) {
             break;
         result.displays.push_back(std::move(display));
     }
-    if (result.displays.isEmpty() || static_cast<size_t>(result.displays.size()) != count) {
+    if (((request.historyEnabled || request.target == DirectCaptureTarget::CurrentMonitor) &&
+         result.displays.isEmpty()) ||
+        static_cast<size_t>(result.displays.size()) != count) {
         result.image = {};
         result.displays.clear();
         return result;

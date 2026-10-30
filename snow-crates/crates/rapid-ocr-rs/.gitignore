@@ -1,8 +1,0 @@
-target
-Cargo.lock
-test
-models
-test_output
-.bench
-scripts/__pycache__
-test-imgs

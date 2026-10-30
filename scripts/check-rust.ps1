@@ -38,33 +38,35 @@ $rustWorkspaces = @(
 if ($Workspace.Count -gt 0) {
     $rustWorkspaces = @($Workspace | ForEach-Object { (Resolve-Path (Join-Path $workspaceRoot $_)).Path })
 }
-$cargoSelection = @('--workspace')
-if ($Package.Count -gt 0) {
-    $cargoSelection = @()
-    foreach ($name in $Package) { $cargoSelection += @('-p', $name) }
-}
+. (Join-Path $PSScriptRoot 'snow-ocr-toolchain.ps1')
 foreach ($rustWorkspace in $rustWorkspaces) {
     Push-Location $rustWorkspace
     try {
-        if ($Fix) {
-            cargo fmt --all
-        } else {
-            cargo fmt --all -- --check
+        $isSnowCrates = $rustWorkspace -eq (Join-Path $workspaceRoot 'snow-crates')
+        $passes = @()
+        $stablePackages = @($Package | Where-Object { $_ -ne 'snow-ocr-process' })
+        if ($Package.Count -eq 0) {
+            $selection = @('--workspace')
+            if ($isSnowCrates) { $selection += @('--exclude', 'snow-ocr-process') }
+            $passes += @{ Toolchain = @(); Selection = $selection; Format = @('--all') }
+        } elseif ($stablePackages.Count -gt 0) {
+            $selection = @($stablePackages | ForEach-Object { '-p'; $_ })
+            $passes += @{ Toolchain = @(); Selection = $selection; Format = $selection }
         }
-        if ($LASTEXITCODE -ne 0) {
-            throw "rustfmt failed in $rustWorkspace"
+        if ($isSnowCrates -and ($Package.Count -eq 0 -or 'snow-ocr-process' -in $Package)) {
+            $passes += @{ Toolchain = @("+$(Get-SnowOcrToolchain)"); Selection = @('-p', 'snow-ocr-process'); Format = @('-p', 'snow-ocr-process') }
         }
-
-        cargo check @cargoSelection --all-targets --all-features
-        if ($LASTEXITCODE -ne 0) {
-            throw "cargo check failed in $rustWorkspace"
+        foreach ($pass in $passes) {
+            $toolchain = $pass.Toolchain
+            $selection = $pass.Selection
+            $format = $pass.Format
+            $formatOptions = if ($Fix) { @() } else { @('--', '--check') }
+            & cargo @toolchain fmt @format @formatOptions
+            if ($LASTEXITCODE -ne 0) { throw "rustfmt failed in $rustWorkspace" }
+            & cargo @toolchain check @selection --all-targets --all-features
+            if ($LASTEXITCODE -ne 0) { throw "cargo check failed in $rustWorkspace" }
+            & cargo @toolchain clippy @selection --all-targets --all-features -- -D warnings
+            if ($LASTEXITCODE -ne 0) { throw "Clippy failed in $rustWorkspace" }
         }
-
-        cargo clippy @cargoSelection --all-targets --all-features -- -D warnings
-        if ($LASTEXITCODE -ne 0) {
-            throw "Clippy failed in $rustWorkspace"
-        }
-    } finally {
-        Pop-Location
-    }
+    } finally { Pop-Location }
 }

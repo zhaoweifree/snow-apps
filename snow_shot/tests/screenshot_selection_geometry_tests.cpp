@@ -1,7 +1,9 @@
+#include "snow_shot/presentation/screenshotexportnaming.h"
 #include "snow_shot/platform/windows/monitorgeometry.h"
 #include "snow_shot/presentation/historypinplacement.h"
 #include "snow_shot/presentation/screenshotdisplaysession.h"
 #include "snow_shot/presentation/screenshotgeometry.h"
+#include "snow_shot/presentation/screenshotinteractionstate.h"
 #include "snow_shot/presentation/screenshotresultcompositor.h"
 #include "snow_shot/presentation/screenshotselectionpin.h"
 #include "snow_shot/presentation/screenshotselectionmodel.h"
@@ -9,6 +11,7 @@
 #include "snow_shot/storage/capturehistorytypes.h"
 #include "../src/presentation/toolbar/screenshottoolbarplacement.h"
 #include "../src/presentation/capture/scrollingselectionmovement.h"
+#include "../src/platform/screenshotwindownamereader_p.h"
 
 #include <QGuiApplication>
 #include <QRectF>
@@ -20,6 +23,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <utility>
 
 namespace {
 constexpr qreal kMinimumSelectionSize = 10.0;
@@ -33,6 +37,95 @@ void require(bool condition, const char* message) {
     }
 }
 
+void exportWindowLookupUsesSelectionCenter() {
+    ScreenshotDisplaySession displays;
+    CapturedDisplayModel display;
+    display.active = true;
+    display.canvasRect = QRect(0, 0, 1600, 1200);
+    display.physicalRect = QRect(-1600, -1200, 1600, 1200);
+    display.logicalRect = QRect(-800, -600, 800, 600);
+    displays.appendDisplay(display);
+    ScreenshotGeometryMapper geometry;
+    const std::uintptr_t excluded[] = {12, 34};
+    int calls = 0;
+    int applicationNameReads = 0;
+    int windowNameReads = 0;
+    QPointF hit;
+    snow_shot::storage::ScreenshotWindowNameFields requestedFields;
+    const snow_shot::storage::ScreenshotWindowNames expected{QStringLiteral("App"),
+                                                             QStringLiteral("Title")};
+    const auto lookup = [&](const QPointF& point, std::span<const std::uintptr_t> ids,
+                            snow_shot::storage::ScreenshotWindowNameFields fields) {
+        ++calls;
+        hit = point;
+        requestedFields = fields;
+        require(ids.size() == 2 && ids[0] == 12 && ids[1] == 34,
+                "native lookup must receive the capture overlay exclusions");
+        return snow_shot::platform::detail::readScreenshotWindowNames(
+            fields,
+            [&] {
+                ++applicationNameReads;
+                return expected.applicationName;
+            },
+            [&] {
+                ++windowNameReads;
+                return expected.windowName;
+            });
+    };
+    const QRect selection(200, 100, 400, 200);
+    require(screenshotWindowNamesForExport({}, QStringLiteral("{YYYY}"), selection, displays,
+                                           geometry, excluded,
+                                           lookup) == snow_shot::storage::ScreenshotWindowNames{} &&
+                calls == 0 && applicationNameReads == 0 && windowNameReads == 0,
+            "ordinary date-only exports must perform no window lookup");
+    const auto names =
+        screenshotWindowNamesForExport(QStringLiteral("/{AN}"), QStringLiteral("{WN}-{AN}"),
+                                       selection, displays, geometry, excluded, lookup);
+    require(names == expected && calls == 1 && hit == QPointF(-1200, -1000) &&
+                requestedFields == snow_shot::storage::ScreenshotWindowNameFields{true, true} &&
+                applicationNameReads == 1 && windowNameReads == 1,
+            "both names must come from one lookup at the selection center in native pixels");
+    displays.displayAt(0).canvasUsesPoints = true;
+    require(screenshotWindowNamesForExport({}, QStringLiteral("{WN}"), selection, displays,
+                                           geometry, excluded, lookup) ==
+                    snow_shot::storage::ScreenshotWindowNames{{}, expected.windowName} &&
+                hit == QPointF(-600, -500) &&
+                requestedFields == snow_shot::storage::ScreenshotWindowNameFields{false, true} &&
+                applicationNameReads == 1 && windowNameReads == 2,
+            "title-only exports must preserve point mapping without reading application metadata");
+    require(
+        screenshotWindowNamesForExport(QStringLiteral("/{AN}/{AN}"), {}, selection, displays,
+                                       geometry, excluded, lookup) ==
+                snow_shot::storage::ScreenshotWindowNames{expected.applicationName, {}} &&
+            requestedFields == snow_shot::storage::ScreenshotWindowNameFields{true, false} &&
+            applicationNameReads == 2 && windowNameReads == 2,
+        "application-only directories must read the application once without reading the title");
+    require(screenshotWindowNamesForExport(QStringLiteral("/{WN}"), QStringLiteral("{WN}-{WN}"),
+                                           selection, displays, geometry, excluded, lookup) ==
+                    snow_shot::storage::ScreenshotWindowNames{{}, expected.windowName} &&
+                applicationNameReads == 2 && windowNameReads == 3,
+            "repeated title variables across both templates must share one title read");
+    const int before = calls;
+    require(screenshotWindowNamesForExport({}, QStringLiteral("{an}-{wn}-{YYYY}"), selection,
+                                           displays, geometry, excluded,
+                                           lookup) == snow_shot::storage::ScreenshotWindowNames{} &&
+                calls == before,
+            "lowercase lookalikes must not request native metadata");
+    require(screenshotWindowNamesForExport({}, QStringLiteral("{AN}"), QRect(2000, 0, 20, 20),
+                                           displays, geometry, excluded,
+                                           lookup) == snow_shot::storage::ScreenshotWindowNames{} &&
+                calls == before,
+            "a selection center outside displays must not select a nearby window");
+    displays.setImageSources({display});
+    require(screenshotWindowNamesForExport({}, QStringLiteral("{AN}"), selection, displays,
+                                           geometry, excluded,
+                                           lookup) == snow_shot::storage::ScreenshotWindowNames{} &&
+                calls == before,
+            "restored history must never query the current desktop");
+    displays.clear();
+    require(names == expected, "export metadata must survive capture teardown");
+}
+
 void requireAspectRatio(const QRectF& selection, const char* message) {
     require(selection.width() >= kMinimumSelectionSize &&
                 selection.height() >= kMinimumSelectionSize,
@@ -40,6 +133,204 @@ void requireAspectRatio(const QRectF& selection, const char* message) {
     require(std::abs(selection.height() / selection.width() - kExpectedAspectRatio) <
                 kComparisonTolerance,
             message);
+}
+
+void selectionRevisionTracksGeometryEffectsAndNoOpRestoration() {
+    ScreenshotSelectionModel selection;
+    require(selection.changeRevision() == 0, "new selections should start without changes");
+    const QRectF rectangle(10, 20, 120, 80);
+    require(selection.setSelectionRect(rectangle) && selection.changeRevision() > 0,
+            "replacing geometry must invalidate selection browsing");
+    auto revision = selection.changeRevision();
+    require(!selection.setSelectionRect(rectangle) && selection.changeRevision() == revision,
+            "unchanged rectangle geometry must preserve selection browsing");
+    require(selection.setCornerRadius(8) && selection.changeRevision() > revision,
+            "corner radius changes must invalidate selection browsing");
+    revision = selection.changeRevision();
+    require(!selection.setCornerRadius(8) && selection.changeRevision() == revision,
+            "identical corner radius must preserve selection browsing");
+    require(selection.setShadowWidth(12) && selection.changeRevision() > revision,
+            "shadow width changes must invalidate selection browsing");
+    revision = selection.changeRevision();
+    require(!selection.setShadowWidth(12) && selection.changeRevision() == revision,
+            "identical shadow width must preserve selection browsing");
+    selection.setShadowColor(QColor(20, 40, 60, 100));
+    require(selection.changeRevision() > revision,
+            "shadow color changes must invalidate selection browsing");
+    revision = selection.changeRevision();
+    selection.setShadowColor(QColor(20, 40, 60, 100));
+    require(selection.changeRevision() == revision,
+            "identical shadow color must preserve selection browsing");
+
+    const QRect bounds(0, 0, 400, 300);
+    require(selection.applyParams(selection.params(bounds), bounds) &&
+                selection.changeRevision() == revision,
+            "restoring identical params must not invalidate selection browsing");
+    require(!selection.applyParams(selection.params(bounds), {}) &&
+                selection.changeRevision() == revision,
+            "unavailable restoration bounds must preserve the revision");
+    require(selection.adjustFromToolbar(0, 0, 0, 0, bounds, 1) &&
+                selection.changeRevision() == revision,
+            "an unchanged toolbar adjustment must preserve selection browsing");
+    selection.setShadowColor({});
+    require(selection.changeRevision() > revision,
+            "sanitizing a changed shadow color must invalidate selection browsing");
+    revision = selection.changeRevision();
+    selection.setShadowColor({});
+    require(selection.changeRevision() == revision,
+            "repeating an invalid color with the same fallback must preserve browsing");
+    selection.setSelectionRect(rectangle.translated(1, 0));
+    selection.setSelectionRect(rectangle);
+    require(selection.changeRevision() > revision,
+            "modifying then restoring geometry must still invalidate selection browsing");
+    revision = selection.changeRevision();
+    require(selection.setAspectRatioLockEnabled(true, 1) && selection.changeRevision() > revision,
+            "changing the selection aspect lock must invalidate browsing");
+    revision = selection.changeRevision();
+    require(!selection.setAspectRatioLockEnabled(true, 1) && selection.changeRevision() == revision,
+            "an identical aspect lock must preserve browsing");
+}
+
+void selectionRevisionTracksRegionsAndIgnoresPresentationCaches() {
+    ScreenshotSelectionModel selection;
+    const ScreenshotRegionGeometry region(
+        QRegion(QRect(10, 20, 20, 30)).united(QRect(60, 20, 20, 30)));
+    selection.setSelectionRegion(region);
+    auto revision = selection.changeRevision();
+    selection.setSelectionRegion(region);
+    require(selection.changeRevision() == revision,
+            "an identical multi-region replacement must preserve selection browsing");
+    selection.beginRegionOperation(ScreenshotSelectionModel::RegionOperation::Add);
+    require(selection.changeRevision() > revision,
+            "starting a region operation must invalidate selection browsing");
+    selection.setSelectionRect(QRectF(90, 20, 20, 30));
+    revision = selection.changeRevision();
+    auto cached = selection;
+    static_cast<void>(cached.selectionRegion());
+    static_cast<void>(cached.selectionRegionForMarquee(QRectF(91, 20, 20, 30)));
+    cached.beginMoveDrag(QPointF(90, 20));
+    require(cached.changeRevision() == revision,
+            "render caches and move anchors must not change the selection revision");
+    selection = cached;
+    require(selection.changeRevision() == revision,
+            "assigning cache-only changes must preserve selection browsing");
+    selection.commitRegionOperation();
+    require(selection.changeRevision() > revision,
+            "committing a region operation must invalidate selection browsing");
+    revision = selection.changeRevision();
+    selection.setRegionType(ScreenshotRegionType::Polyline);
+    require(selection.changeRevision() > revision,
+            "changing the region type must invalidate selection browsing");
+    revision = selection.changeRevision();
+    selection.setRegionType(ScreenshotRegionType::Polyline);
+    require(selection.changeRevision() == revision,
+            "an unchanged region type must preserve selection browsing");
+    QPainterPath path;
+    path.addRect(QRectF(20, 20, 40, 30));
+    const auto draft = ScreenshotRegionGeometry::fromPath(path, ScreenshotRegionType::Polyline);
+    const QVector<QPointF> vertices{{20, 20}, {60, 20}, {60, 50}};
+    selection.setDraftRegion(draft, vertices);
+    require(selection.changeRevision() > revision,
+            "creating a custom-region draft must invalidate selection browsing");
+    revision = selection.changeRevision();
+    selection.setDraftRegion(draft, vertices);
+    require(selection.changeRevision() == revision,
+            "an identical draft must preserve selection browsing");
+    selection.setDraftRegion(draft, {{20, 20}, {60, 20}, {60, 50}, {20, 50}});
+    require(selection.changeRevision() > revision,
+            "editing draft vertices must invalidate browsing even with unchanged bounds");
+}
+
+void selectionRevisionAssignmentsRemainOwnedByTheDestination() {
+    ScreenshotSelectionModel selection;
+    selection.setSelectionRect(QRectF(10, 20, 120, 80));
+    auto stale = selection;
+    require(stale.changeRevision() == selection.changeRevision(),
+            "candidate construction should preserve its source revision");
+    require(selection.setCornerRadius(8), "seed a changed live selection");
+    require(stale.setShadowWidth(12), "seed an independently changed candidate");
+    require(stale.changeRevision() == selection.changeRevision(),
+            "independent candidate changes should exercise a revision collision");
+    auto revision = selection.changeRevision();
+    selection = stale;
+    require(selection.changeRevision() > revision && selection.cornerRadius() == 0 &&
+                selection.shadowWidth() == 12,
+            "candidate assignment must advance the destination despite matching revisions");
+    revision = selection.changeRevision();
+    selection = stale;
+    require(selection.changeRevision() == revision,
+            "identical candidate assignment must preserve the destination revision");
+    selection = std::move(stale);
+    require(selection.changeRevision() == revision,
+            "identical move assignment must preserve the destination revision");
+    auto replacement = selection;
+    require(replacement.setCornerRadius(9), "seed a changed move candidate");
+    selection = std::move(replacement);
+    require(selection.changeRevision() > revision,
+            "changed move assignment must advance the destination revision");
+    revision = selection.changeRevision();
+    selection.reset();
+    require(selection.changeRevision() > revision && !selection.hasPixelSelection(),
+            "resetting selection state must advance rather than clear the revision");
+    revision = selection.changeRevision();
+    selection.reset();
+    require(selection.changeRevision() == revision,
+            "resetting an already empty selection must preserve its revision");
+}
+
+void interactionRevisionTracksSelectionReentryAndGestureBoundaries() {
+    ScreenshotInteractionState interaction;
+    auto revision = interaction.selectionModeRevision();
+    interaction.beginCapture();
+    require(interaction.selectionModeRevision() > revision,
+            "new captures must invalidate selection browsing");
+    revision = interaction.selectionModeRevision();
+    interaction.enterOverlayVisible(true);
+    require(interaction.selectionModeRevision() > revision,
+            "entering initial smart selection must invalidate selection browsing");
+    revision = interaction.selectionModeRevision();
+    interaction.confirmSelection();
+    interaction.applySelectionParams();
+    interaction.setMoveTool(true, false);
+    interaction.setCanvasTool(ScreenshotActiveTool::Shape);
+    require(interaction.selectionModeRevision() == revision,
+            "history confirmation and drawing-tool changes must preserve selection browsing");
+    require(!interaction.enterSelectionDrag(ScreenshotSelectionDragMode::None) &&
+                interaction.selectionModeRevision() == revision,
+            "a rejected selection gesture must preserve selection browsing");
+    require(interaction.enterSelectionDrag(ScreenshotSelectionDragMode::Right) &&
+                interaction.selectionModeRevision() > revision,
+            "starting a selection edit must invalidate browsing before geometry changes");
+    revision = interaction.selectionModeRevision();
+    require(interaction.enterSelectionDrag(ScreenshotSelectionDragMode::All) &&
+                interaction.selectionModeRevision() == revision,
+            "rebasing an active selection gesture must retain its revision");
+    interaction.finishDrag();
+    interaction.confirmSelection();
+    require(interaction.selectionModeRevision() == revision,
+            "finishing and confirming selection edits must preserve their revision");
+    interaction.returnToSelectionMode(true);
+    require(interaction.selectionModeRevision() > revision,
+            "returning to smart framing must invalidate browsing without a geometry change");
+    revision = interaction.selectionModeRevision();
+    interaction.returnToSelectionMode(false);
+    require(interaction.selectionModeRevision() > revision,
+            "returning to manual selection must invalidate selection browsing");
+    revision = interaction.selectionModeRevision();
+    interaction.setMoveTool(false, false);
+    require(interaction.selectionModeRevision() > revision,
+            "arming selection without existing geometry must invalidate selection browsing");
+    revision = interaction.selectionModeRevision();
+    interaction.enterScrollingCapture();
+    require(interaction.selectionModeRevision() > revision,
+            "entering scrolling capture must invalidate selection browsing");
+    revision = interaction.selectionModeRevision();
+    interaction.enterScrollingCapture();
+    require(interaction.selectionModeRevision() == revision,
+            "unchanged scrolling mode must preserve its revision");
+    interaction.reset();
+    require(interaction.selectionModeRevision() > revision,
+            "retiring a capture must advance rather than clear the selection-mode revision");
 }
 
 QRectF lockedDragResult(ScreenshotSelectionDragMode dragMode, const QPointF& originPosition,
@@ -1365,6 +1656,14 @@ void historyBorderAppearanceDoesNotDependOnPlacement() {
                 appearance->sourceSize == QSize(116, 66) &&
                 appearance->contentRect == QRectF(8, 8, 100, 50),
             "history fallback must retain capture-time appearance and logical-to-raster scale");
+    record.selection.region = QRegion(5000, 5000, 20, 50).united(QRegion(5080, 5000, 20, 50));
+    record.selection.layoutCompaction = {true, 3};
+    const auto compacted = snow_shot::presentation::historySelectionBorderAppearance(record);
+    require(compacted && compacted->sourceSize == QSize(75, 66) &&
+                compacted->contentRect == QRectF(8, 8, 59, 50),
+            "history appearance uses compacted dimensions without altering source selection");
+    record.selection.region.reset();
+    record.selection.layoutCompaction = {};
     record.scrolling = true;
     record.result->imageSize = QSize(232, 1016);
     const auto scrolling = snow_shot::presentation::historySelectionBorderAppearance(record);
@@ -1550,6 +1849,11 @@ void displayOwnerPreservesProbePriority() {
 }
 
 int main() {
+    exportWindowLookupUsesSelectionCenter();
+    selectionRevisionTracksGeometryEffectsAndNoOpRestoration();
+    selectionRevisionTracksRegionsAndIgnoresPresentationCaches();
+    selectionRevisionAssignmentsRemainOwnedByTheDestination();
+    interactionRevisionTracksSelectionReentryAndGestureBoundaries();
     displayOwnerPreservesProbePriority();
     selectionDisplayUnitsPreserveGeometryAndOrigins();
     pointCanvasDisplayUnitsMatchExport();

@@ -22,7 +22,7 @@ function Write-PeFixture([string]$Path, [int]$Machine) {
 }
 
 $testRoot = Join-Path $script:SnowRepoRoot ('build/windows-arm64-contract-' + [guid]::NewGuid().ToString('N'))
-$names = @('PATH', 'INCLUDE', 'LIB', 'VSINSTALLDIR', 'VCINSTALLDIR', 'VCToolsInstallDir',
+$names = @('PATH', 'INCLUDE', 'LIB', 'VSINSTALLDIR', 'VCINSTALLDIR', 'VCToolsInstallDir', 'VCToolsVersion',
     'WindowsSdkDir', 'WindowsSDKVersion', 'SNOW_MSVC_HOST_ARCHITECTURE',
     'SNOW_MSVC_TARGET_ARCHITECTURE', 'VSCMD_ARG_HOST_ARCH', 'VSCMD_ARG_TGT_ARCH',
     'Qt6_DIR', 'SNOW_QT_STATIC_DIR', 'QT_HOST_PATH', 'SNOW_QT_HOST_PREFIX', 'LIBCLANG_PATH')
@@ -74,7 +74,10 @@ try {
     $script:FixtureHost = 'x64'
     function Get-SnowWindowsHostArchitecture { return $script:FixtureHost }
     $vs = Join-Path $testRoot 'VS'
-    $msvc = Join-Path $vs 'VC/Tools/MSVC/14.51.99999'
+    $msvc = Join-Path $vs 'VC/Tools/MSVC/14.100.99999'
+    foreach ($version in @('14.50.99999', '14.51.99999', '14.99.99999', 'not-a-version')) {
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $vs "VC/Tools/MSVC/$version")
+    }
     $sdk = Join-Path $testRoot 'Windows SDK'
     foreach ($hostArch in @('x64', 'arm64')) {
         foreach ($targetArch in @('x64', 'arm64')) {
@@ -97,12 +100,25 @@ try {
     foreach ($pair in @(@('x64', 'x64'), @('x64', 'arm64'), @('arm64', 'arm64'))) {
         $script:FixtureHost = $pair[0]
         $path = Add-SnowMsvcToolsToPath -Architecture $pair[1]
+        Require ($env:VCToolsVersion -ceq '14.100.99999') 'Select the newest supported MSVC using numeric version ordering.'
         Require ($path -like "*Host$($pair[0])\$($pair[1])") 'MSVC compiler must reflect host and target independently.'
         Require (@($env:LIB -split ';' | Where-Object { $_ -notlike "*\$($pair[1])" }).Count -eq 0) 'Every SDK/MSVC library root must match target.'
         Require (($env:PATH -split ';')[0] -ceq $path) 'Target compiler must be first for bare cl/armasm custom commands.'
         Require ((Get-SnowWindowsTarget -Architecture $pair[1]).HostTriplet -ceq "$($pair[0])-windows") 'Host packages must remain runnable.'
     }
+    Require ($env:WindowsSdkDir -ceq "$sdk\" -and $env:WindowsSDKVersion -ceq '10.0.99999.0\') `
+        'Repeated environment setup must retain one trailing SDK separator and a stable version.'
     $script:FixtureHost = 'x64'
+    $env:VSINSTALLDIR = Join-Path $testRoot 'old VS'
+    $null = New-Item -ItemType Directory -Force -Path (
+        Join-Path $env:VSINSTALLDIR 'VC/Tools/MSVC/14.50.99999')
+    Require-Rejected { Add-SnowMsvcToolsToPath } 'MSVC below the minimum must fail.'
+    $minimumMsvc = Join-Path $env:VSINSTALLDIR 'VC/Tools/MSVC/14.51.0'
+    Copy-Item -LiteralPath $msvc -Destination $minimumMsvc -Recurse
+    $null = Add-SnowMsvcToolsToPath
+    Require ($env:VCToolsVersion -ceq '14.51.0') 'The minimum MSVC version must remain supported.'
+    $env:VSINSTALLDIR = $vs
+    $null = Add-SnowMsvcToolsToPath
     $hostQt = Join-Path $testRoot 'Qt host'
     $hostQtDir = Join-Path $hostQt 'lib/cmake/Qt6'
     $null = New-Item -ItemType Directory -Force -Path $hostQtDir
@@ -124,6 +140,8 @@ try {
     $target = Get-SnowWindowsTarget -Architecture arm64
     $env:LIBCLANG_PATH = Join-Path $testRoot 'host libclang'
     $arguments = @(Get-SnowConfigureArguments -Preset $target.Preset -BuildDirectory $testRoot)
+    Require ($arguments -ccontains '-T' -and $arguments -ccontains $target.Toolset) `
+        'CMake must use the selected supported MSVC toolset.'
     Require ($arguments -ccontains "-DSNOW_LIBCLANG_BIN_DIR:PATH=$env:LIBCLANG_PATH" -and
         $arguments -ccontains "-DSNOW_SHOT_LIBCLANG_DIR:PATH=$env:LIBCLANG_PATH") 'CMake and Rust must use the validated host libclang.'
     $cachePath = Join-Path $testRoot 'CMakeCache.txt'
@@ -134,7 +152,7 @@ try {
         "Z_VCPKG_POWERSHELL_PATH:INTERNAL=$((Get-Command pwsh.exe).Source)",
         'CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026',
         'CMAKE_GENERATOR_PLATFORM:INTERNAL=ARM64',
-        'CMAKE_GENERATOR_TOOLSET:INTERNAL=version=14.51',
+        "CMAKE_GENERATOR_TOOLSET:INTERNAL=$($target.Toolset)",
         'SNOW_RUST_TARGET:STRING=aarch64-pc-windows-msvc',
         'VCPKG_HOST_TRIPLET:STRING=x64-windows',
         'VCPKG_TARGET_TRIPLET:STRING=arm64-windows-static',
@@ -144,7 +162,8 @@ try {
     $cacheText = $cacheLines -join "`n"
     [IO.File]::WriteAllText($cachePath, $cacheText)
     Require (Test-SnowCacheAlignment -CachePath $cachePath -Preset $target.Preset) 'A matching cross-build cache must be reusable.'
-    foreach ($drift in @(@('ARM64', 'x64'), @('aarch64-pc-windows-msvc', 'x86_64-pc-windows-msvc'),
+    foreach ($drift in @(@('ARM64', 'x64'), @('14.100.99999', '14.51.99999'),
+            @('aarch64-pc-windows-msvc', 'x86_64-pc-windows-msvc'),
             @('VCPKG_HOST_TRIPLET:STRING=x64-windows', 'VCPKG_HOST_TRIPLET:STRING=arm64-windows'),
             @($hostQt.Replace('\', '/'), $qtPrefix.Replace('\', '/')))) {
         [IO.File]::WriteAllText($cachePath, $cacheText.Replace($drift[0], $drift[1]))

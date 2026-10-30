@@ -5,10 +5,9 @@
 #include <QMouseEvent>
 
 RecordingRegionDragHandle::RecordingRegionDragHandle(QWidget* parent)
-    : OverlayControlButton(Intent::Primary, parent) {
+    : OverlayControlButton(Intent::Primary,
+                           snow_shot::presentation::icons::custom::outlined::ToolMove(), parent) {
     setObjectName(QStringLiteral("screenRecordingRegionDragHandle"));
-    setIconRef(snow_shot::presentation::icons::custom::outlined::ToolMove().withColors(
-        adqt::icons::IconColors::primary(QColor(Qt::white))));
     setCursor(Qt::SizeAllCursor);
     setMouseTracking(true);
     retranslateUi();

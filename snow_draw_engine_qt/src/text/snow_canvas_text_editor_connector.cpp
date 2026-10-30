@@ -17,16 +17,20 @@ SnowElementId boundTextElementId(const SnowSceneDisplayItem& item) {
         : SnowElementId {};
 }
 
-const SnowSceneDisplayItem* findSerialNumberItem(const SnowCanvasSceneItem* sceneItems,
-                                                 std::uint32_t sceneItemCount,
-                                                 const SnowElementId& id) {
+bool isConnectorOwner(const SnowSceneDisplayItem& item) {
+    return item.kind == SNOW_SCENE_DISPLAY_ITEM_SERIAL_NUMBER ||
+           item.kind == SNOW_SCENE_DISPLAY_ITEM_DRAW_RECT;
+}
+
+const SnowSceneDisplayItem* findConnectorOwnerItem(const SnowCanvasSceneItem* sceneItems,
+                                                   std::uint32_t sceneItemCount,
+                                                   const SnowElementId& id) {
     if (sceneItems == nullptr || !snow_canvas_element_id::hasElementId(id)) {
         return nullptr;
     }
     for (std::uint32_t index = 0; index < sceneItemCount; ++index) {
         const SnowSceneDisplayItem& item = sceneItems[index];
-        if (item.kind == SNOW_SCENE_DISPLAY_ITEM_SERIAL_NUMBER &&
-            snow_canvas_element_id::sameElementId(item.element_id, id)) {
+        if (isConnectorOwner(item) && snow_canvas_element_id::sameElementId(item.element_id, id)) {
             return &item;
         }
     }
@@ -50,20 +54,23 @@ bool connectorBelongsToPreview(const SnowSceneDisplayItem& connector,
         return false;
     }
     const SnowSceneDisplayItem* serial =
-        findSerialNumberItem(sceneItems, sceneItemCount, connector.element_id);
+        findConnectorOwnerItem(sceneItems, sceneItemCount, connector.element_id);
     return serial != nullptr && itemBindsPreview(*serial, preview);
 }
 
 bool connectorItemForPreview(const SnowSceneDisplayItem& serial,
                              const SnowSceneDisplayItem& preview,
                              SnowCanvasSceneItem* outConnector) {
-    if (outConnector == nullptr || serial.kind != SNOW_SCENE_DISPLAY_ITEM_SERIAL_NUMBER ||
+    if (outConnector == nullptr || !isConnectorOwner(serial) ||
         !itemBindsPreview(serial, &preview)) {
         return false;
     }
 
     SnowSerialTextConnection connection{};
-    if (snow_scene_resolve_serial_text_connection(&serial, &preview, &connection) == 0) {
+    const auto resolveConnection = serial.kind == SNOW_SCENE_DISPLAY_ITEM_DRAW_RECT
+                                       ? snow_scene_resolve_shape_text_connection
+                                       : snow_scene_resolve_serial_text_connection;
+    if (resolveConnection(&serial, &preview, &connection) == 0) {
         return false;
     }
 
@@ -103,8 +110,7 @@ QRegion connectorRegion(const SceneDisplayInfo& displayInfo, const SnowCanvasSce
             region += snow_canvas_render_geometry::alignedRectForBounds(
                 snow_canvas_render_geometry::sceneItemBounds(displayInfo, item));
         }
-        if (item.kind != SNOW_SCENE_DISPLAY_ITEM_SERIAL_NUMBER ||
-            !itemBindsPreview(item, preview)) {
+        if (!isConnectorOwner(item) || !itemBindsPreview(item, preview)) {
             continue;
         }
 

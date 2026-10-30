@@ -1,4 +1,5 @@
 #include "snow/image/resource_estimate.h"
+#include "resize_resource_bounds.h"
 
 #include <algorithm>
 #include <cmath>
@@ -96,6 +97,140 @@ Result<ResourceEstimate> estimate_decode_resources(const DocumentInfo& document,
     return ResourceEstimate{private_memory.value(), 0, output.value()};
 }
 
+Result<ResizeResourceEstimate> estimate_resize_resources(std::uint32_t source_width,
+                                                         std::uint32_t source_height,
+                                                         PixelFormat source_format,
+                                                         const ResizeOptions& options) {
+    if (source_width == 0 || source_height == 0 || options.width == 0 || options.height == 0 ||
+        source_width > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+        source_height > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+        options.width > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+        options.height > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+        std::uint64_t{options.width} * options.height > (std::uint64_t{1} << 32U))
+        return Status::error(ErrorCode::invalid_argument, "Resize dimensions are invalid.");
+    auto pixel_bytes = source_format.bytes_per_pixel();
+    if (!pixel_bytes)
+        return pixel_bytes.error();
+    constexpr std::uint64_t headroom = std::uint64_t{8} << 20U;
+    if (source_width == options.width && source_height == options.height)
+        return ResizeResourceEstimate{0, headroom};
+    const bool nearest = options.method == ResamplingMethod::nearest;
+    const double support = nearest ? .5 : options.method == ResamplingMethod::linear ? 1.0 : 3.0;
+    auto horizontal = detail::resize_axis_resources(source_width, options.width, support, nearest);
+    auto vertical = detail::resize_axis_resources(source_height, options.height, support, nearest);
+    if (!horizontal || !vertical)
+        return !horizontal ? horizontal.error() : vertical.error();
+    auto retained = checked_add(horizontal.value().retained_bytes, vertical.value().retained_bytes);
+    if (!retained)
+        return retained.error();
+    std::uint64_t working =
+        std::max(horizontal.value().construction_bytes, vertical.value().construction_bytes);
+    auto source_row = checked_multiply(source_width, pixel_bytes.value());
+    auto pixel_row = checked_multiply(options.width, sizeof(float) * 4U);
+    auto ring = checked_multiply(pixel_row ? pixel_row.value() : 0, vertical.value().maximum_count);
+    auto index = checked_multiply(vertical.value().maximum_count, 64U);
+    if (!source_row || !pixel_row || !ring || !index)
+        return !source_row  ? source_row.error()
+               : !pixel_row ? pixel_row.error()
+               : !ring      ? ring.error()
+                            : index.error();
+    auto cached = checked_add(ring.value(), index.value());
+    if (!cached)
+        return cached.error();
+    const bool bounded =
+        options.maximum_worker_cache_bytes != std::numeric_limits<std::uint64_t>::max();
+    const bool possible_streaming =
+        bounded && source_height > options.height &&
+        (vertical.value().maximum_count > kDefaultResizeMaximumCachedRows ||
+         cached.value() > options.maximum_worker_cache_bytes);
+    if (possible_streaming) {
+        // The implementation can choose either path near a filter-support boundary. Budget the
+        // larger retained representation and both possible read peaks, rather than guessing which
+        // coefficients vanish at that boundary.
+        auto inverted_entries = checked_multiply(vertical.value().coefficient_count, 8U);
+        auto source_offsets =
+            checked_multiply(static_cast<std::uint64_t>(source_height) + 1U, sizeof(std::size_t));
+        auto target_ranges = checked_multiply(options.height, sizeof(int) * 2U);
+        if (!inverted_entries || !source_offsets || !target_ranges)
+            return !inverted_entries ? inverted_entries.error()
+                   : !source_offsets ? source_offsets.error()
+                                     : target_ranges.error();
+        auto inverted = checked_add(inverted_entries.value(), source_offsets.value());
+        if (!inverted)
+            return inverted.error();
+        inverted = checked_add(inverted.value(), target_ranges.value());
+        if (!inverted)
+            return inverted.error();
+        retained = checked_add(horizontal.value().retained_bytes,
+                               std::max(vertical.value().retained_bytes, inverted.value()));
+        if (!retained)
+            return retained.error();
+        auto inversion_scratch = checked_multiply(source_offsets.value(), 2U);
+        if (!inversion_scratch)
+            return inversion_scratch.error();
+        inversion_scratch = checked_add(
+            inversion_scratch.value(), std::min(vertical.value().retained_bytes, inverted.value()));
+        if (!inversion_scratch)
+            return inversion_scratch.error();
+        working = std::max(working, inversion_scratch.value());
+
+        const auto active_rows = static_cast<std::uint64_t>(std::ceil(support * 2.0 + 2.0));
+        auto accumulators = checked_multiply(pixel_row.value(), active_rows + 1U);
+        auto target_slots = checked_multiply(options.height, sizeof(std::size_t));
+        auto free_slots = checked_multiply(active_rows, sizeof(std::size_t));
+        if (!accumulators || !target_slots || !free_slots)
+            return !accumulators   ? accumulators.error()
+                   : !target_slots ? target_slots.error()
+                                   : free_slots.error();
+        auto streaming = checked_add(accumulators.value(), source_row.value());
+        if (!streaming)
+            return streaming.error();
+        streaming = checked_add(streaming.value(), target_slots.value());
+        if (!streaming)
+            return streaming.error();
+        streaming = checked_add(streaming.value(), free_slots.value());
+        if (!streaming)
+            return streaming.error();
+        working = std::max(working, streaming.value());
+
+        // A cached path admits only its ring plus the implementation's 32-byte index allowance.
+        // Our 64-byte index bound additionally covers nodes, buckets, row tags and row pointers.
+        auto maximum_index = checked_multiply(
+            std::min(vertical.value().maximum_count, kDefaultResizeMaximumCachedRows), 64U);
+        auto budgeted_cache = checked_add(options.maximum_worker_cache_bytes,
+                                          maximum_index ? maximum_index.value() : 0);
+        auto maximum_ring =
+            checked_multiply(pixel_row.value(), std::min(vertical.value().maximum_count,
+                                                         kDefaultResizeMaximumCachedRows));
+        if (!maximum_index || !budgeted_cache || !maximum_ring)
+            return !maximum_index    ? maximum_index.error()
+                   : !budgeted_cache ? budgeted_cache.error()
+                                     : maximum_ring.error();
+        auto row_limited = checked_add(maximum_ring.value(), maximum_index.value());
+        if (!row_limited)
+            return row_limited.error();
+        cached = std::min({cached.value(), budgeted_cache.value(), row_limited.value()});
+    }
+    auto per_worker = checked_add(cached.value(), source_row.value());
+    if (!per_worker)
+        return per_worker.error();
+    per_worker = checked_add(per_worker.value(), pixel_row.value());
+    if (!per_worker)
+        return per_worker.error();
+    const auto hardware = std::max(1U, std::thread::hardware_concurrency());
+    const auto threads = std::clamp(
+        options.maximum_threads == 0 ? hardware : std::min(hardware, options.maximum_threads), 1U,
+        options.height);
+    auto read_working = checked_multiply(per_worker.value(), threads);
+    if (!read_working)
+        return read_working.error();
+    working = std::max(working, read_working.value());
+    auto total_working = checked_add(working, headroom);
+    if (!total_working)
+        return total_working.error();
+    return ResizeResourceEstimate{retained.value(), total_working.value()};
+}
+
 Result<ResourceEstimate> estimate_transform_resources(const DocumentInfo& document,
                                                       const TransformOptions& options) {
     std::uint64_t output = 0;
@@ -121,81 +256,17 @@ Result<ResourceEstimate> estimate_transform_resources(const DocumentInfo& docume
         if (!row)
             return row.error();
         std::uint64_t working = row.value();
-        if (options.resize && frame.height != height) {
-            const double scale = static_cast<double>(height) / frame.height;
-            const double base_radius = options.resize->method == ResamplingMethod::nearest  ? 0.5
-                                       : options.resize->method == ResamplingMethod::linear ? 1.0
-                                                                                            : 3.0;
-            const std::uint64_t ring_rows = static_cast<std::uint64_t>(
-                std::max(1.0, std::ceil(base_radius / std::min(1.0, scale) * 2.0 + 1.0)));
-            auto pixel_row = checked_multiply(width, sizeof(float) * 4U);
-            if (!pixel_row)
-                return pixel_row.error();
-            auto ring = checked_multiply(pixel_row.value(), ring_rows);
-            if (!ring)
-                return ring.error();
-            auto row_index = checked_multiply(ring_rows, 32U);
-            if (!row_index)
-                return row_index.error();
-            auto cached = checked_add(ring.value(), row_index.value());
-            if (!cached)
-                return cached.error();
-            const bool unbounded_cache = options.resize->maximum_worker_cache_bytes ==
-                                         std::numeric_limits<std::uint64_t>::max();
-            const bool streaming = !unbounded_cache && frame.height > height &&
-                                   (ring_rows > kDefaultResizeMaximumCachedRows ||
-                                    cached.value() > options.resize->maximum_worker_cache_bytes);
-            std::uint32_t hardware = std::max(1U, std::thread::hardware_concurrency());
-            std::uint32_t threads = options.resize->maximum_threads == 0
-                                        ? hardware
-                                        : std::min(hardware, options.resize->maximum_threads);
-            threads = std::clamp<std::uint32_t>(threads, 1, height);
-            std::uint64_t per_worker = 0;
-            if (streaming) {
-                threads = 1;
-                const std::uint64_t active_rows =
-                    static_cast<std::uint64_t>(std::ceil(base_radius * 2.0 + 2.0));
-                auto accumulators = checked_multiply(pixel_row.value(), active_rows + 1U);
-                auto coefficient_count = checked_multiply(height, ring_rows);
-                if (!accumulators || !coefficient_count)
-                    return !accumulators ? accumulators.error() : coefficient_count.error();
-                auto coefficient_peak = checked_multiply(coefficient_count.value(), 16U);
-                auto source_offsets = checked_multiply(
-                    static_cast<std::uint64_t>(frame.height) + 1U, sizeof(std::size_t));
-                auto target_ranges = checked_multiply(height, sizeof(int) * 2U);
-                if (!coefficient_peak || !source_offsets || !target_ranges)
-                    return !coefficient_peak ? coefficient_peak.error()
-                           : !source_offsets ? source_offsets.error()
-                                             : target_ranges.error();
-                auto tables = checked_add(coefficient_peak.value(), source_offsets.value());
-                if (!tables)
-                    return tables.error();
-                tables = checked_add(tables.value(), target_ranges.value());
-                if (!tables)
-                    return tables.error();
-                auto combined = checked_add(accumulators.value(), tables.value());
-                if (!combined)
-                    return combined.error();
-                per_worker = combined.value();
-            } else {
-                auto cached_with_output = checked_add(cached.value(), pixel_row.value());
-                if (!cached_with_output)
-                    return cached_with_output.error();
-                per_worker = cached_with_output.value();
-            }
-            if (!streaming && options.resize->maximum_threads == 0 && per_worker != 0) {
-                constexpr std::uint64_t kAutomaticWorkingSet = std::uint64_t{256} << 20U;
-                threads = std::min<std::uint32_t>(
-                    threads, static_cast<std::uint32_t>(
-                                 std::max<std::uint64_t>(1, kAutomaticWorkingSet / per_worker)));
-            }
-            auto rings = checked_multiply(per_worker, threads);
-            if (!rings)
-                return rings.error();
-            auto combined = checked_add(working, rings.value());
+        if (options.resize) {
+            auto resize = estimate_resize_resources(frame.width, frame.height, frame.native_format,
+                                                    *options.resize);
+            if (!resize)
+                return resize.error();
+            auto combined =
+                checked_add(resize.value().retained_bytes, resize.value().working_bytes);
             if (!combined)
                 return combined.error();
-            working = combined.value();
+            // The resize estimate already includes its private-memory headroom.
+            working = combined.value() - (std::uint64_t{8} << 20U);
         }
         row_working = std::max(row_working, working);
     }

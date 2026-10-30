@@ -2,6 +2,7 @@
 #include "snow_draw_engine_qt/snow_canvas_image.h"
 #include "snow_shot/platform/applicationqos.h"
 #include "snow_shot/presentation/directcapturecontroller.h"
+#include "snow_shot/presentation/directcapturebudget.h"
 #include "snow_shot/presentation/screenshotencodingsettings.h"
 
 #include "directcapturenative.h"
@@ -325,7 +326,8 @@ void DirectCaptureController::captureCurrentMonitor() {
 }
 
 bool DirectCaptureController::mcpCapture(
-    const QJsonObject& options, std::function<void(QImage, QJsonObject, QString)> completion) {
+    const QJsonObject& options, std::function<void(QImage, QJsonObject, QString)> completion,
+    std::function<bool(qint64)> admitRasterBytes) {
     if (blocksApplicationUpdate())
         return false;
     const auto target =
@@ -383,6 +385,16 @@ bool DirectCaptureController::mcpCapture(
     if (!std::isfinite(scale) || scale < 0.1 || scale > 4)
         return false;
     auto cancellation = std::make_shared<std::atomic_bool>(false);
+    if (admitRasterBytes) {
+        request.admitRaster = [admitRasterBytes = std::move(admitRasterBytes), scale,
+                               cancellation](QSize size) {
+            if (cancellation->load(std::memory_order_acquire))
+                return false;
+            const qint64 bytes = directCapturePeakRasterBytes(size, scale);
+            const bool admitted = admitRasterBytes(bytes);
+            return bytes >= 0 && admitted;
+        };
+    }
     m_impl->mcpCancellation = cancellation;
     m_impl->mcpActive = true;
     emit captureActivityChanged(QStringLiteral("direct-mcp"), true);

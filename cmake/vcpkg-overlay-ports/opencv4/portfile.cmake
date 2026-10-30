@@ -50,13 +50,12 @@ vcpkg_from_github(
       0021-fix-qt-gen-def.patch
       0022-android-use-vcpkg-cpu-features.patch
       0023-ffmpeg8-support.patch
+      0025-dnn-snow-shot-qr-layers.patch
       "${PATCH1_FILE}"
 )
 # Disallow accidental build of vendored copies. 3rdparty/protobuf is the one
 # exception: the dnn module consumes it, and vcpkg's protobuf is a shared-CRT
-# package that cannot be linked into Snow Shot's static-CRT executables (the
-# onnxruntime port still uses the vcpkg protobuf DLLs, so overriding the
-# protobuf port itself is not an option).
+# package that cannot be linked into Snow Shot's static-CRT executables.
 file(GLOB third_party "${SOURCE_PATH}/3rdparty/*")
 list(FILTER third_party EXCLUDE REGEX "/ippicv\$")
 list(FILTER third_party EXCLUDE REGEX "/protobuf\$")
@@ -107,7 +106,6 @@ vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS
  "cuda"       ENABLE_CUDA_FIRST_CLASS_LANGUAGE
  "cudnn"      WITH_CUDNN
  "dc1394"     WITH_1394
- "directml"   WITH_DIRECTML
  "dnn"        BUILD_opencv_dnn
  "dnn"        WITH_PROTOBUF
  "dnn-cuda"   OPENCV_DNN_CUDA
@@ -491,6 +489,9 @@ vcpkg_cmake_configure(
         # cv::barcode for EAN/UPC. This keeps the port build time far below a
         # full contrib build.
         -DBUILD_LIST=wechat_qrcode
+        # Constructor registration otherwise retains every DNN layer family,
+        # even when the final static executable enables dead-code stripping.
+        -DOPENCV_DNN_SNOW_SHOT_QR=ON
         -DBUILD_opencv_apps=OFF
         -DBUILD_opencv_java=OFF
         -DBUILD_opencv_js=OFF
@@ -516,6 +517,7 @@ vcpkg_cmake_configure(
         ${FEATURE_OPTIONS}
         -Dade_DIR=${ADE_DIR}
         -DWITH_AVIF=OFF
+        -DWITH_DIRECTML=OFF
         -DWITH_CPUFEATURES=${WITH_CPUFEATURES}
         # Snow Apps overlay: only Caffe models are loaded; keep the TFLite
         # importer off so flatbuffers is not needed at all. The bundled
@@ -553,6 +555,9 @@ vcpkg_cmake_configure(
 
 vcpkg_cmake_install()
 vcpkg_cmake_config_fixup()
+file(APPEND "${CURRENT_PACKAGES_DIR}/share/opencv4/OpenCVConfig.cmake"
+    "\n# Snow Shot's bundled Caffe graphs define the supported DNN layer closure.\n"
+    "set(OpenCV_SNOW_SHOT_QR_PROFILE TRUE)\n")
 vcpkg_copy_pdbs()
 
 if (NOT VCPKG_BUILD_TYPE)
