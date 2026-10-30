@@ -291,7 +291,7 @@ if(SNOW_DRAW_ENGINE_QT_BUILD_TESTS)
     set_tests_properties(snow-canvas-pressure-mask-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_snow_canvas_pressure_mask_qpa_environment}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_executable(snow-canvas-pressure-brush-render-tests
         tests/snow_canvas_pressure_brush_render_tests.cpp)
     target_include_directories(snow-canvas-pressure-brush-render-tests PRIVATE
@@ -305,7 +305,7 @@ if(SNOW_DRAW_ENGINE_QT_BUILD_TESTS)
     set_tests_properties(snow-canvas-pressure-brush-render-tests PROPERTIES
         LABELS "unit" TIMEOUT 60
         ENVIRONMENT "${_snow_canvas_pressure_qpa_environment}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>")
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_executable(snow-canvas-tablet-input-tests tests/snow_canvas_tablet_input_tests.cpp)
     target_include_directories(snow-canvas-tablet-input-tests PRIVATE
         ${SNOW_CANVAS_QT_PRIVATE_SOURCE_DIRS}
@@ -316,7 +316,7 @@ if(SNOW_DRAW_ENGINE_QT_BUILD_TESTS)
     snow_shot_offscreen_qpa_environment(_snow_canvas_tablet_qpa_environment)
     set_tests_properties(snow-canvas-tablet-input-tests PROPERTIES
         ENVIRONMENT "${_snow_canvas_tablet_qpa_environment}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" TIMEOUT 30)
     add_executable(snow-canvas-lifetime-tests tests/snow_canvas_lifetime_tests.cpp)
     target_include_directories(snow-canvas-lifetime-tests PRIVATE
@@ -605,7 +605,7 @@ if(SNOW_DRAW_ENGINE_QT_BUILD_TESTS)
         COMMAND snow-canvas-custom-renderer-tests --crosshair-factory-only)
     set_tests_properties(snow-canvas-crosshair-factory-tests PROPERTIES
         ENVIRONMENT "${_snow_canvas_reset_qpa_environment}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt::Core>"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>"
         LABELS "unit" TIMEOUT 60)
     add_test(NAME snow-canvas-background-coverage-tests
         COMMAND snow-canvas-custom-renderer-tests --background-coverage-only)

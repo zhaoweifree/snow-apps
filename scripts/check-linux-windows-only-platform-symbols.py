@@ -152,7 +152,9 @@ def defined_symbols(paths: list[Path], namespace: str = "snow_shot::platform",
 
 
 CMAKE_IF = re.compile(r"^\s*(if|elseif|else|endif)\s*\(", re.IGNORECASE)
-CMAKE_ADD_TARGET = re.compile(r"^\s*add_(?:executable|library)\s*\(\s*([A-Za-z0-9_\-]+)(.*)$")
+CMAKE_ADD_TARGET = re.compile(
+    r"^\s*(?:add_(?:executable|library)|target_sources)\s*\(\s*([A-Za-z0-9_\-${}]+)(.*)$"
+)
 
 
 def source_files() -> list[Path]:
@@ -172,6 +174,15 @@ def windows_only_target_sources() -> set[str]:
     on purpose: it is only ever compiled on Windows (`if(WIN32)` in
     `snow_shot/CMakeLists.txt`). A gate that does not read the build file cannot
     tell that apart from a real mistake.
+
+    `target_sources` counts too, not just `add_executable`/`add_library`:
+    `toolbar_capture_exclusion_native_tests.cpp` is attached to two existing test
+    targets that way, inside the same `if(WIN32 ...)`, and it includes
+    `<qt_windows.h>` outright. It is a translation unit that cannot exist on
+    Linux at all, so symbol-level checking of it proves nothing.
+
+    What this deliberately does *not* do is follow `else()` branches or negated
+    conditions -- only the taken side of a Windows guard exempts a source.
     """
     cmakelists = REPO / "snow_shot" / "CMakeLists.txt"
     if not cmakelists.is_file():

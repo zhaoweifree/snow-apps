@@ -45,6 +45,15 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <!-- Newest first, and the newest entry has to stay equal to
+         SNOW_SHOT_VERSION in the root CMakeLists.txt: the package is built
+         from that version, and AppStream has to be able to say what changed.
+         scripts/check-linux-freedesktop.py enforces the link, so an upstream
+         version bump that skips this file turns the `gates` job red with the
+         version it wants. Dates are the day upstream cut the version, not the
+         day this fork absorbed it. -->
+    <release version="1.3.2" date="2026-10-18"/>
+    <release version="1.2.9" date="2026-10-13"/>
     <release version="1.2.8" date="2026-10-13"/>
   </releases>
 </component>
