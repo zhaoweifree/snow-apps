@@ -24,7 +24,7 @@ ScreenshotRecognitionImageSnapshot fixture() {
     snapshot.textColor = Qt::black;
     ScreenshotOcrLine line;
     line.text = QStringLiteral("Translated result");
-    line.quad = {{660, 380}, {920, 380}, {920, 420}, {660, 420}};
+    line.quad = snowPolygonF({{660, 380}, {920, 380}, {920, 420}, {660, 420}});
     snapshot.lines.push_back(line);
     return snapshot;
 }
@@ -152,7 +152,7 @@ void layoutModesAndTransformsRenderOnWorkers() {
             snapshot.lines[0].paragraph = paragraph;
             snapshot.lines[0].text =
                 QString::fromUtf8("繁體文字 Á العربية 👩‍💻");
-            snapshot.lines[0].quad = {{675, 375}, {820, 390}, {805, 525}, {660, 510}};
+            snapshot.lines[0].quad = snowPolygonF({{675, 375}, {820, 390}, {805, 525}, {660, 510}});
             const QImage expected = renderScreenshotRecognitionImage(snapshot);
             auto result = std::async(std::launch::async, [snapshot]() {
                 return renderScreenshotRecognitionImage(snapshot);

@@ -453,12 +453,12 @@ class PdfPageCard final : public QWidget {
             if (event->type() == QEvent::MouseButtonPress) {
                 auto* mouse = static_cast<QMouseEvent*>(event);
                 if (mouse->button() == Qt::LeftButton) {
-                    pressed(m_image->mapTo(this, mouse->position().toPoint()));
+                    pressed(m_image->mapTo(this, snowPos(mouse).toPoint()));
                     return true;
                 }
             } else if (event->type() == QEvent::MouseMove) {
                 auto* mouse = static_cast<QMouseEvent*>(event);
-                moved(m_image->mapTo(this, mouse->position().toPoint()), mouse->buttons());
+                moved(m_image->mapTo(this, snowPos(mouse).toPoint()), mouse->buttons());
                 return mouse->buttons().testFlag(Qt::LeftButton);
             } else if (event->type() == QEvent::MouseButtonRelease) {
                 m_pressed = false;
@@ -469,7 +469,7 @@ class PdfPageCard final : public QWidget {
 
     void mousePressEvent(QMouseEvent* event) override {
         if (event->button() == Qt::LeftButton) {
-            pressed(event->position());
+            pressed(snowPos(event));
             event->accept();
         } else {
             QWidget::mousePressEvent(event);
@@ -477,7 +477,7 @@ class PdfPageCard final : public QWidget {
     }
 
     void mouseMoveEvent(QMouseEvent* event) override {
-        moved(event->position(), event->buttons());
+        moved(snowPos(event), event->buttons());
     }
 
     void mouseReleaseEvent(QMouseEvent* event) override {
@@ -1276,12 +1276,12 @@ bool CollagePdfPageGrid::eventFilter(QObject* watched, QEvent* event) {
     if (watched == d.scroll->viewport()) {
         if (event->type() == QEvent::DragEnter) {
             auto* drag = static_cast<QDragEnterEvent*>(event);
-            d.dragEnter(drag, drag->position());
+            d.dragEnter(drag, snowPos(drag));
             return drag->isAccepted();
         }
         if (event->type() == QEvent::DragMove) {
             auto* drag = static_cast<QDragMoveEvent*>(event);
-            d.dragMove(drag, drag->position());
+            d.dragMove(drag, snowPos(drag));
             return drag->isAccepted();
         }
         if (event->type() == QEvent::DragLeave) {
@@ -1292,7 +1292,7 @@ bool CollagePdfPageGrid::eventFilter(QObject* watched, QEvent* event) {
         }
         if (event->type() == QEvent::Drop) {
             auto* drop = static_cast<QDropEvent*>(event);
-            d.drop(drop, drop->position());
+            d.drop(drop, snowPos(drop));
             return drop->isAccepted();
         }
         if (event->type() == QEvent::Resize && d.refreshTimer)
@@ -1346,12 +1346,12 @@ void CollagePdfPageGrid::changeEvent(QEvent* event) {
 
 void CollagePdfPageGrid::dragEnterEvent(QDragEnterEvent* event) {
     const auto viewport = m_impl->scroll->viewport()->mapTo(this, QPoint{});
-    m_impl->dragEnter(event, event->position() - viewport);
+    m_impl->dragEnter(event, snowPos(event) - viewport);
 }
 
 void CollagePdfPageGrid::dragMoveEvent(QDragMoveEvent* event) {
     const auto viewport = m_impl->scroll->viewport()->mapTo(this, QPoint{});
-    m_impl->dragMove(event, event->position() - viewport);
+    m_impl->dragMove(event, snowPos(event) - viewport);
 }
 
 void CollagePdfPageGrid::dragLeaveEvent(QDragLeaveEvent* event) {
@@ -1362,7 +1362,7 @@ void CollagePdfPageGrid::dragLeaveEvent(QDragLeaveEvent* event) {
 
 void CollagePdfPageGrid::dropEvent(QDropEvent* event) {
     const auto viewport = m_impl->scroll->viewport()->mapTo(this, QPoint{});
-    m_impl->drop(event, event->position() - viewport);
+    m_impl->drop(event, snowPos(event) - viewport);
 }
 
 } // namespace snow_shot::presentation::components

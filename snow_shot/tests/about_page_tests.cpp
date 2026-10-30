@@ -231,7 +231,7 @@ void projectLinkSurfacesMatchStandardButtons() {
                     target->setEnabled(state != 3);
                     target->setDown(state == 2);
                     if (state == 1) {
-                        SnowEnterEvent enter(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2));
+                        SnowEnterEventInstance enter(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2));
                         QCoreApplication::sendEvent(target, &enter);
                     } else {
                         QEvent leave(QEvent::Leave);
@@ -521,7 +521,7 @@ void updateStatesFitTheVersionPanel() {
                                      ? AdButton::ButtonStyle::Solid
                                      : AdButton::ButtonStyle::Outline),
                             "download and restart receive the primary visual emphasis");
-                    require(!child<QLabel>(page, "aboutUpdateIcon")->pixmap().isNull(),
+                    require(!snowLabelPixmap(child<QLabel>(page, "aboutUpdateIcon")).isNull(),
                             "every update state has a rendered status icon");
                     require(label->textFormat() == Qt::PlainText &&
                                 label->accessibleName() == label->text(),
@@ -875,9 +875,9 @@ void mainNavigationSearchThemesAndLanguages() {
                     ->styleSheet()
                     .contains(scheme.map.colorBorderSecondary.name(QColor::HexArgb)),
                 "compact version surface follows the neutral theme tokens");
-        require(!child<QLabel>(*page, "aboutLogo")->pixmap().isNull(), "render the Snow Shot icon");
+        require(!snowLabelPixmap(child<QLabel>(*page, "aboutLogo")).isNull(), "render the Snow Shot icon");
         auto* logo = child<QLabel>(*page, "aboutLogo");
-        require(qFuzzyCompare(logo->pixmap().devicePixelRatio(), logo->devicePixelRatioF()),
+        require(qFuzzyCompare(snowLabelPixmap(logo).devicePixelRatio(), logo->devicePixelRatioF()),
                 "the logo uses the current display pixel ratio");
         auto* artwork = child<QWidget>(*page, "aboutArtwork");
         const QImage hero = child<QWidget>(*page, "aboutHero")->grab().toImage();
@@ -946,7 +946,7 @@ void mainNavigationSearchThemesAndLanguages() {
                         label->text() == translator.translate("AboutPageWidget", features[i]),
                     "every feature label retranslates");
             auto* icon = page->findChild<QLabel*>(QStringLiteral("aboutFeatureIcon%1").arg(i));
-            require(icon != nullptr && !icon->pixmap().isNull(), "every feature icon renders");
+            require(icon != nullptr && !snowLabelPixmap(icon).isNull(), "every feature icon renders");
         }
         require(child<QAbstractButton>(*page, "aboutWebsite")->accessibleName() ==
                         translator.translate("AboutPageWidget", "Official website") &&

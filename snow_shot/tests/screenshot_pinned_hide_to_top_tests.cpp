@@ -387,9 +387,9 @@ void debouncedHandlePresence() {
             "repeated handle entry must not reactivate or schedule hiding");
     f.controller.updatePointer(outside);
     require(f.owner.isVisible() && f.timer().isActive(), "handle union exit must wait");
-    const auto timerId = f.timer().id();
+    const auto timerId = f.timer().timerId();
     f.controller.updatePointer(outside);
-    require(f.timer().id() == timerId, "repeated exit must not restart the delay");
+    require(f.timer().timerId() == timerId, "repeated exit must not restart the delay");
     f.controller.updatePointer(f.nativeGeometry.center());
     require(f.owner.isVisible() && !f.timer().isActive(),
             "returning to the image must cancel pending hiding");

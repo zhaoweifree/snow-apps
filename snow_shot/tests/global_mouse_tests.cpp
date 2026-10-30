@@ -66,7 +66,7 @@ void everyCombinationMatchesExactlyAndLatchesItsAction() {
                 GlobalMouseInput press{
                     InputKind::Press, {-200, 50}, binding->button, binding->modifiers};
                 auto extra = press;
-                extra.modifiers |= binding->modifiers == GlobalMouseModifier::Control
+                extra.modifiers |= snowFlagsEqual(binding->modifiers, GlobalMouseModifier::Control)
                                        ? GlobalMouseModifier::Shift
                                        : GlobalMouseModifier::Control;
                 require(!gesture.handle(extra, config).event, "extra modifiers must not activate");
@@ -467,7 +467,7 @@ void managerLoadsLiveSettingsAndCoalescesOnlyMovement() {
     for (qsizetype index = 0; index < 3; ++index) {
         const auto& binding = input->configuration.bindings[index];
         require(binding.action == defaultActions.at(static_cast<std::size_t>(index)) &&
-                    binding.modifiers == GlobalMouseModifier::Super &&
+                    snowFlagsEqual(binding.modifiers, GlobalMouseModifier::Super) &&
                     binding.button == defaultButtons.at(static_cast<std::size_t>(index)),
                 "default bindings must reach the backend as Windows plus left, middle, and right");
     }
@@ -534,7 +534,7 @@ void managerLoadsLiveSettingsAndCoalescesOnlyMovement() {
             "screen recording combination must persist");
     require(input->configuration.bindings.size() == 2 &&
                 input->configuration.bindings.last().action == Action::ScreenRecording &&
-                input->configuration.bindings.last().modifiers == GlobalMouseModifier::Alt &&
+                snowFlagsEqual(input->configuration.bindings.last().modifiers, GlobalMouseModifier::Alt) &&
                 input->configuration.bindings.last().button == Qt::LeftButton,
             "screen recording settings must reach the native backend immediately");
     manager.setCaptureAvailable(false);

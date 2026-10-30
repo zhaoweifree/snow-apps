@@ -90,7 +90,7 @@ class RecordingToolbarEdgeControl final : public QAbstractButton {
         return QAbstractButton::event(event);
     }
 
-    bool nativeEvent(const QByteArray& type, void* message, qintptr* result) override {
+    bool nativeEvent(const QByteArray& type, void* message, snowNativeEventResult* result) override {
         adqt::widgets::detail::constrainTopLevelToolStackingToOwner(this, message);
         return QAbstractButton::nativeEvent(type, message, result);
     }
@@ -547,7 +547,7 @@ class ScreenRecordingToolbarWindow::AutoHide final : public QObject {
             case QEvent::Hide:
             case QEvent::Move:
             case QEvent::Resize:
-            case QEvent::DevicePixelRatioChange:
+            case snowDevicePixelRatioChange:
                 queueReconcile();
                 break;
             default:

@@ -4,11 +4,17 @@
 #include <QEvent>
 #include <QGuiApplication>
 #include <QPointer>
-#include <QRhiWidget>
 #include <QWindow>
-#include <qpa/qplatformbackingstore.h>
+// QRhiWidget is Qt 6.4 API. Qt 5 keeps RHI in private headers as a graphics
+// abstraction with no widget, and nothing in this file needs RHI on that route
+// (see the Qt5 branch at the bottom of the file).
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#  include <QRhiWidget>
+#  include <qpa/qplatformbackingstore.h>
+#endif
 
 namespace snow_shot::platform::windows::detail {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 namespace {
 // The opted-in windows paint into Qt's raster backing image. QRhi only presents
 // that image through D3D11. Windows no longer derives input coverage from alpha
@@ -103,6 +109,7 @@ class CaptureExclusionComposition final : public QRhiWidget {
     bool m_dispatching = false;
 };
 } // namespace
+#endif // QT_VERSION >= 6.0
 
 QRegion captureExclusionAlphaRegion(const QImage& image) {
     QRegion region;
@@ -126,13 +133,31 @@ QRegion captureExclusionAlphaRegion(const QImage& image) {
     return region;
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 bool usesCaptureExclusionComposition(const QWidget* window) {
     return window &&
            window->findChild<QRhiWidget*>(QStringLiteral("snowCaptureExclusionComposition"),
                                           Qt::FindDirectChildrenOnly);
 }
+#else
+// Degraded on Qt 5, and deliberately so: the composition widget exists only to
+// move the window onto Qt 6's D3D11 presenter, because that presenter stopped
+// deriving input coverage from the raster image's alpha. The Qt 5 raster route
+// still derives it the old way, so the ERROR_NOT_ENOUGH_MEMORY fallback this
+// feature unlocks is not needed there. Reporting "unavailable" keeps the caller
+// on the plain setAffinity path instead of pretending the window was covered;
+// the native region is simply not applied on Qt 5.
+bool usesCaptureExclusionComposition(const QWidget* window) {
+    Q_UNUSED(window);
+    return false;
+}
+#endif
 
 bool applyCaptureExclusionCompositionFallback(QWidget* window) {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    Q_UNUSED(window);
+    return false;
+#else
     if (!window || !window->isWindow() || !window->testAttribute(Qt::WA_TranslucentBackground) ||
         !window->property(captureExclusionCompositionFallbackProperty).toBool() ||
         QGuiApplication::platformName() != QStringLiteral("windows") ||
@@ -146,5 +171,6 @@ bool applyCaptureExclusionCompositionFallback(QWidget* window) {
     window->winId();
     new CaptureExclusionComposition(window);
     return true;
+#endif // QT_VERSION >= 6.0
 }
 } // namespace snow_shot::platform::windows::detail

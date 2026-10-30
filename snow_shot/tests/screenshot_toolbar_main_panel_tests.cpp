@@ -641,12 +641,12 @@ void cachedToolbarIconsFollowThemeColors() {
     recordingToolbar.setRecordingState(ScreenshotToolPalette::RecordingState::Recording);
 
     const auto lightScheme = themeManager.themeColorScheme();
-    require(imageContainsColor(selectionOpacity->pixmap().toImage(),
+    require(imageContainsColor(snowLabelPixmap(selectionOpacity).toImage(),
                                lightScheme.map.colorTextQuaternary),
             "selection opacity icon should use the light disabled text color");
-    require(imageContainsColor(watermarkOpacity->pixmap().toImage(), lightScheme.map.colorText),
+    require(imageContainsColor(snowLabelPixmap(watermarkOpacity).toImage(), lightScheme.map.colorText),
             "watermark opacity icon should use the light text color");
-    require(imageContainsColor(dragHandle->pixmap().toImage(), lightScheme.map.colorTextQuaternary),
+    require(imageContainsColor(snowLabelPixmap(dragHandle).toImage(), lightScheme.map.colorTextQuaternary),
             "drag handle should use the light weak text color");
     require(buttonIconContainsColor(copyButton, lightScheme.map.colorPrimary),
             "copy icon should use the light primary color");
@@ -665,10 +665,10 @@ void cachedToolbarIconsFollowThemeColors() {
     flushEvents();
     const auto darkScheme = themeManager.themeColorScheme();
     require(
-        imageContainsColor(selectionOpacity->pixmap().toImage(),
+        imageContainsColor(snowLabelPixmap(selectionOpacity).toImage(),
                            darkScheme.map.colorTextQuaternary) &&
-            imageContainsColor(watermarkOpacity->pixmap().toImage(), darkScheme.map.colorText) &&
-            imageContainsColor(dragHandle->pixmap().toImage(),
+            imageContainsColor(snowLabelPixmap(watermarkOpacity).toImage(), darkScheme.map.colorText) &&
+            imageContainsColor(snowLabelPixmap(dragHandle).toImage(),
                                darkScheme.map.colorTextQuaternary) &&
             buttonIconContainsColor(copyButton, darkScheme.map.colorPrimary) &&
             buttonIconContainsColor(recordStartButton, darkScheme.map.colorPrimary) &&
@@ -1851,14 +1851,14 @@ void printToolbarRoutingAndLayoutMigration() {
         require(layout::normalizedLayout(old, kind).positions[0] == QStringList{print},
                 "explicitly positioned Print must remain in its position");
         verifyStorage(old);
-        old.positions = {{save}};
-        old.hidden = {print};
+        old.positions = QStringList{{save}};
+        old.hidden = QStringList{print};
         const auto hiddenPrint = layout::normalizedLayout(old, kind);
         require(hiddenPrint.hidden.contains(print) && !hiddenPrint.positions[0].contains(print),
                 "explicitly hidden Print must remain hidden");
         verifyStorage(old);
         old.positions.clear();
-        old.hidden = {save};
+        old.hidden = QStringList{save};
         require(layout::normalizedLayout(old, kind).hidden.contains(print),
                 "migrated Print must inherit Save as File's hidden state");
         verifyStorage(old);

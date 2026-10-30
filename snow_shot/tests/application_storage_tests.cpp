@@ -1458,7 +1458,7 @@ void screenshotUiAdaptersRoundTripTypedValues() {
         {QStringLiteral("rectangle-highlight")},
         {QStringLiteral("shape")},
     };
-    layout.hidden = {QStringLiteral("shape"), QStringLiteral("arrow"), QStringLiteral("free-draw"),
+    layout.hidden = QStringList{QStringLiteral("shape"), QStringLiteral("arrow"), QStringLiteral("free-draw"),
                      QStringLiteral("pen-highlight"), QStringLiteral("arrow")};
     const storage::ScreenshotToolbarSettings toolbar;
     const QVector<QStringList> expectedPositions{
@@ -1539,7 +1539,7 @@ void screenshotUiAdaptersRoundTripTypedValues() {
     auto malformedPinned = pinnedLayout;
     malformedPinned.positions.prepend({QStringLiteral("record-screen"), QStringLiteral("unknown")});
     malformedPinned.positions.last().append(QStringLiteral("table-recognition"));
-    malformedPinned.hidden = {QStringLiteral("text-recognition"), QStringLiteral("unknown")};
+    malformedPinned.hidden = QStringList{QStringLiteral("text-recognition"), QStringLiteral("unknown")};
     require(
         toolbar.setLayout(pinnedKind, malformedPinned) &&
             toolbar.layout(pinnedKind) == upgradedPinned,

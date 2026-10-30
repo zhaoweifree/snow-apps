@@ -116,7 +116,7 @@ void scanCategorizesAppOwnedLocations() {
     UsageRecorder recorder;
     {
         auto options = trackerOptions(dirs, recorder.callbacks());
-        options.diagnosticsDirectories = {logs, logs, fallback, fallback,
+        options.diagnosticsDirectories = QStringList{logs, logs, fallback, fallback,
                                           QDir(fallback).filePath(QStringLiteral("crashes"))};
         storage::StorageUsageTracker tracker(options);
         tracker.requestRefresh();

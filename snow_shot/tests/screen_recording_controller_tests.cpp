@@ -507,9 +507,9 @@ void recordingDeleteOnCloseTests(const QString& directory) {
     };
     const auto finishRender = [&](ScreenRecordingController& controller) {
         wait([&] {
-            return controller.automationState()
+            return snowJsonInteger(controller.automationState()
                        .value(QStringLiteral("render_duration_ms"))
-                       .toInteger() == 2300;
+                       ) == 2300;
         });
         renderState = SNOW_RECORDING_RENDER_STATE_SUCCEEDED;
     };
@@ -815,9 +815,9 @@ void recordingAutoExitAfterSuccessfulFinalization(bool notifications = false) {
                     joinHeldExport(release, previousExports);
                     if (deferred && succeeds) {
                         wait([&] {
-                            return controller.automationState()
+                            return snowJsonInteger(controller.automationState()
                                        .value(QStringLiteral("render_duration_ms"))
-                                       .toInteger() == 2300;
+                                       ) == 2300;
                         });
                         require(controller.isOpen(), "auto-exit must wait for deferred rendering");
                         require(notificationPaths.isEmpty(),
@@ -3817,9 +3817,9 @@ void recordingPostProcessingLifecycle() {
         if (deferred) {
             wait(
                 [&] {
-                    return controller && controller->automationState()
+                    return controller && snowJsonInteger(controller->automationState()
                                                  .value(QStringLiteral("render_duration_ms"))
-                                                 .toInteger() == 2300;
+                                                 ) == 2300;
                 },
                 "deferred completion must adopt its render task before the terminal snapshot");
             renderState = SNOW_RECORDING_RENDER_STATE_SUCCEEDED;
@@ -5031,7 +5031,7 @@ void recordingTrimmingTests(const QString& directory, bool uiOnly = false) {
                     first->clearFocus();
                     end->clearFocus();
                     saveState(QStringLiteral("rest"));
-                    SnowEnterEvent enter{QPointF(), QPointF(), QPointF()};
+                    SnowEnterEventInstance enter{QPointF(), QPointF(), QPointF()};
                     QApplication::sendEvent(end, &enter);
                     saveState(QStringLiteral("hover"));
                     QEvent leave(QEvent::Leave);

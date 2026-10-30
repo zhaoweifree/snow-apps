@@ -203,7 +203,7 @@ void compoundSelectionsCanSwitchBetweenPreviousAndSavedPresets() {
                         !dropdown->lineEdit()->text().isEmpty(),
                     "a disabled current ratio must retain its value and indicator");
             const QPointF position(dropdown->rect().center());
-            SnowEnterEvent hover(position, position, dropdown->mapToGlobal(position.toPoint()));
+            SnowEnterEventInstance hover(position, position, dropdown->mapToGlobal(position.toPoint()));
             QApplication::sendEvent(dropdown, &hover);
             fixture.flush();
             require(dropdown->popupVisible(), "compound selection presets must open on hover");

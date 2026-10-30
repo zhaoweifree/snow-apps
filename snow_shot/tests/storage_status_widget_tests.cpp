@@ -643,7 +643,7 @@ void drawingToolbarSeparatorCanMoveAndHideByDrop() {
     const auto drop = [](QWidget* target, const QString& itemId, const QPoint& point) {
         QMimeData mime;
         mime.setData("application/x-snow-shot-toolbar-item", itemId.toUtf8());
-        QDragEnterEvent enter(QPointF(point), Qt::MoveAction, &mime, Qt::LeftButton,
+        QDragEnterEvent enter(snowWidgetPosition(QPointF(point)), Qt::MoveAction, &mime, Qt::LeftButton,
                               Qt::NoModifier);
         QCoreApplication::sendEvent(target, &enter);
         QDropEvent event(QPointF(point), Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier);
@@ -756,7 +756,7 @@ void screenshotToolbarResultToolsCanMoveAndHideByDrop() {
     const auto drop = [](QWidget* target, const QString& itemId, const QPoint& point) {
         QMimeData mime;
         mime.setData("application/x-snow-shot-toolbar-item", itemId.toUtf8());
-        QDragEnterEvent enter(QPointF(point), Qt::MoveAction, &mime, Qt::LeftButton,
+        QDragEnterEvent enter(snowWidgetPosition(QPointF(point)), Qt::MoveAction, &mime, Qt::LeftButton,
                               Qt::NoModifier);
         QCoreApplication::sendEvent(target, &enter);
         QDropEvent event(QPointF(point), Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier);
@@ -849,7 +849,7 @@ void recordingToolbarToolsCanMoveStackHideAndReset() {
     const auto drop = [](QWidget* target, const QString& itemId, const QPoint& point) {
         QMimeData mime;
         mime.setData("application/x-snow-shot-toolbar-item", itemId.toUtf8());
-        QDragEnterEvent enter(QPointF(point), Qt::MoveAction, &mime, Qt::LeftButton,
+        QDragEnterEvent enter(snowWidgetPosition(QPointF(point)), Qt::MoveAction, &mime, Qt::LeftButton,
                               Qt::NoModifier);
         QCoreApplication::sendEvent(target, &enter);
         QDropEvent event(QPointF(point), Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier);
@@ -992,7 +992,7 @@ void pinnedToolbarExportToolsCanMoveAndHideByDrop() {
     const auto drop = [](QWidget* target, const QString& itemId, const QPoint& point) {
         QMimeData mime;
         mime.setData("application/x-snow-shot-toolbar-item", itemId.toUtf8());
-        QDragEnterEvent enter(QPointF(point), Qt::MoveAction, &mime, Qt::LeftButton,
+        QDragEnterEvent enter(snowWidgetPosition(QPointF(point)), Qt::MoveAction, &mime, Qt::LeftButton,
                               Qt::NoModifier);
         QCoreApplication::sendEvent(target, &enter);
         QDropEvent event(QPointF(point), Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier);
@@ -1134,7 +1134,7 @@ void copyPublishesStableFileAndPreservesClipboardOnFailure() {
     QTemporaryDir directory;
     auto& diagnostics = snow_shot::diagnostics::DiagnosticsService::instance();
     snow_shot::diagnostics::DiagnosticsOptions options;
-    options.directories = {directory.path()};
+    options.directories = QStringList{directory.path()};
     options.enableCrashCapture = false;
     options.installMessageHandler = false;
     require(diagnostics.initialize(options), "clipboard diagnostics initialize");
@@ -1170,7 +1170,7 @@ void copyPublishesStableFileAndPreservesClipboardOnFailure() {
     snapshot.close();
     diagnostics.shutdown();
     QTemporaryDir failedDirectory;
-    options.directories = {failedDirectory.path()};
+    options.directories = QStringList{failedDirectory.path()};
     require(diagnostics.initialize(options), "failed-export logger starts");
     QFile blocker(QDir(failedDirectory.path()).filePath(QStringLiteral("exports")));
     require(blocker.open(QIODevice::WriteOnly), "create export failure fixture");

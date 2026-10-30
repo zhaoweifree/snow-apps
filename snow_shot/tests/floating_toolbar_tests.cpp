@@ -228,7 +228,7 @@ void verifyOpacity() {
         QApplication::sendEvent(surface, &event);
     };
     const auto enter = [](QWidget* surface) {
-        SnowEnterEvent event(QPointF(1, 1), QPointF(1, 1), surface->mapToGlobal(QPoint(1, 1)));
+        SnowEnterEventInstance event(QPointF(1, 1), QPointF(1, 1), surface->mapToGlobal(QPoint(1, 1)));
         QApplication::sendEvent(surface, &event);
     };
     leave(toolbar);
@@ -389,7 +389,7 @@ void verifyContentDrops(const QString& visualDirectory = {}) {
         saveFrame(QStringLiteral("idle"), idle);
         const auto dragEnter = [&](const QMimeData& mime) {
             const int before = delivered;
-            QDragEnterEvent enter(QPointF(10, 10), Qt::CopyAction | Qt::MoveAction, &mime,
+            QDragEnterEvent enter(snowWidgetPosition(QPointF(10, 10)), Qt::CopyAction | Qt::MoveAction, &mime,
                                   Qt::LeftButton, Qt::ShiftModifier);
             QApplication::sendEvent(target, &enter);
             require(enter.isAccepted() && enter.dropAction() == Qt::CopyAction,
@@ -399,7 +399,7 @@ void verifyContentDrops(const QString& visualDirectory = {}) {
                     "acceptable content highlights the icon before release without dispatching");
             require(qAbs(target->windowOpacity() - 1.0) < 0.005,
                     "dragging acceptable content makes the drop surface fully opaque");
-            QDragMoveEvent move(QPointF(12, 12), Qt::CopyAction | Qt::MoveAction, &mime,
+            QDragMoveEvent move(snowWidgetPosition(QPointF(12, 12)), Qt::CopyAction | Qt::MoveAction, &mime,
                                 Qt::LeftButton, Qt::ShiftModifier);
             QApplication::sendEvent(target, &move);
             require(move.isAccepted() && move.dropAction() == Qt::CopyAction &&
@@ -454,24 +454,24 @@ void verifyContentDrops(const QString& visualDirectory = {}) {
         image.setImageData(pixels);
         drop(image);
         require(captured.isValid() && capturedPaths.isEmpty(), "image drops confirm acceptance");
-        QDragEnterEvent move(QPointF(10, 10), Qt::MoveAction, &text, Qt::LeftButton,
+        QDragEnterEvent move(snowWidgetPosition(QPointF(10, 10)), Qt::MoveAction, &text, Qt::LeftButton,
                              Qt::NoModifier);
         QApplication::sendEvent(target, &move);
         require(!move.isAccepted(), "move-only drops are rejected");
         QMimeData unsupported;
         unsupported.setUrls({QUrl::fromLocalFile(QStringLiteral("/ignore.pdf"))});
-        QDragEnterEvent invalid(QPointF(10, 10), Qt::CopyAction, &unsupported, Qt::LeftButton,
+        QDragEnterEvent invalid(snowWidgetPosition(QPointF(10, 10)), Qt::CopyAction, &unsupported, Qt::LeftButton,
                                 Qt::NoModifier);
         QApplication::sendEvent(target, &invalid);
         require(!invalid.isAccepted(), "unsupported files are not treated as URL text");
         require(handle->grab().toImage() == idle, "rejected content does not highlight the icon");
         dragEnter(text);
-        QDragMoveEvent moveOnly(QPointF(12, 12), Qt::MoveAction, &text, Qt::LeftButton,
+        QDragMoveEvent moveOnly(snowWidgetPosition(QPointF(12, 12)), Qt::MoveAction, &text, Qt::LeftButton,
                                 Qt::NoModifier);
         QApplication::sendEvent(target, &moveOnly);
         require(!moveOnly.isAccepted() && handle->grab().toImage() == idle,
                 "losing the copy action during a drag clears the ready highlight");
-        QDragMoveEvent copyAgain(QPointF(12, 12), Qt::CopyAction, &text, Qt::LeftButton,
+        QDragMoveEvent copyAgain(snowWidgetPosition(QPointF(12, 12)), Qt::CopyAction, &text, Qt::LeftButton,
                                  Qt::NoModifier);
         QApplication::sendEvent(target, &copyAgain);
         require(copyAgain.isAccepted() && handle->grab().toImage() != idle,
@@ -720,7 +720,7 @@ class FloatingTranslator final : public QTranslator {
 void reveal(FloatingToolbarController& controller) {
     auto* icon = window("floatingToolbarIconWindow");
     require(icon && icon->isVisible(), "icon visible before hover");
-    SnowEnterEvent event(QPointF(20, 20), QPointF(20, 20), QPointF(icon->mapToGlobal(QPoint(20, 20))));
+    SnowEnterEventInstance event(QPointF(20, 20), QPointF(20, 20), QPointF(icon->mapToGlobal(QPoint(20, 20))));
     QApplication::sendEvent(icon, &event);
     timer(controller, "floatingToolbarRevealTimer");
 }
@@ -1188,7 +1188,7 @@ void verifyWindows(const QString& visualDirectory) {
                        QStringLiteral("text-recognition"),
             "default main recognition action is OCR");
     auto* popover = ocr->findChild<adqt::widgets::AdPopover*>();
-    require(popover && popover->triggers() == adqt::widgets::AdPopover::Trigger::Hover,
+    require(popover && snowFlagsEqual(popover->triggers(), adqt::widgets::AdPopover::Trigger::Hover),
             "OCR uses the drawing toolbar hover group implementation");
     require(toolbar->findChildren<adqt::widgets::AdButton*>().size() == 5,
             "four groups and overflow use one button each without special arrow buttons");
@@ -1262,7 +1262,7 @@ void verifyWindows(const QString& visualDirectory) {
             ++drops;
         });
     QApplication::clipboard()->setText(QStringLiteral("preserve clipboard"));
-    QDragEnterEvent enter(QPointF(20, 20), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QDragEnterEvent enter(snowWidgetPosition(QPointF(20, 20)), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(iconWindow, &enter);
     require(enter.isAccepted(), "image drag is accepted");
     QDropEvent drop(QPointF(20, 20), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
@@ -1280,7 +1280,7 @@ void verifyWindows(const QString& visualDirectory) {
                    QUrl::fromLocalFile(QStringLiteral("/two.jpg")),
                    QUrl::fromLocalFile(QStringLiteral("/ignore.pdf")),
                    QUrl(QStringLiteral("https://example.com/remote.png"))});
-    QDragEnterEvent filesEnter(QPointF(20, 20), Qt::CopyAction, &files, Qt::LeftButton,
+    QDragEnterEvent filesEnter(snowWidgetPosition(QPointF(20, 20)), Qt::CopyAction, &files, Qt::LeftButton,
                                Qt::NoModifier);
     QApplication::sendEvent(iconWindow, &filesEnter);
     QDropEvent filesDrop(QPointF(20, 20), Qt::CopyAction, &files, Qt::LeftButton, Qt::NoModifier);

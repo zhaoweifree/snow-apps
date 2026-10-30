@@ -265,9 +265,12 @@ exportCollagePdf(const QVector<CollageItem>& items, const CollagePdfSettings& se
         setError(result, "No output destination was selected.");
         return result;
     }
+    // Qt5 containers count in int, Qt6 in qsizetype; name the count once so
+    // std::min is never asked to deduce across the two.
+    const qsizetype itemCount = static_cast<qsizetype>(items.size());
     const auto reportProgress = [&](qsizetype page, qreal fraction) {
         if (progress)
-            progress({std::min(page, items.size()), items.size(), std::min(page + 1, items.size()),
+            progress({std::min(page, itemCount), itemCount, std::min(page + 1, itemCount),
                       std::clamp(fraction, qreal{0}, qreal{1})});
     };
     qsizetype activePage = 0;
@@ -413,7 +416,10 @@ exportCollagePdf(const QVector<CollageItem>& items, const CollagePdfSettings& se
                 }
                 file.close();
                 const QString base = QStringLiteral("%1_%2")
-                                         .arg(index + 1, digits, 10, u'0')
+                                         // Qt5's arg() overload set makes char16_t ambiguous (it converts to
+                                         // every integer overload's type as well); name the QChar.
+                                         .arg(static_cast<qlonglong>(index) + 1, digits, 10,
+                                              QChar(u'0'))
                                          .arg(safeImageName(items[index].label));
                 const QString path =
                     publishUnique(file.fileName(), directory, base, cancelled, &error);

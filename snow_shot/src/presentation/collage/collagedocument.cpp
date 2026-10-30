@@ -105,8 +105,8 @@ QStringList normalizeCustomGrid(CollageSettings& settings, qsizetype imageCount)
         settings.rows = static_cast<int>(std::clamp<qint64>(
             columnsForImages(imageCount, settings.columns), 1, std::numeric_limits<int>::max()));
         settings.customGridInitialized = true;
-        fields = {QStringLiteral("rows"), QStringLiteral("columns"),
-                  QStringLiteral("custom_grid_initialized")};
+        fields = QStringList{QStringLiteral("rows"), QStringLiteral("columns"),
+                             QStringLiteral("custom_grid_initialized")};
     }
     const auto columns = std::min<qint64>(columnsForImages(imageCount, settings.rows),
                                           std::numeric_limits<int>::max());

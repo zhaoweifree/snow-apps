@@ -156,7 +156,7 @@ void sendEnter(QWidget* widget) {
     require(widget != nullptr, "enter-event target should exist");
     const QPointF localPosition(widget->rect().center());
     const QPointF globalPosition(widget->mapToGlobal(localPosition.toPoint()));
-    SnowEnterEvent event(localPosition, localPosition, globalPosition);
+    SnowEnterEventInstance event(localPosition, localPosition, globalPosition);
     QCoreApplication::sendEvent(widget, &event);
 }
 

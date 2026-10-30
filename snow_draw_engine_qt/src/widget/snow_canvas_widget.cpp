@@ -3635,10 +3635,7 @@ bool SnowCanvasWidget::Impl::suppressTabletMouseEvent(QMouseEvent* event) {
         suppressSynthesizedTabletMouse = false;
         return false;
     }
-    const auto* device = event->pointingDevice();
-    const bool touchFallback =
-        device != nullptr && (device->type() == QInputDevice::DeviceType::TouchScreen ||
-                              device->type() == QInputDevice::DeviceType::TouchPad);
+    const bool touchFallback = snowMouseEventFromTouch(event);
     constexpr quint64 kTabletMouseDuplicateWindowMs = 64;
     const bool expired =
         event->timestamp() != 0 && lastTabletTimestamp != 0
@@ -3681,9 +3678,9 @@ bool SnowCanvasWidget::Impl::handleTablet(QTabletEvent* event) {
                            : event->type() == QEvent::TabletPress   ? QEvent::MouseButtonPress
                            : event->type() == QEvent::TabletRelease ? QEvent::MouseButtonRelease
                                                                     : QEvent::MouseMove;
-    QMouseEvent mouse(mouseType, event->position(), event->globalPosition(),
-                      barrelButtonChange ? Qt::NoButton : event->button(), event->buttons(),
-                      event->modifiers(), event->pointingDevice());
+    QMouseEvent mouse = snowTabletMouseEvent(mouseType, *event,
+                                             barrelButtonChange ? Qt::NoButton : event->button(),
+                                             event->buttons(), event->modifiers());
     mouse.setTimestamp(event->timestamp());
     SnowInputEvent input = snow_canvas_input::makePointerInput(*event, pointerType);
     if (barrelButtonChange) {

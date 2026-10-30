@@ -681,12 +681,12 @@ void ImageSplitPreviewCanvas::resizeEvent(QResizeEvent*) {
 void ImageSplitPreviewCanvas::mousePressEvent(QMouseEvent* event) {
     auto& d = *m_impl;
     const auto before = d.overlayState();
-    d.hoverPosition = event->position();
+    d.hoverPosition = snowPos(event);
     setFocus(Qt::MouseFocusReason);
     if (event->button() == Qt::MiddleButton) {
         d.panning = true;
         d.automaticFit = false;
-        d.last = event->position();
+        d.last = snowPos(event);
         setCursor(Qt::ClosedHandCursor);
         d.updateOverlay(before);
         event->accept();
@@ -696,7 +696,7 @@ void ImageSplitPreviewCanvas::mousePressEvent(QMouseEvent* event) {
         d.updateOverlay(before);
         return;
     }
-    const auto point = event->position();
+    const auto point = snowPos(event);
     const auto create = [&d](bool vertical, int coordinate) {
         static_cast<void>(d.document->createLine(vertical, coordinate));
         const auto layout = d.document->layout();
@@ -726,16 +726,16 @@ void ImageSplitPreviewCanvas::mousePressEvent(QMouseEvent* event) {
 void ImageSplitPreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
     auto& d = *m_impl;
     const auto before = d.overlayState();
-    d.hoverPosition = event->position();
+    d.hoverPosition = snowPos(event);
     if (d.panning) {
-        d.offset += event->position() - d.last;
-        d.last = event->position();
+        d.offset += snowPos(event) - d.last;
+        d.last = snowPos(event);
         update();
     } else if (d.dragging) {
-        const auto point = viewportToImage(event->position());
+        const auto point = viewportToImage(snowPos(event));
         d.document->moveDraggedLine(roundedCoordinate(d.selectedVertical ? point.x() : point.y()));
     } else if (d.editing) {
-        const auto [vertical, index] = d.hit(event->position());
+        const auto [vertical, index] = d.hit(snowPos(event));
         d.hoveredVertical = vertical;
         d.hoveredIndex = index;
         if (index >= 0)
@@ -750,7 +750,7 @@ void ImageSplitPreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
 void ImageSplitPreviewCanvas::mouseReleaseEvent(QMouseEvent* event) {
     auto& d = *m_impl;
     const auto before = d.overlayState();
-    d.hoverPosition = event->position();
+    d.hoverPosition = snowPos(event);
     if (event->button() == Qt::MiddleButton)
         d.panning = false;
     if (event->button() == Qt::LeftButton && d.dragging) {
@@ -763,14 +763,14 @@ void ImageSplitPreviewCanvas::mouseReleaseEvent(QMouseEvent* event) {
 void ImageSplitPreviewCanvas::wheelEvent(QWheelEvent* event) {
     auto& d = *m_impl;
     const auto before = d.overlayState();
-    d.hoverPosition = event->position();
+    d.hoverPosition = snowPos(event);
     if (d.document->image().isNull())
         return;
     const double steps = usesPreciseWheelDelta(*event) ? event->pixelDelta().y() / 100.0
                                                        : event->angleDelta().y() / 120.0;
     if (steps != 0) {
         const qreal next = std::clamp(d.zoom * std::pow(1.15, steps), 0.000000001, 16.0);
-        d.offset = event->position() - (event->position() - d.offset) * (next / d.zoom);
+        d.offset = snowPos(event) - (snowPos(event) - d.offset) * (next / d.zoom);
         d.zoom = next;
         d.automaticFit = false;
         update();
@@ -1294,7 +1294,7 @@ ImageSplitEditorWidget::ImageSplitEditorWidget(ImageSplitDocument* document, QWi
         for (const auto& sequence :
              QKeySequence::keyBindings(undo ? QKeySequence::Undo : QKeySequence::Redo)) {
             if (sequence.count() == 1)
-                binding.keyCombinations.append(sequence[0]);
+                binding.keyCombinations.append(snowKeySequenceAt(sequence, 0));
         }
         binding.priority = WindowShortcutManager::StandardPriority::WindowCommand;
         binding.canActivate = [this, undo](const auto& context) {

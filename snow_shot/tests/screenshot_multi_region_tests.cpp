@@ -1085,7 +1085,7 @@ void shapeCodecAndSamplingBoundaries() {
         require(distance <= 0.250001, "Freehand simplification obeys subpixel error bound");
     }
     QPainterPath crossing;
-    crossing.addPolygon(QPolygonF{{0, 0}, {100, 100}, {0, 100}, {100, 0}});
+    crossing.addPolygon(snowPolygonF({{0, 0}, {100, 100}, {0, 100}, {100, 0}}));
     crossing.closeSubpath();
     const auto region =
         ScreenshotRegionGeometry::fromPath(crossing, ScreenshotRegionType::Polyline);

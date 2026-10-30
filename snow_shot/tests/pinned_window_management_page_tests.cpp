@@ -1096,7 +1096,7 @@ int main(int argc, char** argv) {
                 "saved image has a preview viewer");
         const QColor idleCorner = imagePreview->grab().toImage().pixelColor(20, 20);
         const QPointF hoverPoint = imagePreview->rect().center();
-        SnowEnterEvent hover(hoverPoint, hoverPoint, imagePreview->mapToGlobal(hoverPoint.toPoint()));
+        SnowEnterEventInstance hover(hoverPoint, hoverPoint, imagePreview->mapToGlobal(hoverPoint.toPoint()));
         QApplication::sendEvent(imagePreview, &hover);
         require(imagePreview->grab().toImage().pixelColor(20, 20) != idleCorner,
                 "hovering a pinned image draws the shared Preview overlay");

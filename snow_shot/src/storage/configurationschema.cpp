@@ -2673,7 +2673,10 @@ ConfigurationNormalization ConfigurationSchema::normalize(const QString& key,
                 return {};
             normalized = shortcuts::shortcutBindingsToJson({shortcuts::ShortcutBinding{accessKey}});
         }
-        return {normalized, true, normalized != value};
+        // Qt6 compares a QJsonArray against a QJsonValue; Qt5 has no such overload
+        // and the rewrite candidate C7692 is an error at /W4. The value was already
+        // checked to be an array above, so compare like for like.
+        return {normalized, true, normalized != value.toArray()};
     }
     if (key.startsWith(QStringLiteral("collage/pdf_custom_")) ||
         key.startsWith(QStringLiteral("collage/pdf_margin_"))) {

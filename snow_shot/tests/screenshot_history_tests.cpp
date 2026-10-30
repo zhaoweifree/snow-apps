@@ -6242,7 +6242,7 @@ void complexRegionsMoveFromTheirBoundingRectangle() {
     const QRegion withHole = QRegion(QRect(20, 20, 160, 160)).subtracted(QRect(70, 70, 60, 60));
     const QRegion disconnected = QRegion(QRect(20, 20, 40, 40)).united(QRect(140, 140, 40, 40));
     QPainterPath triangle;
-    triangle.addPolygon(QPolygonF{{20, 20}, {180, 20}, {100, 180}});
+    triangle.addPolygon(snowPolygonF({{20, 20}, {180, 20}, {100, 180}}));
     triangle.closeSubpath();
 
     const auto verifyMove = [&](const ScreenshotRegionGeometry& region, const QPointF& press) {
@@ -6424,7 +6424,7 @@ void customRegionsMoveDuringManualSelection() {
         {capture, interaction, selection, intelligent, geometry, displays, actions});
 
     QPainterPath triangle;
-    triangle.addPolygon(QPolygonF{{20, 20}, {180, 20}, {100, 180}});
+    triangle.addPolygon(snowPolygonF({{20, 20}, {180, 20}, {100, 180}}));
     triangle.closeSubpath();
     for (const auto type : {ScreenshotRegionType::Polyline, ScreenshotRegionType::Curve,
                             ScreenshotRegionType::Freehand}) {

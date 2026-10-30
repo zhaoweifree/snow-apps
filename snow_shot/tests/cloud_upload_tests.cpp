@@ -125,7 +125,7 @@ void settingsContracts() {
                     stack.popoverItemIds.last() == QStringLiteral("upload-to-cloud"),
                 "retain Save primary and append upload option");
         legacy.positions.clear();
-        legacy.hidden = {QStringLiteral("save-as-file")};
+        legacy.hidden = QStringList{QStringLiteral("save-as-file")};
         require(presentation::toolbar_layout::normalizedLayout(legacy, kind)
                     .hidden.contains(QStringLiteral("upload-to-cloud")),
                 "inherit hidden save group");

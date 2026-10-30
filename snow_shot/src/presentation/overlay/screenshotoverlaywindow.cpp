@@ -1120,18 +1120,36 @@ bool ScreenshotOverlayWindow::forwardCanvasInputEvent(QEvent* event) {
         return false;
     }
 
-    const auto* pointer = static_cast<QSinglePointEvent*>(event);
-    const QPointF position = m_canvas->mapFrom(this, pointer->position());
+    // Qt 6 reads this through QSinglePointEvent, the base class that gave every
+    // pointer event a position(); Qt 5 has no such base, so pick the concrete
+    // type here and let the shim answer.
+    QPointF pointerPosition;
+    Qt::MouseButtons pointerButtons = Qt::NoButton;
+    if (event->type() == QEvent::Wheel) {
+        const auto* wheel = static_cast<QWheelEvent*>(event);
+        pointerPosition = snowPointerPos(wheel);
+        pointerButtons = wheel->buttons();
+    } else if (event->type() == QEvent::TabletPress || event->type() == QEvent::TabletMove ||
+               event->type() == QEvent::TabletRelease) {
+        const auto* tablet = static_cast<QTabletEvent*>(event);
+        pointerPosition = snowTabletPos(*tablet);
+        pointerButtons = tablet->buttons();
+    } else {
+        const auto* mouse = static_cast<QMouseEvent*>(event);
+        pointerPosition = snowPointerPos(mouse);
+        pointerButtons = mouse->buttons();
+    }
+    const QPointF position = m_canvas->mapFrom(this, pointerPosition.toPoint());
     const bool continuingGesture =
         event->type() == QEvent::MouseButtonRelease || event->type() == QEvent::TabletRelease ||
         ((event->type() == QEvent::MouseMove || event->type() == QEvent::TabletMove) &&
-         pointer->buttons() != Qt::NoButton);
+         pointerButtons != Qt::NoButton);
     if (!continuingGesture) {
         if (position.x() < 0 || position.y() < 0 || position.x() >= m_canvas->width() ||
             position.y() >= m_canvas->height()) {
             return false;
         }
-        if (const QWidget* child = childAt(pointer->position());
+        if (const QWidget* child = childAt(pointerPosition.toPoint());
             child != nullptr && child != m_canvas) {
             return false;
         }
@@ -1141,29 +1159,61 @@ bool ScreenshotOverlayWindow::forwardCanvasInputEvent(QEvent* event) {
     // and height-1. Those valid display coordinates land on this window instead
     // of its canvas. Route them through the same canvas path, including drawing
     // tools and the remainder of Qt's implicit grab, without changing geometry.
-    std::unique_ptr<QSinglePointEvent> mapped;
+    // QSinglePointEvent is Qt 6 only, and the Qt 5 constructors of these events
+    // take no pointing device at all: the tablet one takes the deprecated
+    // device/pointerType integers instead. Both branches build the same event.
+    std::unique_ptr<QEvent> mapped;
     if (event->type() == QEvent::Wheel) {
         const auto* wheel = static_cast<QWheelEvent*>(event);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         mapped = std::make_unique<QWheelEvent>(
             position, wheel->globalPosition(), wheel->pixelDelta(), wheel->angleDelta(),
             wheel->buttons(), wheel->modifiers(), wheel->phase(), wheel->inverted(),
             wheel->source(), wheel->pointingDevice());
+#else
+        mapped = std::make_unique<QWheelEvent>(
+            position, wheel->globalPosF(), wheel->pixelDelta(), wheel->angleDelta(),
+            wheel->buttons(), wheel->modifiers(), wheel->phase(), wheel->inverted(),
+            wheel->source());
+#endif
     } else if (event->type() == QEvent::TabletPress || event->type() == QEvent::TabletMove ||
                event->type() == QEvent::TabletRelease) {
         const auto* tablet = static_cast<QTabletEvent*>(event);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         mapped = std::make_unique<QTabletEvent>(
             tablet->type(), tablet->pointingDevice(), position, tablet->globalPosition(),
             tablet->pressure(), tablet->xTilt(), tablet->yTilt(), tablet->tangentialPressure(),
             tablet->rotation(), tablet->z(), tablet->modifiers(), tablet->button(),
             tablet->buttons());
+#else
+        mapped = std::make_unique<QTabletEvent>(
+            tablet->type(), position, tablet->globalPosF(), int(tablet->deviceType()),
+            int(tablet->pointerType()), tablet->pressure(), tablet->xTilt(), tablet->yTilt(),
+            tablet->tangentialPressure(), tablet->rotation(), tablet->z(), tablet->modifiers(),
+            tablet->uniqueId(), tablet->button(), tablet->buttons());
+#endif
     } else {
         const auto* mouse = static_cast<QMouseEvent*>(event);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         mapped = std::make_unique<QMouseEvent>(mouse->type(), position, mouse->scenePosition(),
                                                mouse->globalPosition(), mouse->button(),
                                                mouse->buttons(), mouse->modifiers(),
                                                mouse->source(), mouse->pointingDevice());
+#else
+        // Qt 5 has no scenePos() on QMouseEvent; its widest non-deprecated
+        // constructor takes (local, window, screen) positions instead.
+        mapped = std::make_unique<QMouseEvent>(mouse->type(), position, mouse->windowPos(),
+                                               mouse->globalPos(), mouse->button(),
+                                               mouse->buttons(), mouse->modifiers(),
+                                               mouse->source());
+#endif
     }
-    mapped->setTimestamp(pointer->timestamp());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // QEvent::setTimestamp arrived in Qt 6; on Qt 5 the remapped event keeps the
+    // timestamp its constructor path stamped, which is why the forwarding gate
+    // reads the original event's timestamp rather than this copy's.
+    mapped->setTimestamp(event->timestamp());
+#endif
     // sendEvent marks the remapped event synthetic. Preserve its actual origin
     // for the startup gate, scoped to this exact event rather than nested input.
     const QScopedValueRollback forwardedEvent(m_forwardedCanvasInputEvent,
@@ -1197,8 +1247,8 @@ bool ScreenshotOverlayWindow::handleCanvasEvent(QEvent* event) {
     if (tablet) {
         auto* tabletEvent = static_cast<QTabletEvent*>(event);
         if (event->type() == QEvent::TabletMove && m_screenshotRenderer) {
-            if (!m_eventSink.presentOverlayPointer(this, tabletEvent->position())) {
-                m_screenshotRenderer->setGuideCursorPosition(tabletEvent->position());
+            if (!m_eventSink.presentOverlayPointer(this, snowTabletPos(*tabletEvent))) {
+                m_screenshotRenderer->setGuideCursorPosition(snowTabletPos(*tabletEvent));
             }
         }
         const bool barrelButtonChange =
@@ -1209,10 +1259,9 @@ bool ScreenshotOverlayWindow::handleCanvasEvent(QEvent* event) {
                           : event->type() == QEvent::TabletPress   ? QEvent::MouseButtonPress
                           : event->type() == QEvent::TabletRelease ? QEvent::MouseButtonRelease
                                                                    : QEvent::MouseMove;
-        QMouseEvent pointer(type, tabletEvent->position(), tabletEvent->globalPosition(),
-                            barrelButtonChange ? Qt::NoButton : tabletEvent->button(),
-                            tabletEvent->buttons(), tabletEvent->modifiers(),
-                            tabletEvent->pointingDevice());
+        QMouseEvent pointer = snowTabletMouseEvent(
+            type, *tabletEvent, barrelButtonChange ? Qt::NoButton : tabletEvent->button(),
+            tabletEvent->buttons(), tabletEvent->modifiers());
         if (handleCanvasMouseEvent(&pointer)) {
             event->accept();
             return true;

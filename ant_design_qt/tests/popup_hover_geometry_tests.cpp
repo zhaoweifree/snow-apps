@@ -317,7 +317,7 @@ int main(int argc, char** argv) {
     const QPoint center = trigger->rect().center();
     const QPoint global = trigger->mapToGlobal(center);
     QCursor::setPos(global);
-    SnowEnterEvent enter(center, trigger->mapTo(&window, center), global);
+    SnowEnterEventInstance enter(center, trigger->mapTo(&window, center), global);
     QApplication::sendEvent(trigger, &enter);
     require(QTest::qWaitFor([&]() { return popup->isVisible(); }, 1000),
             "hover must open main and sub-tool popovers across a display scale boundary");
@@ -371,7 +371,7 @@ int main(int argc, char** argv) {
   const QPoint center = mainTrigger.rect().center();
   const QPoint global = mainTrigger.mapToGlobal(center);
   QCursor::setPos(global);
-  SnowEnterEvent enter(center, mainTrigger.mapTo(&window, center), global);
+  SnowEnterEventInstance enter(center, mainTrigger.mapTo(&window, center), global);
   QApplication::sendEvent(&mainTrigger, &enter);
   QTest::qWait(40);
   require(!mainPopup.isVisible(), "a locally clipped trigger must remain closed");

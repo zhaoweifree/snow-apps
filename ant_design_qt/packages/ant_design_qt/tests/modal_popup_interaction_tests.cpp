@@ -16,7 +16,7 @@ namespace {
 
 void enter(QWidget* target) {
   const QPoint local = target->rect().center();
-  SnowEnterEvent event(local, target->mapTo(target->window(), local), target->mapToGlobal(local));
+  SnowEnterEventInstance event(local, target->mapTo(target->window(), local), target->mapToGlobal(local));
   QApplication::sendEvent(target, &event);
 }
 

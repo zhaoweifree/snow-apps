@@ -162,7 +162,7 @@ void retainedPopoverButtonsForgetHover() {
   const QImage idle = first->grab().toImage();
   auto enter = [](AdButton* button) {
     const QPointF local = button->rect().center();
-    SnowEnterEvent event(local, local, button->mapToGlobal(local.toPoint()));
+    SnowEnterEventInstance event(local, local, button->mapToGlobal(local.toPoint()));
     QApplication::sendEvent(button, &event);
   };
   // Deliver Enter without Leave: hiding a popup during activation does not

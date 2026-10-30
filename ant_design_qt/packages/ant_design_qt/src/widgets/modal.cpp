@@ -858,7 +858,8 @@ class ModalIconButton final : public QToolButton {
               ? QIcon::Disabled
               : ((detail::widgetHovered(this) || isDown()) ? QIcon::Active : QIcon::Normal);
       const QSize logicalSize = iconSize().isValid() ? iconSize() : QSize(16, 16);
-      const QPixmap pixmap = currentIcon.pixmap(logicalSize, devicePixelRatioF(), mode, QIcon::Off);
+      const QPixmap pixmap = snowIconPixmap(currentIcon, logicalSize, devicePixelRatioF(), mode,
+                                          QIcon::Off);
       if (!pixmap.isNull()) {
         const QSize pixmapSize = snowDeviceIndependentSize(pixmap).toSize();
         const QPoint topLeft((width() - pixmapSize.width()) / 2,
@@ -1827,7 +1828,7 @@ bool AdModal::eventFilter(QObject* watched, QEvent* event) {
   }
 
   if (watched == overlay_ && (event->type() == QEvent::WindowStateChange ||
-                              event->type() == QEvent::DevicePixelRatioChange)) {
+                              event->type() == snowDevicePixelRatioChange)) {
     // Restore labels and icon density follow native actions and display changes,
     // while Qt retains the window's normal geometry across maximize/minimize.
     applyVisualStyle();
@@ -2878,7 +2879,7 @@ void AdModal::refreshWindowIcon() {
   windowIconLabel_->setContentsMargins(0, 0, gap, 0);
   windowIconLabel_->setFixedSize(size + gap, size);
   windowIconLabel_->setPixmap(
-      windowIcon_.pixmap(QSize(size, size), windowIconLabel_->devicePixelRatioF()));
+      snowIconPixmap(windowIcon_, QSize(size, size), windowIconLabel_->devicePixelRatioF()));
   windowIconLabel_->show();
 }
 

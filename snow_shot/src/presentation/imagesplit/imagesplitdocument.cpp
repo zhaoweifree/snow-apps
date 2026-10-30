@@ -581,7 +581,7 @@ QString normalizedDigits(QString value) {
     qsizetype first = 0;
     while (first + 1 < value.size() && value.at(first) == u'0')
         ++first;
-    return value.sliced(first);
+    return value.mid(static_cast<int>(first));
 }
 
 // Decimal multiplication keeps percentage boundaries exact even when the entered decimal is a
@@ -593,14 +593,14 @@ QString multiplyDigits(const QString& digits, quint64 multiplier) {
     for (qsizetype index = digits.size(); index > 0; --index) {
         const quint64 product =
             quint64(digits.at(index - 1).unicode() - ushort('0')) * multiplier + carry;
-        result[--destination] = QChar(ushort('0') + ushort(product % 10));
+        result[static_cast<int>(--destination)] = QChar(ushort('0') + ushort(product % 10));
         carry = product / 10;
     }
     while (carry > 0) {
-        result[--destination] = QChar(ushort('0') + ushort(carry % 10));
+        result[static_cast<int>(--destination)] = QChar(ushort('0') + ushort(carry % 10));
         carry /= 10;
     }
-    return normalizedDigits(result.sliced(destination));
+    return normalizedDigits(result.mid(static_cast<int>(destination)));
 }
 
 int compareDigits(const QString& first, const QString& second) {
@@ -626,8 +626,8 @@ std::optional<DecimalPercentage> parseDecimalPercentage(QString value) {
     if (value.startsWith(u'+'))
         value.remove(0, 1);
     const auto separator = value.indexOf(u'.');
-    QString whole = separator < 0 ? value : value.first(separator);
-    QString fractional = separator < 0 ? QString() : value.sliced(separator + 1);
+    QString whole = separator < 0 ? value : value.left(separator);
+    QString fractional = separator < 0 ? QString() : value.mid(separator + 1);
     const auto decimalDigits = [](QStringView text) {
         return std::all_of(text.begin(), text.end(),
                            [](QChar character) { return character >= u'0' && character <= u'9'; });
@@ -658,7 +658,7 @@ std::optional<int> percentageBoundary(const DecimalPercentage& percentage, int d
     if (product.size() < scale)
         return 0;
     const qsizetype integerDigits = product.size() - scale;
-    const QString whole = integerDigits == 0 ? QStringLiteral("0") : product.first(integerDigits);
+    const QString whole = integerDigits == 0 ? QStringLiteral("0") : product.left(static_cast<int>(integerDigits));
     if (compareDigits(whole, QString::number(std::numeric_limits<int>::max())) > 0)
         return {};
     const qint64 integer = whole.toLongLong() + (product.at(integerDigits) >= u'5' ? 1 : 0);

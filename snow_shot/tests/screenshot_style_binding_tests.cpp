@@ -1076,7 +1076,7 @@ void toolbarAndCanvasShareFontCommit() {
 ScreenshotToolPalette::Options watermarkOptions(std::function<QDateTime()> clock) {
     auto result = options();
     result.watermarkTemplateClock = clock ? std::move(clock) : [] {
-        return QDateTime(QDate(2026, 10, 9), QTime(12, 34, 56), QTimeZone::LocalTime);
+        return QDateTime(QDate(2026, 10, 9), QTime(12, 34, 56), snowTimeZoneLocal());
     };
     return result;
 }
@@ -1207,7 +1207,7 @@ void rememberedWatermarkAppliesOncePerCaptureWithFreshTime() {
     int clockCalls = 0;
     WatermarkEditor editor([&clockCalls] {
         return QDateTime(QDate(2026, 10, 9), QTime(12, 34, 10 + clockCalls++),
-                         QTimeZone::LocalTime);
+                         snowTimeZoneLocal());
     });
     const QRectF bounds(0, 0, 400, 300);
     QImage base(400, 300, QImage::Format_ARGB32_Premultiplied);
@@ -1254,7 +1254,7 @@ void rememberedWatermarkAppliesOncePerCaptureWithFreshTime() {
             "a new capture rearms restoration and takes a fresh timestamp");
     WatermarkEditor existing([&clockCalls] {
         ++clockCalls;
-        return QDateTime(QDate(2026, 10, 9), QTime(12, 34, 56), QTimeZone::LocalTime);
+        return QDateTime(QDate(2026, 10, 9), QTime(12, 34, 56), snowTimeZoneLocal());
     });
     auto document = first;
     document.text = QStringLiteral("Existing document");

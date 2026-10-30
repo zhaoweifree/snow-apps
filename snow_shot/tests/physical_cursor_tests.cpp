@@ -73,7 +73,7 @@ void silentWarpsDeliverMovementThroughQt() {
     sibling.setMouseTracking(true);
     window.show();
     QCoreApplication::processEvents();
-    QPointF desktop = surface.mapToGlobal(QPointF(20, 30));
+    QPointF desktop = surface.mapToGlobal(snowWidgetPosition(QPointF(20, 30)));
     QPoint pixels = (desktop * 2).toPoint();
     bool writeSucceeds = true;
     bool generatesEvents = false;
@@ -109,7 +109,7 @@ void silentWarpsDeliverMovementThroughQt() {
                 surface.selection == QRectF(QPointF(20.5, 30), QPointF(20.5, 30.5)),
             "keyboard cursor movement must update the pressed child's selection drag");
     // Move the live cursor over a sibling while the original surface owns the press.
-    desktop = sibling.mapToGlobal(QPointF(20, 30));
+    desktop = sibling.mapToGlobal(snowWidgetPosition(QPointF(20, 30)));
     pixels = (desktop * 2).toPoint();
     static_cast<void>(cursor.moveOnePixel(PhysicalCursorDirection::Right));
     require(surface.moves == 3 && sibling.moves == 0 && surface.lastGlobalPosition == desktop,
@@ -121,7 +121,7 @@ void silentWarpsDeliverMovementThroughQt() {
     otherSurface.setMouseTracking(true);
     otherWindow.show();
     QCoreApplication::processEvents();
-    desktop = otherSurface.mapToGlobal(QPointF(20, 30));
+    desktop = otherSurface.mapToGlobal(snowWidgetPosition(QPointF(20, 30)));
     pixels = (desktop * 2).toPoint();
     static_cast<void>(cursor.moveOnePixel(PhysicalCursorDirection::Right));
     require(surface.moves == 4 && otherSurface.moves == 0 && surface.lastGlobalPosition == desktop,
@@ -149,7 +149,7 @@ void warpsKeepNativePointerStateSynchronized() {
     surface.show();
     QCoreApplication::processEvents();
     QWindow* window = surface.windowHandle();
-    const QPointF original = surface.mapToGlobal(QPointF(40, 50));
+    const QPointF original = surface.mapToGlobal(snowWidgetPosition(QPointF(40, 50)));
     const auto nativeMove = [&](const QPointF& global) {
         QWindowSystemInterface::handleMouseEvent<QWindowSystemInterface::SynchronousDelivery>(
             window, QHighDpi::toNativeLocalPosition(window->mapFromGlobal(global), window),

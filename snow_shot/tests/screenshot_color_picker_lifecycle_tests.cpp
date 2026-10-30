@@ -1163,7 +1163,7 @@ void toolbarHoverKeepsScreenshotGuidesResponsive() {
         require(style && style->isVisible(), "the drawing style panel must be visible");
         const QPoint styleLocal = style->rect().center();
         const QPoint styleGlobal = style->mapToGlobal(styleLocal);
-        SnowEnterEvent enter(styleLocal, style->window()->mapFromGlobal(styleGlobal), styleGlobal);
+        SnowEnterEventInstance enter(styleLocal, style->window()->mapFromGlobal(styleGlobal), styleGlobal);
         QApplication::sendEvent(style, &enter);
         requireGuideAt(style, styleLocal);
 
@@ -1346,7 +1346,7 @@ void toolbarPopoversSuppressPickerAcrossWindowBoundaries() {
         const auto enterWidget = [&](QWidget* receiver) {
             const QPoint local = receiver->rect().center();
             const QPoint global = receiver->mapToGlobal(local);
-            SnowEnterEvent event(local, receiver->window()->mapFromGlobal(global), global);
+            SnowEnterEventInstance event(local, receiver->window()->mapFromGlobal(global), global);
             QApplication::sendEvent(receiver, &event);
             require(!coordinator.colorPicker()->isVisible(),
                     "entering owned screenshot UI must hide the picker without a canvas move");

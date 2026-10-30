@@ -1575,7 +1575,7 @@ bool ScreenshotExportArtifact::requestFileSave(QObject* receiver, FileSaveDestin
                     if (!clipboardDirectory)
                         return ScreenshotExportTaskResult::failure(
                             ScreenshotExportFailureStage::File, std::move(error));
-                    directories = {clipboardDirectory->path()};
+                    directories = QStringList{clipboardDirectory->path()};
                 } else if (const auto* configuredDirectory = std::get_if<QString>(&destination)) {
                     directories = ScreenshotImageFileService::automaticDirectories(
                         *configuredDirectory, requestedAt, names);

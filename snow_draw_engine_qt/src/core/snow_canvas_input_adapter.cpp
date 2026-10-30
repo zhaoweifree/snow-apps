@@ -140,6 +140,7 @@ SnowInputEvent makePointerInput(const QTabletEvent& event, SnowPointerEventType 
         input.pointer.pressure = std::clamp(event.pressure(), 0.0, 1.0);
     }
 #endif
+    return input;
 }
 
 SnowInputEvent makePointerInput(const QPointF& position, Qt::MouseButton button,

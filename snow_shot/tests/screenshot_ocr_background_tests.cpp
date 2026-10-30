@@ -20,7 +20,7 @@ void require(bool condition, const char* message) {
 
 ScreenshotOcrLine box(qreal x, qreal y, qreal width, qreal height) {
     ScreenshotOcrLine line;
-    line.quad = {{x, y}, {x + width, y}, {x + width, y + height}, {x, y + height}};
+    line.quad = snowPolygonF({{x, y}, {x + width, y}, {x + width, y + height}, {x, y + height}});
     return line;
 }
 
@@ -380,7 +380,7 @@ void disjointSolidRegionsCannotExpandIntoTheImage() {
     ScreenshotOcrPresentation presentation;
     presentation.lines = {box(160.1, 20, 20, 40)};
     ScreenshotOcrLine rotated;
-    rotated.quad = {{-10, 0}, {0, -10}, {4.8, -5.2}, {-5.2, 4.8}};
+    rotated.quad = snowPolygonF({{-10, 0}, {0, -10}, {4.8, -5.2}, {-5.2, 4.8}});
     presentation.lines.push_back(rotated);
     prepareScreenshotOcrFillColors(presentation, source, source.rect(), true);
     require(screenshotOcrFilterRegion(presentation, source.rect(), source.size()).isEmpty(),

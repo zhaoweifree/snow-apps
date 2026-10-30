@@ -798,7 +798,9 @@ void ScreenshotSelectionModel::commitRegionOperation() {
             region.geometry = region.geometry.subtracted(operand);
             region.bounds = region.geometry.boundingRect();
         }
-        m_createdRegions.removeIf([](const auto& region) { return region.bounds.isEmpty(); });
+        // Rule R5: QList/QVector::removeIf is Qt 6.1; the shim re-implements it.
+        snow::compat::removeIf(m_createdRegions,
+                               [](const auto& region) { return region.bounds.isEmpty(); });
     }
     storeRegionGeometry(result);
     m_regionOperation = RegionOperation::Replace;

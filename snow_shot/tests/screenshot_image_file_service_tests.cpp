@@ -78,7 +78,7 @@ void namingAndFormatSelection() {
                     ScreenshotImageFileFormat::Pdf,
             "PDF must be selectable and use its canonical suffix in both dialogs");
 
-    const QDateTime timestamp(QDate(2026, 8, 14), QTime(9, 7, 6), QTimeZone::UTC);
+    const QDateTime timestamp(QDate(2026, 8, 14), QTime(9, 7, 6), snowTimeZoneUTC());
     require(ScreenshotImageFileService::suggestedBaseName(timestamp) ==
                 QStringLiteral("SnowShot_2026-08-14_09-07-06"),
             "automatic screenshot names must use the documented timestamp format");
@@ -163,7 +163,7 @@ void namingAndFormatSelection() {
 void writesLosslessImageAndPreservesCollisionNames() {
     QTemporaryDir directory;
     require(directory.isValid(), "temporary directory could not be created");
-    const QDateTime timestamp(QDate(2026, 8, 14), QTime(9, 7, 6), QTimeZone::UTC);
+    const QDateTime timestamp(QDate(2026, 8, 14), QTime(9, 7, 6), snowTimeZoneUTC());
     const QString base = ScreenshotImageFileService::suggestedBaseName(timestamp);
     const QString firstPath = QDir(directory.path()).filePath(base + QStringLiteral(".png"));
     QFile collision(firstPath);
@@ -305,7 +305,7 @@ void automaticDirectoriesUseSystemLocations() {
 void configuredAutomaticOutputUsesFormatDirectoryAndFilename() {
     QTemporaryDir directory;
     require(directory.isValid(), "temporary configured-output directory could not be created");
-    const QDateTime timestamp(QDate(2026, 8, 14), QTime(9, 7, 6), QTimeZone::UTC);
+    const QDateTime timestamp(QDate(2026, 8, 14), QTime(9, 7, 6), snowTimeZoneUTC());
     const QStringList candidates =
         ScreenshotImageFileService::automaticDirectories(directory.path());
     require(!candidates.isEmpty() && candidates.constFirst() == directory.path(),
@@ -356,7 +356,7 @@ void retriesNextDirectoryAndPublishesFileOnlyClipboardData() {
 
     const ScreenshotImageFileSaveResult result = ScreenshotImageFileService::saveAutomatically(
         image(), QStringList{blockedPath, fallback},
-        QDateTime(QDate(2026, 8, 14), QTime(9, 7, 6), QTimeZone::UTC));
+        QDateTime(QDate(2026, 8, 14), QTime(9, 7, 6), snowTimeZoneUTC()));
     require(result.succeeded() && result.path.startsWith(fallback),
             "automatic saving should retry the next candidate directory after a failure");
 

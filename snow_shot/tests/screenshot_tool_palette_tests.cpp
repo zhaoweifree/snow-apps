@@ -505,7 +505,7 @@ void recordingCursorOptionsAreIndependentAndLazy() {
     auto* popover = palette.findChild<adqt::widgets::AdPopover*>(
         QStringLiteral("screenRecordingCursorPopover"));
     require(cursor && popover && !popover->contentWidget(), "cursor options must be lazy");
-    require(popover->triggers() == adqt::widgets::AdPopover::Trigger::Hover &&
+    require(snowFlagsEqual(popover->triggers(), adqt::widgets::AdPopover::Trigger::Hover) &&
                 popover->popupLayerMode() == adqt::widgets::AdPopover::PopupLayerMode::QtTool,
             "cursor options must use the native hover popover");
     require(popover->placement() == adqt::widgets::AdPopover::Placement::Bottom,
@@ -596,7 +596,7 @@ void recordingPostProcessingOptionsBindState() {
                 button->height() == keyboard->height(),
             "post-processing must follow the keystroke button within the same control group");
     require(popover->sourceWidget() == button &&
-                popover->triggers() == adqt::widgets::AdPopover::Trigger::Hover &&
+                snowFlagsEqual(popover->triggers(), adqt::widgets::AdPopover::Trigger::Hover) &&
                 popover->placement() == adqt::widgets::AdPopover::Placement::Bottom &&
                 popover->popupLayerMode() == adqt::widgets::AdPopover::PopupLayerMode::QtTool,
             "post-processing must use a downward native hover popover");
@@ -624,7 +624,7 @@ void recordingPostProcessingOptionsBindState() {
                          if (visible)
                              loop.quit();
                      });
-    SnowEnterEvent enter(local, button->mapTo(button->window(), local), button->mapToGlobal(local));
+    SnowEnterEventInstance enter(local, button->mapTo(button->window(), local), button->mapToGlobal(local));
     QCoreApplication::sendEvent(button, &enter);
     QTimer::singleShot(2000, &loop, &QEventLoop::quit);
     if (!popover->isVisible())
@@ -800,7 +800,7 @@ void recordingEffectSettingsModal() {
         require(highlight && swatch &&
                     highlight->value().solidColor == palette.recordingMouseHighlightColor(),
                 "highlight picker and multiply swatch follow palette state");
-        require(!swatch->pixmap().isNull(), "highlight preview must render a swatch");
+        require(!snowLabelPixmap(swatch).isNull(), "highlight preview must render a swatch");
         auto* radius = settings.modal->contentWidget()->findChild<adqt::widgets::AdInputNumber*>(
             QStringLiteral("screenRecordingMouseHighlightRadius"));
         require(radius && radius->value() == palette.recordingMouseHighlightRadius(),
@@ -859,7 +859,7 @@ void recordingEffectSettingsModal() {
                 !modal->maskVisible() && !modal->closeOnMaskClick() &&
                 modal->ownerWindow() == &recordingOwner &&
                 modal->windowTitle() == QStringLiteral("Effect Settings") &&
-                modal->standardButtons() == adqt::widgets::AdModal::StandardButton::Ok,
+                snowFlagsEqual(modal->standardButtons(), adqt::widgets::AdModal::StandardButton::Ok),
             "settings must use the selection editor's Windows-style modal conventions");
     require((modal->contentWidget()->window()->frameGeometry().center() -
              recordingOwner.frameGeometry().center())
@@ -1219,7 +1219,7 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
     verifyColorIconTooltips();
     const auto findPresets = [exportPanel](adqt::widgets::AdColorPicker* picker) {
         QVector<adqt::widgets::AdButton*> presets;
-        auto colors = snow_shot::presentation::style_presets::strokeColors().first(4);
+        auto colors = snow_shot::presentation::style_presets::strokeColors().mid(0, 4);
         colors.prepend(QColor(0, 0, 0, 0));
         for (int index = 0; index < colors.size(); ++index) {
             auto* button = exportPanel->findChild<adqt::widgets::AdButton*>(
@@ -1328,7 +1328,7 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
                 "recording settings must retain the shared toolbar button size at every scale");
         for (QLabel* icon : {trailIcon, clickIcon}) {
             require(icon->size() == QSize(controlSize, controlSize) &&
-                        icon->pixmap().deviceIndependentSize() == QSizeF(iconSize, iconSize),
+                        snowLabelPixmap(icon).deviceIndependentSize() == QSizeF(iconSize, iconSize),
                     "mouse effect icons should match drawing style controls at every scale");
         }
         for (auto* picker : {trail, click}) {
@@ -2926,7 +2926,7 @@ void recordingAudioStacksUseVisibleAnchorsWithoutCompetingHoverPopovers() {
     palette.setActionToolsLayout({});
     require(gain->trigger() == palette.findChild<adqt::widgets::AdButton*>(
                                    QStringLiteral("screenRecordingMicrophone")) &&
-                gain->popover()->triggers() == adqt::widgets::AdPopover::Trigger::Hover,
+                snowFlagsEqual(gain->popover()->triggers(), adqt::widgets::AdPopover::Trigger::Hover),
             "restoring direct audio controls restores their original hover editor");
 }
 
@@ -3963,7 +3963,7 @@ void arrowAndLineUseConfiguredPopoverGroup() {
                 mainDrawingToolbarButtons(palette).constFirst() == trigger &&
                 trigger->toolTip() == QStringLiteral("Arrow (2)") &&
                 trigger->accessibleName() == QStringLiteral("Arrow") && popover != nullptr &&
-                popover->triggers() == adqt::widgets::AdPopover::Trigger::Hover &&
+                snowFlagsEqual(popover->triggers(), adqt::widgets::AdPopover::Trigger::Hover) &&
                 popover->placement() == adqt::widgets::AdPopover::Placement::Top &&
                 popover->popupLayerMode() == adqt::widgets::AdPopover::PopupLayerMode::QtTool &&
                 popover->arrowVisible() && popover->contentMargins() == QMargins(12, 12, 12, 12) &&
@@ -4542,7 +4542,7 @@ void tableQrPopoverSharesOneEntryAndRemembersTheSelectedMode() {
             "the shared recognition slot should initially present Table recognition");
 
     adqt::widgets::AdPopover* popover = popoverForTrigger(trigger);
-    require(popover != nullptr && popover->triggers() == adqt::widgets::AdPopover::Trigger::Hover,
+    require(popover != nullptr && snowFlagsEqual(popover->triggers(), adqt::widgets::AdPopover::Trigger::Hover),
             "the shared Table and QR slot should expose a hover popover");
     materializeLazyPopover(trigger);
     QWidget* content = popover->contentWidget();
@@ -5879,13 +5879,13 @@ void quickSaveStacksAndLayoutMigration() {
                 QStringList{QStringLiteral("record-screen"), cloud, print, quick, save},
             "custom save placements must gain Quick save immediately above Save");
     legacy.positions.removeLast();
-    legacy.hidden = {save};
+    legacy.hidden = QStringList{save};
     const auto hidden = normalizedLayout(legacy, kind);
     require(hidden.hidden.contains(save) && hidden.hidden.contains(quick),
             "hiding Save in a legacy layout must also hide the new Quick save action");
     auto explicitLayout = upgraded;
     explicitLayout.positions.last().removeAll(quick);
-    explicitLayout.hidden = {quick};
+    explicitLayout.hidden = QStringList{quick};
     require(normalizedLayout(explicitLayout, kind) == explicitLayout,
             "an explicitly hidden Quick save must stay hidden");
     explicitLayout.hidden.clear();
@@ -9507,7 +9507,7 @@ void filterToolExposesTypeAndIntensityControls() {
         palette.findChild<QLabel*>(QStringLiteral("screenshotPenFilterIntensityIcon"));
     require(typeSelect != nullptr && intensity != nullptr && intensityIcon != nullptr,
             "Filter should expose type and intensity controls");
-    require(!intensityIcon->pixmap().isNull(), "Filter intensity should display the blur icon");
+    require(!snowLabelPixmap(intensityIcon).isNull(), "Filter intensity should display the blur icon");
     require(typeSelect->variant() == adqt::widgets::AdSelect::Variant::Borderless,
             "Filter type select should match the font-family select style");
     require(palette.findChild<QSlider*>(QStringLiteral("screenshotFilterOpacitySlider")) == nullptr,
@@ -9551,7 +9551,7 @@ void filterToolExposesTypeAndIntensityControls() {
     require(lastProperties == SnowCanvasFilterStylePropertyType,
             "Filter type should emit its dedicated style property");
     require(!intensity->isEnabled(), "Grayscale should disable filter intensity");
-    const QImage disabledIntensityIcon = intensityIcon->pixmap().toImage();
+    const QImage disabledIntensityIcon = snowLabelPixmap(intensityIcon).toImage();
     typeSelect->setCurrentData(5, adqt::widgets::AdSelect::DefaultValueRole);
     require(!intensity->isEnabled(), "Smart Erase must disable intensity");
     typeSelect->setCurrentData(3, adqt::widgets::AdSelect::DefaultValueRole);
@@ -9560,7 +9560,7 @@ void filterToolExposesTypeAndIntensityControls() {
     require(intensity->isEnabled(), "Emboss should enable filter intensity");
     typeSelect->setCurrentData(0, adqt::widgets::AdSelect::DefaultValueRole);
     require(intensity->isEnabled(), "Mosaic should enable filter intensity");
-    require(intensityIcon->pixmap().toImage() != disabledIntensityIcon,
+    require(snowLabelPixmap(intensityIcon).toImage() != disabledIntensityIcon,
             "filter intensity icon should brighten with its enabled slider");
     typeSelect->setCurrentData(4, adqt::widgets::AdSelect::DefaultValueRole);
     require(lastProperties == SnowCanvasFilterStylePropertyType,
@@ -10083,7 +10083,7 @@ void watermarkToolExposesSharedStyleControls() {
                 gap->accessibleName() == gap->toolTip() &&
                 gap->cursor().shape() == Qt::SplitVCursor && angle->size() == gap->size(),
             "Watermark angle and gap should use shared numeric icon editors");
-    require(!opacityIcon->pixmap().isNull() && opacityIcon->size() == QSize(28, 28) &&
+    require(!snowLabelPixmap(opacityIcon).isNull() && opacityIcon->size() == QSize(28, 28) &&
                 opacityIcon->toolTip() == QStringLiteral("Opacity") &&
                 opacitySlider->size() == QSize(96, 28) && opacitySlider->minimum() == 0 &&
                 opacitySlider->maximum() == 100 && opacitySlider->value() == 16 &&
@@ -10498,7 +10498,7 @@ void watermarkTemplateLibraryAndEditorApplySnapshotsDeterministically() {
     options.showWatermarkTool = true;
     options.watermarkTemplateClock = [&clockCalls]() {
         return QDateTime(QDate(2026, 9, 15), QTime(12, 34, 10 + clockCalls++),
-                         QTimeZone::LocalTime);
+                         snowTimeZoneLocal());
     };
     ScreenshotToolPalette palette(options);
     QWidget selectionDisplayOverlay;
@@ -11520,7 +11520,7 @@ void arrowStyleControlsExposeAndEmitAllStyleProperties() {
          }) {
         adqt::widgets::AdPopover* popover = popoverForTrigger(trigger);
         require(popover != nullptr, "arrow control should have a popup layer");
-        require(popover->triggers() == adqt::widgets::AdPopover::Trigger::Hover,
+        require(snowFlagsEqual(popover->triggers(), adqt::widgets::AdPopover::Trigger::Hover),
                 "arrow control popup should open on hover");
         require(popover->arrowVisible(), "arrow control popup should show its placement arrow");
         require(qobject_cast<adqt::widgets::AdButton*>(trigger) != nullptr,
@@ -15515,7 +15515,7 @@ void configurationDrivenStyleEditorsShareStructuralContracts() {
         adqt::widgets::AdPopover* popover = popoverForTrigger(trigger);
         require(dynamic_cast<IconValuePreviewTrigger*>(trigger) != nullptr &&
                     trigger->focusPolicy() == Qt::NoFocus && popover != nullptr &&
-                    popover->triggers() == adqt::widgets::AdPopover::Trigger::Hover &&
+                    snowFlagsEqual(popover->triggers(), adqt::widgets::AdPopover::Trigger::Hover) &&
                     popover->placement() == adqt::widgets::AdPopover::Placement::Bottom &&
                     popover->popupLayerMode() == adqt::widgets::AdPopover::PopupLayerMode::QtTool &&
                     popover->arrowVisible() && popover->contentMargins() == QMargins(8, 8, 8, 8),
@@ -16056,7 +16056,7 @@ void selectToolExposesDedicatedActionToolbar() {
         palette.findChild<QLabel*>(QStringLiteral("screenshotSelectionOpacityIcon"));
     auto* opacitySlider = palette.findChild<adqt::widgets::AdSlider*>(
         QStringLiteral("screenshotSelectionOpacitySlider"));
-    require(opacityIcon != nullptr && !opacityIcon->pixmap().isNull(),
+    require(opacityIcon != nullptr && !snowLabelPixmap(opacityIcon).isNull(),
             "selection opacity should display its icon");
     require(opacityIcon->size() == QSize(32, 32),
             "selection opacity icon should match the action toolbar height");
@@ -16078,7 +16078,7 @@ void selectToolExposesDedicatedActionToolbar() {
             "selection opacity slider should be disabled without a selection");
     require(!palette.stepSelectionOpacity(-1),
             "the select tool wheel should ignore an empty selection");
-    const QImage disabledOpacityIcon = opacityIcon->pixmap().toImage();
+    const QImage disabledOpacityIcon = snowLabelPixmap(opacityIcon).toImage();
 
     SnowCanvasStyleToolbarState selectedState;
     selectedState.source = SnowCanvasStyleToolbarSource::SelectedRectangle;
@@ -16087,7 +16087,7 @@ void selectToolExposesDedicatedActionToolbar() {
     palette.setStyleToolbarState(selectedState);
     require(opacitySlider->value() == 40 && opacitySlider->property("mixed").toBool(),
             "selection opacity should come from the element opacity property");
-    require(opacityIcon->pixmap().toImage() != disabledOpacityIcon,
+    require(snowLabelPixmap(opacityIcon).toImage() != disabledOpacityIcon,
             "selection opacity icon should brighten with its enabled slider");
     selectedState.shapeStyle.opacity = 1.0;
     selectedState.shapeStyleMixed = 0;
@@ -18214,7 +18214,7 @@ void customColorPresetSettingsPersistAndValidate(
     const auto revision = configuration.revision();
     auto invalidColors = stroke;
     invalidColors[2] = QColor();
-    require(!settings.setStrokeColors(stroke.first(4)) &&
+    require(!settings.setStrokeColors(stroke.mid(0, 4)) &&
                 !settings.setFillColors(fill + QVector<QColor>{QColor(Qt::red)}) &&
                 !settings.setStrokeColors(invalidColors),
             "typed writes must reject incorrect slot counts and invalid colors");

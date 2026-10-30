@@ -30,7 +30,7 @@ inline void verifyEraserToolbarHost(ScreenshotToolPalette& palette, SnowCanvasWi
     };
     const auto mouse = [&](QEvent::Type type, QPointF point, Qt::MouseButton button,
                            Qt::MouseButtons buttons) {
-        QMouseEvent event(type, point, canvas.mapToGlobal(point), button, buttons, Qt::NoModifier);
+        QMouseEvent event(type, point, canvas.mapToGlobal(snowWidgetPosition(point)), button, buttons, Qt::NoModifier);
         QApplication::sendEvent(&canvas, &event);
     };
     const auto gesture = [&](QPointF first, QPointF last) {

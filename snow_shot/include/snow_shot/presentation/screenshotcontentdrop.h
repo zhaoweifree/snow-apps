@@ -45,7 +45,8 @@ decodeScreenshotDropContent(ScreenshotClipboardContentSnapshot snapshot,
         hash.addData("\0", static_cast<int>(1));
         hash.addData(content->originalContent.text.toUtf8());
         if (content->originalContent.textFormat == snow_shot::storage::PinnedTextFormat::Markdown)
-            hash.addData(QByteArrayView("\0markdown", 9));
+            // QByteArrayView is Qt 6 only; Qt5 has the (const char*, int) overload.
+            hash.addData("\0markdown", 9);
         if (!content->sourceIdentity.isValid())
             content->sourceIdentity.key =
                 QStringLiteral("drop-text:") + QString::fromLatin1(hash.result().toHex());

@@ -37,7 +37,7 @@ void put(const QString& path, const QByteArray& bytes) {
 }
 DiagnosticsOptions optionsFor(const QString& directory) {
     DiagnosticsOptions options;
-    options.directories = {directory};
+    options.directories = QStringList{directory};
     options.enableCrashCapture = false;
     options.installMessageHandler = false;
     options.mirrorToConsole = false;
@@ -286,7 +286,7 @@ void retentionAndRollover() {
     QTemporaryDir directory(QDir(QDir::tempPath()).canonicalPath() +
                             QStringLiteral("/snow-diag-XXXXXX"));
     std::atomic<qint64> time{
-        QDateTime(QDate(2026, 9, 7), QTime(23, 59), QTimeZone::LocalTime).toMSecsSinceEpoch()};
+        QDateTime(QDate(2026, 9, 7), QTime(23, 59), snowTimeZoneLocal()).toMSecsSinceEpoch()};
     auto options = optionsFor(directory.path());
     options.clock = [&] { return QDateTime::fromMSecsSinceEpoch(time.load()); };
     const QString old =

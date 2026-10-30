@@ -75,7 +75,7 @@ void permissionDiagnostics() {
     QTemporaryDir directory(QDir(QDir::tempPath()).canonicalPath() +
                             QStringLiteral("/snow-permissions-XXXXXX"));
     DiagnosticsOptions options;
-    options.directories = {directory.path()};
+    options.directories = QStringList{directory.path()};
     options.enableCrashCapture = false;
     options.installMessageHandler = false;
     options.mirrorToConsole = false;

@@ -1436,7 +1436,7 @@ void shortcutPopupInteraction(QWidget& owner, const QTemporaryDir& temp) {
         const QPoint global = widget->mapToGlobal(local);
         QCursor::setPos(global);
         flush();
-        SnowEnterEvent event(local, local, global);
+        SnowEnterEventInstance event(local, local, global);
         QApplication::sendEvent(widget, &event);
     };
     auto leave = [](QWidget* widget) {
@@ -1549,7 +1549,7 @@ void shortcutPopupInteraction(QWidget& owner, const QTemporaryDir& temp) {
     require(menu.isNull(),
             "a covered trigger must retire its hover popup session after pointer movement");
     const QPoint triggerCenter = trigger->rect().center();
-    SnowEnterEvent coveredEnter(triggerCenter, triggerCenter, coveredTrigger);
+    SnowEnterEventInstance coveredEnter(triggerCenter, triggerCenter, coveredTrigger);
     QApplication::sendEvent(trigger, &coveredEnter);
     const auto menus = content->findChildren<AdContextMenu*>(QStringLiteral("savePathMenu"));
     require(

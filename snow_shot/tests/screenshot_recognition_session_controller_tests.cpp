@@ -82,7 +82,7 @@ void headlessWorkflowResultsAndEdits() {
     ScreenshotOcrLine line;
     line.text = QStringLiteral("Original text");
     line.confidence = 0.95;
-    line.quad = QPolygonF{QPointF(0, 0), QPointF(70, 0), QPointF(70, 20), QPointF(0, 20)};
+    line.quad = snowPolygonF({QPointF(0, 0), QPointF(70, 0), QPointF(70, 20), QPointF(0, 20)});
     presentation->lines.append(line);
     presentation->prepareForRendering();
     results.text = ScreenshotOcrRecognitionResult{presentation};
@@ -524,7 +524,7 @@ void originalImagePreviewFollowsTextSessionLifecycle() {
         presentation->selection = QRect(10, 20, 64, 48);
         ScreenshotOcrLine line;
         line.text = QStringLiteral("Source text");
-        line.quad = {QPointF(15, 25), QPointF(65, 25), QPointF(65, 45), QPointF(15, 45)};
+        line.quad = snowPolygonF({QPointF(15, 25), QPointF(65, 25), QPointF(65, 45), QPointF(15, 45)});
         presentation->lines.push_back(line);
         presentation->prepareForRendering();
         ScreenshotRecognitionResults cached;
@@ -683,7 +683,7 @@ void originalImageOverridePreservesSessionState() {
     presentation->selection = QRect(0, 0, 64, 64);
     presentation->lines.push_back(
         {QStringLiteral("Source"), 0.99,
-         QPolygonF{QPointF(5, 5), QPointF(55, 5), QPointF(55, 25), QPointF(5, 25)}});
+         snowPolygonF({QPointF(5, 5), QPointF(55, 5), QPointF(55, 25), QPointF(5, 25)})});
     presentation->prepareForRendering();
     ScreenshotRecognitionResults cached;
     cached.key = QStringLiteral("next-image");
@@ -781,7 +781,7 @@ void cachedRecognitionUsesTheSelectedFillStyle() {
     cached.text->presentation->selection = QRect(0, 0, 64, 64);
     cached.text->presentation->lines.push_back(
         {QStringLiteral("Text"), 1.0,
-         QPolygonF{QPointF(10, 10), QPointF(50, 10), QPointF(50, 30), QPointF(10, 30)}});
+         snowPolygonF({QPointF(10, 10), QPointF(50, 10), QPointF(50, 30), QPointF(10, 30)})});
     cached.text->presentation->prepareForRendering();
     controller.seedRecognitionResults(cached);
     controller.activate(ScreenshotRecognitionSessionController::Mode::Text);
@@ -806,7 +806,7 @@ void displayedRecognitionSnapshotPreservesCachedResults() {
     presentation->selection = QRect(0, 0, 64, 64);
     presentation->lines.push_back(
         {QStringLiteral("Visible OCR"), 0.95,
-         QPolygonF{QPointF(5, 5), QPointF(55, 5), QPointF(55, 25), QPointF(5, 25)}});
+         snowPolygonF({QPointF(5, 5), QPointF(55, 5), QPointF(55, 25), QPointF(5, 25)})});
     presentation->prepareForRendering();
     ScreenshotRecognitionResults cached;
     cached.key = QStringLiteral("session");

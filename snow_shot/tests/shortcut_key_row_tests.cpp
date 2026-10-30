@@ -1440,7 +1440,7 @@ void recordingShortcutRecorderAcceptsControlKeysAndEscape() {
             ShortcutKeyRowConfig::ValidationScope::RecordingShortcut);
         const auto modifiers = key == Qt::Key_Escape ? Qt::NoModifier : Qt::ControlModifier;
         const QString expected =
-            QKeySequence(QKeyCombination(modifiers, key)).toString(QKeySequence::PortableText);
+            snowKeySequence(QKeyCombination(modifiers, key)).toString(QKeySequence::PortableText);
         session.key(QEvent::KeyPress, key, modifiers);
         session.flush();
         require(session.validated == QStringList{expected} &&

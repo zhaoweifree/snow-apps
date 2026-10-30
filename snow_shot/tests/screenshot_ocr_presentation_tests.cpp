@@ -258,10 +258,10 @@ void lineBoxSelectionPreviewsCurrentHitsAndCommitsFixedToggles() {
 void lineBoxSelectionRequiresPositivePolygonOverlap() {
     ScreenshotOcrPresentation presentation;
     auto diamond = line(QStringLiteral("Diamond"), 0, 0);
-    diamond.quad = QPolygonF{QPointF(0, 10), QPointF(10, 0), QPointF(20, 10), QPointF(10, 20)};
+    diamond.quad = snowPolygonF({QPointF(0, 10), QPointF(10, 0), QPointF(20, 10), QPointF(10, 20)});
     auto vertical = line(QStringLiteral("Vertical"), 40, 0);
     vertical.direction = ScreenshotOcrTextDirection::Vertical;
-    vertical.quad = QPolygonF{QPointF(40, 0), QPointF(50, 0), QPointF(50, 80), QPointF(40, 80)};
+    vertical.quad = snowPolygonF({QPointF(40, 0), QPointF(50, 0), QPointF(50, 80), QPointF(40, 80)});
     presentation.lines = {diamond, vertical};
     presentation.beginLineBoxSelection(QPointF(-5, -5));
     presentation.updateLineBoxSelection(QRectF(0, 0, 2, 2));
@@ -288,12 +288,12 @@ void lineBoxSelectionContainmentCachesPreserveExactGeometry() {
     auto reversed = line(QStringLiteral("Reversed"), 40, 0);
     std::reverse(reversed.quad.begin(), reversed.quad.end());
     auto diamond = line(QStringLiteral("Diamond"), 0, 0);
-    diamond.quad = QPolygonF{QPointF(0, 10), QPointF(10, 0), QPointF(20, 10), QPointF(10, 20)};
+    diamond.quad = snowPolygonF({QPointF(0, 10), QPointF(10, 0), QPointF(20, 10), QPointF(10, 20)});
     auto triangle = line(QStringLiteral("Triangle"), 80, 0);
-    triangle.quad = QPolygonF{QPointF(80, 0), QPointF(100, 0), QPointF(90, 10), QPointF(90, 10)};
+    triangle.quad = snowPolygonF({QPointF(80, 0), QPointF(100, 0), QPointF(90, 10), QPointF(90, 10)});
     auto collinear = line(QStringLiteral("Collinear"), 120, 0);
     collinear.quad =
-        QPolygonF{QPointF(120, 0), QPointF(130, 10), QPointF(140, 20), QPointF(150, 30)};
+        snowPolygonF({QPointF(120, 0), QPointF(130, 10), QPointF(140, 20), QPointF(150, 30)});
     presentation.lines = {diamond, reversed, triangle, collinear};
     presentation.beginLineBoxSelection(QPointF(-1, -1));
     presentation.updateLineBoxSelection(QRectF(-1, -1, 181, 32));
@@ -319,16 +319,16 @@ void lineBoxSelectionContainmentCachesPreserveExactGeometry() {
 void lineBoxSelectionRejectsCrossingQuadsAtEveryScale() {
     ScreenshotOcrPresentation presentation;
     auto bowtie = line(QStringLiteral("Bowtie"), 0, 0);
-    bowtie.quad = QPolygonF{QPointF(0, 0), QPointF(10, 10), QPointF(0, 10), QPointF(10, 0)};
+    bowtie.quad = snowPolygonF({QPointF(0, 0), QPointF(10, 10), QPointF(0, 10), QPointF(10, 0)});
     auto unequalBowtie = line(QStringLiteral("Unequal bowtie"), 20, 0);
     unequalBowtie.quad =
-        QPolygonF{QPointF(20, 0), QPointF(32, 10), QPointF(20, 10), QPointF(30, 0)};
+        snowPolygonF({QPointF(20, 0), QPointF(32, 10), QPointF(20, 10), QPointF(30, 0)});
     auto concave = line(QStringLiteral("Concave"), 40, 0);
-    concave.quad = QPolygonF{QPointF(40, 0), QPointF(50, 0), QPointF(43, 3), QPointF(40, 10)};
+    concave.quad = snowPolygonF({QPointF(40, 0), QPointF(50, 0), QPointF(43, 3), QPointF(40, 10)});
     auto reversed = line(QStringLiteral("Reversed"), 80, 0);
     std::reverse(reversed.quad.begin(), reversed.quad.end());
     auto triangle = line(QStringLiteral("Triangle"), 140, 0);
-    triangle.quad = QPolygonF{QPointF(140, 0), QPointF(160, 0), QPointF(150, 10), QPointF(150, 10)};
+    triangle.quad = snowPolygonF({QPointF(140, 0), QPointF(160, 0), QPointF(150, 10), QPointF(150, 10)});
     presentation.lines = {bowtie, unequalBowtie, concave, reversed, triangle};
     presentation.beginLineBoxSelection(QPointF(-1, -1));
     require(presentation.lineAt(QPointF(1, 0.25)) == -1 &&
@@ -517,7 +517,7 @@ void lineBoxSelectionPreservesLinearNewlineAndParagraphContracts() {
             "canceling an empty box leaves the original linear clipboard contract intact");
     auto paragraph = line(QStringLiteral("Wrapped translated paragraph"), 0, 80);
     paragraph.quad =
-        QPolygonF{QPointF(0, 80), QPointF(100, 80), QPointF(100, 130), QPointF(0, 130)};
+        snowPolygonF({QPointF(0, 80), QPointF(100, 80), QPointF(100, 130), QPointF(0, 130)});
     paragraph.paragraph = true;
     paragraph.sourceLineQuads = {line(QStringLiteral("Row"), 0, 80).quad,
                                  line(QStringLiteral("Row"), 0, 120).quad};
@@ -532,8 +532,8 @@ void lineBoxSelectionPreservesLinearNewlineAndParagraphContracts() {
 void lineBoxSelectionHandlesBoundedIndexesAndInvalidGeometry() {
     ScreenshotOcrPresentation presentation;
     auto huge = line(QStringLiteral("Large"), -1000000, -1000000);
-    huge.quad = QPolygonF{QPointF(-1000000, -1000000), QPointF(1000000, -1000000),
-                          QPointF(1000000, 1000000), QPointF(-1000000, 1000000)};
+    huge.quad = snowPolygonF({QPointF(-1000000, -1000000), QPointF(1000000, -1000000),
+                          QPointF(1000000, 1000000), QPointF(-1000000, 1000000)});
     auto invalid = line(QStringLiteral("Invalid"), 0, 0);
     invalid.quad[0].setX(std::numeric_limits<qreal>::infinity());
     presentation.lines = {huge, line(QStringLiteral("Negative"), -100, -100), invalid};

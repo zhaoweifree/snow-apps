@@ -73,7 +73,8 @@ QByteArray tableWorkbook(const ScreenshotTableDocument& document) {
     const auto writerGuard = qScopeGuard([&] { mz_zip_writer_delete(&writer); });
     if (mz_zip_writer_open(writer, stream, 0) != MZ_OK)
         return {};
-    const auto addXml = [writer](const char* name, QStringView root, QStringView nameSpace,
+    const auto addXml = [writer](const char* name, const QString& root,
+                                 const QString& nameSpace,
                                  const auto& fill) {
         QByteArray bytes;
         QXmlStreamWriter xml(&bytes);
@@ -91,129 +92,129 @@ QByteArray tableWorkbook(const ScreenshotTableDocument& document) {
         return mz_zip_writer_add_buffer(writer, bytes.constData(),
                                         static_cast<int32_t>(bytes.size()), &entry) == MZ_OK;
     };
-    constexpr auto spreadsheetNamespace =
-        u"http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-    constexpr auto relationshipNamespace =
-        u"http://schemas.openxmlformats.org/package/2006/relationships";
-    const auto relationship = [](QXmlStreamWriter& xml, QStringView id, QStringView type,
-                                 QStringView target) {
-        xml.writeEmptyElement(u"Relationship");
-        xml.writeAttribute(u"Id", id);
-        xml.writeAttribute(u"Type", QStringLiteral("http://schemas.openxmlformats.org/"
+    const auto spreadsheetNamespace =
+        QStringLiteral("http://schemas.openxmlformats.org/spreadsheetml/2006/main");
+    const auto relationshipNamespace =
+        QStringLiteral("http://schemas.openxmlformats.org/package/2006/relationships");
+    const auto relationship = [](QXmlStreamWriter& xml, const QString& id, const QString& type,
+                                 const QString& target) {
+        xml.writeEmptyElement(QStringLiteral("Relationship"));
+        xml.writeAttribute(QStringLiteral("Id"), id);
+        xml.writeAttribute(QStringLiteral("Type"), QStringLiteral("http://schemas.openxmlformats.org/"
                                                    "officeDocument/2006/relationships/") +
                                         type);
-        xml.writeAttribute(u"Target", target);
+        xml.writeAttribute(QStringLiteral("Target"), target);
     };
     if (!addXml(
-            "[Content_Types].xml", u"Types",
-            u"http://schemas.openxmlformats.org/package/2006/content-types",
+            "[Content_Types].xml", QStringLiteral("Types"),
+            QStringLiteral("http://schemas.openxmlformats.org/package/2006/content-types"),
             [](QXmlStreamWriter& xml) {
-                xml.writeEmptyElement(u"Default");
-                xml.writeAttribute(u"Extension", u"rels");
-                xml.writeAttribute(u"ContentType",
-                                   u"application/vnd.openxmlformats-package.relationships+xml");
-                xml.writeEmptyElement(u"Default");
-                xml.writeAttribute(u"Extension", u"xml");
-                xml.writeAttribute(u"ContentType", u"application/xml");
-                const auto part = [&](QStringView name, QStringView type) {
-                    xml.writeEmptyElement(u"Override");
-                    xml.writeAttribute(u"PartName", name);
-                    xml.writeAttribute(u"ContentType", type);
+                xml.writeEmptyElement(QStringLiteral("Default"));
+                xml.writeAttribute(QStringLiteral("Extension"), QStringLiteral("rels"));
+                xml.writeAttribute(QStringLiteral("ContentType"),
+                                   QStringLiteral("application/vnd.openxmlformats-package.relationships+xml"));
+                xml.writeEmptyElement(QStringLiteral("Default"));
+                xml.writeAttribute(QStringLiteral("Extension"), QStringLiteral("xml"));
+                xml.writeAttribute(QStringLiteral("ContentType"), QStringLiteral("application/xml"));
+                const auto part = [&](const QString& name, const QString& type) {
+                    xml.writeEmptyElement(QStringLiteral("Override"));
+                    xml.writeAttribute(QStringLiteral("PartName"), name);
+                    xml.writeAttribute(QStringLiteral("ContentType"), type);
                 };
-                part(u"/xl/workbook.xml",
-                     u"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml");
-                part(u"/xl/worksheets/sheet1.xml",
-                     u"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml");
-                part(u"/xl/styles.xml",
-                     u"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml");
+                part(QStringLiteral("/xl/workbook.xml"),
+                     QStringLiteral("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"));
+                part(QStringLiteral("/xl/worksheets/sheet1.xml"),
+                     QStringLiteral("application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"));
+                part(QStringLiteral("/xl/styles.xml"),
+                     QStringLiteral("application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"));
             }) ||
-        !addXml("_rels/.rels", u"Relationships", relationshipNamespace,
+        !addXml("_rels/.rels", QStringLiteral("Relationships"), relationshipNamespace,
                 [&](QXmlStreamWriter& xml) {
-                    relationship(xml, u"rId1", u"officeDocument", u"xl/workbook.xml");
+                    relationship(xml, QStringLiteral("rId1"), QStringLiteral("officeDocument"), QStringLiteral("xl/workbook.xml"));
                 }) ||
-        !addXml("xl/workbook.xml", u"workbook", spreadsheetNamespace,
+        !addXml("xl/workbook.xml", QStringLiteral("workbook"), spreadsheetNamespace,
                 [](QXmlStreamWriter& xml) {
                     xml.writeNamespace(
-                        u"http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-                        u"r");
-                    xml.writeStartElement(u"sheets");
-                    xml.writeEmptyElement(u"sheet");
-                    xml.writeAttribute(u"name", message(QT_TRANSLATE_NOOP(
+                        QStringLiteral("http://schemas.openxmlformats.org/officeDocument/2006/relationships"),
+                        QStringLiteral("r"));
+                    xml.writeStartElement(QStringLiteral("sheets"));
+                    xml.writeEmptyElement(QStringLiteral("sheet"));
+                    xml.writeAttribute(QStringLiteral("name"), message(QT_TRANSLATE_NOOP(
                                                     "ScreenshotRecognitionFileExport", "Table")));
-                    xml.writeAttribute(u"sheetId", u"1");
-                    xml.writeAttribute(u"r:id", u"rId1");
+                    xml.writeAttribute(QStringLiteral("sheetId"), QStringLiteral("1"));
+                    xml.writeAttribute(QStringLiteral("r:id"), QStringLiteral("rId1"));
                     xml.writeEndElement();
                 }) ||
-        !addXml("xl/_rels/workbook.xml.rels", u"Relationships", relationshipNamespace,
+        !addXml("xl/_rels/workbook.xml.rels", QStringLiteral("Relationships"), relationshipNamespace,
                 [&](QXmlStreamWriter& xml) {
-                    relationship(xml, u"rId1", u"worksheet", u"worksheets/sheet1.xml");
-                    relationship(xml, u"rId2", u"styles", u"styles.xml");
+                    relationship(xml, QStringLiteral("rId1"), QStringLiteral("worksheet"), QStringLiteral("worksheets/sheet1.xml"));
+                    relationship(xml, QStringLiteral("rId2"), QStringLiteral("styles"), QStringLiteral("styles.xml"));
                 }) ||
-        !addXml("xl/styles.xml", u"styleSheet", spreadsheetNamespace, [](QXmlStreamWriter& xml) {
-            xml.writeStartElement(u"fonts");
-            xml.writeAttribute(u"count", u"2");
-            xml.writeEmptyElement(u"font");
-            xml.writeStartElement(u"font");
-            xml.writeEmptyElement(u"b");
+        !addXml("xl/styles.xml", QStringLiteral("styleSheet"), spreadsheetNamespace, [](QXmlStreamWriter& xml) {
+            xml.writeStartElement(QStringLiteral("fonts"));
+            xml.writeAttribute(QStringLiteral("count"), QStringLiteral("2"));
+            xml.writeEmptyElement(QStringLiteral("font"));
+            xml.writeStartElement(QStringLiteral("font"));
+            xml.writeEmptyElement(QStringLiteral("b"));
             xml.writeEndElement();
             xml.writeEndElement();
-            xml.writeStartElement(u"fills");
-            xml.writeAttribute(u"count", u"2");
-            for (const auto pattern : {u"none", u"gray125"}) {
-                xml.writeStartElement(u"fill");
-                xml.writeEmptyElement(u"patternFill");
-                xml.writeAttribute(u"patternType", pattern);
+            xml.writeStartElement(QStringLiteral("fills"));
+            xml.writeAttribute(QStringLiteral("count"), QStringLiteral("2"));
+            for (const auto pattern : {QStringLiteral("none"), QStringLiteral("gray125")}) {
+                xml.writeStartElement(QStringLiteral("fill"));
+                xml.writeEmptyElement(QStringLiteral("patternFill"));
+                xml.writeAttribute(QStringLiteral("patternType"), pattern);
                 xml.writeEndElement();
             }
             xml.writeEndElement();
-            xml.writeStartElement(u"borders");
-            xml.writeAttribute(u"count", u"1");
-            xml.writeEmptyElement(u"border");
+            xml.writeStartElement(QStringLiteral("borders"));
+            xml.writeAttribute(QStringLiteral("count"), QStringLiteral("1"));
+            xml.writeEmptyElement(QStringLiteral("border"));
             xml.writeEndElement();
-            for (const auto group : {u"cellStyleXfs", u"cellXfs"}) {
-                const bool cells = QStringView(group) == u"cellXfs";
+            for (const auto group : {QStringLiteral("cellStyleXfs"), QStringLiteral("cellXfs")}) {
+                const bool cells = group == QStringLiteral("cellXfs");
                 xml.writeStartElement(group);
-                xml.writeAttribute(u"count", cells ? u"2" : u"1");
+                xml.writeAttribute(QStringLiteral("count"), cells ? QStringLiteral("2") : QStringLiteral("1"));
                 for (int index = 0; index < (cells ? 2 : 1); ++index) {
-                    xml.writeStartElement(u"xf");
-                    xml.writeAttribute(u"numFmtId", u"49");
-                    xml.writeAttribute(u"fontId", QString::number(index));
-                    xml.writeAttribute(u"fillId", u"0");
-                    xml.writeAttribute(u"borderId", u"0");
+                    xml.writeStartElement(QStringLiteral("xf"));
+                    xml.writeAttribute(QStringLiteral("numFmtId"), QStringLiteral("49"));
+                    xml.writeAttribute(QStringLiteral("fontId"), QString::number(index));
+                    xml.writeAttribute(QStringLiteral("fillId"), QStringLiteral("0"));
+                    xml.writeAttribute(QStringLiteral("borderId"), QStringLiteral("0"));
                     if (cells) {
-                        xml.writeAttribute(u"xfId", u"0");
-                        xml.writeAttribute(u"applyNumberFormat", u"1");
-                        xml.writeAttribute(u"applyFont", u"1");
-                        xml.writeAttribute(u"applyAlignment", u"1");
-                        xml.writeEmptyElement(u"alignment");
-                        xml.writeAttribute(u"wrapText", u"1");
-                        xml.writeAttribute(u"vertical", u"top");
+                        xml.writeAttribute(QStringLiteral("xfId"), QStringLiteral("0"));
+                        xml.writeAttribute(QStringLiteral("applyNumberFormat"), QStringLiteral("1"));
+                        xml.writeAttribute(QStringLiteral("applyFont"), QStringLiteral("1"));
+                        xml.writeAttribute(QStringLiteral("applyAlignment"), QStringLiteral("1"));
+                        xml.writeEmptyElement(QStringLiteral("alignment"));
+                        xml.writeAttribute(QStringLiteral("wrapText"), QStringLiteral("1"));
+                        xml.writeAttribute(QStringLiteral("vertical"), QStringLiteral("top"));
                     }
                     xml.writeEndElement();
                 }
                 xml.writeEndElement();
             }
-            xml.writeStartElement(u"cellStyles");
-            xml.writeAttribute(u"count", u"1");
-            xml.writeEmptyElement(u"cellStyle");
-            xml.writeAttribute(u"name", u"Normal");
-            xml.writeAttribute(u"xfId", u"0");
-            xml.writeAttribute(u"builtinId", u"0");
+            xml.writeStartElement(QStringLiteral("cellStyles"));
+            xml.writeAttribute(QStringLiteral("count"), QStringLiteral("1"));
+            xml.writeEmptyElement(QStringLiteral("cellStyle"));
+            xml.writeAttribute(QStringLiteral("name"), QStringLiteral("Normal"));
+            xml.writeAttribute(QStringLiteral("xfId"), QStringLiteral("0"));
+            xml.writeAttribute(QStringLiteral("builtinId"), QStringLiteral("0"));
             xml.writeEndElement();
         }))
         return {};
     bool validCells = true;
-    if (!addXml("xl/worksheets/sheet1.xml", u"worksheet", spreadsheetNamespace,
+    if (!addXml("xl/worksheets/sheet1.xml", QStringLiteral("worksheet"), spreadsheetNamespace,
                 [&](QXmlStreamWriter& xml) {
-                    xml.writeEmptyElement(u"dimension");
-                    xml.writeAttribute(u"ref", QStringLiteral("A1:") +
+                    xml.writeEmptyElement(QStringLiteral("dimension"));
+                    xml.writeAttribute(QStringLiteral("ref"), QStringLiteral("A1:") +
                                                    cellReference(document.rowCount() - 1,
                                                                  document.columnCount() - 1));
-                    xml.writeStartElement(u"sheetData");
+                    xml.writeStartElement(QStringLiteral("sheetData"));
                     QStringList merges;
                     for (int row = 0; row < document.rowCount(); ++row) {
-                        xml.writeStartElement(u"row");
-                        xml.writeAttribute(u"r", QString::number(row + 1));
+                        xml.writeStartElement(QStringLiteral("row"));
+                        xml.writeAttribute(QStringLiteral("r"), QString::number(row + 1));
                         for (int column = 0; column < document.columnCount(); ++column) {
                             const auto* cell = document.anchorCellAt(row, column);
                             if (!cell)
@@ -223,13 +224,13 @@ QByteArray tableWorkbook(const ScreenshotTableDocument& document) {
                                 return;
                             }
                             const QString reference = cellReference(row, column);
-                            xml.writeStartElement(u"c");
-                            xml.writeAttribute(u"r", reference);
-                            xml.writeAttribute(u"t", u"inlineStr");
-                            xml.writeAttribute(u"s", cell->header ? u"1" : u"0");
-                            xml.writeStartElement(u"is");
-                            xml.writeStartElement(u"t");
-                            xml.writeAttribute(u"xml:space", u"preserve");
+                            xml.writeStartElement(QStringLiteral("c"));
+                            xml.writeAttribute(QStringLiteral("r"), reference);
+                            xml.writeAttribute(QStringLiteral("t"), QStringLiteral("inlineStr"));
+                            xml.writeAttribute(QStringLiteral("s"), cell->header ? QStringLiteral("1") : QStringLiteral("0"));
+                            xml.writeStartElement(QStringLiteral("is"));
+                            xml.writeStartElement(QStringLiteral("t"));
+                            xml.writeAttribute(QStringLiteral("xml:space"), QStringLiteral("preserve"));
                             xml.writeCharacters(spreadsheetText(cell->text));
                             xml.writeEndElement();
                             xml.writeEndElement();
@@ -243,11 +244,11 @@ QByteArray tableWorkbook(const ScreenshotTableDocument& document) {
                     }
                     xml.writeEndElement();
                     if (!merges.isEmpty()) {
-                        xml.writeStartElement(u"mergeCells");
-                        xml.writeAttribute(u"count", QString::number(merges.size()));
+                        xml.writeStartElement(QStringLiteral("mergeCells"));
+                        xml.writeAttribute(QStringLiteral("count"), QString::number(merges.size()));
                         for (const auto& range : merges) {
-                            xml.writeEmptyElement(u"mergeCell");
-                            xml.writeAttribute(u"ref", range);
+                            xml.writeEmptyElement(QStringLiteral("mergeCell"));
+                            xml.writeAttribute(QStringLiteral("ref"), range);
                         }
                         xml.writeEndElement();
                     }

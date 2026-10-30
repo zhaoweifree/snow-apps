@@ -1010,7 +1010,7 @@ void retryRefreshesUnavailableCatalogsForBothRecognitionModes() {
         for (const QString& selection :
              {QStringLiteral("new-vision"), screenshotDefaultVisionRecognitionModelId()}) {
             RecognitionServer server;
-            server.catalogOrder = {QStringLiteral("vision-a")};
+            server.catalogOrder = QStringList{QStringLiteral("vision-a")};
             server.includeBuiltinVision = selection != screenshotDefaultVisionRecognitionModelId();
             server.visionSource = mode == Mode::Table
                                       ? QStringLiteral("<table><tr><th>Recovered</th></tr></table>")
@@ -1139,7 +1139,7 @@ void defaultVisionModelRemainsBoundAcrossCatalogRefreshes() {
                     publishedModelState.effectiveModel == QStringLiteral("vision-a") &&
                     inactiveModelState.effectiveModel.isEmpty(),
                 "only the active default selector publishes its bound extraction model");
-        server.catalogOrder = {QStringLiteral("vision-b"), QStringLiteral("vision-a")};
+        server.catalogOrder = QStringList{QStringLiteral("vision-b"), QStringLiteral("vision-a")};
         refreshCatalog(api);
         require(api.builtInVisionModel() == QStringLiteral("vision-b") && session.busy(mode) &&
                     session.workflowResult().isEmpty() && server.visionRequests.size() == 1 &&
@@ -1168,9 +1168,9 @@ void defaultVisionModelRemainsBoundAcrossCatalogRefreshes() {
                               {QStringLiteral("text"), QStringLiteral("a^3")}};
         require(session.editWorkflow(edit), "edit the active semantic default result");
         const auto edited = session.workflowResult();
-        server.catalogOrder = {QStringLiteral("vision-a"), QStringLiteral("vision-b")};
+        server.catalogOrder = QStringList{QStringLiteral("vision-a"), QStringLiteral("vision-b")};
         refreshCatalog(api);
-        server.catalogOrder = {QStringLiteral("vision-b"), QStringLiteral("vision-a")};
+        server.catalogOrder = QStringList{QStringLiteral("vision-b"), QStringLiteral("vision-a")};
         refreshCatalog(api);
         require(session.workflowResult() == edited && !session.busy() &&
                     server.visionRequests.size() == 1 && server.dedicatedRequests == 0 &&

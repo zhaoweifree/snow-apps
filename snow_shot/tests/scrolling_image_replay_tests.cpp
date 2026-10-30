@@ -1213,7 +1213,7 @@ void pipelineDiagnosticsTest() {
     };
     QTemporaryDir directory;
     DiagnosticsOptions options;
-    options.directories = {QDir(directory.path()).canonicalPath()};
+    options.directories = QStringList{QDir(directory.path()).canonicalPath()};
     options.enableCrashCapture = false;
     options.installMessageHandler = false;
     options.mirrorToConsole = false;

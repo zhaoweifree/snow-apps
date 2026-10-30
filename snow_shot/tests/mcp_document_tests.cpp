@@ -151,7 +151,7 @@ class FixtureOcr final : public ScreenshotOcrRecognitionPort {
                 line.text = QStringLiteral("Fixture recognized text");
                 line.confidence = 1;
                 line.quad =
-                    QPolygonF{QPointF(0, 0), QPointF(70, 0), QPointF(70, 20), QPointF(0, 20)};
+                    snowPolygonF({QPointF(0, 0), QPointF(70, 0), QPointF(70, 20), QPointF(0, 20)});
                 presentation->lines.append(line);
                 presentation->prepareForRendering();
                 completion({presentation});

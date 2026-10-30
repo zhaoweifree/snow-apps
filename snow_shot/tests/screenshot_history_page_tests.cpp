@@ -770,8 +770,8 @@ void pageTextAndEmptyStateMatchPinnedWindowManagement() {
         const auto scheme = snow_shot::presentation::styles::generateThemeColorScheme(config);
         historyPage.applyTheme(scheme);
         pinnedPage.applyTheme(scheme);
-        require(!historyIcon->pixmap().isNull() &&
-                    historyIcon->pixmap().toImage() == pinnedIcon->pixmap().toImage(),
+        require(!snowLabelPixmap(historyIcon).isNull() &&
+                    snowLabelPixmap(historyIcon).toImage() == snowLabelPixmap(pinnedIcon).toImage(),
                 "the empty-state icon must use identical colors on both pages in each theme");
         for (QLabel* label : {historyCount, pinnedCount, historySelection, pinnedSelection}) {
             require(
@@ -1006,7 +1006,7 @@ void moreMenuOffersPinStitchAndDelete() {
         const QPoint local(widget->width() / 2, 0);
         const QPoint global = widget->mapToGlobal(local);
         QCursor::setPos(global);
-        SnowEnterEvent event(local, local, global);
+        SnowEnterEventInstance event(local, local, global);
         QApplication::sendEvent(widget, &event);
     };
     hover(more);

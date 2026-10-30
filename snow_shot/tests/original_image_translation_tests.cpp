@@ -316,8 +316,8 @@ struct SessionProbe {
             const qreal top = index * 25.0;
             source->lines.push_back(
                 {sourceTexts.value(index, QStringLiteral("source %1").arg(index)), 0.95,
-                 QPolygonF{QPointF(0, top), QPointF(150, top), QPointF(150, top + 20),
-                           QPointF(0, top + 20)}});
+                 snowPolygonF({QPointF(0, top), QPointF(150, top), QPointF(150, top + 20),
+                               QPointF(0, top + 20)})});
         }
         source->prepareForRendering();
         ScreenshotRecognitionTarget target;

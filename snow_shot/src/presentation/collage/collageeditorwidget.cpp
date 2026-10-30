@@ -219,9 +219,16 @@ int areaStripRows(const QImage& image, QRect crop, QSize output) {
         return 0;
     // The native crop, ICC conversion and high-precision horizontal result coexist.
     // Qt's native FP16 color transform expands to FP32 before restoring its input format.
+    // The FP16 pixel formats (and the FP32 conversion Qt does behind them) are
+    // Qt 6.2 API; Qt 5's widest format here is 16-bit integer, so no input can
+    // take that path and the wider per-row budget is never needed.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
     const bool halfFloat = image.format() == QImage::Format_RGBX16FPx4 ||
                            image.format() == QImage::Format_RGBA16FPx4 ||
                            image.format() == QImage::Format_RGBA16FPx4_Premultiplied;
+#else
+    const bool halfFloat = false;
+#endif
     const qint64 row = qint64(crop.width()) * std::max(halfFloat ? 16 : 8, image.depth() / 8) * 3;
     return static_cast<int>(std::min<qint64>(64, maximumAreaStripBytes / row));
 }
@@ -510,7 +517,7 @@ class CollageThumbnail final : public QWidget {
             painter.drawRoundedRect(outer, theme.borderRadiusSM, theme.borderRadiusSM);
         }
     }
-    void enterEvent(QEnterEvent* event) override {
+    void enterEvent(SnowEnterEvent* event) override {
         m_hovered = true;
         reveal();
         QWidget::enterEvent(event);
@@ -539,7 +546,7 @@ class CollageThumbnail final : public QWidget {
     }
     void mousePressEvent(QMouseEvent* event) override {
         if (event->button() == Qt::LeftButton) {
-            m_press = event->position();
+            m_press = snowPos(event);
             setFocus(Qt::MouseFocusReason);
             if (selected)
                 selected(m_id);
@@ -548,7 +555,7 @@ class CollageThumbnail final : public QWidget {
     }
     void mouseMoveEvent(QMouseEvent* event) override {
         if (!(event->buttons() & Qt::LeftButton) || !m_editing ||
-            (event->position() - m_press).manhattanLength() < QApplication::startDragDistance())
+            (snowPos(event) - m_press).manhattanLength() < QApplication::startDragDistance())
             return;
         auto* drag = new QDrag(this);
         auto* mime = new QMimeData;
@@ -1220,14 +1227,14 @@ void CollagePreviewCanvas::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton) {
         d.panning = true;
         d.automaticFit = false;
-        d.last = event->position();
+        d.last = snowPos(event);
         setCursor(Qt::ClosedHandCursor);
         event->accept();
     } else if (event->button() == Qt::LeftButton) {
         d.automaticFit = false;
-        const auto selected = d.hit(event->position());
+        const auto selected = d.hit(snowPos(event));
         d.pressedId = d.editing ? selected : 0;
-        d.press = event->position();
+        d.press = snowPos(event);
         d.document->select(selected);
         event->accept();
     }
@@ -1235,13 +1242,13 @@ void CollagePreviewCanvas::mousePressEvent(QMouseEvent* event) {
 void CollagePreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
     auto& d = *m_impl;
     if (d.panning) {
-        d.offset += event->position() - d.last;
-        d.last = event->position();
+        d.offset += snowPos(event) - d.last;
+        d.last = snowPos(event);
         d.geometryChanged();
     } else if (d.pressedId && d.editing && (event->buttons() & Qt::LeftButton)) {
-        if ((event->position() - d.press).manhattanLength() >= QApplication::startDragDistance())
+        if ((snowPos(event) - d.press).manhattanLength() >= QApplication::startDragDistance())
             d.dragging = true;
-        d.targetId = d.dragging ? d.hit(event->position()) : 0;
+        d.targetId = d.dragging ? d.hit(snowPos(event)) : 0;
         if (d.dragging)
             setCursor(d.targetId && d.targetId != d.pressedId ? Qt::DragMoveCursor
                                                               : Qt::ForbiddenCursor);
@@ -1253,7 +1260,7 @@ void CollagePreviewCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton)
         d.panning = false;
     if (event->button() == Qt::LeftButton) {
-        const auto target = d.hit(event->position());
+        const auto target = d.hit(snowPos(event));
         if (d.dragging && d.editing && target && target != d.pressedId)
             d.document->swapItems(d.pressedId, target);
         d.pressedId = 0;
@@ -1273,7 +1280,7 @@ void CollagePreviewCanvas::wheelEvent(QWheelEvent* event) {
                                                        : event->angleDelta().y() / 120.0;
     if (steps != 0) {
         const double next = std::clamp(d.zoom * std::pow(1.15, steps), 0.000000001, 16.0);
-        d.offset = event->position() - (event->position() - d.offset) * (next / d.zoom);
+        d.offset = snowPos(event) - (snowPos(event) - d.offset) * (next / d.zoom);
         d.zoom = next;
         d.automaticFit = false;
         d.geometryChanged();
@@ -1297,7 +1304,8 @@ void CollagePreviewCanvas::keyPressEvent(QKeyEvent* event) {
         const auto index = d.indexById.value(d.document->selectedId(), -1);
         const int delta = event->key() == Qt::Key_Left || event->key() == Qt::Key_Up ? -1 : 1;
         if (!d.order.isEmpty())
-            centerImage(d.order[qBound(qsizetype{0}, index + delta, d.order.size() - 1)]);
+            centerImage(d.order[qBound(qsizetype{0}, index + delta,
+                                          static_cast<qsizetype>(d.order.size()) - 1)]);
     } else {
         QWidget::keyPressEvent(event);
         return;
@@ -1309,7 +1317,7 @@ void CollagePreviewCanvas::dragEnterEvent(QDragEnterEvent* event) {
         event->acceptProposedAction();
 }
 void CollagePreviewCanvas::dragMoveEvent(QDragMoveEvent* event) {
-    m_impl->targetId = m_impl->hit(event->position());
+    m_impl->targetId = m_impl->hit(snowPos(event));
     if (m_impl->targetId && m_impl->targetId != dragItem(event->mimeData(), m_impl->document))
         event->acceptProposedAction();
     else
@@ -1321,7 +1329,7 @@ void CollagePreviewCanvas::dragLeaveEvent(QDragLeaveEvent*) {
     update();
 }
 void CollagePreviewCanvas::dropEvent(QDropEvent* event) {
-    const auto target = m_impl->hit(event->position());
+    const auto target = m_impl->hit(snowPos(event));
     const auto source = dragItem(event->mimeData(), m_impl->document);
     m_impl->targetId = 0;
     if (m_impl->editing && target && source && m_impl->document->swapItems(source, target))

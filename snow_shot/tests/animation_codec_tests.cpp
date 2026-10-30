@@ -247,8 +247,8 @@ void malformedStaticPngsFailSafely() {
     require(!encoded.isEmpty(), "encode malformed PNG regression fixture");
     const auto imageData = encoded.indexOf("IDAT");
     require(imageData >= 4, "PNG regression fixture image data");
-    const QList<QByteArray> truncated{encoded.first(20), encoded.first(imageData + 9),
-                                      encoded.first(encoded.size() - 12)};
+    const QList<QByteArray> truncated{encoded.mid(0, 20), encoded.mid(0, imageData + 9),
+                                      encoded.mid(0, encoded.size() - 12)};
     for (int attempt = 0; attempt < 3; ++attempt) {
         for (const auto& bytes : truncated)
             require(decode(bytes, snow::image::Format::png, "malformed.png").isNull(),

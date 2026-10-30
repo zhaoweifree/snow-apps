@@ -302,9 +302,8 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
             const auto type = event->type() == QEvent::TabletPress     ? QEvent::MouseButtonPress
                               : event->type() == QEvent::TabletRelease ? QEvent::MouseButtonRelease
                                                                        : QEvent::MouseMove;
-            QMouseEvent pointer(type, tablet->position(), tablet->globalPosition(),
-                                tablet->button(), tablet->buttons(), tablet->modifiers(),
-                                tablet->pointingDevice());
+            QMouseEvent pointer = snowTabletMouseEvent(type, *tablet, tablet->button(),
+                                                        tablet->buttons(), tablet->modifiers());
             if (eventFilter(watched, &pointer)) {
                 event->accept();
                 return true;
@@ -422,7 +421,7 @@ class GlobalCanvasController::Session final : public QWidget, public SnowCanvasC
             colorSampling.hidePreview();
         } else {
             colorSampling.updatePreview(preview,
-                                        snowMapToGlobal(drawing.data(), localPosition).toPoint());
+                                        snowMapToGlobal(drawing.get(), localPosition).toPoint());
         }
     }
     void finishPan() {

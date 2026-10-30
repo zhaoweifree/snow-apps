@@ -340,7 +340,7 @@ void ocrProcessLifecycleTests() {
     qputenv("SNOW_TEST_OCR_LIFECYCLE_CHILD", "1");
     qputenv("SNOW_TEST_OCR_LIFECYCLE_MARKER", markerPath.toUtf8());
     DiagnosticsOptions logging;
-    logging.directories = {
+    logging.directories = QStringList{
         QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("logs"))};
     logging.enableCrashCapture = false;
     logging.mirrorToConsole = false;

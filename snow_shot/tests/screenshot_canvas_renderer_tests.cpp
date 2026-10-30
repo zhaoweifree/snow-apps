@@ -4285,7 +4285,7 @@ std::shared_ptr<ScreenshotOcrPresentation> ocrLineBoxRenderingPresentation() {
         ScreenshotOcrLine line;
         line.text = QStringLiteral("  Preview text  ");
         const qreal y = 25.0 + lineIndex * 50.0;
-        line.quad = {{30.0, y}, {250.0, y}, {250.0, y + 20.0}, {30.0, y + 20.0}};
+        line.quad = snowPolygonF({{30.0, y}, {250.0, y}, {250.0, y + 20.0}, {30.0, y + 20.0}});
         presentation->lines.push_back(std::move(line));
     }
     presentation->beginTextSelection(ScreenshotOcrTextPosition{0, 0});
@@ -4809,8 +4809,8 @@ void ocrLineBoxBatchRetainsOverlappingReversedQuads() {
     auto presentation = std::make_shared<ScreenshotOcrPresentation>();
     presentation->selection = QRect(0, 0, 300, 200);
     for (const QPolygonF& quad :
-         {QPolygonF{{40.0, 40.0}, {160.0, 40.0}, {160.0, 80.0}, {40.0, 80.0}},
-          QPolygonF{{100.0, 80.0}, {220.0, 80.0}, {220.0, 40.0}, {100.0, 40.0}}}) {
+         {snowPolygonF({{40.0, 40.0}, {160.0, 40.0}, {160.0, 80.0}, {40.0, 80.0}}),
+          snowPolygonF({{100.0, 80.0}, {220.0, 80.0}, {220.0, 40.0}, {100.0, 40.0}})}) {
         ScreenshotOcrLine line;
         line.text = QStringLiteral("Overlapping text");
         line.quad = quad;
@@ -4848,7 +4848,7 @@ void ocrLineBoxDamageClampsHugeGeometryAndRejectsNonfiniteQuads() {
     presentation->selection = host.rect();
     ScreenshotOcrLine giant;
     giant.text = QStringLiteral("X");
-    giant.quad = {{-1.0e12, 40.0}, {1.0e12, 40.0}, {1.0e12, 80.0}, {-1.0e12, 80.0}};
+    giant.quad = snowPolygonF({{-1.0e12, 40.0}, {1.0e12, 40.0}, {1.0e12, 80.0}, {-1.0e12, 80.0}});
     presentation->lines.push_back(giant);
     ScreenshotOcrLine invalid = giant;
     invalid.quad[0].setX(std::numeric_limits<qreal>::quiet_NaN());
@@ -5162,8 +5162,8 @@ void ocrGlyphDeviceCachesMatchDirectPaintingAndInvalidate() {
         line.text = QStringLiteral("Translated source rows retain their exact selected backgrounds "
                                    "and preserve the shorter final row");
         line.paragraph = true;
-        line.quad = {QPointF(30.0, 25.0), QPointF(250.0, 25.0), QPointF(250.0, 120.0),
-                     QPointF(30.0, 120.0)};
+        line.quad = snowPolygonF({QPointF(30.0, 25.0), QPointF(250.0, 25.0), QPointF(250.0, 120.0),
+                     QPointF(30.0, 120.0)});
         for (const QRectF row : {QRectF(30.0, 25.0, 220.0, 20.0), QRectF(30.0, 60.0, 220.0, 20.0),
                                  QRectF(30.0, 100.0, 145.0, 20.0)}) {
             QPolygonF quad(row);
@@ -5245,7 +5245,7 @@ void ocrGlyphCachesCropTransparentMarginsWithoutChangingPhase() {
         ScreenshotOcrLine line;
         line.text = QStringLiteral("Margin glyphs with room");
         line.backgroundFillColor = Qt::white;
-        line.quad = {{20.0, 20.0}, {320.0, 20.0}, {320.0, 110.0}, {20.0, 110.0}};
+        line.quad = snowPolygonF({{20.0, 20.0}, {320.0, 20.0}, {320.0, 110.0}, {20.0, 110.0}});
         presentation->lines.push_back(line);
         layer.setPresentation(presentation);
         layer.synchronize(QTransform(1.0, 0.03, 0.05, 1.0, 0.25, 0.5), host.rect());
@@ -5356,7 +5356,7 @@ void ocrGlyphCachingPreservesOriginalAndCffFontCoverage() {
         line.text = sample;
         line.direction = direction;
         line.backgroundFillColor = Qt::white;
-        line.quad = {{20.0, 20.0}, {320.0, 20.0}, {320.0, 110.0}, {20.0, 110.0}};
+        line.quad = snowPolygonF({{20.0, 20.0}, {320.0, 20.0}, {320.0, 110.0}, {20.0, 110.0}});
         line.paragraph = sourceRows;
         if (sourceRows) {
             for (const QRectF row :
@@ -5553,8 +5553,8 @@ void ocrBackgroundRastersPreserveSourceRowExposureAndDpi() {
     ScreenshotOcrLine line;
     line.text = QStringLiteral("These words should fill the original rows with readable spacing");
     line.paragraph = true;
-    line.quad = {QPointF(30.0, 25.0), QPointF(250.0, 25.0), QPointF(250.0, 120.0),
-                 QPointF(30.0, 120.0)};
+    line.quad = snowPolygonF({QPointF(30.0, 25.0), QPointF(250.0, 25.0), QPointF(250.0, 120.0),
+                 QPointF(30.0, 120.0)});
     for (const QRectF row : {QRectF(30.0, 25.0, 220.0, 20.0), QRectF(30.0, 60.0, 220.0, 20.0),
                              QRectF(30.0, 100.0, 145.0, 20.0)}) {
         QPolygonF quad(row);
@@ -5772,8 +5772,8 @@ void originalImageVisibilityPreservesLatestOcrRendering() {
             auto presentation = std::make_shared<ScreenshotOcrPresentation>();
             presentation->selection = rect.toRect();
             presentation->lines.push_back({QStringLiteral("OCR"), 0.99,
-                                           QPolygonF{QPointF(-40, -10), QPointF(40, -10),
-                                                     QPointF(40, 10), QPointF(-40, 10)}});
+                                           snowPolygonF({QPointF(-40, -10), QPointF(40, -10),
+                                                     QPointF(40, 10), QPointF(-40, 10)})});
             renderer.setOcrPresentation(presentation, mode);
             QImage filtered(original.size(), original.format());
             filtered.fill(Qt::red);
@@ -6400,7 +6400,7 @@ void mergedParagraphWrapsAndFillsAnalyzedRegion() {
     line.text = QStringLiteral("This translated paragraph must wrap into several readable lines "
                                "inside its original image region");
     line.paragraph = true;
-    line.quad = {QPointF(-100, -60), QPointF(100, -60), QPointF(100, 60), QPointF(-100, 60)};
+    line.quad = snowPolygonF({QPointF(-100, -60), QPointF(100, -60), QPointF(100, 60), QPointF(-100, 60)});
     line.sourceLineQuads = {
         {QPointF(-100, -60), QPointF(100, -60), QPointF(100, -40), QPointF(-100, -40)},
         {QPointF(-100, 40), QPointF(100, 40), QPointF(100, 60), QPointF(-100, 60)}};

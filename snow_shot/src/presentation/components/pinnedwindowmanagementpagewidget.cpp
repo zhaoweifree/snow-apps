@@ -200,8 +200,10 @@ class ApplicationPinnedDataSource final : public PinnedWindowManagementDataSourc
             storage::ApplicationStorage::instance().pinnedWindows().previewSourceRevision(
                 id, &colorSwatch);
         return revision && colorSwatch
-                   ? std::optional<quint64>(qHashMulti(
-                         *revision, swatchAppearanceKey(capturePinnedColorSwatchStyle())))
+                   // Rule R14: qHashMulti() with no seed is Qt 6 only; the shim
+                   // always takes one, and 0 is the seed Qt 6 uses there.
+                   ? std::optional<quint64>(snowHashMulti(
+                         0, *revision, swatchAppearanceKey(capturePinnedColorSwatchStyle())))
                    : revision;
     }
 

@@ -241,7 +241,7 @@ bool ScreenshotPinnedEditController::eventFilter(QObject* watched, QEvent* event
             return true;
         }
         const bool outsideContent = !m_pinnedWindow.contentViewRect().contains(
-            m_pinnedWindow.windowPositionForEvent(watched, tablet->position()));
+            m_pinnedWindow.windowPositionForEvent(watched, snowTabletPos(*tablet)));
         if (m_tabletFrameGesture || (event->type() != QEvent::TabletRelease &&
                                      QWidget::mouseGrabber() != &m_canvas && outsideContent)) {
             m_tabletFrameGesture = event->type() != QEvent::TabletRelease &&
@@ -254,8 +254,8 @@ bool ScreenshotPinnedEditController::eventFilter(QObject* watched, QEvent* event
         const auto type = event->type() == QEvent::TabletPress     ? QEvent::MouseButtonPress
                           : event->type() == QEvent::TabletRelease ? QEvent::MouseButtonRelease
                                                                    : QEvent::MouseMove;
-        QMouseEvent pointer(type, tablet->position(), tablet->globalPosition(), tablet->button(),
-                            tablet->buttons(), tablet->modifiers(), tablet->pointingDevice());
+        QMouseEvent pointer = snowTabletMouseEvent(type, *tablet, tablet->button(),
+                                                    tablet->buttons(), tablet->modifiers());
         const bool samplingPress =
             event->type() == QEvent::TabletPress && canvasColorSamplingActive();
         const QPointer<ScreenshotPinnedEditController> lifetime(this);

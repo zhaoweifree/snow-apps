@@ -1754,7 +1754,7 @@ bool OverlayPopupController::handlePopupShadowPointerEvent(QEvent* event) {
       if (surface->isWindow()) {
         return false;
       }
-      globalPos = static_cast<QWheelEvent*>(event)->globalPosition().toPoint();
+      globalPos = snowGlobalPos(static_cast<QWheelEvent*>(event)).toPoint();
       break;
     case QEvent::ContextMenu:
       globalPos = static_cast<QContextMenuEvent*>(event)->globalPos();

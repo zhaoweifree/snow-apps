@@ -358,7 +358,7 @@ void selectionAndCancellation() {
     QTemporaryDir directory;
     const QString path = imageFile(directory, QStringLiteral("selection.png"));
     auto backend = std::make_shared<FakeBackend>();
-    backend->paths = {path};
+    backend->paths = QStringList{path};
     ScreenshotFilePinBatch batch;
     int presented = 0;
     auto present = [&](ScreenshotClipboardContent content) {
@@ -378,7 +378,7 @@ void selectionAndCancellation() {
     require(presented == 1, "empty or unsupported selection must do nothing");
 
     backend = std::make_shared<FakeBackend>();
-    backend->paths = {path};
+    backend->paths = QStringList{path};
     backend->block = true;
     batch.startSelection(backend, target, present);
     require(backend->entered.tryAcquire(1, 5000), "selection worker must start");
@@ -388,7 +388,7 @@ void selectionAndCancellation() {
     require(presented == 2, "replaced selection must not deliver a late pin");
 
     backend = std::make_shared<FakeBackend>();
-    backend->paths = {path};
+    backend->paths = QStringList{path};
     backend->block = true;
     auto dying = std::make_unique<ScreenshotFilePinBatch>();
     dying->startSelection(backend, target, present);

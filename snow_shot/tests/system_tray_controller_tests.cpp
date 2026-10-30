@@ -265,7 +265,7 @@ void verifyFullscreenSuppressionBadge(snow_shot::presentation::SystemTrayControl
     const auto connection = QObject::connect(
         &controller, &snow_shot::presentation::SystemTrayController::quickActionRequested,
         &controller, [&](Action) { ++quickActions; });
-    const auto artwork = [&]() { return trayIcon->icon().pixmap(QSize(32, 32), 1.0).toImage(); };
+    const auto artwork = [&]() { return snowIconPixmap(trayIcon->icon(), QSize(32, 32), 1.0).toImage(); };
     const auto verify = [&]() {
         const QImage original = artwork();
         controller.setQuickActionChecked(Action::ToggleDisableOnFocusedFullscreenWindow, true);
@@ -950,7 +950,7 @@ int main(int argc, char* argv[]) {
             QPainter painter(&normal);
             original.paint(&painter, QRect(0, 0, size, size));
             painter.end();
-            const QImage disabled = trayIcon->icon().pixmap(QSize(size, size), 1.0).toImage();
+            const QImage disabled = snowIconPixmap(trayIcon->icon(), QSize(size, size), 1.0).toImage();
             require(disabled.size() == QSize(size, size),
                     "badged tray icons should provide standard and high-DPI sizes");
             const QColor red = disabled.pixelColor(size * 6 / 16, size * 6 / 16);
@@ -971,12 +971,12 @@ int main(int argc, char* argv[]) {
                     "the centered badge must preserve artwork along every edge");
         }
         controller.show();
-        require(trayIcon->icon().pixmap(QSize(32, 32), 1.0).toImage() !=
-                    original.pixmap(QSize(32, 32), 1.0).toImage(),
+        require(snowIconPixmap(trayIcon->icon(), QSize(32, 32), 1.0).toImage() !=
+                    snowIconPixmap(original, QSize(32, 32), 1.0).toImage(),
                 "refreshing the tray must preserve the disabled badge");
         controller.setQuickActionChecked(GlobalShortcutAction::ToggleGlobalHotkeys, false);
-        require(trayIcon->icon().pixmap(QSize(32, 32), 1.0).toImage() ==
-                    original.pixmap(QSize(32, 32), 1.0).toImage(),
+        require(snowIconPixmap(trayIcon->icon(), QSize(32, 32), 1.0).toImage() ==
+                    snowIconPixmap(original, QSize(32, 32), 1.0).toImage(),
                 "re-enabling shortcuts must restore the original tray artwork");
     };
     for (const QString& selection : bundledSelections) {
@@ -1056,7 +1056,7 @@ int main(int argc, char* argv[]) {
         require(
             trayIcon->property("customIconSourcePixelSize").toSize() == QSize(512, 1024) &&
                 trayIcon->property("customIconDecodedPixelSize").toSize() == QSize(128, 256) &&
-                trayIcon->icon().pixmap(QSize(128, 256), 1.0).size() == QSize(128, 256),
+                snowIconPixmap(trayIcon->icon(), QSize(128, 256), 1.0).size() == QSize(128, 256),
             "tray metadata must match orientation while scaling remains bounded before rotation");
     }
 
@@ -1297,7 +1297,7 @@ int main(int argc, char* argv[]) {
                       "Screenshot should use its catalog label");
 #ifdef Q_OS_MACOS
     const QImage screenshotMenuIcon =
-        screenshotMenuAction->icon().pixmap(QSize(32, 32), QIcon::Normal).toImage();
+        snowIconPixmap(screenshotMenuAction->icon(), QSize(32, 32), QIcon::Normal).toImage();
     require(containsOpaqueColor(screenshotMenuIcon,
                                 menu->palette().color(QPalette::Active, QPalette::Text)) &&
                 containsOpaqueColor(screenshotMenuIcon, QColor(QStringLiteral("#9254de"))) &&

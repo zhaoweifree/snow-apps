@@ -278,7 +278,7 @@ struct ImageSplitWindow::Impl final {
         binding.id = QStringLiteral("imageSplitPaste");
         for (const auto& sequence : QKeySequence::keyBindings(QKeySequence::Paste)) {
             if (sequence.count() == 1)
-                binding.keyCombinations.append(sequence[0]);
+                binding.keyCombinations.append(snowKeySequenceAt(sequence, 0));
         }
         binding.priority = WindowShortcutManager::StandardPriority::WindowCommand;
         binding.canActivate = [this](const auto& context) {

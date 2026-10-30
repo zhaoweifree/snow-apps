@@ -83,7 +83,7 @@ void windowClick(QWidget* target) {
     windowMouse(target, QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton);
 }
 QPolygonF quad(qreal x, qreal y, qreal size = 30) {
-    return {QPointF(x, y), QPointF(x + size, y), QPointF(x + size, y + size), QPointF(x, y + size)};
+    return snowPolygonF({QPointF(x, y), QPointF(x + size, y), QPointF(x + size, y + size), QPointF(x, y + size)});
 }
 class Decoder final : public ScreenshotQrRecognitionPort {
   public:
@@ -400,7 +400,7 @@ void hoverPopoverPreservesOwnerStacking() {
         QApplication::processEvents();
         verify();
         auto* marker = f.marker(0);
-        SnowEnterEvent enter(QPointF(12, 12), QPointF(12, 12), marker->mapToGlobal(QPoint(12, 12)));
+        SnowEnterEventInstance enter(QPointF(12, 12), QPointF(12, 12), marker->mapToGlobal(QPoint(12, 12)));
         QApplication::sendEvent(marker, &enter);
         until([&] { return f.popover() && f.popover()->isVisible(); },
               "QR hover must reveal the popover");
@@ -420,7 +420,7 @@ void hoverPopoverPreservesOwnerStacking() {
 
 void enterMarker(QWidget* marker) {
     const QPoint center = marker->rect().center();
-    SnowEnterEvent enter(center, marker->mapTo(marker->window(), center), marker->mapToGlobal(center));
+    SnowEnterEventInstance enter(center, marker->mapTo(marker->window(), center), marker->mapToGlobal(center));
     QApplication::sendEvent(marker, &enter);
 }
 
@@ -592,7 +592,7 @@ void popoverActionsAndHover() {
     const QString payload = QStringLiteral("  <b>Text</b>\n二维码\n  ");
     f.complete({{payload, quad(50, 60)}});
     auto* marker = f.marker(0);
-    SnowEnterEvent enter(QPointF(12, 12), QPointF(12, 12), marker->mapToGlobal(QPoint(12, 12)));
+    SnowEnterEventInstance enter(QPointF(12, 12), QPointF(12, 12), marker->mapToGlobal(QPoint(12, 12)));
     QApplication::sendEvent(marker, &enter);
     require(!f.popover(), "hover opening is delayed");
     advance(175);

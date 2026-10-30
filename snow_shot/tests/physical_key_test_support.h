@@ -31,7 +31,7 @@ class PhysicalKeyEvent : public QKeyEvent {
             break;
         }
         const auto binding = snow_shot::shortcuts::bindingFromPortableText(
-            QKeySequence(QKeyCombination(modifiers, static_cast<Qt::Key>(key)))
+            snowKeySequence(QKeyCombination(modifiers, static_cast<Qt::Key>(key)))
                 .toString(QKeySequence::PortableText));
         return snow_shot::shortcuts::macVirtualKeyForBinding(binding).value_or(128);
     }

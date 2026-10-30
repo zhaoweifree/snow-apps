@@ -206,7 +206,7 @@ void oneEngineIsInitializedAfterReadyAndReused() {
     using namespace snow_shot::diagnostics;
     QTemporaryDir directory;
     DiagnosticsOptions logging;
-    logging.directories = {QFileInfo(directory.path()).canonicalFilePath()};
+    logging.directories = QStringList{QFileInfo(directory.path()).canonicalFilePath()};
     logging.enableCrashCapture = false;
     logging.mirrorToConsole = false;
     auto& diagnostics = DiagnosticsService::instance();
@@ -267,7 +267,7 @@ void residentRuntimeRebuildsWarmSessions(
     using namespace snow_shot::diagnostics;
     QTemporaryDir directory;
     DiagnosticsOptions logging;
-    logging.directories = {QFileInfo(directory.path()).canonicalFilePath()};
+    logging.directories = QStringList{QFileInfo(directory.path()).canonicalFilePath()};
     logging.enableCrashCapture = false;
     logging.mirrorToConsole = false;
     auto& diagnostics = DiagnosticsService::instance();

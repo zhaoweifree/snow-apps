@@ -1064,7 +1064,7 @@ void controlledBordersCrossAndCancelWithoutClearingAnnotations() {
                                 QRect(end, QSize(1, 1)), area.screen())
                                 .topLeft();
 #endif
-    QMouseEvent release(QEvent::MouseButtonRelease, area.mapFromGlobal(logical), logical,
+    QMouseEvent release(QEvent::MouseButtonRelease, area.mapFromGlobal(snowWidgetPosition(logical)), logical,
                         Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
     QCoreApplication::sendEvent(&area, &release);
     require(!ScreenRecordingAreaWindowTestAccess::dragging(area) &&

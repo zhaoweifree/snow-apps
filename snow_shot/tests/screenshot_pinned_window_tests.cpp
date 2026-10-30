@@ -4447,7 +4447,7 @@ void setPinnedWindowHovered(ScreenshotPinnedWindow& window, bool hovered) {
     }
 #endif
     if (hovered) {
-        SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(10, 10));
+        SnowEnterEventInstance enter(QPointF(10, 10), QPointF(10, 10), QPointF(10, 10));
         QCoreApplication::sendEvent(&window, &enter);
     } else {
         QEvent leave(QEvent::Leave);
@@ -5793,7 +5793,7 @@ void pinnedControlsMatchReferenceStyle(SnowCanvasRuntime&) {
             "pinned controls should have a transparent eight pixel gap without a panel surface");
 
     const QPointF center(editButton->rect().center());
-    SnowEnterEvent editEnter(center, center, QPointF(editButton->mapToGlobal(center.toPoint())));
+    SnowEnterEventInstance editEnter(center, center, QPointF(editButton->mapToGlobal(center.toPoint())));
     QCoreApplication::sendEvent(editButton, &editEnter);
     const QColor primary =
         adqt::theme::ThemeManager::instance().resolveTheme(editButton).colorPrimary;
@@ -8238,7 +8238,7 @@ void pinnedGeometryQueriesDoNotCreateNativeWindows() {
     require(!window.currentNativeGeometry().isValid(),
             "uninitialized geometry must not fall back to logical QWidget coordinates");
     require(window.internalWinId() == 0, "reading pinned geometry must not create a native window");
-    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(10, 10));
+    SnowEnterEventInstance enter(QPointF(10, 10), QPointF(10, 10), QPointF(10, 10));
     QCoreApplication::sendEvent(&window, &enter);
     require(window.internalWinId() == 0,
             "hover delivery must not create an unpresented native window");
@@ -8368,7 +8368,7 @@ void pinnedWindowButtonsFollowSettings() {
     require(panel && edit && close, "the settings fixture needs both window buttons");
     require(edit->iconSize() == QSize(18, 18) && close->iconSize() == QSize(18, 18),
             "both pinned controls must use the enlarged shared icon size");
-    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
+    SnowEnterEventInstance enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
     QCoreApplication::sendEvent(&window, &enter);
     require(!panel->isVisible() && !edit->isVisible() && !close->isVisible(),
             "new pinned windows must honor disabled window buttons even on hover");
@@ -8410,7 +8410,7 @@ void pinnedPointerPresenceFollowsEvents() {
     auto* canvas = window.findChild<SnowCanvasWidget*>();
     require(panel && canvas, "the hover fixture needs controls and a canvas");
 
-    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
+    SnowEnterEventInstance enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
     QEvent leave(QEvent::Leave);
     QCoreApplication::sendEvent(&window, &enter);
     require(panel->isVisible(), "top-level entry must reveal controls");
@@ -8451,7 +8451,7 @@ void pinnedPointerPresenceIsDebounced() {
     require(panel && edit && close, "the controls fixture needs both buttons");
     auto& timer = ScreenshotPinnedWindowTestAccess::pointerPresenceTimer(window);
     const auto inside = [&]() { return ScreenshotPinnedWindowTestAccess::pointerInside(window); };
-    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
+    SnowEnterEventInstance enter(QPointF(10, 10), QPointF(10, 10), QPointF(50, 50));
     QEvent leave(QEvent::Leave);
     require(timer.interval() == 100 && timer.isSingleShot() &&
                 timer.timerType() == Qt::PreciseTimer,
@@ -8463,9 +8463,9 @@ void pinnedPointerPresenceIsDebounced() {
     require(inside() && edit->isVisible() && close->isVisible(), "entry must reveal both controls");
     QCoreApplication::sendEvent(&window, &leave);
     require(inside() && timer.isActive(), "exit must start the delay");
-    const auto timerId = timer.id();
+    const auto timerId = timer.timerId();
     QCoreApplication::sendEvent(&window, &leave);
-    require(timer.id() == timerId, "repeated leaves must not restart the delay");
+    require(timer.timerId() == timerId, "repeated leaves must not restart the delay");
     QCoreApplication::sendEvent(edit, &enter);
     require(inside() && !timer.isActive(), "entry onto a child must cancel pending hiding");
     QCoreApplication::sendEvent(&window, &leave);
@@ -8529,7 +8529,7 @@ void pinnedControlsRemainAboveRecognitionContent() {
     auto* close =
         window.findChild<adqt::widgets::AdButton*>(QStringLiteral("screenshotPinnedCloseButton"));
     require(session && panel && edit && close, "recognition stacking fixture needs controls");
-    SnowEnterEvent enter(QPointF(10, 10), QPointF(10, 10), window.mapToGlobal(QPoint(10, 10)));
+    SnowEnterEventInstance enter(QPointF(10, 10), QPointF(10, 10), window.mapToGlobal(QPoint(10, 10)));
     QCoreApplication::sendEvent(window.windowHandle(), &enter);
     require(panel->isVisible(), "controls must be visible before recognition completes");
     const auto requireButtonTargets = [&] {
@@ -10112,7 +10112,7 @@ void restoredPinnedSelectionRendersCachedOcrAfterStorageRestart() {
                 restored.text->presentation->lines.front().text == QStringLiteral("Saved text") &&
                 restored.text->presentation->lines.front().confidence == 0.75 &&
                 restored.text->presentation->lines.front().quad ==
-                    QPolygonF{QPointF(-10, 15), QPointF(80, 15), QPointF(80, 35), QPointF(-10, 35)},
+                    snowPolygonF({QPointF(-10, 15), QPointF(80, 15), QPointF(80, 35), QPointF(-10, 35)}),
             "Qt 6.11 recognition records must retain their text and canvas geometry");
     require(
         ScreenshotPinnedWindow::decodeRecognitionSnapshot(legacy.left(legacy.size() - 1)).isEmpty(),
@@ -12131,7 +12131,7 @@ void pinnedAnnotationsIgnoreSelectionShape() {
             presentation->selection = config.canvasSourceRect.toRect();
             ScreenshotOcrLine line;
             line.text = QStringLiteral("Pinned OCR");
-            line.quad = {{140, 125}, {260, 125}, {260, 165}, {140, 165}};
+            line.quad = snowPolygonF({{140, 125}, {260, 125}, {260, 165}, {140, 165}});
             presentation->lines.push_back(line);
             presentation->prepareForRendering();
             recognitionConfig.recognitionResults.text->presentation = std::move(presentation);
@@ -16392,10 +16392,10 @@ void pinnedOcrBoxSelectionOffscreen() {
     auto& source = *config.recognitionResults.text->presentation;
     source.lines.append(ScreenshotOcrLine{
         QStringLiteral("Middle line"), 0.95,
-        QPolygonF{QPointF(680, 452), QPointF(860, 452), QPointF(860, 472), QPointF(680, 472)}});
+        snowPolygonF({QPointF(680, 452), QPointF(860, 452), QPointF(860, 472), QPointF(680, 472)})});
     source.lines.append(ScreenshotOcrLine{
         QStringLiteral("Last line"), 0.95,
-        QPolygonF{QPointF(680, 490), QPointF(860, 490), QPointF(860, 510), QPointF(680, 510)}});
+        snowPolygonF({QPointF(680, 490), QPointF(860, 490), QPointF(860, 510), QPointF(680, 510)})});
     source.prepareForRendering();
     config.recognitionResults.translatedText = std::make_shared<ScreenshotOcrPresentation>(source);
     config.recognitionResults.translatedText->setLineText(0, QStringLiteral("Translated first"));
@@ -17575,7 +17575,7 @@ void pinnedFileDrop() {
     mime.setUrls({QUrl::fromLocalFile(second)});
     const auto enter = [&](QWidget* target, const QMimeData& data,
                            Qt::DropActions actions = Qt::CopyAction | Qt::MoveAction) {
-        QDragEnterEvent event(QPointF(10, 10), actions, &data, Qt::LeftButton, Qt::ShiftModifier);
+        QDragEnterEvent event(snowWidgetPosition(QPointF(10, 10)), actions, &data, Qt::LeftButton, Qt::ShiftModifier);
         QApplication::sendEvent(target, &event);
         if (event.isAccepted()) {
             require(event.dropAction() == Qt::CopyAction, "file drops must always copy");
@@ -17654,7 +17654,7 @@ void pinnedFileDrop() {
     require(!enter(&window, unsupported), "unsupported file and remote URLs must reject");
     require(!enter(&window, mime, Qt::MoveAction), "move-only sources must reject");
     require(enter(&window, mime), "valid drag before invalid move");
-    QDragMoveEvent rejectedMove(QPointF(10, 10), Qt::MoveAction, &mime, Qt::LeftButton,
+    QDragMoveEvent rejectedMove(snowWidgetPosition(QPointF(10, 10)), Qt::MoveAction, &mime, Qt::LeftButton,
                                 Qt::NoModifier);
     QApplication::sendEvent(&window, &rejectedMove);
     require(!rejectedMove.isAccepted() && !Access::fileDragActive(window),
@@ -17674,7 +17674,7 @@ void pinnedFileDrop() {
     require(canvas && control && !canvas->acceptDrops() && !control->acceptDrops(),
             "embedded surfaces must delegate drops to the pin");
     require(enter(canvas, mime), "canvas must route enter to pin");
-    QDragMoveEvent move(QPointF(1, 1), Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton,
+    QDragMoveEvent move(snowWidgetPosition(QPointF(1, 1)), Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton,
                         Qt::ShiftModifier);
     QApplication::sendEvent(control, &move);
     require(move.isAccepted() && Access::fileDragActive(window),
@@ -19195,7 +19195,7 @@ void pinnedInteractionsReleasePointerRouting() {
                                 Qt::MouseButton button, Qt::MouseButtons buttons) {
         // Enter through QWindow as native input does. Sending directly to the
         // widget bypasses Qt's implicit mouse-grab bookkeeping.
-        const QPointF local = window.mapFromGlobal(global);
+        const QPointF local = window.mapFromGlobal(snowWidgetPosition(global));
         QMouseEvent event(type, local, local, global, button, buttons, Qt::NoModifier);
         QCoreApplication::sendEvent(window.windowHandle(), &event);
     };
@@ -19433,7 +19433,7 @@ void pinnedControlledInteractionAndGestures() {
                     "button-loss fixture could not begin");
             ScreenshotPinnedWindowTestAccess::updateControlled(window, cursor + QPointF(12, 8));
             const QPointF hover = cursor + QPointF(100.13, 80.21);
-            QMouseEvent lostRelease(QEvent::MouseMove, window.mapFromGlobal(hover), hover,
+            QMouseEvent lostRelease(QEvent::MouseMove, window.mapFromGlobal(snowWidgetPosition(hover)), hover,
                                     Qt::NoButton, buttons, Qt::NoModifier);
             QCoreApplication::sendEvent(&window, &lostRelease);
             require(!ScreenshotPinnedWindowTestAccess::interactionActive(window) &&
@@ -19445,7 +19445,7 @@ void pinnedControlledInteractionAndGestures() {
     require(ScreenshotPinnedWindowTestAccess::beginControlled(window, cursor),
             "release-only fixture could not begin");
     const QPointF released = cursor + QPointF(25, 15);
-    QMouseEvent coalescedRelease(QEvent::MouseButtonRelease, window.mapFromGlobal(released),
+    QMouseEvent coalescedRelease(QEvent::MouseButtonRelease, window.mapFromGlobal(snowWidgetPosition(released)),
                                  released, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
     QCoreApplication::sendEvent(&window, &coalescedRelease);
     require(!ScreenshotPinnedWindowTestAccess::interactionActive(window) &&

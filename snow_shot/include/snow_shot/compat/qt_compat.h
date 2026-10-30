@@ -2175,4 +2175,284 @@ class NativeEventFilterProbe final : public QAbstractNativeEventFilter {
 
 } // namespace snow_compat_probe
 
+// ---------------------------------------------------------------------------
+// 18. Spellings only the *test* corpus ever used.
+//
+//     Product code reached Qt 5 through the rewrite rules above, but the 289
+//     test translation units had never been compiled against Qt 5 at all --
+//     Windows builds them with Qt 6, where all of this is native. Run 48 was
+//     their first Qt 5 compile and reported 416 errors in 86 files; the helpers
+//     below cover the shape of every one of them that is a spelling difference
+//     rather than a missing feature.
+//
+//     Each helper is a *mechanical rewrite target* (rule numbers continue the
+//     sequence above), so a call site reads as one function call on both
+//     versions and the difference lives here.
+// ---------------------------------------------------------------------------
+#if SNOW_COMPAT_HAS_GUI
+
+#  include <QColorSpace>
+#  include <QImage>
+#  include <QPolygonF>
+#  include <initializer_list>
+// QLabel is a QtWidgets header: a QtGui-only target (snow_canvas_image is one)
+// has no QtWidgets include path, and this header is force-included into every
+// TU, so the include has to follow the same Widgets probe section 9 uses.
+// 18c is the only user, and it is gated on the same flag below.
+#  if SNOW_COMPAT_HAS_WIDGETS
+#    include <QLabel>
+#  endif
+
+// --- 18a. Constructing a "cursor entered" event -----------------------------
+//
+//     Rule R39: `SnowEnterEvent <name>(<local>, <window>, <screen>)`
+//            -> `SnowEnterEventInstance <name>(<local>, <window>, <screen>)`
+//
+//     SnowEnterEvent itself is the *override-declaration* spelling: on Qt 5
+//     QWidget::enterEvent() still takes QEvent*, so the alias must stay QEvent.
+//     A constructed instance is a different question: QEnterEvent exists since
+//     5.10 with the same three positions as Qt 6, so an instance can always be
+//     a real QEnterEvent and QWidget::event() dispatches it to enterEvent().
+//
+//     Taking SnowEnterEvent for construction is what failed: on Qt 5 that name
+//     is QEvent, which has no three-position constructor, and the compiler
+//     reported it as "no matching function for call to QEvent::QEvent(...)" --
+//     an error that names the base class, not the alias.
+#if SNOW_COMPAT_HAS_ENTER_EVENT
+using SnowEnterEventInstance = QEnterEvent;
+#else
+// No QtGui in this target: nothing can construct one (see 2 above).
+using SnowEnterEventInstance = QEvent;
+#endif
+
+// --- 18b. QPolygonF from a braced list (rule R40) ---------------------------
+//
+//     `QPolygonF{ {0, 0}, {10, 0}, {10, 10} }` is Qt 6 only: Qt 6.0 gave
+//     QPolygonF an initializer_list constructor. Qt 5.15 has exactly four
+//     constructors (QPolygon, QVector<QPointF>, QRectF, copy) and a derived
+//     class does not inherit constructors, so a braced list cannot reach any of
+//     them.
+//
+//     Rule R40: `QPolygonF({...})` / `= {...}` -> `snowPolygonF({...})`
+[[nodiscard]] inline QPolygonF snowPolygonF(std::initializer_list<QPointF> points)
+{
+#if SNOW_QT6
+    return QPolygonF(points);
+#else
+    return QPolygonF(QVector<QPointF>(points));
+#endif
+}
+
+#if SNOW_COMPAT_HAS_WIDGETS
+// --- 18c. QLabel::pixmap() returns a pointer on Qt 5 (rule R41) -------------
+//
+//     Qt 5.15: `const QPixmap *pixmap() const`   (may be null)
+//     Qt 6   : `QPixmap pixmap() const`          (may be a null pixmap)
+//
+//     Rule R41: `<label>->pixmap()` -> `snowLabelPixmap(<label>)`
+[[nodiscard]] inline QPixmap snowLabelPixmap(const QLabel* label)
+{
+#if SNOW_QT6
+    return label != nullptr ? label->pixmap() : QPixmap();
+#else
+    const QPixmap* pixmap = label != nullptr ? label->pixmap() : nullptr;
+    return pixmap != nullptr ? *pixmap : QPixmap();
+#endif
+}
+#endif // SNOW_COMPAT_HAS_WIDGETS
+
+// --- 18d. QImage::convertedToColorSpace() lost its format argument (R42) ----
+//
+//     Qt 5.15: convertedToColorSpace(const QColorSpace &) const
+//     Qt 6   : convertedToColorSpace(const QColorSpace &, QImage::Format) const
+//
+//     Rule R42: `<i>.convertedToColorSpace(<s>[, <f>])`
+//            -> `snowImageConvertedToColorSpace(<i>, <s>[, <f>])`
+//
+//     LOSSY on Qt 5: the format request is dropped. Qt 5 converts into the
+//     source format; every test that passes a format does so to assert the
+//     *pixels* came back in that layout, and it re-checks the format with
+//     QCOMPARE -- which is the assertion that can fail, not this call.
+[[nodiscard]] inline QImage snowImageConvertedToColorSpace(const QImage& image,
+                                                          const QColorSpace& space,
+                                                          QImage::Format format =
+                                                              QImage::Format_Invalid)
+{
+#if SNOW_QT6
+    if (format == QImage::Format_Invalid) {
+        return image.convertedToColorSpace(space);
+    }
+    return image.convertedToColorSpace(space, format);
+#else
+    Q_UNUSED(format)
+    return image.convertedToColorSpace(space);
+#endif
+}
+
+// --- 18e. QTimeZone::UTC / QTimeZone::LocalTime (rule R43) ------------------
+//
+//     Qt 6.5 turned both into enumerators of QTimeZone::Initialization, so
+//     `QTimeZone::UTC` is a *value*, not a call. Qt 5.15 has static factories
+//     only: QTimeZone::utc() and QTimeZone::systemTimeZone().
+//
+//     Rule R43: `QTimeZone::UTC` -> `snowTimeZoneUTC()`
+//               `QTimeZone::LocalTime` -> `snowTimeZoneLocal()`
+[[nodiscard]] inline QTimeZone snowTimeZoneUTC()
+{
+#if SNOW_QT6
+    return QTimeZone(QTimeZone::UTC);
+#else
+    return QTimeZone::utc();
+#endif
+}
+
+[[nodiscard]] inline QTimeZone snowTimeZoneLocal()
+{
+#if SNOW_QT6
+    return QTimeZone(QTimeZone::LocalTime);
+#else
+    return QTimeZone::systemTimeZone();
+#endif
+}
+
+// --- 18f. Comparing a QFlags against a single enumerator (rule R44) ---------
+//
+//     Qt 6.0 added operator==(Enum) to QFlags. Qt 5.15 has no comparison
+//     operator at all -- equality works through `operator Int()`, and a scoped
+//     enumerator cannot feed that, so `flags == Enum::Value` is
+//     "no match for operator==" out of nowhere. (QFlags is a Qt type, so no
+//     header-level shim can add the operator back; the call site has to change.)
+//
+//     Rule R44: `<flags> == <Enum>::<Value>` -> `snowFlagsEqual(<flags>, <Enum>::<Value>)`
+//
+//     Exact equality, not testFlag(): `triggers() == Trigger::Hover` asks that
+//     nothing else is set, and answering "contains Hover" would quietly accept
+//     a popover that also triggers on click.
+template <typename Enum>
+[[nodiscard]] constexpr bool snowFlagsEqual(QFlags<Enum> flags, Enum value) noexcept
+{
+    return static_cast<int>(flags) == static_cast<int>(value);
+}
+
+// --- 18g. QPointer::data() is Qt 6 only (rule R48) --------------------------
+//
+//     Qt 6 gave QPointer data()/get(); Qt 5 only converts implicitly. A call site
+//     that passes a QPointer where a raw pointer is wanted reads the same both
+//     ways through this helper.
+//
+//     Rule R48: `<p>.data()` on a QPointer -> `snowPointerData(<p>)`
+template <typename T>
+[[nodiscard]] inline T* snowPointerData(const QPointer<T>& pointer)
+{
+#if SNOW_QT6
+    return pointer.data();
+#else
+    return pointer;
+#endif
+}
+
+// --- 19. Tablet input spellings (rules R45-R47) -----------------------------
+//
+//     Qt 6 moved every pointer event onto QPointingDevice: QTabletEvent gained
+//     position()/globalPosition()/pointingDevice(), and the QMouseEvent
+//     constructor gained a trailing device argument. Qt 5.15 has none of that --
+//     it still answers posF()/globalPosF() and identifies a device only through
+//     the deprecated class-level QTouchDevice::devices() list, which says
+//     nothing about the event in hand.
+#  include <QDropEvent>
+#  include <QTabletEvent>
+
+//     Rule R45a: `<e>.position() on a QMouseEvent/QWheelEvent` -> `snowPointerPos(<e>)`
+//
+//     QSinglePointEvent, the Qt 6 base class that made position() common to the
+//     pointer events, does not exist in Qt 5 -- a call site that reads the
+//     position through it has to pick the concrete type first and come here.
+[[nodiscard]] inline QPointF snowPos(const QDropEvent* event)
+{
+#if SNOW_QT6
+    return event->position();
+#else
+    // Qt5 spells the drag/drop cursor position posF(); there is no position().
+    return event->posF();
+#endif
+}
+
+[[nodiscard]] inline QPointF snowPointerPos(const QMouseEvent* event)
+{
+#if SNOW_QT6
+    return event->position();
+#else
+    return event->localPos();
+#endif
+}
+
+[[nodiscard]] inline QPointF snowPointerPos(const QWheelEvent* event)
+{
+    // QWheelEvent is the one pointer event Qt 5.15 backported position() to, and
+    // posF() is deprecated there, so both versions answer the same call.
+    return event->position();
+}
+
+//     Rule R45: `<e>.position() on a QTabletEvent` -> `snowTabletPos(<e>)`
+//               `<e>.globalPosition() on a QTabletEvent` -> `snowTabletGlobalPos(<e>)`
+[[nodiscard]] inline QPointF snowTabletPos(const QTabletEvent& event)
+{
+#if SNOW_QT6
+    return event.position();
+#else
+    return event.posF();
+#endif
+}
+
+[[nodiscard]] inline QPointF snowTabletGlobalPos(const QTabletEvent& event)
+{
+#if SNOW_QT6
+    return event.globalPosition();
+#else
+    return event.globalPosF();
+#endif
+}
+
+//     Rule R46: `new QMouseEvent(<t>, <lp>, <gp>, <b>, <bs>, <m>, <e>.pointingDevice())`
+//            -> `snowTabletMouseEvent(<t>, <e>, <b>, <bs>, <m>)`
+//
+//     Built as a prvalue so C++17 guaranteed elision applies: QMouseEvent is a
+//     QEvent and its copy constructor is deprecated in Qt 6.
+[[nodiscard]] inline QMouseEvent snowTabletMouseEvent(QEvent::Type type, const QTabletEvent& event,
+                                                      Qt::MouseButton button,
+                                                      Qt::MouseButtons buttons,
+                                                      Qt::KeyboardModifiers modifiers)
+{
+#if SNOW_QT6
+    return QMouseEvent(type, snowTabletPos(event), snowTabletGlobalPos(event), button, buttons,
+                       modifiers, event.pointingDevice());
+#else
+    return QMouseEvent(type, snowTabletPos(event), snowTabletGlobalPos(event), button, buttons,
+                       modifiers);
+#endif
+}
+
+//     Rule R47: `<e>->pointingDevice()` type test for touch -> `snowMouseEventFromTouch(<e>)`
+//
+//     LOSSY on Qt 5: there is no per-event device query. QTouchDevice::devices()
+//     reports whether the platform has a touch screen at all, not whether *this*
+//     synthesized event came from it, so answering with it would disable the
+//     stylus duplicate-suppression path on every touch-capable machine. The shim
+//     therefore answers false, which keeps stylus suppression working and leaves
+//     a touch pan started within one 64 ms window of a stylus stroke to the
+//     timestamp test in the caller.
+[[nodiscard]] inline bool snowMouseEventFromTouch(const QMouseEvent* event)
+{
+#if SNOW_QT6
+    const QPointingDevice* device = event != nullptr ? event->pointingDevice() : nullptr;
+    return device != nullptr && (device->type() == QInputDevice::DeviceType::TouchScreen ||
+                                 device->type() == QInputDevice::DeviceType::TouchPad);
+#else
+    Q_UNUSED(event);
+    return false;
+#endif
+}
+
+#endif // SNOW_COMPAT_HAS_GUI
+
 #endif // !SNOW_COMPAT_INERT

@@ -2538,7 +2538,7 @@ int main(int argc, char** argv) {
     try {
         QTemporaryDir logs;
         snow_shot::diagnostics::DiagnosticsOptions logging;
-        logging.directories = {QFileInfo(logs.path()).canonicalFilePath()};
+        logging.directories = QStringList{QFileInfo(logs.path()).canonicalFilePath()};
         logging.enableCrashCapture = false;
         logging.mirrorToConsole = false;
         auto& diagnostics = snow_shot::diagnostics::DiagnosticsService::instance();

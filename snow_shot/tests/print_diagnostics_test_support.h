@@ -17,7 +17,7 @@ class LogSession {
         : m_directory(QDir(QDir::tempPath()).canonicalPath() +
                       QStringLiteral("/snow-print-log-XXXXXX")) {
         snow_shot::diagnostics::DiagnosticsOptions options;
-        options.directories = {m_directory.path()};
+        options.directories = QStringList{m_directory.path()};
         options.enableCrashCapture = false;
         options.installMessageHandler = false;
         options.mirrorToConsole = false;

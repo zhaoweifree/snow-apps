@@ -861,7 +861,7 @@ void synchronousRecognitionCompletionAllowsOwnerDeletion() {
                 ScreenshotOcrLine line;
                 line.text = QStringLiteral("recognized");
                 line.quad =
-                    QPolygonF{QPointF(0, 0), QPointF(100, 0), QPointF(100, 20), QPointF(0, 20)};
+                    snowPolygonF({QPointF(0, 0), QPointF(100, 0), QPointF(100, 20), QPointF(0, 20)});
                 result.presentation->lines.append(line);
                 result.presentation->prepareForRendering();
             } else {
@@ -1960,7 +1960,7 @@ void conversionToolbarMigration() {
         for (bool hideSave : {false, true}) {
             storage::ScreenshotToolbarLayout saveLayout;
             if (hideSave)
-                saveLayout.hidden = {QStringLiteral("save-as-file")};
+                saveLayout.hidden = QStringList{QStringLiteral("save-as-file")};
             else
                 saveLayout.positions = {{QStringLiteral("save-as-file")}};
             const auto result = layout::normalizedLayout(saveLayout, kind);
@@ -1989,13 +1989,13 @@ void conversionToolbarMigration() {
     snow::compat::removeIf(historicalDefaults.positions, 
         [&](const QStringList& position) { return formerFixedPositions.contains(position); });
     auto previousDefault = historicalDefaults;
-    previousDefault.positions[0] = {QStringLiteral("barcode-recognition"),
+    previousDefault.positions[0] = QStringList{QStringLiteral("barcode-recognition"),
                                     QStringLiteral("table-recognition")};
     previousDefault.positions.insert(1, QStringList{QStringLiteral("convert-to-markdown")});
     previousDefault.positions.insert(2, QStringList{QStringLiteral("convert-to-html")});
     verify(previousDefault, defaults);
     auto previousGroupedDefault = historicalDefaults;
-    previousGroupedDefault.positions[0] = {
+    previousGroupedDefault.positions[0] = QStringList{
         QStringLiteral("table-recognition"), QStringLiteral("barcode-recognition"),
         QStringLiteral("convert-to-markdown"), QStringLiteral("convert-to-html")};
     verify(previousGroupedDefault, defaults);
@@ -2022,7 +2022,7 @@ void conversionToolbarMigration() {
     verify(qrHidden, tableGroup);
     auto recognitionHidden = defaults;
     recognitionHidden.positions.removeFirst();
-    recognitionHidden.hidden = {QStringLiteral("barcode-recognition"),
+    recognitionHidden.hidden = QStringList{QStringLiteral("barcode-recognition"),
                                 QStringLiteral("table-recognition")};
     auto conversionsOnly = recognitionHidden;
     conversionsOnly.positions.push_back({QStringLiteral("convert-to-html"),
@@ -2697,7 +2697,7 @@ void runLatexRecognitionTests() {
         require(migrated.positions.front().at(2) == QStringLiteral("latex-recognition"),
                 "migration inserts LaTeX immediately after Markdown");
         snow_shot::storage::ScreenshotToolbarLayout previousDefault;
-        previousDefault.positions = {
+        previousDefault.positions = QStringList{
             {QStringLiteral("convert-to-html"), QStringLiteral("latex-recognition"),
              QStringLiteral("convert-to-markdown"), QStringLiteral("barcode-recognition"),
              QStringLiteral("table-recognition")}};
@@ -2705,7 +2705,7 @@ void runLatexRecognitionTests() {
         require(updated.positions.front().at(1) == QStringLiteral("convert-to-markdown") &&
                     updated.positions.front().at(2) == QStringLiteral("latex-recognition"),
                 "previous default moves LaTeX to Markdown's left in the reversed popup");
-        old.hidden = {QStringLiteral("latex-recognition")};
+        old.hidden = QStringList{QStringLiteral("latex-recognition")};
         const auto hidden = layout::normalizedLayout(old, kind);
         require(hidden.hidden.contains(QStringLiteral("latex-recognition")) &&
                     !hidden.positions.front().contains(QStringLiteral("latex-recognition")),

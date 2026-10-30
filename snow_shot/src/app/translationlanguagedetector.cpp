@@ -29,7 +29,10 @@ QString resolveTranslationTarget(const TranslationPreferences& preferences,
         QLatin1StringView target;
         QLatin1StringView detected;
     };
-    static constexpr std::array<Mapping, 13> mappings{{
+    // Not constexpr: Qt5's QLatin1String is not a literal type (its constructor
+    // calls strlen), so a constant-initialised array of these is rejected with
+    // C2131. A function-local static keeps the one-time initialisation.
+    static const std::array<Mapping, 13> mappings{{
         {QLatin1StringView("ar"), QLatin1StringView("ara")},
         {QLatin1StringView("de"), QLatin1StringView("deu")},
         {QLatin1StringView("en"), QLatin1StringView("eng")},

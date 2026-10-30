@@ -18,7 +18,7 @@ inline void require(bool condition, const char* message) {
 inline bool mouse(SnowCanvasWidget& canvas, QEvent::Type type, QPointF point,
                   Qt::MouseButton button, Qt::MouseButtons buttons,
                   Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
-    QMouseEvent event(type, point, canvas.mapToGlobal(point), button, buttons, modifiers);
+    QMouseEvent event(type, point, canvas.mapToGlobal(snowWidgetPosition(point)), button, buttons, modifiers);
     event.setAccepted(false);
     QApplication::sendEvent(&canvas, &event);
     return event.isAccepted();

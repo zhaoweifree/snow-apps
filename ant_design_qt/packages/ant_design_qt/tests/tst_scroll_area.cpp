@@ -170,7 +170,7 @@ void ScrollAreaTest::embeddedHorizontalScrollBarKeepsAStableExtent() {
   QVERIFY(bar.isEmbedded());
   QVERIFY(!bar.isExpanded());
 
-  SnowEnterEvent enter(QPointF(1.0, 1.0), QPointF(1.0, 1.0), QPointF(1.0, 1.0));
+  SnowEnterEventInstance enter(QPointF(1.0, 1.0), QPointF(1.0, 1.0), QPointF(1.0, 1.0));
   QCoreApplication::sendEvent(&bar, &enter);
   QCOMPARE(bar.geometry(), geometry);
   QVERIFY(!bar.isExpanded());

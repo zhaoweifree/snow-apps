@@ -4180,7 +4180,7 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
     if (m_backgroundOpacityEditor && m_backgroundOpacityEditor->isEnabled() &&
         m_backgroundOpacityEditor->isVisible() &&
         m_backgroundOpacityEditor->rect().contains(
-            m_backgroundOpacityEditor->mapFromGlobal(event->globalPosition().toPoint()))) {
+            m_backgroundOpacityEditor->mapFromGlobal(snowGlobalPos(event).toPoint()))) {
         const int opacityDelta = direction * 10;
         const int percent = std::clamp(m_backgroundOpacityPercent + opacityDelta, 0, 100);
         if (percent != m_backgroundOpacityPercent) {
@@ -4193,7 +4193,7 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
     if (m_layoutSpacingEditor && m_layoutSpacingEditor->isEnabled() &&
         m_layoutSpacingEditor->isVisible() &&
         m_layoutSpacingEditor->rect().contains(
-            m_layoutSpacingEditor->mapFromGlobal(event->globalPosition().toPoint()))) {
+            m_layoutSpacingEditor->mapFromGlobal(snowGlobalPos(event).toPoint()))) {
         auto options = m_layoutCompaction;
         options.spacing = std::clamp(options.spacing + direction * 5, 0,
                                      ScreenshotLayoutCompaction::maximumSpacing);
@@ -4210,7 +4210,7 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
         m_scrollingAutoScrollIntervalEditor->isVisible() &&
         m_scrollingAutoScrollIntervalEditor->rect().contains(
             m_scrollingAutoScrollIntervalEditor->mapFromGlobal(
-                event->globalPosition().toPoint()))) {
+                snowGlobalPos(event).toPoint()))) {
         const int previous = m_scrollingAutoScrollIntervalMs;
         setScrollingAutoScrollIntervalMs(previous + direction * 10);
         if (previous != m_scrollingAutoScrollIntervalMs) {
@@ -4225,7 +4225,7 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
     if (m_recordDelayButton != nullptr && m_recordDelayButton->isEnabled() &&
         m_recordDelayButton->isVisible() &&
         m_recordDelayButton->rect().contains(
-            m_recordDelayButton->mapFromGlobal(event->globalPosition().toPoint()))) {
+            m_recordDelayButton->mapFromGlobal(snowGlobalPos(event).toPoint()))) {
         if (stepRecordingStartDelay(direction)) {
             event->accept();
             return true;
@@ -4263,13 +4263,13 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
     }
     if (m_activeTool == Tool::Magnifier ||
         source == SnowCanvasStyleToolbarSource::SelectedMagnifier) {
-        if (!m_styleControls->handleMagnifierWheel(event->globalPosition().toPoint(), direction))
+        if (!m_styleControls->handleMagnifierWheel(snowGlobalPos(event).toPoint(), direction))
             return false;
         event->accept();
         return true;
     }
     if (m_activeTool == Tool::Spotlight) {
-        if (m_styleControls->handleCornerRadiusWheel(event->globalPosition().toPoint(),
+        if (m_styleControls->handleCornerRadiusWheel(snowGlobalPos(event).toPoint(),
                                                      direction)) {
             event->accept();
             return true;
@@ -4278,7 +4278,7 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
             return false;
         }
         if (!m_spotlightOpacitySlider->rect().contains(
-                m_spotlightOpacitySlider->mapFromGlobal(event->globalPosition().toPoint()))) {
+                m_spotlightOpacitySlider->mapFromGlobal(snowGlobalPos(event).toPoint()))) {
             return false;
         }
         static_cast<void>(stepSpotlightOpacity(direction));
@@ -4303,16 +4303,16 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
         return true;
     }
     if (m_watermarkStyleControlsWidget != nullptr && m_watermarkStyleControlsWidget->isVisible()) {
-        if (m_styleControls->handleWatermarkWheel(event->globalPosition().toPoint(), direction)) {
+        if (m_styleControls->handleWatermarkWheel(snowGlobalPos(event).toPoint(), direction)) {
             event->accept();
             return true;
         }
         return false;
     }
     if (m_textStyleControlsWidget != nullptr && m_textStyleControlsWidget->isVisible()) {
-        if (m_styleControls->handleTextCornerRadiusWheel(event->globalPosition().toPoint(),
+        if (m_styleControls->handleTextCornerRadiusWheel(snowGlobalPos(event).toPoint(),
                                                          direction) ||
-            m_styleControls->handleTextStrokeWidthWheel(event->globalPosition().toPoint(),
+            m_styleControls->handleTextStrokeWidthWheel(snowGlobalPos(event).toPoint(),
                                                         direction) ||
             m_styleControls->stepTextFontSize(direction)) {
             event->accept();
@@ -4322,22 +4322,22 @@ bool ScreenshotToolPalette::handleToolbarWheel(QWheelEvent* event) {
     }
     if (m_serialNumberStyleControlsWidget != nullptr &&
         m_serialNumberStyleControlsWidget->isVisible()) {
-        if (m_styleControls->handleSerialNumberWheel(event->globalPosition().toPoint(),
+        if (m_styleControls->handleSerialNumberWheel(snowGlobalPos(event).toPoint(),
                                                      direction)) {
             event->accept();
             return true;
         }
         return false;
     }
-    if (m_styleControls->handleDistanceWheel(event->globalPosition().toPoint(), direction)) {
+    if (m_styleControls->handleDistanceWheel(snowGlobalPos(event).toPoint(), direction)) {
         event->accept();
         return true;
     }
-    if (m_styleControls->handleArrowRatioWheel(event->globalPosition().toPoint(), direction)) {
+    if (m_styleControls->handleArrowRatioWheel(snowGlobalPos(event).toPoint(), direction)) {
         event->accept();
         return true;
     }
-    if (m_styleControls->handleCornerRadiusWheel(event->globalPosition().toPoint(), direction)) {
+    if (m_styleControls->handleCornerRadiusWheel(snowGlobalPos(event).toPoint(), direction)) {
         event->accept();
         return true;
     }

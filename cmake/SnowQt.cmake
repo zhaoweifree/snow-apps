@@ -144,6 +144,11 @@ macro(snow_find_qt)
             set_property(GLOBAL PROPERTY SNOW_QT_COMPAT_HEADER "${_snow_compat_header}")
         endif()
         if(MSVC)
+            # /utf-8 travels with the force-include: the header's comments are
+            # UTF-8, and under the active code page (936 here) mispaired bytes
+            # can swallow the following line. Without it the failure looks like
+            # a stray "identifier not found" inside the header.
+            add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
             add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/FI${_snow_compat_header}>")
         else()
             add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-include;${_snow_compat_header}>")
@@ -167,7 +172,13 @@ macro(snow_qt_apply_compat_include target)
         set_property(GLOBAL PROPERTY SNOW_QT_COMPAT_HEADER "${_snow_compat_header}")
     endif()
     if(MSVC)
+        # /utf-8 belongs with the force-include: the shim header carries UTF-8
+        # comments, and a target that does not already pass /utf-8 reads them as
+        # the active code page (936 here). Mispaired bytes can then swallow the
+        # following line, which surfaces as a bogus "identifier not found" a few
+        # lines into the header rather than as an encoding problem.
         target_compile_options(${target} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
             "$<$<COMPILE_LANGUAGE:CXX>:/FI${_snow_compat_header}>")
     else()
         target_compile_options(${target} PRIVATE

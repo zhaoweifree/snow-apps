@@ -695,7 +695,7 @@ void editorAndShortcutBehavior() {
     source->clear();
     QMimeData dropText;
     dropText.setText(boundary + QStringLiteral("drop overflow"));
-    QDragEnterEvent enter(QPointF(10, 10), Qt::CopyAction, &dropText, Qt::LeftButton,
+    QDragEnterEvent enter(snowWidgetPosition(QPointF(10, 10)), Qt::CopyAction, &dropText, Qt::LeftButton,
                           Qt::NoModifier);
     QApplication::sendEvent(source->viewport(), &enter);
     QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &dropText, Qt::LeftButton, Qt::NoModifier);
@@ -755,7 +755,7 @@ void editorAndShortcutBehavior() {
 
     const QPointF local = floating->rect().center();
     QCursor::setPos(floating->mapToGlobal(local.toPoint()));
-    SnowEnterEvent hover(local, local, floating->mapToGlobal(local.toPoint()));
+    SnowEnterEventInstance hover(local, local, floating->mapToGlobal(local.toPoint()));
     QApplication::sendEvent(floating, &hover);
 #ifdef Q_OS_MACOS
     require(!menu || !menu->isPopupVisible(), "macOS action menus do not open on hover");

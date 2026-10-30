@@ -376,13 +376,13 @@ void globalMousePageRendersActionButtons() {
         }
         require(correctlyOrdered,
                 "Global mouse rows must place the action label left of the configuration button");
-        require(!icon->pixmap().isNull() && icon->testAttribute(Qt::WA_TransparentForMouseEvents),
+        require(!snowLabelPixmap(icon).isNull() && icon->testAttribute(Qt::WA_TransparentForMouseEvents),
                 "Every global mouse action must display an icon without intercepting clicks");
         if (label->text() == QStringLiteral("Quick save")) {
             const QPixmap expected = presentation::icons::renderTintedIconPixmap(
                 presentation::icons::custom::outlined::QuickSave(), icon->size(),
                 row->devicePixelRatioF(), label->palette().color(QPalette::WindowText));
-            require(icon->pixmap().toImage() == expected.toImage(),
+            require(snowLabelPixmap(icon).toImage() == expected.toImage(),
                     "Quick save must display the supplied quick-save icon");
         }
         require(remainingTitles.removeOne(label->text()),
@@ -709,7 +709,7 @@ void globalMouseAndHotkeyTitlesRenderIdentically() {
     const auto sendHover = [](QWidget& widget, bool hovered) {
         widget.setAttribute(Qt::WA_UnderMouse, hovered);
         if (hovered) {
-            SnowEnterEvent event(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1));
+            SnowEnterEventInstance event(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1));
             QApplication::sendEvent(&widget, &event);
         } else {
             QEvent event(QEvent::Leave);

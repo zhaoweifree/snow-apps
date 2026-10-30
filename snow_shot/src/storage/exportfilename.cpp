@@ -8,12 +8,12 @@ namespace {
 QString truncateUtf8(QString name, qsizetype maximumBytes) {
     if (name.size() > maximumBytes) {
         name.truncate(maximumBytes);
-        if (!name.isEmpty() && name.back().isHighSurrogate())
+        if (!name.isEmpty() && name.at(name.size() - 1).isHighSurrogate())
             name.chop(1);
     }
     while (name.toUtf8().size() > maximumBytes) {
         name.chop(1);
-        if (!name.isEmpty() && name.back().isHighSurrogate())
+        if (!name.isEmpty() && name.at(name.size() - 1).isHighSurrogate())
             name.chop(1);
     }
     return name;
@@ -50,6 +50,6 @@ QString composeExportFileName(QString stem, QStringView suffix, qsizetype maximu
         while (stem.endsWith(u'.') || stem.endsWith(u' '))
             stem.chop(1);
     }
-    return stem + suffix;
+    return stem + suffix.toString();
 }
 } // namespace snow_shot::storage

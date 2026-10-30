@@ -58,7 +58,16 @@ class CropRowReader final {
           m_transform(std::move(transform)),
           m_convertColor(m_image.colorSpace().isValid() &&
                          m_image.colorSpace() != QColorSpace(QColorSpace::SRgb)),
-          m_cachedRgbTransform(m_image.colorSpace().colorModel() == QColorSpace::ColorModel::Rgb) {}
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+          m_cachedRgbTransform(m_image.colorSpace().colorModel() == QColorSpace::ColorModel::Rgb)
+#else
+          // Qt 5.15's QColorSpace exposes neither colorModel() nor ColorModel, and
+          // QImage has no colorTransformed() to pre-build a QColorTransform for.
+          // The member stays false so the branch below always takes Qt 5's own
+          // convertedToColorSpace(), which is the same conversion by another route.
+          m_cachedRgbTransform(false)
+#endif
+{}
 
     bool operator()(int firstRow, int rowCount, qsizetype stride, uchar* destination,
                     qsizetype destinationSize) {
@@ -144,10 +153,15 @@ class CropRowReader final {
                 // rounding. Qt's combined conversion can differ for native input formats.
                 // Non-RGB profiles retain Qt's complete color-model conversion/retagging path.
                 // Move the owned tile through RGB conversion to avoid Qt's extra clone.
-                if (!converted.isNull() && m_convertColor)
+                if (!converted.isNull() && m_convertColor) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
                     converted = m_cachedRgbTransform
                                     ? std::move(converted).colorTransformed(m_transform)
                                     : converted.convertedToColorSpace(QColorSpace::SRgb);
+#else
+                    converted = converted.convertedToColorSpace(QColorSpace::SRgb);
+#endif
+                }
                 // Keep the out-of-place format converter: Qt's in-place path can round
                 // low-alpha channels differently from full-image export normalization.
                 if (!converted.isNull() && converted.format() != QImage::Format_RGBA8888)

@@ -23,7 +23,7 @@ inline void require(bool condition, const char* message) {
 
 inline void click(SnowCanvasWidget& canvas, QPointF point) {
     for (const auto type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
-        QMouseEvent event(type, point, canvas.mapToGlobal(point), Qt::LeftButton,
+        QMouseEvent event(type, point, canvas.mapToGlobal(snowWidgetPosition(point)), Qt::LeftButton,
                           type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton,
                           Qt::NoModifier);
         QApplication::sendEvent(&canvas, &event);
@@ -74,7 +74,7 @@ inline void exercise(SnowCanvasWidget& canvas,
     const auto camera = canvas.canvasToViewTransform();
     const auto wheel = [&](int delta, Qt::KeyboardModifiers modifiers = Qt::NoModifier,
                            Qt::ScrollPhase phase = Qt::NoScrollPhase) {
-        QWheelEvent event(vertex, canvas.mapToGlobal(vertex), {}, {0, delta}, Qt::NoButton,
+        QWheelEvent event(vertex, canvas.mapToGlobal(snowWidgetPosition(vertex)), {}, {0, delta}, Qt::NoButton,
                           modifiers, phase, false);
         event.setTimestamp(100);
         QApplication::sendEvent(&canvas, &event);
