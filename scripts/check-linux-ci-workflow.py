@@ -509,6 +509,40 @@ def main() -> int:
               re.search(r"rustup target add[ \t]+--toolchain[ \t]+1\.97\.1", gates_text) is not None,
               "the targets could land on a different toolchain than the checks use")
 
+        # Upstream moved the OCR helper into a git submodule that
+        # `snow-ocr-process` path-depends on. Two consequences the workflow has
+        # to keep paying for, both of which cost a full run to discover:
+        #
+        #   * without the submodule, `cargo metadata --locked` cannot resolve the
+        #     workspace at all ("unable to update .../simd-paddle-ocr-rs"), and
+        #     cmake/SnowOcrToolchain.cmake fails the configure outright;
+        #   * the helper is built with `RUSTUP_TOOLCHAIN=<channel from that
+        #     submodule>`, and the channel is a dated nightly because the crate
+        #     uses `portable_simd` -- a stable compiler fails it with E0554.
+        #
+        # The channel is required to be *read* from the submodule rather than
+        # written here, so a re-pin is one edit in one place.
+        for job_name, job in jobs.items():
+            checkouts = [
+                step for step in job.get("steps", [])
+                if str(step.get("uses", "")).startswith("actions/checkout")
+            ]
+            check(f"{job_name} job checks out the OCR submodule",
+                  bool(checkouts) and all(
+                      str(step.get("with", {}).get("submodules", "")) == "recursive"
+                      for step in checkouts
+                  ),
+                  "any checkout without submodules: recursive leaves the OCR "
+                  "submodule empty, and nothing downstream can resolve it")
+        check("build job installs the OCR submodule's toolchain",
+              "simd-paddle-ocr-rs/rust-toolchain.toml" in build_text
+              and re.search(r"rustup toolchain install[ \t]+\"?\$\{?ocr_channel",
+                            build_text) is not None,
+              "snow-ocr-process is compiled with the channel that file pins")
+        check("build job reads the OCR channel instead of hardcoding it",
+              re.search(r"nightly-\d{4}-\d{2}-\d{2}", build_text) is None,
+              "a literal nightly here would drift from the submodule's pin")
+
         # The apt lists, split by what each job is actually asked to do. The
         # requirements are not one list applied to every job: `gates` is defined
         # as "no toolchain" (it runs `cmake -P` script-mode checks, cargo and two

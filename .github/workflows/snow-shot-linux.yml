@@ -322,6 +322,11 @@ jobs:
           # channel is a dated nightly because the crate uses `portable_simd`.
           # Deriving it from the same file keeps one source of truth: pin a new
           # nightly in the submodule and this step follows without an edit.
+          #
+          # No components on purpose. The submodule's toolchain file asks for
+          # rustfmt and clippy, but CI runs neither, and asking rustup for a
+          # component it has to resolve on this runner is what rolled a
+          # half-installed toolchain back in run 39715098658.
           ocr_channel="$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' \
             snow-crates/crates/simd-paddle-ocr-rs/rust-toolchain.toml)"
           if [ -z "$ocr_channel" ]; then
@@ -333,7 +338,7 @@ jobs:
             *) echo "the OCR channel must be a dated nightly, got '$ocr_channel'" >&2; exit 1 ;;
           esac
           rustup toolchain install "$ocr_channel" --profile minimal --no-self-update \
-            --force-non-host --component rustfmt --component clippy
+            --force-non-host
           rustup show active-toolchain
           rustc -vV
 
