@@ -7,9 +7,9 @@ mod parallel;
 pub(crate) use parallel::{conversion_workers, pool_initialized};
 mod scalar;
 #[cfg(target_arch = "aarch64")]
-mod simd_neon;
-#[cfg(target_arch = "aarch64")]
 pub(crate) mod simd_arm;
+#[cfg(target_arch = "aarch64")]
+mod simd_neon;
 #[cfg(target_arch = "x86_64")]
 mod simd_x86;
 
