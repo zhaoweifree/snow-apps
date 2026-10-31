@@ -4,6 +4,7 @@
 #include <QImage>
 #include <QPointer>
 #include <QRect>
+#include <QScreen>
 #include <QString>
 #include <QtGlobal>
 #include <QVector>
@@ -12,7 +13,6 @@
 #include <optional>
 #include <memory>
 
-class QScreen;
 class ScreenshotOverlayWindow;
 struct SnowCaptureCursorSnapshotImpl;
 

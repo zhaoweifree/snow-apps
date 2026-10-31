@@ -2516,7 +2516,7 @@ void latexKeyboardHistoryRoutesToSession() {
         const auto bindings = QKeySequence::keyBindings(standard);
         require(!bindings.isEmpty() && bindings.front().count() == 1,
                 "LaTeX source editing has a platform standard shortcut");
-        const auto combination = bindings.front()[0];
+        const auto combination = snowKeySequenceAt(bindings.front(), 0);
         PhysicalKeyEvent press(QEvent::KeyPress, combination.key(),
                                combination.keyboardModifiers());
         QApplication::sendEvent(editor, &press);
@@ -2697,10 +2697,10 @@ void runLatexRecognitionTests() {
         require(migrated.positions.front().at(2) == QStringLiteral("latex-recognition"),
                 "migration inserts LaTeX immediately after Markdown");
         snow_shot::storage::ScreenshotToolbarLayout previousDefault;
-        previousDefault.positions = QStringList{
-            {QStringLiteral("convert-to-html"), QStringLiteral("latex-recognition"),
-             QStringLiteral("convert-to-markdown"), QStringLiteral("barcode-recognition"),
-             QStringLiteral("table-recognition")}};
+        previousDefault.positions = QVector<QStringList>{
+            QStringList{QStringLiteral("convert-to-html"), QStringLiteral("latex-recognition"),
+                        QStringLiteral("convert-to-markdown"), QStringLiteral("barcode-recognition"),
+                        QStringLiteral("table-recognition")}};
         const auto updated = layout::normalizedLayout(previousDefault, kind);
         require(updated.positions.front().at(1) == QStringLiteral("convert-to-markdown") &&
                     updated.positions.front().at(2) == QStringLiteral("latex-recognition"),

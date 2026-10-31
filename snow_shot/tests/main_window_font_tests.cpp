@@ -111,8 +111,9 @@ void customTitleBarUsesPlatformWindowControls() {
     auto* icon = titleBar.findChild<QLabel*>(QStringLiteral("windowSystemMenuIcon"));
     require(icon != nullptr && icon->geometry() == QRect(16, 8, 16, 16),
             "the 16 DIP app icon must have the standard leading inset and vertical alignment");
-    require(!icon->pixmap().isNull(), "the caption must render the actual application icon");
-    const QImage captionIcon = icon->pixmap().toImage();
+    require(!snowLabelPixmap(icon).isNull(),
+            "the caption must render the actual application icon");
+    const QImage captionIcon = snowLabelPixmap(icon).toImage();
     bool paintsWhiteBackdrop = false;
     for (int y = 0; y < captionIcon.height() && !paintsWhiteBackdrop; ++y) {
         for (int x = 0; x < captionIcon.width(); ++x) {

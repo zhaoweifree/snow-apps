@@ -191,13 +191,14 @@ void verifyHoverMovementWithoutEnter() {
                 : icon;
         require(target, "the hover target must exist");
         const QPoint local = target->rect().center();
-        QHoverEvent move(QEvent::HoverMove, local, target->mapToGlobal(local), QPointF(-1, -1),
-                         Qt::NoModifier);
+        QHoverEvent move =
+            snowHoverEvent(QEvent::HoverMove, local, target->mapToGlobal(local), QPointF(-1, -1),
+                           Qt::NoModifier);
         QApplication::sendEvent(target, &move);
         require(reveal->isActive(), "hover movement without Enter must schedule toolbar reveal");
-        const auto deadline = reveal->id();
+        const SnowTimerId deadline = snowTimerId(reveal);
         QApplication::sendEvent(target, &move);
-        require(reveal->id() == deadline,
+        require(snowTimerId(reveal) == deadline,
                 "continued hover movement must preserve the toolbar reveal deadline");
         require(qAbs(icon->windowOpacity() - 1.0) < 0.005,
                 "hover movement over the surface or handle must restore full opacity");

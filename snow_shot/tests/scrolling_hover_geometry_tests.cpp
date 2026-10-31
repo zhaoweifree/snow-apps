@@ -1,4 +1,9 @@
-#include <QRhiWidget>
+// QRhiWidget is Qt 6.4: the composition helper it names does not exist on Qt 5
+// (captureexclusioncomposition.cpp degrades to "unavailable" there), so the
+// helper lookup below is compiled only where the type exists.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#  include <QRhiWidget>
+#endif
 #include "snow_shot/presentation/screenshotscrollingthumbnailwidget.h"
 #ifdef Q_OS_WIN
 #include "../src/platform/windows/captureexclusioncomposition.h"
@@ -444,10 +449,18 @@ void thumbnailNativeCaptureComposition(ScreenshotScrollingRecognitionMode mode, 
     require(snow_shot::platform::setWindowExcludedFromCapture(&thumbnail, true),
             "thumbnail must support capture exclusion before its first frame is shown");
     // Also exercise the rendering upgrade on hosts whose native affinity already works.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     if (!composition::usesCaptureExclusionComposition(&thumbnail)) {
         require(composition::applyCaptureExclusionCompositionFallback(&thumbnail),
                 "registered thumbnail must accept the composition upgrade");
     }
+#else
+    // Qt 5 raster windows keep deriving input coverage from the backing image's
+    // alpha, so the D3D11 composition upgrade is not offered. The request must
+    // fall through to the plain affinity path instead of claiming coverage.
+    require(!composition::applyCaptureExclusionCompositionFallback(&thumbnail),
+            "Qt 5 must decline the composition upgrade it cannot provide");
+#endif
     require(snow_shot::platform::setWindowExcludedFromCapture(&thumbnail, true),
             "composited thumbnail must accept capture exclusion");
     const auto verify = [&] {
@@ -455,10 +468,15 @@ void thumbnailNativeCaptureComposition(ScreenshotScrollingRecognitionMode mode, 
         require(GetWindowDisplayAffinity(reinterpret_cast<HWND>(thumbnail.winId()), &affinity) &&
                     affinity == WDA_EXCLUDEFROMCAPTURE,
                 "thumbnail native surface must remain excluded from capture");
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         const auto children = thumbnail.findChildren<QRhiWidget*>(
             QStringLiteral("snowCaptureExclusionComposition"), Qt::FindDirectChildrenOnly);
         require(children.size() == 1 && children.front()->isHidden(),
                 "thumbnail must retain exactly one hidden composition helper");
+#else
+        require(!composition::usesCaptureExclusionComposition(&thumbnail),
+                "Qt 5 must never report a composition helper it cannot create");
+#endif
         if (thumbnail.geometry() != geometry) {
             const QRect actual = thumbnail.geometry();
             std::cerr << "thumbnail geometry expected=" << geometry.x() << ',' << geometry.y()

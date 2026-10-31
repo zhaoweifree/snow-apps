@@ -1851,7 +1851,7 @@ void printToolbarRoutingAndLayoutMigration() {
         require(layout::normalizedLayout(old, kind).positions[0] == QStringList{print},
                 "explicitly positioned Print must remain in its position");
         verifyStorage(old);
-        old.positions = QStringList{{save}};
+        old.positions = QVector<QStringList>{QStringList{save}};
         old.hidden = QStringList{print};
         const auto hiddenPrint = layout::normalizedLayout(old, kind);
         require(hiddenPrint.hidden.contains(print) && !hiddenPrint.positions[0].contains(print),

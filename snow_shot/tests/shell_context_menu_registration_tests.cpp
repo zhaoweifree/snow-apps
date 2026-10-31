@@ -242,7 +242,8 @@ void isolatedNativeRegistry() {
     options.classesRoot = root;
     options.executablePath =
         QStringLiteral("C:/Native Snow Shot/雪/") + snow_shot::app::edition::executableName();
-    options.fileExtensions = {QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("bmp")};
+    options.fileExtensions =
+        QStringList{QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("bmp")};
     windows::ShellContextMenuRegistration registration(std::move(options));
     require(registration.setEnabled(true, QStringLiteral("E")),
             "native isolated registry can enable the image verbs with an access key");

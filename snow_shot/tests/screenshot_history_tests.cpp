@@ -5018,7 +5018,8 @@ void selectionStagesActivateEveryToolbarShortcut() {
         QStringLiteral("redo"),
     };
     for (const bool drawing : {false, true}) {
-        const auto commands = drawing ? originalDrawing.keys() : screenshotCommands;
+        const QStringList commands =
+            drawing ? QStringList(originalDrawing.keys()) : screenshotCommands;
         for (const auto& id : commands) {
             auto screenshot = screenshotBindings;
             auto draw = drawingBindings;
@@ -5394,12 +5395,15 @@ void rejectedGlobalScreenshotShortcutsPreserveSession() {
                         "drawing shortcuts must preserve an active effect drag");
                 static_cast<void>(dispatchShortcutRelease(receiver, Qt::Key_J, Qt::AltModifier));
                 for (const auto& undo : QKeySequence::keyBindings(QKeySequence::Undo)) {
-                    require(
-                        !dispatchShortcut(receiver, undo[0].key(), undo[0].keyboardModifiers()) &&
-                            mutations == 0 && handler.effectDragActive() && rollbacks == 0,
-                        "history shortcuts must preserve an active effect drag");
-                    static_cast<void>(dispatchShortcutRelease(receiver, undo[0].key(),
-                                                              undo[0].keyboardModifiers()));
+                    // QKeySequence::operator[] yields a packed int on Qt 5 and a
+                    // QKeyCombination on Qt 6; snowKeySequenceAt normalizes it.
+                    const auto combination = snowKeySequenceAt(undo, 0);
+                    require(!dispatchShortcut(receiver, combination.key(),
+                                              combination.keyboardModifiers()) &&
+                                mutations == 0 && handler.effectDragActive() && rollbacks == 0,
+                            "history shortcuts must preserve an active effect drag");
+                    static_cast<void>(dispatchShortcutRelease(
+                        receiver, combination.key(), combination.keyboardModifiers()));
                 }
             }
             require(shortcuts.handleGlobalScreenshotShortcut(globalAction, captureReady),

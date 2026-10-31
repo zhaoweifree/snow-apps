@@ -348,11 +348,18 @@ bool readablePng(const QByteArray& encoded) {
         return false;
     // A scaled validation read avoids the native codec's fatal malformed-input
     // path without retaining a second full-size image. Timed as initialization.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // Qt 6 preallocates from the header dimensions unless a cap is in place;
+    // Qt 5.15's reader has no allocation limit at all, so there is no budget to
+    // raise and the scaled read below is already the only guard it needs.
     const int previousLimit = QImageReader::allocationLimit();
     QImageReader::setAllocationLimit(std::max(previousLimit, 1024));
+#endif
     reader.setScaledSize(QSize(1, 1));
     const QImage validated = reader.read();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     QImageReader::setAllocationLimit(previousLimit);
+#endif
     return !validated.isNull() && reader.error() == QImageReader::UnknownError;
 }
 } // namespace snow_shot::scrolling_benchmark

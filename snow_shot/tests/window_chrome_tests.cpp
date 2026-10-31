@@ -64,7 +64,7 @@ qintptr hitTestAt(QWidget& window, QWidget& titleBar, const QPoint& globalPositi
     message.lParam =
         MAKELPARAM(static_cast<WORD>(nativePosition.x), static_cast<WORD>(nativePosition.y));
 
-    qintptr result = HTERROR;
+    snowNativeEventResult result = HTERROR;
     require(snow_shot::platform::windows::handleNativeWindowEvent(&titleBar, &message, &result),
             "the window chrome should handle WM_NCHITTEST");
     return result;
@@ -164,7 +164,7 @@ void customMaximizePressUsesVisibleButtonGeometry() {
         message.hwnd = hwnd;
         message.message = type;
         message.wParam = HTMAXBUTTON;
-        qintptr result = -1;
+        snowNativeEventResult result = -1;
         require(snow_shot::platform::windows::handleNativeWindowEvent(&titleBar, &message, &result),
                 "non-client hover must never fall through to USER32 caption painting");
         require(maximize.property("snowNativeCaptionHover").toBool() == (type == WM_NCMOUSEMOVE),
@@ -180,7 +180,7 @@ void customMaximizePressUsesVisibleButtonGeometry() {
         message.message = type;
         message.wParam = HTMAXBUTTON;
         message.lParam = MAKELPARAM(position.x, position.y);
-        qintptr result = -1;
+        snowNativeEventResult result = -1;
         require(snow_shot::platform::windows::handleNativeWindowEvent(&titleBar, &message, &result),
                 "custom maximize presses must be consumed before default caption processing");
         flushEvents();
@@ -281,7 +281,7 @@ int main(int argc, char** argv) {
             MSG message{};
             message.message = type;
             message.wParam = 0;
-            qintptr result = 0;
+            snowNativeEventResult result = 0;
             snow_shot::platform::windows::handleNativeWindowEvent(&titleBar, &message, &result);
             require(!maximize.property("snowNativeCaptionHover").toBool(),
                     "native lifecycle changes must clear caption hover without a mouse move");

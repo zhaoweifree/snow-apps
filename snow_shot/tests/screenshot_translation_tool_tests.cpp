@@ -122,7 +122,8 @@ class Recognition final : public ScreenshotOcrRecognitionPort {
         line.text = QStringLiteral("Recognized text");
         line.confidence = 1.0;
         const QRectF rect = requests.at(index).canvasRect;
-        line.quad = {rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()};
+        line.quad =
+            snowPolygonF({rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()});
         if (!empty)
             presentation->lines.append(line);
         presentation->prepareForRendering();

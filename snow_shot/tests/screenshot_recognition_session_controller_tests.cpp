@@ -330,9 +330,12 @@ void smartTypesettingUsesRecognizedLayout() {
     auto presentation = std::make_shared<ScreenshotOcrPresentation>();
     presentation->selection = QRect(0, 0, 400, 150);
     presentation->lines = {
-        {QStringLiteral("This is trans-"), 1.0, {{0, 0}, {160, 0}, {160, 20}, {0, 20}}},
-        {QStringLiteral("lation continued!"), 1.0, {{0, 24}, {180, 24}, {180, 44}, {0, 44}}},
-        {QStringLiteral("Separate paragraph."), 1.0, {{0, 100}, {180, 100}, {180, 120}, {0, 120}}},
+        ScreenshotOcrLine{QStringLiteral("This is trans-"), 1.0,
+                          snowPolygonF({{0, 0}, {160, 0}, {160, 20}, {0, 20}})},
+        ScreenshotOcrLine{QStringLiteral("lation continued!"), 1.0,
+                          snowPolygonF({{0, 24}, {180, 24}, {180, 44}, {0, 44}})},
+        ScreenshotOcrLine{QStringLiteral("Separate paragraph."), 1.0,
+                          snowPolygonF({{0, 100}, {180, 100}, {180, 120}, {0, 120}})},
     };
     presentation->prepareForRendering();
     ScreenshotRecognitionResults cached;

@@ -1378,7 +1378,9 @@ bool sendNativeRecorderMessage(QWidget* window, UINT message, Qt::KeyboardModifi
     native.wParam = key;
     native.lParam = flags;
     native.time = timestamp;
-    qintptr result = -1;
+    // The result slot is qintptr* on Qt 6 and long* on Qt 5, where the Windows
+    // dispatcher still hands out a 32-bit result.
+    snowNativeEventResult result = -1;
     const bool consumed = QAbstractEventDispatcher::instance()->filterNativeEvent(
         QByteArrayLiteral("windows_generic_MSG"), &native, &result);
     require(SetKeyboardState(savedState.data()) != FALSE, "keyboard state must be restored");

@@ -307,8 +307,10 @@ class BenchmarkApplication final : public QApplication {
         if (!widget.isWindow()) {
             return isObserved(*widget.window());
         }
+        // QFlags::toInt() is Qt 6.2; the int conversion operator is the spelling
+        // both versions accept.
         const Qt::WindowType type = static_cast<Qt::WindowType>(
-            widget.windowFlags().toInt() & static_cast<int>(Qt::WindowType_Mask));
+            static_cast<int>(widget.windowFlags()) & static_cast<int>(Qt::WindowType_Mask));
         return widget.isVisible() && (type == Qt::ToolTip || type == Qt::Popup || type == Qt::Tool);
     }
 
@@ -554,7 +556,9 @@ class TransitionEventAudit final : public QObject {
             return;
         }
         m_toolbar->installEventFilter(this);
-        m_watched.append(m_toolbar);
+        // QPointer has no converting copy across template arguments on Qt 5, so a
+        // QPointer<ScreenshotToolbarWindow> will not become a QPointer<QObject>.
+        m_watched.append(QPointer<QObject>(snowPointerData(m_toolbar)));
         for (QWidget* widget : m_toolbar->findChildren<QWidget*>()) {
             widget->installEventFilter(this);
             m_watched.append(widget);

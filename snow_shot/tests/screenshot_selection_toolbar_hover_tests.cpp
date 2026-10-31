@@ -890,8 +890,8 @@ void aspectRatioPopupRecoversFromHoverMovement() {
     QCoreApplication::processEvents();
     auto* select = ratioSelect(toolbar);
     const auto hover = [](QWidget* receiver, QEvent::Type type, const QPoint& point) {
-        QHoverEvent event(type, point, receiver->mapToGlobal(point), QPointF(-1, -1),
-                          Qt::NoModifier);
+        QHoverEvent event = snowHoverEvent(type, point, receiver->mapToGlobal(point),
+                                           QPointF(-1, -1), Qt::NoModifier);
         QApplication::sendEvent(receiver, &event);
     };
     const auto advanceDismissal = [] {

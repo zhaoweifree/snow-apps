@@ -1006,8 +1006,12 @@ void navigationThemesLanguagesAndGeometry() {
             const QString theme = appearance == styles::ThemeAppearance::Light
                                       ? QStringLiteral("light")
                                       : QStringLiteral("dark");
-            for (const auto& locale :
-                 {QStringLiteral("en_US"), QStringLiteral("zh_CN"), QStringLiteral("zh_TW")}) {
+            // Hoisted out of the for-range: on Qt 5 QStringLiteral expands to a
+            // lambda, and this compiler reports the second one in a braced range
+            // list as a redefinition of the first (C2011 lambda_2).
+            const QStringList locales{QStringLiteral("en_US"), QStringLiteral("zh_CN"),
+                                      QStringLiteral("zh_TW")};
+            for (const auto& locale : locales) {
                 QTranslator translator;
                 require(translator.load(QStringLiteral("snow_shot_%1.qm").arg(locale),
                                         QStringLiteral(SNOW_SHOT_TEST_TRANSLATIONS_DIR)),

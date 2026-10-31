@@ -1192,7 +1192,7 @@ void deterministicDirtyOrderAndCustomValues() {
     require(!session.hasDirtyFields(), "custom tray completion must clear its dirty state");
 
     storage::ScreenshotToolbarLayout layout;
-    layout.positions = QStringList{{QStringLiteral("brush")}};
+    layout.positions = QVector<QStringList>{QStringList{QStringLiteral("brush")}};
     layout.hidden = QStringList{QStringLiteral("text")};
     require(session.applyToolbarLayout(storage::ScreenshotToolbarLayoutKind::DrawingTools, layout),
             "custom toolbar values must be writable");
@@ -1200,7 +1200,8 @@ void deterministicDirtyOrderAndCustomValues() {
             "custom toolbar compatibility reads must expose the accepted value");
 
     storage::ScreenshotToolbarLayout actionLayout;
-    actionLayout.positions = QStringList{{QStringLiteral("save-as-file")}, {QStringLiteral("record-screen")}};
+    actionLayout.positions = QVector<QStringList>{QStringList{QStringLiteral("save-as-file")},
+                                                  QStringList{QStringLiteral("record-screen")}};
     actionLayout.hidden = QStringList{QStringLiteral("barcode-recognition")};
     require(session.applyToolbarLayout(storage::ScreenshotToolbarLayoutKind::ActionTools,
                                        actionLayout) &&

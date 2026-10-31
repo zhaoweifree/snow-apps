@@ -239,7 +239,8 @@ void screenshotExportsRetainSrgb() {
     }
     QImage p3 = source;
     p3.setColorSpace(QColorSpace::DisplayP3);
-    const auto expected = p3.convertedToColorSpace(srgb, QImage::Format_ARGB32_Premultiplied);
+    const auto expected =
+        snowImageConvertedToColorSpace(p3, srgb, QImage::Format_ARGB32_Premultiplied);
     const auto normalized = ScreenshotResultCompositor::normalizeImage(p3);
     require(normalized.colorSpace() == srgb && hasSamePixels(normalized, expected) &&
                 normalized.pixelColor(0, 0) != p3.pixelColor(0, 0),

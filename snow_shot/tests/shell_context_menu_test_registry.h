@@ -86,7 +86,10 @@ class Registry final {
         options.classesRoot = QStringLiteral("Software\\SnowShotTests");
         options.executablePath =
             QStringLiteral("C:/Snow Shot/雪/") + snow_shot::app::edition::executableName();
-        options.fileExtensions = {QStringLiteral("png"), QStringLiteral("jpg")};
+        // A braced list is ambiguous here on Qt 5: QStringList is its own class
+        // deriving from QList<QString>, so both operator=(initializer_list) and
+        // operator=(const QStringList&) match. Name the type instead.
+        options.fileExtensions = QStringList{QStringLiteral("png"), QStringLiteral("jpg")};
         options.registry = access();
         return options;
     }

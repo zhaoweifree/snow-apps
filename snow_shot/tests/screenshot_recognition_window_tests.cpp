@@ -147,7 +147,7 @@ void clickCell(ScreenshotTableEditor& editor, int row, int column) {
 }
 
 QPolygonF ocrQuad(const QRectF& rect) {
-    return {rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()};
+    return snowPolygonF({rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()});
 }
 
 QList<QGraphicsItem*> ocrGlyphItems(QGraphicsView* layer) {
@@ -344,15 +344,18 @@ std::shared_ptr<ScreenshotOcrPresentation> ocrHighlightingPresentation() {
     presentation->lines = {
         ScreenshotOcrLine{QStringLiteral("A"), 1.0, ocrQuad(QRectF(20, 15, 220, 40))},
         ScreenshotOcrLine{
-            QStringLiteral("Rotated"), 1.0, {{40, 85}, {260, 125}, {254, 160}, {34, 120}}},
+            QStringLiteral("Rotated"), 1.0,
+            snowPolygonF({{40, 85}, {260, 125}, {254, 160}, {34, 120}})},
         ScreenshotOcrLine{
-            QStringLiteral("Perspective"), 1.0, {{40, 180}, {255, 165}, {245, 220}, {50, 235}}},
+            QStringLiteral("Perspective"), 1.0,
+            snowPolygonF({{40, 180}, {255, 165}, {245, 220}, {50, 235}})},
         ScreenshotOcrLine{QStringLiteral("ABCDE"), 1.0, ocrQuad(QRectF(320, 30, 35, 220)),
                           ScreenshotOcrTextDirection::Vertical},
         ScreenshotOcrLine{QStringLiteral("Top row\nBottom row"), 1.0,
                           ocrQuad(QRectF(40, 270, 280, 130))},
         ScreenshotOcrLine{QString{}, 1.0, ocrQuad(QRectF(350, 300, 30, 30))},
-        ScreenshotOcrLine{QStringLiteral("Invalid"), 1.0, {{360, 360}, {390, 360}, {375, 390}}},
+        ScreenshotOcrLine{QStringLiteral("Invalid"), 1.0,
+                          snowPolygonF({{360, 360}, {390, 360}, {375, 390}})},
         ScreenshotOcrLine{QStringLiteral("Offscreen"), 1.0, ocrQuad(QRectF(900, 900, 50, 20))},
     };
     auto& paragraph = presentation->lines[4];
@@ -449,7 +452,8 @@ void ocrTextHighlightingUnionsOverlappingLabels() {
         ScreenshotOcrLine{
             QStringLiteral("Overlap"),
             1.0,
-            {bounds.topLeft(), bounds.bottomLeft(), bounds.bottomRight(), bounds.topRight()}},
+            snowPolygonF(
+                {bounds.topLeft(), bounds.bottomLeft(), bounds.bottomRight(), bounds.topRight()})},
     };
     layer.setPresentation(presentation);
     layer.synchronize(QTransform(), presentation->selection);

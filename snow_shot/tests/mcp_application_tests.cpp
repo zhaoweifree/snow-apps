@@ -663,7 +663,8 @@ void runMcpApplicationTests() {
         if (length > static_cast<quint32>(damagedPng.size() - offset - 12))
             break;
         if (damagedPng.mid(offset + 4, 4) == "IDAT" && length > 0) {
-            damagedPng[offset + 8] = char(damagedPng[offset + 8] ^ 0xff);
+            damagedPng[static_cast<int>(offset) + 8] =
+                char(damagedPng[static_cast<int>(offset) + 8] ^ 0xff);
             damaged = true;
             break;
         }
