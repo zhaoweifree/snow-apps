@@ -117,7 +117,7 @@ void imageTransfersConvertDirectlyWithoutPublishingReady() {
                                 static_cast<std::size_t>(source.width()) * 4) == 0,
                     "direct OCR transfer must match Qt alpha and format conversion");
         require(std::all_of(slot.end() - trailingGuard, slot.end(),
-                            [](uchar value) { return value == sentinel; }),
+                            [sentinel](uchar value) { return value == sentinel; }),
                 "OCR staging must stay within slot capacity");
     }
     std::array<uchar, 64> slot{};
@@ -132,7 +132,7 @@ void imageTransfersConvertDirectlyWithoutPublishingReady() {
         require(takeU32(header, stateOffset, &state) && state == kSlotFree,
                 "failed OCR staging must leave Ready unpublished");
         require(std::all_of(slot.begin() + kSlotHeaderBytes, slot.end(),
-                            [](uchar value) { return value == sentinel; }),
+                            [sentinel](uchar value) { return value == sentinel; }),
                 "OCR capacity failure must not write pixel bytes");
     };
     failUnpublished(fixture, static_cast<qsizetype>(slot.size()));

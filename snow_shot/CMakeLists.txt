@@ -530,6 +530,20 @@ set_target_properties(snow_shot_image_codec_backend PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
 )
+if(UNIX AND NOT APPLE AND NOT SNOW_SHOT_IMAGE_CODEC_BACKEND_STATIC)
+    # On ELF the backend reached libwebpmux only through the static snow_image
+    # archive's link interface, which lands the WebP libraries *before* the
+    # archive on the link line; `--as-needed` then drops libwebpmux and the .so
+    # is left with an undefined WebPAnimEncoderSetChunk. Anything that links the
+    # .so without independently pulling libwebpmux -- snow-shot-scrolling-result-
+    # async-benchmark, for one -- then fails with that single undefined symbol.
+    # Naming the libraries here appends them after the archive, so the .so
+    # records its own DT_NEEDED and every consumer links cleanly.
+    if(TARGET WebP::libwebpmux)
+        target_link_libraries(snow_shot_image_codec_backend PRIVATE
+            WebP::webp WebP::webpdemux WebP::libwebpmux)
+    endif()
+endif()
 
 set(SNOW_SHOT_IMAGE_CODEC_SOURCES
     src/image/snowimageqtcodec.h
@@ -7112,6 +7126,21 @@ if(SNOW_SHOT_BUILD_TESTS)
         src/presentation/selection/screenshotselectiontoolbarwidgets.cpp)
     target_include_directories(snow-shot-scrolling-capture-settings-tests PRIVATE include src
         src/image src/presentation/services)
+    # The object library above is compiled with the platform scroll entry points
+    # renamed to the snowTest* hooks, so its calls only resolve once the
+    # implementation of those hooks is linked too. screenshotscroll.cpp is the
+    # file that renames platform::screenshotScrollPermission/sendScreenshotScroll
+    # into snowTestScrollPermission/snowTestSendScreenshotScroll and forwards to
+    # windows::snowTestSendScrollingWheelStep, so it has to be built into this
+    # executable with the same definitions. Without it every ELF link of the
+    # target reported both symbols as undefined.
+    target_sources(snow-shot-scrolling-capture-settings-tests PRIVATE
+        src/platform/screenshotscroll.cpp)
+    target_compile_definitions(snow-shot-scrolling-capture-settings-tests PRIVATE
+        screenshotScrollPermission=snowTestScrollPermission
+        sendScreenshotScroll=snowTestSendScreenshotScroll
+        sendScrollingWheelStep=snowTestSendScrollingWheelStep
+        flushWindowComposition=snowTestFlushWindowComposition)
     target_link_libraries(snow-shot-scrolling-capture-settings-tests PRIVATE
         snow-shot-scrolling-settings-test-runtime snow_shot_diagnostics snow_shot_storage
         snow_shot_image_split
