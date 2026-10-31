@@ -5197,13 +5197,18 @@ if(SNOW_SHOT_BUILD_TESTS)
             psapi
         )
     endif()
-    add_test(
-        NAME snow-shot-pinned-window-tests
-        COMMAND snow-shot-pinned-window-tests
-    )
-    set_tests_properties(snow-shot-pinned-window-tests PROPERTIES
-        LABELS "interactive;e2e;windows" RUN_SERIAL TRUE TIMEOUT 180
-        ENVIRONMENT "QT_QPA_PLATFORM=windows")
+    # Starts the real pinned window on the native platform: the Win32 plugin
+    # only exists in a Windows build, so registering this on Linux would fail
+    # with "Could not find the Qt platform plugin" instead of testing anything.
+    if(WIN32)
+        add_test(
+            NAME snow-shot-pinned-window-tests
+            COMMAND snow-shot-pinned-window-tests
+        )
+        set_tests_properties(snow-shot-pinned-window-tests PROPERTIES
+            LABELS "interactive;e2e;windows" RUN_SERIAL TRUE TIMEOUT 180
+            ENVIRONMENT "QT_QPA_PLATFORM=windows")
+    endif()
     snow_shot_import_offscreen_platform(snow-shot-pinned-window-tests)
     add_test(NAME snow-shot-pinned-wheel-step-tests
         COMMAND snow-shot-pinned-window-tests --wheel-step-only -platform offscreen)
@@ -5267,10 +5272,12 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-window-tests --hide-to-top-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-hide-to-top-tests PROPERTIES LABELS "unit"
         RUN_SERIAL TRUE TIMEOUT 60)
-    add_test(NAME snow-shot-pinned-hide-to-top-native-tests
-        COMMAND snow-shot-pinned-window-tests --hide-to-top-native-only -platform windows)
-    set_tests_properties(snow-shot-pinned-hide-to-top-native-tests PROPERTIES LABELS "unit;windows"
-        RUN_SERIAL TRUE TIMEOUT 60)
+    if(WIN32)
+        add_test(NAME snow-shot-pinned-hide-to-top-native-tests
+            COMMAND snow-shot-pinned-window-tests --hide-to-top-native-only -platform windows)
+        set_tests_properties(snow-shot-pinned-hide-to-top-native-tests PROPERTIES LABELS "unit;windows"
+            RUN_SERIAL TRUE TIMEOUT 60)
+    endif()
     add_test(NAME snow-shot-pinned-lock-tests
         COMMAND snow-shot-pinned-window-tests --lock-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-lock-tests PROPERTIES LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60)
@@ -5312,10 +5319,12 @@ if(SNOW_SHOT_BUILD_TESTS)
         COMMAND snow-shot-pinned-window-tests --remembered-drawing-tool-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-remembered-drawing-tool-tests PROPERTIES LABELS "unit"
         RUN_SERIAL TRUE TIMEOUT 60)
-    add_test(NAME snow-shot-pinned-click-through-native-tests
-        COMMAND snow-shot-pinned-window-tests --click-through-native-only -platform windows)
-    set_tests_properties(snow-shot-pinned-click-through-native-tests PROPERTIES
-        LABELS "interactive;e2e;windows" RUN_SERIAL TRUE TIMEOUT 60)
+    if(WIN32)
+        add_test(NAME snow-shot-pinned-click-through-native-tests
+            COMMAND snow-shot-pinned-window-tests --click-through-native-only -platform windows)
+        set_tests_properties(snow-shot-pinned-click-through-native-tests PROPERTIES
+            LABELS "interactive;e2e;windows" RUN_SERIAL TRUE TIMEOUT 60)
+    endif()
     add_test(NAME snow-shot-pinned-image-processing-shortcut-tests
         COMMAND snow-shot-pinned-window-tests --image-processing-shortcuts-only -platform offscreen)
     set_tests_properties(snow-shot-pinned-image-processing-shortcut-tests PROPERTIES LABELS "unit")
@@ -6236,7 +6245,8 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-pinned-opacity-export-tests PROPERTIES
         LABELS "unit" TIMEOUT 90)
     add_test(NAME snow-shot-pinned-quick-save-tests
-        COMMAND snow-shot-pinned-window-tests --quick-save-only -platform $<IF:$<PLATFORM_ID:Darwin>,offscreen,windows>)
+        COMMAND snow-shot-pinned-window-tests --quick-save-only
+            -platform $<IF:$<PLATFORM_ID:Windows>,windows,offscreen>)
     set_tests_properties(snow-shot-pinned-quick-save-tests PROPERTIES LABELS "unit;windows")
     add_test(NAME snow-shot-quick-save-toolbar-tests
         COMMAND snow-shot-screenshot-tool-palette-tests --quick-save-only -platform offscreen)
@@ -7009,9 +7019,14 @@ if(SNOW_SHOT_BUILD_TESTS)
     if(APPLE)
         set(_snow_recording_shortcut_platform cocoa)
         set(_snow_recording_shortcut_os macos)
-    else()
+    elseif(WIN32)
         set(_snow_recording_shortcut_platform windows)
         set(_snow_recording_shortcut_os windows)
+    else()
+        # X11 keeps the native focus handover this test asserts; the xcb plugin
+        # is the Linux equivalent of the Win32 one here.
+        set(_snow_recording_shortcut_platform xcb)
+        set(_snow_recording_shortcut_os linux)
     endif()
     add_test(NAME snow-shot-recording-history-shortcut-tests
         COMMAND snow-shot-screen-recording-shortcut-tests --history-shortcuts-only)
@@ -8784,10 +8799,10 @@ if(SNOW_SHOT_BUILD_TESTS)
     set_tests_properties(snow-shot-image-conversion-toolbar-tests PROPERTIES TIMEOUT 60
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-image-conversion-pinned-tests
-        COMMAND snow-shot-pinned-window-tests --image-conversion-only)
+        COMMAND snow-shot-pinned-window-tests --image-conversion-only
+            -platform $<IF:$<PLATFORM_ID:Windows>,windows,offscreen>)
     set_tests_properties(snow-shot-image-conversion-pinned-tests PROPERTIES TIMEOUT 60
-        ENVIRONMENT "QT_QPA_PLATFORM=windows"
-        LABELS "unit;windows"
+        LABELS "unit"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     add_test(NAME snow-shot-table-recognition-session-tests
         COMMAND snow-shot-recognition-session-controller-tests --table-only -platform offscreen)

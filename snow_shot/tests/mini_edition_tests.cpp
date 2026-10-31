@@ -1,5 +1,5 @@
 #include "snow_shot/app/edition.h"
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 #include "snow_shot/presentation/settings/settingsregistry.h"
 #include "snow_shot/presentation/settings/settingssearchindex.h"
 #include "snow_shot/presentation/screenshottoolbarlayoutmodel.h"
@@ -59,7 +59,7 @@ void settingsExcludeRemovedFeatures() {
         const auto* item = catalog.item(entry.location);
         require(
             item == nullptr || item->configurationKey.isEmpty() ||
-                snow_shot::presentation::editionConfigurationKeyAvailable(item->configurationKey),
+                snow_shot::app::editionConfigurationKeyAvailable(item->configurationKey),
             "search must not expose removed configuration keys");
     }
     for (const auto& group : settings::builtInTrayCommandManifest().groups) {
@@ -99,7 +99,7 @@ void toolbarDefaultsAndImports() {
         const auto normalized = layout::normalizedLayout(imported, kind);
         for (const auto& position : normalized.positions)
             for (const auto& id : position)
-                require(snow_shot::presentation::editionActionToolAvailable(id),
+                require(snow_shot::app::editionActionToolAvailable(id),
                         "imported full-edition layouts must discard removed tools");
         require(normalized.hidden.contains(QStringLiteral("text-recognition")),
                 "partial imported layouts must preserve hidden default OCR");
@@ -273,12 +273,12 @@ void fullArchiveImportPreservesSupportedChoices() {
                 "archive normalization must retain the visible OCR tool");
         for (const auto& position : layout.value(QStringLiteral("positions")).toArray()) {
             for (const auto& id : position.toArray()) {
-                require(snow_shot::presentation::editionActionToolAvailable(id.toString()),
+                require(snow_shot::app::editionActionToolAvailable(id.toString()),
                         "archive normalization must remove unavailable visible tools");
             }
         }
         for (const auto& id : hidden) {
-            require(snow_shot::presentation::editionActionToolAvailable(id.toString()),
+            require(snow_shot::app::editionActionToolAvailable(id.toString()),
                     "archive normalization must remove unavailable hidden tools");
         }
     }

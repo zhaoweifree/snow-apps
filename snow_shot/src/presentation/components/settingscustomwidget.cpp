@@ -9,7 +9,7 @@
 #include "snow_shot/presentation/components/texttranslationsettingswidget.h"
 #endif
 
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 
 #include "snow_shot/presentation/components/toolbareditorsettingswidget.h"
 #include "snow_shot/presentation/components/storagestatussettingswidget.h"

@@ -41,7 +41,7 @@
 #include "snow_shot/presentation/languagemanager.h"
 #include "snow_shot/shortcuts/shortcutdisplayservice.h"
 
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 
 #include "snow_shot/platform/physicalcursor.h"
 #include "snow_shot/platform/windowcaptureexclusion.h"

@@ -6,7 +6,7 @@
 #include <QDataStream>
 #include <QIODevice>
 
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 
 #include "snow_shot/presentation/screenshotcapturestate.h"
 #include "snow_shot/presentation/screenshotdisplaysession.h"
@@ -428,7 +428,7 @@ void ScreenshotOcrController::activateMode(Mode mode, bool textTranslation,
                             : mode == Mode::Markdown ? 3
                             : mode == Mode::Html     ? 4
                                                      : 5;
-    if (!snow_shot::presentation::editionRecognitionModeAvailable(sessionMode))
+    if (!snow_shot::app::editionRecognitionModeAvailable(sessionMode))
         return;
     const QRect selection = m_context.selection.pixelSelection();
     if (selection.width() < 1 || selection.height() < 1) {

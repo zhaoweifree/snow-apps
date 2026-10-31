@@ -4,7 +4,7 @@
 #include "snow_shot/image/screenshotregionpoints.h"
 #include "snow_shot/presentation/screenshotselectorworkflow.h"
 #include "snow_shot/presentation/screenshotregionpreferences.h"
-#include "snow_shot/presentation/screenshotregiontypeshortcut.h"
+#include "snow_shot/shortcuts/screenshotregiontypeshortcut.h"
 #include "snow_shot/presentation/screenshothistoryservice.h"
 #include "snow_shot/presentation/directcapturehistory.h"
 #include "snowimageqtcodec.h"

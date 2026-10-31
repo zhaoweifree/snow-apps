@@ -5,7 +5,7 @@
 #endif
 #include "snow_shot/presentation/screenshotocrlayout.h"
 
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 
 #include "snow_shot/presentation/screenshotocrpresentation.h"
 #include "snow_shot/presentation/screenshotocrvisuals.h"
@@ -1123,7 +1123,7 @@ void ScreenshotRecognitionSessionController::prefetchText() {
 
 void ScreenshotRecognitionSessionController::activate(Mode mode) {
     const QPointer<ScreenshotRecognitionSessionController> lifetime(this);
-    if (!snow_shot::presentation::editionRecognitionModeAvailable(static_cast<int>(mode)))
+    if (!snow_shot::app::editionRecognitionModeAvailable(static_cast<int>(mode)))
         return;
     if (m_active && m_mode == mode && (mode == Mode::Table || mode == Mode::Latex) && busy(mode)) {
         if (!updateRecognitionModels())

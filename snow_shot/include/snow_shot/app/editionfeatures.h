@@ -1,13 +1,16 @@
-#ifndef SNOW_SHOT_PRESENTATION_EDITIONFEATURES_H
-#define SNOW_SHOT_PRESENTATION_EDITIONFEATURES_H
+#ifndef SNOW_SHOT_APP_EDITIONFEATURES_H
+#define SNOW_SHOT_APP_EDITIONFEATURES_H
 
 #include "snow_shot/app/edition.h"
 
 #include <QString>
 
-namespace snow_shot::presentation {
+// Edition gating is application policy layered on app/edition.h, not
+// presentation code: the storage layer needs it too (the default floating
+// toolbar layout and the configuration schema both drop tools the running
+// edition does not ship), and storage must not include presentation.
+namespace snow_shot::app {
 [[nodiscard]] inline bool editionActionToolAvailable(const QString& id) {
-    using namespace app;
     if (id == QStringLiteral("barcode-recognition"))
         return edition::qrRecognition;
     if (id == QStringLiteral("table-recognition"))
@@ -22,7 +25,6 @@ namespace snow_shot::presentation {
 }
 
 [[nodiscard]] inline bool editionRecognitionModeAvailable(int mode) {
-    using namespace app;
     switch (mode) {
     case 0:
         return true;
@@ -41,7 +43,6 @@ namespace snow_shot::presentation {
 }
 
 [[nodiscard]] inline bool editionConfigurationKeyAvailable(const QString& key) {
-    using namespace app;
     if (!edition::apiConfiguration && key.startsWith(QStringLiteral("api_configuration/")))
         return false;
     if (!edition::extendedFeatures && key.startsWith(QStringLiteral("extended_features/")))
@@ -64,6 +65,15 @@ namespace snow_shot::presentation {
         return false;
     return true;
 }
-} // namespace snow_shot::presentation
+} // namespace snow_shot::app
 
-#endif // SNOW_SHOT_PRESENTATION_EDITIONFEATURES_H
+namespace snow_shot {
+// These used to live in snow_shot::presentation. The using-declarations keep
+// the unqualified call sites in presentation and storage compiling unchanged
+// while the definitions sit in the layer that owns them.
+using app::editionActionToolAvailable;
+using app::editionConfigurationKeyAvailable;
+using app::editionRecognitionModeAvailable;
+} // namespace snow_shot
+
+#endif // SNOW_SHOT_APP_EDITIONFEATURES_H

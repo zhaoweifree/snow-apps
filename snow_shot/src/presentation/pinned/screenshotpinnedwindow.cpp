@@ -34,7 +34,7 @@
 #include "snow_shot/storage/applicationstorage.h"
 #include "snow_shot/storage/pinnedwindowrepository.h"
 
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 
 #include "screenshotpinnednativegeometrycontroller.h"
 #include "screenshotpinnedgeometrymapping.h"
@@ -5143,7 +5143,7 @@ void ScreenshotPinnedWindow::endAuxiliaryWindowInteraction() {
 void ScreenshotPinnedWindow::activateRecognitionMode(int mode, bool showToolbar) {
     if (animatedImage())
         return;
-    if (!snow_shot::presentation::editionRecognitionModeAvailable(mode))
+    if (!snow_shot::app::editionRecognitionModeAvailable(mode))
         return;
     m_automationRecognition = false;
     if (m_clickThroughActive && !setClickThroughMode(false)) {
@@ -5247,7 +5247,7 @@ void ScreenshotPinnedWindow::deactivateRecognition() {
 bool ScreenshotPinnedWindow::recognitionModeAvailable(int mode) const {
     if (animatedImage())
         return false;
-    if (!snow_shot::presentation::editionRecognitionModeAvailable(mode))
+    if (!snow_shot::app::editionRecognitionModeAvailable(mode))
         return false;
     const auto results = m_recognitionTargetReady && m_recognitionSession != nullptr
                              ? m_recognitionSession->cachedRecognitionResults()
@@ -9865,7 +9865,7 @@ QJsonObject ScreenshotPinnedWindow::automationEdit(const QString& action,
         const qsizetype mode = kinds.indexOf(payload.value(QStringLiteral("kind")).toString());
         if (mode < 0)
             return fail("invalid_parameters");
-        if (!snow_shot::presentation::editionRecognitionModeAvailable(static_cast<int>(mode)))
+        if (!snow_shot::app::editionRecognitionModeAvailable(static_cast<int>(mode)))
             return fail("action_unavailable");
         ensureRecognitionProviders();
         activateRecognitionMode(static_cast<int>(mode), false);

@@ -1,5 +1,5 @@
 #include "snow_shot/presentation/windowcloseshortcut.h"
-#include "snow_shot/presentation/screenshotregiontypeshortcut.h"
+#include "snow_shot/shortcuts/screenshotregiontypeshortcut.h"
 #include "snow_shot/presentation/windowshortcutmanager.h"
 
 #import <AppKit/AppKit.h>

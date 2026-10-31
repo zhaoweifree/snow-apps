@@ -2,7 +2,7 @@
 #include "snow_shot/storage/settingsadapters.h"
 #include "snow_shot/storage/floatingtoolbarsettings.h"
 
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 
 #include "snow_shot/storage/applicationstorage.h"
 #include "snow_shot/storage/configurationschema.h"
@@ -113,7 +113,7 @@ const QStringList& screenshotShortcutActionIds() {
             QStringLiteral("redo"),
         };
         snow::compat::removeIf(result, [](const QString& id) {
-            return !snow_shot::presentation::editionConfigurationKeyAvailable(
+            return !snow_shot::app::editionConfigurationKeyAvailable(
                 QStringLiteral("screenshot_shortcuts/") + id);
         });
         return result;

@@ -14,8 +14,12 @@ file(GLOB_RECURSE _snow_shot_sources
 # verifies the deployed tree's `bin/__data_directory` marker; both describe
 # the installation layout, not application-settings storage, so they do not
 # bypass the ConfigurationStore boundary this check protects.
+# `app/edition.h` names the same install-layout marker: it is the header that
+# defines which marker distinguishes the Mini build, so it has to spell the
+# string out. Nothing there reads or writes the marker.
 set(_snow_shot_boundary_allowlist
     "${SNOW_SHOT_SOURCE_DIR}/src/update/updatetransaction.cpp"
+    "${SNOW_SHOT_SOURCE_DIR}/include/snow_shot/app/edition.h"
 )
 
 foreach(_source IN LISTS _snow_shot_sources)

@@ -3,7 +3,7 @@
 #include "snow_shot/storage/applicationstorage.h"
 #include <QTimer>
 
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 
 #include "snow_shot/storage/capturehistoryrepository.h"
 #include "snow_shot/storage/pinnedwindowrepository.h"

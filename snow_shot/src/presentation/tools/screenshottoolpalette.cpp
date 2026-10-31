@@ -6,7 +6,7 @@
 #include "../recording/recordingaudiogainpopover.h"
 #include "snow_shot/presentation/shortcutdisplaytext.h"
 
-#include "snow_shot/presentation/editionfeatures.h"
+#include "snow_shot/app/editionfeatures.h"
 
 #include "screenshottoolbarperfinstrumentation.h"
 #include "../recording/screenrecordingperfinstrumentation.h"
@@ -1901,7 +1901,7 @@ void ScreenshotToolPalette::setActiveTool(Tool tool) {
     m_angleWheelSteps.reset();
     if (m_recordTrimPanel)
         return;
-    if (!snow_shot::presentation::editionActionToolAvailable(actionToolItemId(tool)))
+    if (!snow_shot::app::editionActionToolAvailable(actionToolItemId(tool)))
         return;
     SNOW_SHOT_TOOLBAR_PERF_SCOPE("palette.set_active_tool");
     if (m_releasingSecondaryResources) {
@@ -5353,7 +5353,7 @@ adqt::widgets::AdButton* ScreenshotToolPalette::actionToolEntryButton(const QStr
 }
 
 bool ScreenshotToolPalette::actionToolAvailable(const QString& itemId) const {
-    if (!snow_shot::presentation::editionActionToolAvailable(itemId))
+    if (!snow_shot::app::editionActionToolAvailable(itemId))
         return false;
     if (itemId == QStringLiteral("barcode-recognition")) {
         return (m_options.showQrTool && snow_shot::app::edition::qrRecognition);
