@@ -2189,12 +2189,92 @@ class NativeEventFilterProbe final : public QAbstractNativeEventFilter {
 //     sequence above), so a call site reads as one function call on both
 //     versions and the difference lives here.
 // ---------------------------------------------------------------------------
+// Sections 18e-18g are QtCore-only rewrites even though they sit in the 18
+// series: a target that links nothing but Qt::Core (many of the 289 test
+// translation units do) never defines SNOW_COMPAT_HAS_GUI, and the helpers
+// have to exist there anyway. They are hoisted above the GUI guard for that
+// reason; only the spelling helpers that need a QtGui or QtWidgets type stay
+// below it.
+#  include <QPointer>
+#  include <QTimeZone>
+
+// --- 18e. QTimeZone::UTC / QTimeZone::LocalTime (rule R43) ------------------
+//
+//     Qt 6.5 turned both into enumerators of QTimeZone::Initialization, so
+//     `QTimeZone::UTC` is a *value*, not a call. Qt 5.15 has static factories
+//     only: QTimeZone::utc() and QTimeZone::systemTimeZone().
+//
+//     Rule R43: `QTimeZone::UTC` -> `snowTimeZoneUTC()`
+//               `QTimeZone::LocalTime` -> `snowTimeZoneLocal()`
+[[nodiscard]] inline QTimeZone snowTimeZoneUTC()
+{
+#if SNOW_QT6
+    return QTimeZone(QTimeZone::UTC);
+#else
+    return QTimeZone::utc();
+#endif
+}
+
+[[nodiscard]] inline QTimeZone snowTimeZoneLocal()
+{
+#if SNOW_QT6
+    return QTimeZone(QTimeZone::LocalTime);
+#else
+    return QTimeZone::systemTimeZone();
+#endif
+}
+
+// --- 18f. Comparing a QFlags against a single enumerator (rule R44) ---------
+//
+//     Qt 6.0 added operator==(Enum) to QFlags. Qt 5.15 has no comparison
+//     operator at all -- equality works through `operator Int()`, and a scoped
+//     enumerator cannot feed that, so `flags == Enum::Value` is
+//     "no match for operator==" out of nowhere. (QFlags is a Qt type, so no
+//     header-level shim can add the operator back; the call site has to change.)
+//
+//     Rule R44: `<flags> == <Enum>::<Value>` -> `snowFlagsEqual(<flags>, <Enum>::<Value>)`
+//
+//     Exact equality, not testFlag(): `triggers() == Trigger::Hover` asks that
+//     nothing else is set, and answering "contains Hover" would quietly accept
+//     a popover that also triggers on click.
+template <typename Enum>
+[[nodiscard]] constexpr bool snowFlagsEqual(QFlags<Enum> flags, Enum value) noexcept
+{
+    return static_cast<int>(flags) == static_cast<int>(value);
+}
+
+// --- 18g. QPointer::data() is Qt 6 only (rule R48) --------------------------
+//
+//     Qt 6 gave QPointer data()/get(); Qt 5 only converts implicitly. A call site
+//     that passes a QPointer where a raw pointer is wanted reads the same both
+//     ways through this helper.
+//
+//     Rule R48: `<p>.data()` on a QPointer -> `snowPointerData(<p>)`
+template <typename T>
+[[nodiscard]] inline T* snowPointerData(const QPointer<T>& pointer)
+{
+#if SNOW_QT6
+    return pointer.data();
+#else
+    return pointer;
+#endif
+}
+
+
 #if SNOW_COMPAT_HAS_GUI
 
 #  include <QColorSpace>
 #  include <QImage>
 #  include <QPolygonF>
+#  include <QTabletEvent>
 #  include <initializer_list>
+// Section 21 builds a QPointingDevice fixture. That class only exists on Qt 6,
+// so the include follows the rule the rest of this file uses: a header that one
+// version does not ship lives inside the version guard.
+#  if SNOW_QT6
+#    include <QInputDevice>
+#    include <QPointingDevice>
+#  endif
 // QLabel is a QtWidgets header: a QtGui-only target (snow_canvas_image is one)
 // has no QtWidgets include path, and this header is force-included into every
 // TU, so the include has to follow the same Widgets probe section 9 uses.
@@ -2266,88 +2346,59 @@ using SnowEnterEventInstance = QEvent;
 //     Qt 5.15: convertedToColorSpace(const QColorSpace &) const
 //     Qt 6   : convertedToColorSpace(const QColorSpace &, QImage::Format) const
 //
-//     Rule R42: `<i>.convertedToColorSpace(<s>[, <f>])`
-//            -> `snowImageConvertedToColorSpace(<i>, <s>[, <f>])`
+//     Rule R42: `<i>.convertedToColorSpace(<s>[, <f>[, <fl>]])`
+//            -> `snowImageConvertedToColorSpace(<i>, <s>[, <f>[, <fl>]])`
 //
-//     LOSSY on Qt 5: the format request is dropped. Qt 5 converts into the
-//     source format; every test that passes a format does so to assert the
-//     *pixels* came back in that layout, and it re-checks the format with
-//     QCOMPARE -- which is the assertion that can fail, not this call.
+//     Qt 6.8 added the third argument (Qt::ImageConversionFlags); the two-
+//     argument form above is unchanged.
+//
+//     LOSSY on Qt 5: both the format and the flags are dropped, and Qt 5
+//     converts into the source format. Every test that passes a format does so
+//     to assert the *pixels* came back in that layout, and it re-checks the
+//     format with QCOMPARE -- which is the assertion that can fail, not this
+//     call. The flags argument only ever carries dithering requests, which Qt 5
+//     applies unconditionally on this path.
 [[nodiscard]] inline QImage snowImageConvertedToColorSpace(const QImage& image,
                                                           const QColorSpace& space,
                                                           QImage::Format format =
-                                                              QImage::Format_Invalid)
+                                                              QImage::Format_Invalid,
+                                                          Qt::ImageConversionFlags flags =
+                                                              Qt::AutoColor)
 {
 #if SNOW_QT6
     if (format == QImage::Format_Invalid) {
         return image.convertedToColorSpace(space);
     }
+#  if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    return image.convertedToColorSpace(space, format, flags);
+#  else
+    Q_UNUSED(flags)
     return image.convertedToColorSpace(space, format);
+#  endif
 #else
     Q_UNUSED(format)
+    Q_UNUSED(flags)
     return image.convertedToColorSpace(space);
 #endif
 }
 
-// --- 18e. QTimeZone::UTC / QTimeZone::LocalTime (rule R43) ------------------
+// --- 18h. QColorSpace::description() is Qt 6 only (rule R49) ---------------
 //
-//     Qt 6.5 turned both into enumerators of QTimeZone::Initialization, so
-//     `QTimeZone::UTC` is a *value*, not a call. Qt 5.15 has static factories
-//     only: QTimeZone::utc() and QTimeZone::systemTimeZone().
+//     Qt 6 added QColorSpace::description(); Qt 5.15 exposes only the structural
+//     parts (primaries, transfer function). The only consumers are diagnostic
+//     strings printed when a pixel comparison fails, so the Qt 5 branch reports
+//     the same two facts the description is derived from rather than dropping
+//     the line.
 //
-//     Rule R43: `QTimeZone::UTC` -> `snowTimeZoneUTC()`
-//               `QTimeZone::LocalTime` -> `snowTimeZoneLocal()`
-[[nodiscard]] inline QTimeZone snowTimeZoneUTC()
+//     Rule R49: `<s>.description()` -> `snowColorSpaceDescription(<s>)`
+[[nodiscard]] inline QString snowColorSpaceDescription(const QColorSpace& space)
 {
 #if SNOW_QT6
-    return QTimeZone(QTimeZone::UTC);
+    return space.description();
 #else
-    return QTimeZone::utc();
-#endif
-}
-
-[[nodiscard]] inline QTimeZone snowTimeZoneLocal()
-{
-#if SNOW_QT6
-    return QTimeZone(QTimeZone::LocalTime);
-#else
-    return QTimeZone::systemTimeZone();
-#endif
-}
-
-// --- 18f. Comparing a QFlags against a single enumerator (rule R44) ---------
-//
-//     Qt 6.0 added operator==(Enum) to QFlags. Qt 5.15 has no comparison
-//     operator at all -- equality works through `operator Int()`, and a scoped
-//     enumerator cannot feed that, so `flags == Enum::Value` is
-//     "no match for operator==" out of nowhere. (QFlags is a Qt type, so no
-//     header-level shim can add the operator back; the call site has to change.)
-//
-//     Rule R44: `<flags> == <Enum>::<Value>` -> `snowFlagsEqual(<flags>, <Enum>::<Value>)`
-//
-//     Exact equality, not testFlag(): `triggers() == Trigger::Hover` asks that
-//     nothing else is set, and answering "contains Hover" would quietly accept
-//     a popover that also triggers on click.
-template <typename Enum>
-[[nodiscard]] constexpr bool snowFlagsEqual(QFlags<Enum> flags, Enum value) noexcept
-{
-    return static_cast<int>(flags) == static_cast<int>(value);
-}
-
-// --- 18g. QPointer::data() is Qt 6 only (rule R48) --------------------------
-//
-//     Qt 6 gave QPointer data()/get(); Qt 5 only converts implicitly. A call site
-//     that passes a QPointer where a raw pointer is wanted reads the same both
-//     ways through this helper.
-//
-//     Rule R48: `<p>.data()` on a QPointer -> `snowPointerData(<p>)`
-template <typename T>
-[[nodiscard]] inline T* snowPointerData(const QPointer<T>& pointer)
-{
-#if SNOW_QT6
-    return pointer.data();
-#else
-    return pointer;
+    return QStringLiteral("tf=%1/primaries=%2")
+        .arg(static_cast<int>(space.transferFunction()))
+        .arg(static_cast<int>(space.primaries()));
 #endif
 }
 
@@ -2452,6 +2503,226 @@ template <typename T>
     return false;
 #endif
 }
+
+// --- 20. QPointF positions for QWidget::map{To,From}Global (rule R50) -------
+//
+//     Qt 6 gave QWidget the QPointF overloads of mapToGlobal()/mapFromGlobal();
+//     Qt 5.15 has only the QPoint ones, so `widget.mapToGlobal(someQPointF)`
+//     fails there with "cannot convert QPointF to const QPoint&" -- an error
+//     that names the argument, never the missing overload.
+//
+//     Rule R50: `w.mapToGlobal(<p>)` / `w.mapFromGlobal(<p>)`
+//            -> `w.mapToGlobal(snowWidgetPosition(<p>))` (same for mapFromGlobal)
+//
+//     The return type is what makes one spelling serve both versions: on Qt 6
+//     this is the identity, so the fractional position survives exactly as the
+//     original call passed it; on Qt 5 it rounds to QPoint, which the surviving
+//     overload takes. Rounding is the only loss, and it lands on a screen
+//     coordinate that Qt 5 cannot express fractionally anyway.
+#if SNOW_QT6
+[[nodiscard]] inline QPointF snowWidgetPosition(const QPointF& position)
+{
+    return position;
+}
+#else
+[[nodiscard]] inline QPoint snowWidgetPosition(const QPointF& position)
+{
+    return position.toPoint();
+}
+#endif
+
+// --- 21. Tablet fixtures: the device behind a QTabletEvent (rules R51, R52) --
+//
+//     Qt 6 builds a tablet event around a QPointingDevice, and that device is
+//     also where the *capabilities* live: a fixture can say "stylus with a
+//     pressure axis" or "stylus that only reports position", and the product
+//     reads the answer back through pointingDevice(). Qt 5.15 has no
+//     QPointingDevice at all: QTabletEvent takes an (int device, int pointerType)
+//     pair and has no capability channel, so a Qt 5 fixture cannot express the
+//     position-only stylus. What it can express is the difference the product
+//     acts on -- a pressure axis is present exactly when pressure() is a usable
+//     number -- so 0 stands in for "no pressure axis", which is also how the Qt 5
+//     product path reads it (snow_canvas_input_adapter.cpp, makePointerInput).
+//
+//     Rule R51: `QPointingDevice p(<name>, <id>, Stylus, Pen, <caps>, 1, 3)`
+//            -> `SnowTabletDevice p(<id>)`        (caps include Pressure)
+//            -> `SnowTabletDevice p(<id>, false)` (caps are Position only)
+//     Rule R52: `QTabletEvent e(<type>, &<p>, <rest...>)`
+//            -> `snowTabletEvent(<type>, <p>, <rest...>)`
+//
+//     The rest of the argument list is unchanged: Qt 6 is
+//     (position, globalPosition, pressure, xTilt, yTilt, tangential, rotation, z)
+//     and Qt 5 puts (device, pointerType) between the positions and the pressure,
+//     so the trailing order already matches and the helper only has to fill the
+//     gap in the middle.
+class SnowTabletDevice
+{
+public:
+#if SNOW_QT6
+    QPointingDevice device;
+#endif
+
+    explicit SnowTabletDevice(int id, bool pressureCapable = true)
+#if SNOW_QT6
+        : device(QStringLiteral("snow tablet fixture"), id, QInputDevice::DeviceType::Stylus,
+                 QPointingDevice::PointerType::Pen,
+                 pressureCapable
+                     ? (QInputDevice::Capability::Position | QInputDevice::Capability::Pressure)
+                     : QInputDevice::Capability::Position,
+                 1, 3),
+          m_id(id)
+    {
+    }
+#else
+        : m_id(id)
+    {
+        // No capability channel on Qt 5: the flag has no field to reach.
+        Q_UNUSED(pressureCapable)
+    }
+#endif
+
+    [[nodiscard]] int deviceId() const { return m_id; }
+
+private:
+    int m_id;
+};
+
+[[nodiscard]] inline QTabletEvent snowTabletEvent(QEvent::Type type, const SnowTabletDevice& pen,
+                                                  const QPointF& position,
+                                                  const QPointF& globalPosition, qreal pressure,
+                                                  qreal xTilt, qreal yTilt,
+                                                  qreal tangentialPressure, qreal rotation,
+                                                  qreal z, Qt::KeyboardModifiers modifiers,
+                                                  Qt::MouseButton button, Qt::MouseButtons buttons)
+{
+#if SNOW_QT6
+    return QTabletEvent(type, &pen.device, position, globalPosition, pressure,
+                        static_cast<float>(xTilt), static_cast<float>(yTilt),
+                        static_cast<float>(tangentialPressure), static_cast<float>(rotation),
+                        static_cast<float>(z), modifiers, button, buttons);
+#else
+    // Qt 5 takes the tilt/z axes as ints and needs the event's unique id, which
+    // no assertion in the corpus reads; the fixture id keeps it non-zero so the
+    // event is not "the same device" as a default-constructed one.
+    return QTabletEvent(type, position, globalPosition, QTabletEvent::Stylus, QTabletEvent::Pen,
+                        pressure, static_cast<int>(xTilt), static_cast<int>(yTilt),
+                        tangentialPressure, rotation, static_cast<int>(z), modifiers,
+                        pen.deviceId(), button, buttons);
+#endif
+}
+
+// --- 22. Application fallback font families (rule R53) ----------------------
+//
+//     Qt 6.1 added QFontDatabase::setApplicationFallbackFontFamilies(), the only
+//     way for a process to say which family covers a script its primary font
+//     does not. Qt 5.15 has no equivalent: it consults the platform's font
+//     substitution list, which an application cannot extend.
+//
+//     Rule R53: `QFontDatabase::setApplicationFallbackFontFamilies(<s>, <l>)`
+//            -> `snowSetApplicationFallbackFontFamilies(<s>, <l>)`
+//
+//     The Qt 5 branch does nothing, and that is the honest behaviour rather than
+//     a stub: the call states a *preference* about which face to pick, never
+//     something that decides whether text is shaped correctly. Callers that need
+//     a specific family have to check the resolved font; callers that only want
+//     the UI not to draw tofu are already satisfied by the platform's own
+//     substitution, which is why this can be a statement instead of a value.
+#  include <QFontDatabase>
+inline void snowSetApplicationFallbackFontFamilies(QChar::Script script,
+                                                   const QStringList& families)
+{
+#if SNOW_QT6
+    QFontDatabase::setApplicationFallbackFontFamilies(script, families);
+#else
+    Q_UNUSED(script);
+    Q_UNUSED(families);
+#endif
+}
+
+// --- 23. QHoverEvent carries a global position since Qt 6 (rule R54) --------
+//
+//     Qt 6's QHoverEvent takes (type, scenePos, globalPos, oldPos, modifiers);
+//     Qt 5.15's takes (type, pos, oldPos, modifiers). A five-argument
+//     construction is therefore a Qt 6-only spelling, and the Qt 5 error points
+//     at the extra argument rather than at the missing parameter.
+//
+//     Rule R54: `QHoverEvent <n>(<type>, <pos>, <global>, <old>, [<mod>])`
+//            -> `QHoverEvent <n> = snowHoverEvent(<type>, <pos>, <global>, <old>, [<mod>])`
+//
+//     Qt 5 hover events have no global position to carry -- QHoverEvent derives
+//     from QInputEvent there, not from QSinglePointEvent -- so the argument is
+//     dropped. Nothing in the product reads a hover event's global position; the
+//     tests pass the mapped position only because Qt 6 requires the argument.
+[[nodiscard]] inline QHoverEvent snowHoverEvent(QEvent::Type type, const QPointF& position,
+                                                const QPointF& globalPosition,
+                                                const QPointF& oldPosition,
+                                                Qt::KeyboardModifiers modifiers = Qt::NoModifier)
+{
+#if SNOW_QT6
+    return QHoverEvent(type, position, globalPosition, oldPosition, modifiers);
+#else
+    Q_UNUSED(globalPosition);
+    return QHoverEvent(type, position, oldPosition, modifiers);
+#endif
+}
+
+// --- 24. QPixmap::deviceIndependentSize() is Qt 6.2 (rule R55) -------------
+//
+//     Rule R55: `<pixmap>.deviceIndependentSize()`
+//            -> `snowPixmapDeviceIndependentSize(<pixmap>)`
+//
+//     The Qt 5 branch computes the same quotient by hand. Dividing by a zero
+//     device pixel ratio cannot happen: Qt clamps devicePixelRatio() to at least
+//     1.0 for every pixmap it hands out.
+[[nodiscard]] inline QSizeF snowPixmapDeviceIndependentSize(const QPixmap& pixmap)
+{
+#if SNOW_QT6
+    return pixmap.deviceIndependentSize();
+#else
+    const qreal ratio = pixmap.devicePixelRatio();
+    return QSizeF(pixmap.width() / ratio, pixmap.height() / ratio);
+#endif
+}
+
+// The same query on a QImage. It exists as an overload rather than a template
+// because Qt 5.15 has no `QImage::deviceIndependentSize()` either, so both
+// branches have to name their own arithmetic and a template would only add a
+// deduction failure to the error message.
+[[nodiscard]] inline QSizeF snowDeviceIndependentSize(const QImage& image)
+{
+#if SNOW_QT6
+    return image.deviceIndependentSize();
+#else
+    const qreal ratio = image.devicePixelRatio();
+    return ratio > 0.0 ? QSizeF(image.size()) / ratio : QSizeF(image.size());
+#endif
+}
+
+// --- 25. QMessageBox::testOption() is Qt 6 (rule R56) ----------------------
+//
+//     Qt 5.15's QMessageBox has no Option enum at all: it never delegates to a
+//     native dialog, so there is no "use a Qt dialog instead" switch to query.
+//     The question the tests actually ask ("did this come up as a Qt widget
+//     dialog?") is therefore answered yes unconditionally there, and answered by
+//     reading the flag on Qt 6.
+//
+//     Rule R56: `<box>->testOption(QMessageBox::Option::DontUseNativeDialog)`
+//            -> `snowMessageBoxUsesQtDialog(<box>)`
+//
+//     <QMessageBox> is only dragged in under SNOW_COMPAT_HAS_WIDGETS, and a
+//     Qt::Gui-only target is a real configuration here (the draw-engine tests
+//     are exactly that), so this one cannot sit in the plain GUI region.
+#if SNOW_COMPAT_HAS_WIDGETS
+[[nodiscard]] inline bool snowMessageBoxUsesQtDialog(const QMessageBox* box)
+{
+#if SNOW_QT6
+    return box->testOption(QMessageBox::Option::DontUseNativeDialog);
+#else
+    Q_UNUSED(box);
+    return true;
+#endif
+}
+#endif // SNOW_COMPAT_HAS_WIDGETS
 
 #endif // SNOW_COMPAT_HAS_GUI
 

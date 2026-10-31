@@ -98,6 +98,11 @@ void managedQtReader() {
         }
     }
 
+    // QImageReader::allocationLimit() is a Qt 6 addition: Qt 5.15's reader has no
+    // allocation cap to set, so there is no budget for the decoder to hit and
+    // nothing here to assert. The corrupt-image case below is version-free and
+    // still runs, which is what keeps the managed decode path covered on Qt 5.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     const QByteArray encoded = pngBytes(solid(Qt::red, QSize(1025, 513)));
     const int oldLimit = QImageReader::allocationLimit();
     struct RestoreLimit final {
@@ -114,6 +119,9 @@ void managedQtReader() {
     require(snow_shot::image_codec::readManagedImage(reader).isNull() &&
                 reader.error() == QImageReader::InvalidDataError,
             "managed preallocation must preserve Qt's allocation limit and decode error");
+#else
+    std::cout << "[skip] QImageReader::allocationLimit() needs Qt 6.0+\n";
+#endif
     QBuffer corrupt;
     corrupt.setData(QByteArray("invalid PNG"));
     require(corrupt.open(QIODevice::ReadOnly), "open the corrupt reader fixture");
@@ -154,7 +162,8 @@ std::uint32_t read32(const QByteArray& bytes, qsizetype offset, bool little = fa
     std::uint32_t value = 0;
     for (unsigned index = 0; index < 4; ++index) {
         const unsigned shift = little ? index * 8U : 24U - index * 8U;
-        value |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset + index]))
+        value |= static_cast<std::uint32_t>(
+                     static_cast<unsigned char>(bytes[static_cast<int>(offset + index)]))
                  << shift;
     }
     return value;
@@ -372,9 +381,9 @@ void animatedWebpPreviewPreservesQtScaling(const QTemporaryDir& directory) {
     const qreal scale = 4096.0 / canvas.width();
     const QSize previewSize(4096, qMax(1, qRound(canvas.height() * scale)));
     const QColorSpace srgb(QColorSpace::SRgb);
-    QImage expected =
-        fullCanvas.scaled(previewSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-            .convertedToColorSpace(srgb, QImage::Format_ARGB32_Premultiplied);
+    QImage expected = snowImageConvertedToColorSpace(
+        fullCanvas.scaled(previewSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation), srgb,
+        QImage::Format_ARGB32_Premultiplied);
     expected.setColorSpace(srgb);
     expected.setDevicePixelRatio(1.0);
     const auto actual = decodeSkinFile(
@@ -409,8 +418,8 @@ void orientationAndColor(const QTemporaryDir& directory) {
 
     QImage tagged = solid(QColor(200, 110, 65, 180));
     tagged.setColorSpace(QColorSpace(QColorSpace::DisplayP3));
-    const QImage expected = tagged.convertedToColorSpace(QColorSpace(QColorSpace::SRgb),
-                                                         QImage::Format_ARGB32_Premultiplied);
+    const QImage expected = snowImageConvertedToColorSpace(
+        tagged, QColorSpace(QColorSpace::SRgb), QImage::Format_ARGB32_Premultiplied);
     const auto color =
         decodeSkinFile(writeFixture(directory, QStringLiteral("profile.png"), pngBytes(tagged)));
     require(color.error == SkinDecodeError::None, "decode a PNG with an embedded ICC profile");

@@ -163,8 +163,8 @@ void initialDisplayPreservesOriginalProfile() {
         const QImage expected =
             profile == srgb
                 ? source->firstFrame.convertToFormat(QImage::Format_ARGB32_Premultiplied)
-                : source->firstFrame.convertedToColorSpace(srgb,
-                                                           QImage::Format_ARGB32_Premultiplied);
+                : snowImageConvertedToColorSpace(source->firstFrame, srgb,
+                                                 QImage::Format_ARGB32_Premultiplied);
         require(source->firstDisplayFrame == expected &&
                     source->firstDisplayFrame.colorSpace() == srgb &&
                     source->firstFrame.colorSpace() == profile,

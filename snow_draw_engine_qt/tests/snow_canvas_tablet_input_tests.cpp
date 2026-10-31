@@ -8,7 +8,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMouseEvent>
-#include <QPointingDevice>
 #include <QTabletEvent>
 
 #include <algorithm>
@@ -25,11 +24,12 @@ void require(bool condition, const char* message) {
     }
 }
 
-bool tablet(SnowCanvasWidget& canvas, const QPointingDevice& device, QEvent::Type type,
+bool tablet(SnowCanvasWidget& canvas, const SnowTabletDevice& device, QEvent::Type type,
             QPointF point, double pressure, quint64 timestamp) {
     const auto button = type == QEvent::TabletMove ? Qt::NoButton : Qt::LeftButton;
     const auto buttons = type == QEvent::TabletRelease ? Qt::NoButton : Qt::LeftButton;
-    QTabletEvent event(type, &device, point, canvas.mapToGlobal(point), pressure, 0, 0, 0, 0, 0,
+    QTabletEvent event = snowTabletEvent(type, device, point,
+        canvas.mapToGlobal(snowWidgetPosition(point)), pressure, 0, 0, 0, 0, 0,
                        Qt::NoModifier, button, buttons);
     event.setTimestamp(timestamp);
     event.setAccepted(false);
@@ -41,19 +41,16 @@ void mouse(SnowCanvasWidget& canvas, QEvent::Type type, QPointF point, Qt::Mouse
            quint64 timestamp) {
     const auto button = type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton;
     const auto buttons = type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton;
-    QMouseEvent event(type, point, point, canvas.mapToGlobal(point), button, buttons,
-                      Qt::NoModifier, source);
+    QMouseEvent event(type, point, point, canvas.mapToGlobal(snowWidgetPosition(point)), button,
+                      buttons, Qt::NoModifier, source);
     event.setTimestamp(timestamp);
     QApplication::sendEvent(&canvas, &event);
 }
 
 void adapterPreservesAvailablePressureAndTimestamps() {
-    QPointingDevice pen(QStringLiteral("pressure tablet"), 42, QInputDevice::DeviceType::Stylus,
-                        QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(42);
     for (const auto pressure : {0.0, 0.25, 1.0, 1.4, -0.2}) {
-        QTabletEvent event(QEvent::TabletMove, &pen, {20.5, 30.25}, {100.5, 130.25}, pressure, 0, 0,
+        QTabletEvent event = snowTabletEvent(QEvent::TabletMove, pen, {20.5, 30.25}, {100.5, 130.25}, pressure, 0, 0,
                            0, 0, 0, Qt::ShiftModifier, Qt::NoButton, Qt::LeftButton);
         event.setTimestamp(1234);
         const auto input = snow_canvas_input::makePointerInput(event, SNOW_POINTER_EVENT_MOVE);
@@ -63,15 +60,13 @@ void adapterPreservesAvailablePressureAndTimestamps() {
                     input.pointer.pressure == std::max(0.0, std::min(1.0, pressure)),
                 "tablet samples preserve subpixel positions, time and normalized actual pressure");
     }
-    QTabletEvent invalid(QEvent::TabletMove, &pen, {}, {}, std::numeric_limits<double>::quiet_NaN(),
+    QTabletEvent invalid = snowTabletEvent(QEvent::TabletMove, pen, {}, {}, std::numeric_limits<double>::quiet_NaN(),
                          0, 0, 0, 0, 0, Qt::NoModifier, Qt::NoButton, Qt::LeftButton);
     require(snow_canvas_input::makePointerInput(invalid, SNOW_POINTER_EVENT_MOVE)
                     .pointer.has_pressure == 0,
             "non-finite pressure is unavailable instead of entering stroke geometry");
-    QPointingDevice plain(QStringLiteral("position tablet"), 43, QInputDevice::DeviceType::Stylus,
-                          QPointingDevice::PointerType::Pen, QInputDevice::Capability::Position, 1,
-                          3);
-    QTabletEvent unavailable(QEvent::TabletPress, &plain, {}, {}, 0, 0, 0, 0, 0, 0, Qt::NoModifier,
+    SnowTabletDevice plain(43, false);
+    QTabletEvent unavailable = snowTabletEvent(QEvent::TabletPress, plain, {}, {}, 0, 0, 0, 0, 0, 0, Qt::NoModifier,
                              Qt::LeftButton, Qt::LeftButton);
     require(snow_canvas_input::makePointerInput(unavailable, SNOW_POINTER_EVENT_DOWN)
                     .pointer.has_pressure == 0,
@@ -90,10 +85,7 @@ void adapterPreservesAvailablePressureAndTimestamps() {
 }
 
 void nativeStrokeCommitsOnceAndKeepsMouseUsable() {
-    QPointingDevice pen(QStringLiteral("stroke tablet"), 44, QInputDevice::DeviceType::Stylus,
-                        QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(44);
     SnowCanvasRuntime runtime;
     SnowCanvasWidget canvas(runtime);
     require(canvas.hasTabletTracking(), "native tablet hover follows the brush endpoint cursor");
@@ -179,10 +171,7 @@ void nativeStrokeCommitsOnceAndKeepsMouseUsable() {
 }
 
 void unhandledToolsAndCancelledTabletStreamsKeepTheirExistingBehavior() {
-    QPointingDevice pen(QStringLiteral("cancel tablet"), 45, QInputDevice::DeviceType::Stylus,
-                        QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(45);
     SnowCanvasRuntime runtime;
     SnowCanvasWidget canvas(runtime);
     canvas.resize(320, 240);
@@ -227,10 +216,7 @@ void unhandledToolsAndCancelledTabletStreamsKeepTheirExistingBehavior() {
 }
 
 void barrelButtonsPreserveTheOwnedTipStroke() {
-    QPointingDevice pen(QStringLiteral("barrel button tablet"), 46,
-                        QInputDevice::DeviceType::Stylus, QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(46);
     SnowCanvasRuntime runtime;
     SnowCanvasWidget canvas(runtime);
     canvas.resize(320, 240);
@@ -242,7 +228,8 @@ void barrelButtonsPreserveTheOwnedTipStroke() {
     for (const auto type : {QEvent::TabletPress, QEvent::TabletRelease}) {
         const Qt::MouseButtons buttons =
             type == QEvent::TabletPress ? Qt::LeftButton | Qt::RightButton : Qt::LeftButton;
-        QTabletEvent event(type, &pen, {140, 100}, canvas.mapToGlobal(QPoint(140, 100)), 0.7, 0, 0,
+        QTabletEvent event = snowTabletEvent(type, pen, {140, 100},
+            canvas.mapToGlobal(snowWidgetPosition(QPoint(140, 100))), 0.7, 0, 0,
                            0, 0, 0, Qt::NoModifier, Qt::RightButton, buttons);
         event.setAccepted(false);
         QApplication::sendEvent(&canvas, &event);

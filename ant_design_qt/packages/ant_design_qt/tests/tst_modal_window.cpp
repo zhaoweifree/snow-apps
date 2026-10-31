@@ -1449,7 +1449,7 @@ class TstModalWindow : public QObject {
     auto* icon = surface->findChild<QLabel*>(QStringLiteral("ad-modal-window-icon"));
     auto* maximize = surface->findChild<QToolButton*>(QStringLiteral("ad-modal-maximize"));
     auto* minimize = surface->findChild<QToolButton*>(QStringLiteral("ad-modal-minimize"));
-    QVERIFY(icon && icon->isVisible() && !icon->pixmap().isNull());
+    QVERIFY(icon && icon->isVisible() && !snowLabelPixmap(icon).isNull());
     QVERIFY(maximize && maximize->isVisible() && maximize->isEnabled());
     QVERIFY(minimize && minimize->isVisible());
     QCOMPARE(maximize->focusPolicy(), Qt::StrongFocus);
@@ -1528,8 +1528,8 @@ class TstModalWindow : public QObject {
     modal.setWindowIcon(replacement);
     QCOMPARE(iconChanged.count(), 2);
     QCOMPARE(surface->windowIcon().cacheKey(), replacement.cacheKey());
-    QCOMPARE(icon->pixmap().toImage().pixelColor(0, 0), QColor(Qt::blue));
-    QEvent densityChange(QEvent::DevicePixelRatioChange);
+    QCOMPARE(snowLabelPixmap(icon).toImage().pixelColor(0, 0), QColor(Qt::blue));
+    QEvent densityChange(snowDevicePixelRatioChange);
     QApplication::sendEvent(surface, &densityChange);
     QCOMPARE(surface->geometry(), normal);
     mainWindow.hide();

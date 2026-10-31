@@ -56,7 +56,7 @@ int fixture(const QStringList& arguments) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 #endif
     DiagnosticsOptions options;
-    options.directories = {arguments.at(2)};
+    options.directories = QStringList{arguments.at(2)};
     options.handlerPath = QStringLiteral(SNOW_TEST_CRASHPAD_HANDLER);
     options.mirrorToConsole = false;
     DiagnosticsService service;
@@ -143,7 +143,7 @@ void verifyEmergencyLogging() {
     snow_diag_shutdown();
 #endif
     DiagnosticsOptions options;
-    options.directories = {directory.path()};
+    options.directories = QStringList{directory.path()};
     options.handlerPath = directory.filePath(QStringLiteral("missing-handler"));
     options.mirrorToConsole = false;
     DiagnosticsService service;
@@ -244,7 +244,7 @@ void verifyCrash(const QString& kind) {
         require(!emergency.contains("private panic payload"), "panic payload excluded from logs");
     }
     DiagnosticsOptions recoveryOptions;
-    recoveryOptions.directories = {directory.path()};
+    recoveryOptions.directories = QStringList{directory.path()};
     recoveryOptions.mirrorToConsole = false;
     DiagnosticsService recovery;
     require(recovery.initialize(recoveryOptions), "logger recovers after crash");

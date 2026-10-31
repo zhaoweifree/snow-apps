@@ -159,7 +159,7 @@ void emptyImageShowsUploadSurface() {
     QStringList received;
     QObject::connect(&editor, &ImageSplitEditorWidget::imageFilesDropped, &editor,
                      [&](const QStringList& paths) { received = paths; });
-    QDragEnterEvent enter(QRectF(empty->rect()).center(), Qt::CopyAction, &files, Qt::LeftButton,
+    QDragEnterEvent enter(snowWidgetPosition(QRectF(empty->rect()).center()), Qt::CopyAction, &files, Qt::LeftButton,
                           Qt::NoModifier);
     QApplication::sendEvent(empty, &enter);
     require(enter.isAccepted() && hint->isVisible() && hint->geometry() == empty->geometry(),
@@ -894,7 +894,7 @@ void replacementResetBusyAndDrops() {
     multiple.setUrls({QUrl::fromLocalFile(QStringLiteral("C:/split-one.png")),
                       QUrl::fromLocalFile(QStringLiteral("C:/split-two.png"))});
     const auto beforeDrop = document.state();
-    QDragEnterEvent enter(QPointF(100, 100), Qt::CopyAction, &multiple, Qt::LeftButton,
+    QDragEnterEvent enter(snowWidgetPosition(QPointF(100, 100)), Qt::CopyAction, &multiple, Qt::LeftButton,
                           Qt::NoModifier);
     QApplication::sendEvent(&editor, &enter);
     QDropEvent drop({100, 100}, Qt::CopyAction, &multiple, Qt::LeftButton, Qt::NoModifier);
@@ -905,7 +905,7 @@ void replacementResetBusyAndDrops() {
     QMimeData mixed;
     mixed.setUrls({QUrl::fromLocalFile(QStringLiteral("C:/split-one.png")),
                    QUrl(QStringLiteral("https://example.com/image.png"))});
-    QDragEnterEvent rejected(QPointF(100, 100), Qt::CopyAction, &mixed, Qt::LeftButton,
+    QDragEnterEvent rejected(snowWidgetPosition(QPointF(100, 100)), Qt::CopyAction, &mixed, Qt::LeftButton,
                              Qt::NoModifier);
     QApplication::sendEvent(&editor, &rejected);
     require(!rejected.isAccepted() && received.isEmpty(),
@@ -914,7 +914,7 @@ void replacementResetBusyAndDrops() {
     require(!child<AdButton>(editor, "imageSplitReload")->isEnabled() &&
                 !child<AdSegmented>(editor, "imageSplitDirection")->isEnabled(),
             "busy export must prevent duplicate reloads and form changes");
-    QDragEnterEvent busyEnter(QPointF(100, 100), Qt::CopyAction, &multiple, Qt::LeftButton,
+    QDragEnterEvent busyEnter(snowWidgetPosition(QPointF(100, 100)), Qt::CopyAction, &multiple, Qt::LeftButton,
                               Qt::NoModifier);
     QApplication::sendEvent(&editor, &busyEnter);
     require(!busyEnter.isAccepted(), "busy work must reject incoming image drops");
@@ -939,7 +939,7 @@ void dragFeedbackUsesUploadSurface() {
     QMimeData files;
     files.setUrls({QUrl::fromLocalFile(QStringLiteral("C:/replacement.png"))});
     const auto enter = [&](QWidget* target, Qt::DropActions actions = Qt::CopyAction) {
-        QDragEnterEvent event(QRectF(target->rect()).center(), actions, &files, Qt::LeftButton,
+        QDragEnterEvent event(snowWidgetPosition(QRectF(target->rect()).center()), actions, &files, Qt::LeftButton,
                               Qt::NoModifier);
         QApplication::sendEvent(target, &event);
         return event.isAccepted() && event.dropAction() == Qt::CopyAction;
@@ -1024,7 +1024,7 @@ void dragFeedbackUsesUploadSurface() {
     }
     require(document.state() == state && !document.canUndo(),
             "drag feedback, resizing and language changes must preserve image edits");
-    QDragMoveEvent rejected(QPointF(editor.rect().center()), Qt::MoveAction, &files, Qt::LeftButton,
+    QDragMoveEvent rejected(snowWidgetPosition(QPointF(editor.rect().center())), Qt::MoveAction, &files, Qt::LeftButton,
                             Qt::NoModifier);
     QApplication::sendEvent(&editor, &rejected);
     require(!rejected.isAccepted() && hint->isHidden(),

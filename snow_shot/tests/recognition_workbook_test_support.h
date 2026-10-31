@@ -63,21 +63,21 @@ inline Sheet sheet(const QMap<QString, QByteArray>& package) {
         xml.readNext();
         if (!xml.isStartElement())
             continue;
-        if (xml.name() == u"dimension")
-            result.dimension = xml.attributes().value(u"ref").toString();
-        if (xml.name() == u"mergeCell")
-            result.merges.append(xml.attributes().value(u"ref").toString());
-        if (xml.name() == u"c") {
-            reference = xml.attributes().value(u"r").toString();
-            check(xml.attributes().value(u"t") == u"inlineStr");
-            result.styles.insert(reference, xml.attributes().value(u"s").toString());
+        if (xml.name() == QStringLiteral("dimension"))
+            result.dimension = xml.attributes().value(QStringLiteral("ref")).toString();
+        if (xml.name() == QStringLiteral("mergeCell"))
+            result.merges.append(xml.attributes().value(QStringLiteral("ref")).toString());
+        if (xml.name() == QStringLiteral("c")) {
+            reference = xml.attributes().value(QStringLiteral("r")).toString();
+            check(xml.attributes().value(QStringLiteral("t")) == QStringLiteral("inlineStr"));
+            result.styles.insert(reference, xml.attributes().value(QStringLiteral("s")).toString());
         }
-        if (xml.name() == u"t") {
-            check(xml.attributes().value(u"http://www.w3.org/XML/1998/namespace", u"space") ==
-                  u"preserve");
+        if (xml.name() == QStringLiteral("t")) {
+            check(xml.attributes().value(QStringLiteral("http://www.w3.org/XML/1998/namespace"), QStringLiteral("space")) ==
+                  QStringLiteral("preserve"));
             result.cells.insert(reference, xml.readElementText());
         }
-        check(xml.name() != u"f");
+        check(xml.name() != QStringLiteral("f"));
     }
     check(!xml.hasError());
     return result;

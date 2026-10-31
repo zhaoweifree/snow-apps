@@ -53,7 +53,8 @@ void require(bool condition, const char* message) {
 }
 void mouse(QWidget* widget, QEvent::Type type, QPointF point, Qt::MouseButton button,
            Qt::MouseButtons buttons) {
-    QMouseEvent event(type, point, widget->mapToGlobal(point), button, buttons, Qt::NoModifier);
+    QMouseEvent event(type, point, widget->mapToGlobal(snowWidgetPosition(point)), button, buttons,
+                      Qt::NoModifier);
     QApplication::sendEvent(widget, &event);
 }
 class SignalConnectionProbe : public QObject {
@@ -566,14 +567,11 @@ void canvasColorSampling(QApplication& app, QScreen* screen) {
     adqt::widgets::AdColorPicker tabletPicker;
     tabletPicker.setValue(adqt::widgets::AdColorValue::solid(Qt::red));
     palette->canvasColorSamplingRequested(&tabletPicker);
-    QPointingDevice pen(QStringLiteral("global canvas tablet"), 93,
-                        QInputDevice::DeviceType::Stylus, QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(93);
     for (const auto type : {QEvent::TabletMove, QEvent::TabletPress, QEvent::TabletRelease}) {
         const auto button = type == QEvent::TabletMove ? Qt::NoButton : Qt::LeftButton;
         const auto buttons = type == QEvent::TabletPress ? Qt::LeftButton : Qt::NoButton;
-        QTabletEvent event(type, &pen, {190, 190}, canvas->mapToGlobal(QPoint(190, 190)), 0.5, 0, 0,
+        QTabletEvent event = snowTabletEvent(type, pen, {190, 190}, canvas->mapToGlobal(snowWidgetPosition(QPoint(190, 190))), 0.5, 0, 0,
                            0, 0, 0, Qt::NoModifier, button, buttons);
         event.setAccepted(false);
         QApplication::sendEvent(canvas, &event);
@@ -628,8 +626,8 @@ void canvasNavigation(QApplication& app) {
     auto* canvas = controller.canvas();
     const QPointF pointer(170, 130);
     const auto wheel = [&](Qt::KeyboardModifiers modifiers, QPoint angle, QPoint pixel = {}) {
-        QWheelEvent event(pointer, canvas->mapToGlobal(pointer), pixel, angle, Qt::NoButton,
-                          modifiers, Qt::NoScrollPhase, false);
+        QWheelEvent event(pointer, canvas->mapToGlobal(snowWidgetPosition(pointer)), pixel, angle,
+                          Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
         QApplication::sendEvent(canvas, &event);
     };
     const auto closePoint = [](QPointF a, QPointF b) { return QLineF(a, b).length() < 0.001; };

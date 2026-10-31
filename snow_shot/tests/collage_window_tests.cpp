@@ -232,7 +232,7 @@ void selectedFilesOpenAndAppendInOrder() {
     ports.history.insert(QStringLiteral("queued"), image({4, 2}, Qt::green));
     CollageWindowCoordinator coordinator(nullptr, ports.services());
     auto backend = std::make_shared<SelectedFilesTestBackend>();
-    backend->result.paths = {blue, text, folder, red, red, bad};
+    backend->result.paths = QStringList{blue, text, folder, red, red, bad};
     backend->onCapture = [&] {
         require(!coordinator.window(), "capture the source before creating the stitching window");
     };
@@ -348,7 +348,7 @@ void selectedFileQueriesCancelWithWindowLifecycle() {
         ports.history.insert(QStringLiteral("fresh"), image({2, 3}, Qt::green));
         CollageWindowCoordinator coordinator(nullptr, ports.services());
         auto backend = std::make_shared<SelectedFilesTestBackend>();
-        backend->result.paths = {path};
+        backend->result.paths = QStringList{path};
         const auto started = std::make_shared<std::atomic_bool>(false);
         const auto release = std::make_shared<std::atomic_bool>(false);
         const auto cancelled = std::make_shared<std::atomic_bool>(false);
@@ -1411,7 +1411,7 @@ void droppedFilesUseCollageImporter() {
     const auto drop = [&](QWidget* target, const QList<QUrl>& urls) {
         QMimeData files;
         files.setUrls(urls);
-        QDragEnterEvent enter(QRectF(target->rect()).center(), Qt::CopyAction | Qt::MoveAction,
+        QDragEnterEvent enter(snowWidgetPosition(QRectF(target->rect()).center()), Qt::CopyAction | Qt::MoveAction,
                               &files, Qt::LeftButton, Qt::NoModifier);
         QApplication::sendEvent(target, &enter);
         require(enter.isAccepted(), "window child accepts file drag");

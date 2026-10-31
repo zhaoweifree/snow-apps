@@ -128,7 +128,10 @@ inline QVector<pinned_animation_fixtures::Fixture> images() {
     constexpr std::array<quint32, 2> extents{319, 179};
     for (std::size_t axis = 0; axis < extents.size(); ++axis) {
         for (unsigned byte = 0; byte < 3; ++byte)
-            result[1].bytes[24 + static_cast<qsizetype>(axis) * 3 + byte] =
+            // Qt 5 offers both operator[](int) and operator[](uint) on
+            // QByteArray, so a qsizetype index is ambiguous (C2666); the offset
+            // is single digits either way.
+            result[1].bytes[static_cast<int>(24 + static_cast<qsizetype>(axis) * 3 + byte)] =
                 static_cast<char>((extents[axis] >> (byte * 8U)) & 255U);
     }
     result[2].bytes = detail::apng();

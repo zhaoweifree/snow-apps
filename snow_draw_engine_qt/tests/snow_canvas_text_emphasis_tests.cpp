@@ -31,10 +31,24 @@ static_assert(offsetof(SnowTextStyle, font_family_utf8) == 100);
 static_assert(sizeof(SnowTextElementInfo) == 1352);
 static_assert(offsetof(SnowTextElementInfo, text_utf8) == 104);
 static_assert(offsetof(SnowTextElementInfo, font_family_utf8) == 1136);
+// SnowSceneDisplayItem is the one struct here whose layout is *not* the same on
+// every toolchain: the MSVC x64 build lays it out 8 bytes wider than the GNU/ELF
+// build these figures were originally taken from, from arrow_start_head onwards.
+// Both answers are correct for their ABI, and pinning only one of them would
+// either fail the other platform or (worse) tempt someone to stop checking. Pin
+// each ABI to what it actually produces, so a real layout change still shows up
+// as a failure on both.
+#if defined(_MSC_VER)
+static_assert(sizeof(SnowSceneDisplayItem) == 424);
+static_assert(offsetof(SnowSceneDisplayItem, arrow_start_head) == 148);
+static_assert(offsetof(SnowSceneDisplayItem, font_size) == 200);
+static_assert(offsetof(SnowSceneDisplayItem, text_utf8) == 344);
+#else
 static_assert(sizeof(SnowSceneDisplayItem) == 416);
 static_assert(offsetof(SnowSceneDisplayItem, arrow_start_head) == 140);
 static_assert(offsetof(SnowSceneDisplayItem, font_size) == 192);
 static_assert(offsetof(SnowSceneDisplayItem, text_utf8) == 336);
+#endif
 
 void require(bool condition, const char* message) {
     if (!condition) {

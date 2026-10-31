@@ -1073,7 +1073,7 @@ void actualOcrCrashAfterInference() {
     QTemporaryDir directory;
     auto& diagnostics = DiagnosticsService::instance();
     DiagnosticsOptions diagnosticsOptions;
-    diagnosticsOptions.directories = {directory.path()};
+    diagnosticsOptions.directories = QStringList{directory.path()};
     diagnosticsOptions.handlerPath = QStringLiteral(SNOW_TEST_CRASHPAD_HANDLER);
     diagnosticsOptions.mirrorToConsole = false;
     require(diagnostics.initialize(diagnosticsOptions) &&

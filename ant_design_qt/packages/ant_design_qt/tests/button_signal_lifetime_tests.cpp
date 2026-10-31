@@ -8,6 +8,8 @@
 #include <QHBoxLayout>
 #include <QtTest>
 
+#include <type_traits>
+
 #include "widgets/checkbox.h"
 #include "widgets/checkbox_group.h"
 #include "widgets/radio.h"
@@ -15,6 +17,34 @@
 #include "widgets/switch.h"
 
 namespace {
+
+// Qt 6 renamed `QCheckBox::stateChanged(int)` to `checkStateChanged(Qt::CheckState)`.
+// This suite asserts the *native* signal: its name, its order relative to
+// `toggled`, and that it honours `blockSignals`. Aliasing one spelling onto the
+// other inside the test would assert the alias instead of Qt, so each version
+// connects the name it actually ships, and the lambda always sees a CheckState.
+//
+// The Qt 5 branch has to forward by hand because the native signal carries an
+// `int` there, and most slots in this file take no argument at all (Qt lets a
+// connection drop trailing parameters; a hand-written call cannot). Dispatching
+// on the slot's own arity keeps both spellings connectable.
+template <typename Slot>
+QMetaObject::Connection connectNativeCheckState(adqt::widgets::AdCheckbox* box,
+                                                const QObject* context, Slot slot) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  return QObject::connect(box, &adqt::widgets::AdCheckbox::checkStateChanged, context, slot);
+#else
+  return QObject::connect(box, &adqt::widgets::AdCheckbox::stateChanged, context,
+                          [slot](int state) {
+                            if constexpr (std::is_invocable_v<Slot&, Qt::CheckState>) {
+                              slot(static_cast<Qt::CheckState>(state));
+                            } else {
+                              Q_UNUSED(state);
+                              slot();
+                            }
+                          });
+#endif
+}
 
 QAbstractButton* makeButton(int kind) {
   QAbstractButton* button = nullptr;
@@ -248,7 +278,7 @@ void ButtonSignalLifetimeTests::checkboxTransitionsPreserveNativeSignals() {
   QStringList notifications;
   connect(&checkbox, &AdCheckbox::toggled, this,
           [&] { notifications.append(QStringLiteral("toggled")); });
-  connect(&checkbox, &AdCheckbox::checkStateChanged, this,
+  connectNativeCheckState(&checkbox, this,
           [&] { notifications.append(QStringLiteral("state")); });
   checkbox.setChecked(true);
   QCOMPARE(notifications, QStringList({QStringLiteral("state"), QStringLiteral("toggled")}));
@@ -266,7 +296,7 @@ void ButtonSignalLifetimeTests::checkboxTransitionsPreserveNativeSignals() {
   int ownNotifications = 0;
   int groupNotifications = 0;
   connect(&blockedCheckbox, &AdCheckbox::toggled, this, [&] { ++ownNotifications; });
-  connect(&blockedCheckbox, &AdCheckbox::checkStateChanged, this, [&] { ++ownNotifications; });
+  connectNativeCheckState(&blockedCheckbox, this, [&] { ++ownNotifications; });
   connect(&liveGroup, &QButtonGroup::idToggled, this, [&] { ++groupNotifications; });
   blockedCheckbox.setCheckState(Qt::Checked);
   QCOMPARE(ownNotifications, 0);
@@ -290,7 +320,7 @@ void ButtonSignalLifetimeTests::checkboxTransitionsPreserveNativeSignals() {
   QStringList peerNotifications;
   connect(&oldChecked, &AdCheckbox::toggled, this,
           [&] { peerNotifications.append(QStringLiteral("toggled")); });
-  connect(&oldChecked, &AdCheckbox::checkStateChanged, this,
+  connectNativeCheckState(&oldChecked, this,
           [&] { peerNotifications.append(QStringLiteral("state")); });
   nextChecked.setCheckState(Qt::Checked);
   QCOMPARE(peerNotifications, QStringList({QStringLiteral("toggled"), QStringLiteral("state")}));
@@ -300,7 +330,7 @@ void ButtonSignalLifetimeTests::checkboxTransitionsPreserveNativeSignals() {
   refusingGroup.addButton(&exclusivePartial, 1);
   exclusivePartial.setCheckState(Qt::PartiallyChecked);
   int refusedNotifications = 0;
-  connect(&exclusivePartial, &AdCheckbox::checkStateChanged, this, [&] { ++refusedNotifications; });
+  connectNativeCheckState(&exclusivePartial, this, [&] { ++refusedNotifications; });
   connect(&exclusivePartial, &AdCheckbox::toggled, this, [&] { ++refusedNotifications; });
   exclusivePartial.setChecked(false);
   QCOMPARE(exclusivePartial.checkState(), Qt::PartiallyChecked);
@@ -316,7 +346,7 @@ void ButtonSignalLifetimeTests::checkboxTransitionsPreserveNativeSignals() {
   AdCheckbox nonCheckable;
   nonCheckable.setCheckable(false);
   int nonCheckableNotifications = 0;
-  connect(&nonCheckable, &AdCheckbox::checkStateChanged, this,
+  connectNativeCheckState(&nonCheckable, this,
           [&] { ++nonCheckableNotifications; });
   connect(&nonCheckable, &AdCheckbox::toggled, this, [&] { ++nonCheckableNotifications; });
   nonCheckable.setChecked(true);
@@ -334,7 +364,7 @@ void ButtonSignalLifetimeTests::checkboxTransitionsPreserveNativeSignals() {
   AdCheckbox formerlyPartial;
   formerlyPartial.setCheckState(Qt::PartiallyChecked);
   int stateNotifications = 0;
-  connect(&formerlyPartial, &AdCheckbox::checkStateChanged, this, [&] { ++stateNotifications; });
+  connectNativeCheckState(&formerlyPartial, this, [&] { ++stateNotifications; });
   formerlyPartial.setTristate(false);
   formerlyPartial.setChecked(true);
   QCOMPARE(formerlyPartial.checkState(), Qt::Checked);
@@ -361,7 +391,7 @@ void ButtonSignalLifetimeTests::checkboxGroupSelectionAllowsGroupDeletion() {
     auto* second = new AdCheckbox(&owner);
     group->addCheckbox(first, QStringLiteral("first"));
     group->addCheckbox(second, QStringLiteral("second"));
-    connect(first, &AdCheckbox::checkStateChanged, this, [&] { delete group.data(); });
+    connectNativeCheckState(first, this, [&] { delete group.data(); });
     group->setValues({QStringLiteral("first"), QStringLiteral("second")});
     QVERIFY(group.isNull());
     QVERIFY(first->isChecked());
@@ -384,7 +414,7 @@ void ButtonSignalLifetimeTests::checkboxGroupSelectionAllowsGroupDeletion() {
   survivingGroup.addCheckbox(&second, QStringLiteral("second"));
   int selections = 0;
   connect(&survivingGroup, &AdCheckboxGroup::valuesChanged, this, [&] { ++selections; });
-  connect(&first, &AdCheckbox::checkStateChanged, this, [&](Qt::CheckState state) {
+  connectNativeCheckState(&first, this, [&](Qt::CheckState state) {
     if (state == Qt::Checked) survivingGroup.setValues({});
   });
   survivingGroup.setValues({QStringLiteral("first"), QStringLiteral("second")});

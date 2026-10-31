@@ -225,7 +225,7 @@ void partialFailureReportsAndRetryCloses() {
         CollagePdfExportResult result;
         result.totalCount = items.size();
         result.completedPages = {1};
-        result.paths = {QStringLiteral("/output/001_second.pdf")};
+        result.paths = QStringList{QStringLiteral("/output/001_second.pdf")};
         progress({1, items.size(), 2, .5});
         if (attempts->fetch_add(1) == 0)
             result.error = QStringLiteral("Disk fixture failed");
@@ -358,7 +358,7 @@ void uniformMarginReachesPdfExport() {
         result.totalCount = items.size();
         for (qsizetype index = 0; index < items.size(); ++index)
             result.completedPages.append(index + 1);
-        result.paths = {QStringLiteral("/output/uniform.pdf")};
+        result.paths = QStringList{QStringLiteral("/output/uniform.pdf")};
         return result;
     };
     CollageWindow window(nullptr, services);

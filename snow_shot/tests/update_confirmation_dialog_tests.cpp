@@ -40,7 +40,7 @@ void confirmationFollowsSelectedLanguage() {
                     if (dialog == nullptr || !dialog->isVisible())
                         continue;
                     inspected = true;
-                    labelsMatch = dialog->testOption(QMessageBox::Option::DontUseNativeDialog) &&
+                    labelsMatch = snowMessageBoxUsesQtDialog(dialog) &&
                                   dialog->button(QMessageBox::Yes)->text() ==
                                       QString::fromUtf8(test.confirm) &&
                                   dialog->button(QMessageBox::Cancel)->text() ==

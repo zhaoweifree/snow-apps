@@ -14,10 +14,12 @@ void require(bool condition, const char* message) {
     }
 }
 ScreenshotOcrLine box(const QString& text, qreal x, qreal y, qreal width, qreal height = 20) {
+    // A naked brace list cannot reach QPolygonF on Qt 5 (no initializer_list
+    // constructor there), so the quad goes through the compat factory.
     return {text,
             0.95,
-            {QPointF(x, y), QPointF(x + width, y), QPointF(x + width, y + height),
-             QPointF(x, y + height)}};
+            snowPolygonF({QPointF(x, y), QPointF(x + width, y), QPointF(x + width, y + height),
+                          QPointF(x, y + height)})};
 }
 void expect(const QVector<ScreenshotOcrLine>& input, const QStringList& expected,
             const char* name) {

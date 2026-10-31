@@ -107,7 +107,7 @@ void externalImageDrops() {
                    QUrl::fromLocalFile(second), QUrl::fromLocalFile(bitmapPath)});
     const auto enter = [&](QWidget* target, const QMimeData* mime,
                            Qt::DropActions actions = Qt::CopyAction | Qt::MoveAction) {
-        QDragEnterEvent event(QRectF(target->rect()).center(), actions, mime, Qt::LeftButton,
+        QDragEnterEvent event(snowWidgetPosition(QRectF(target->rect()).center()), actions, mime, Qt::LeftButton,
                               Qt::NoModifier);
         QApplication::sendEvent(target, &event);
         return event.isAccepted() && event.dropAction() == Qt::CopyAction;
@@ -134,7 +134,7 @@ void externalImageDrops() {
     }
     require(!enter(&editor, &files, Qt::MoveAction), "file imports require copy permission");
     require(enter(&editor, &files), "image files can enter the editor");
-    QDragMoveEvent move(QRectF(editor.rect()).center(), Qt::CopyAction | Qt::MoveAction, &files,
+    QDragMoveEvent move(snowWidgetPosition(QRectF(editor.rect()).center()), Qt::CopyAction | Qt::MoveAction, &files,
                         Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(&editor, &move);
     require(move.isAccepted() && move.dropAction() == Qt::CopyAction,
@@ -207,7 +207,7 @@ void externalImageDrops() {
     internal.setData(QStringLiteral("application/x-snow-shot-collage-item"),
                      QByteArray::number(reinterpret_cast<quintptr>(&document)) + ':' +
                          QByteArray::number(id));
-    QDragEnterEvent internalEnter(QRectF(editor.canvas()->rect()).center(), Qt::MoveAction,
+    QDragEnterEvent internalEnter(snowWidgetPosition(QRectF(editor.canvas()->rect()).center()), Qt::MoveAction,
                                   &internal, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(editor.canvas(), &internalEnter);
     require(internalEnter.isAccepted() && hint->isHidden(),
@@ -797,7 +797,7 @@ void releaseOnlySwapAndCrossWindowIsolation() {
     foreign.setData(QStringLiteral("application/x-snow-shot-collage-item"),
                     QByteArray::number(reinterpret_cast<quintptr>(&other)) + ':' +
                         QByteArray::number(first));
-    QDragEnterEvent enter(b, Qt::MoveAction, &foreign, Qt::LeftButton, Qt::NoModifier);
+    QDragEnterEvent enter(snowWidgetPosition(b), Qt::MoveAction, &foreign, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(canvas, &enter);
     require(!enter.isAccepted(), "dragging from another collage must be rejected");
     QMimeData local;
@@ -805,7 +805,7 @@ void releaseOnlySwapAndCrossWindowIsolation() {
                   QByteArray::number(reinterpret_cast<quintptr>(&document)) + ':' +
                       QByteArray::number(second));
     auto* target = editor.findChild<QWidget*>(QStringLiteral("collageThumbnail_%1").arg(first));
-    QDragEnterEvent localEnter(QPointF(20, 20), Qt::MoveAction, &local, Qt::LeftButton,
+    QDragEnterEvent localEnter(snowWidgetPosition(QPointF(20, 20)), Qt::MoveAction, &local, Qt::LeftButton,
                                Qt::NoModifier);
     QApplication::sendEvent(target, &localEnter);
     require(localEnter.isAccepted(), "same collage thumbnail drag must be accepted");
@@ -1962,7 +1962,7 @@ int renderPreview(const QString& path, bool dark, bool percentage, bool empty) {
     if (QApplication::arguments().contains(QStringLiteral("--drag"))) {
         dragFiles.setUrls(
             {QUrl::fromLocalFile(QDir::temp().filePath(QStringLiteral("image.png")))});
-        QDragEnterEvent enter(QRectF(editor.rect()).center(), Qt::CopyAction, &dragFiles,
+        QDragEnterEvent enter(snowWidgetPosition(QRectF(editor.rect()).center()), Qt::CopyAction, &dragFiles,
                               Qt::LeftButton, Qt::NoModifier);
         QApplication::sendEvent(&editor, &enter);
         pump();

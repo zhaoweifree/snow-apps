@@ -360,15 +360,18 @@ void optimizedSearchAndVoting() {
     }
     // A small nonperiodic source cannot form another pyramid level. Its only
     // level must keep the coarsest budget even when fine passes are reduced.
-    auto small = bandedBackground(false).copy(20, 20, 48, 40);
+    // `small` would be a bad name here on Windows: rpcndr.h defines it as a
+    // macro for `char`, and `<windows.h>` is pulled in by the compat header, so
+    // `auto small = ...` expands to `auto char = ...` (C2513).
+    auto smallSource = bandedBackground(false).copy(20, 20, 48, 40);
     const auto smallItem = rectangle(QRect(20, 16, 8, 8));
     {
-        QPainter painter(&small);
+        QPainter painter(&smallSource);
         painter.fillPath(path(smallItem), Qt::black);
     }
     std::atomic_bool cancelled{false};
     ReconstructionDiagnostics diagnostics;
-    const auto result = reconstructWithOptions(smallItem, {{small, QRectF(small.rect()), {}}},
+    const auto result = reconstructWithOptions(smallItem, {{smallSource, QRectF(smallSource.rect()), {}}},
                                                cancelled, testOptions, &diagnostics);
     require(result.success && diagnostics.path == ReconstructionDiagnostics::Path::Patches &&
                 diagnostics.levels.size() == 1,

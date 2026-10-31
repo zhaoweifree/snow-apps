@@ -296,7 +296,7 @@ void liveSwitch(bool migrate) {
     require(publication.storage.success, "screenshot fixture");
     auto& diagnostics = snow_shot::diagnostics::DiagnosticsService::instance();
     snow_shot::diagnostics::DiagnosticsOptions logOptions;
-    logOptions.directories = {QDir(source).filePath(QStringLiteral("logs"))};
+    logOptions.directories = QStringList{QDir(source).filePath(QStringLiteral("logs"))};
     logOptions.installMessageHandler = false;
     logOptions.enableCrashCapture = false;
     require(diagnostics.initialize(logOptions), "start source diagnostics");

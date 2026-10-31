@@ -4200,7 +4200,7 @@ void recordingColorSamplingIsConnected(bool nativeDesktop = false) {
         }
         auto* canvas = area->canvas();
         const QPointF point(100.25, 80.5);
-        const QPointF global = canvas->mapToGlobal(point);
+        const QPointF global = canvas->mapToGlobal(snowWidgetPosition(point));
         for (const auto type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
             QMouseEvent event(type, point, global, Qt::LeftButton,
                               type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton,
@@ -4875,7 +4875,7 @@ void recordingTrimmingTests(const QString& directory, bool uiOnly = false) {
     for (auto type : {QEvent::MouseButtonPress, QEvent::MouseMove, QEvent::MouseButtonRelease}) {
         const QPointF global =
             pressGlobal + (type == QEvent::MouseButtonPress ? QPointF() : QPointF(10, 0));
-        QMouseEvent drag(type, first->mapFromGlobal(global), global,
+        QMouseEvent drag(type, first->mapFromGlobal(snowWidgetPosition(global)), global,
                          type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton,
                          type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton,
                          Qt::NoModifier);
@@ -5694,8 +5694,9 @@ int main(int argc, char** argv) {
     QFont testFont(QStringLiteral("Snow Recording Test Sans"));
     testFont.setWeight(QFont::Normal);
     QApplication::setFont(testFont);
-    QFontDatabase::setApplicationFallbackFontFamilies(QChar::Script_Han,
-                                                      {QStringLiteral("Snow Recording Test Han")});
+    // Qt 5 has no application fallback list (rule R53); see the note there.
+    snowSetApplicationFallbackFontFamilies(QChar::Script_Han,
+                                          {QStringLiteral("Snow Recording Test Han")});
     const bool trimUiOnly = app.arguments().contains(QStringLiteral("--trim-ui-only"));
     if (app.arguments().contains(QStringLiteral("--export-naming-only"))) {
         QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);

@@ -377,7 +377,13 @@ void translationsAndAppearance(const PermissionGuideApplication& app) {
 }
 void render(const PermissionGuideApplication& app) {
     for (const auto scheme : {SnowColorSchemeLight, SnowColorSchemeDark}) {
+        // QStyleHints::setColorScheme is Qt 6.8. Qt 5.15 has no platform-level
+        // colour scheme at all -- there is nothing to override and no dark
+        // appearance to emulate -- so the widget's own setColorScheme() call
+        // below, which is what actually drives the render, is the whole input.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
         QGuiApplication::styleHints()->setColorScheme(scheme);
+#endif
         const QString appearance =
             scheme == SnowColorSchemeDark ? QStringLiteral("dark") : QStringLiteral("light");
         for (const auto& locale :
@@ -399,7 +405,9 @@ void render(const PermissionGuideApplication& app) {
             QApplication::removeTranslator(&translator);
         }
     }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
     QGuiApplication::styleHints()->unsetColorScheme();
+#endif
 }
 
 } // namespace

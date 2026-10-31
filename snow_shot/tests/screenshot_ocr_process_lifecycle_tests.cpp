@@ -81,7 +81,12 @@ void imageTransfersConvertDirectlyWithoutPublishingReady() {
     constexpr uchar sentinel = 0xa9;
     for (const auto format :
          {QImage::Format_RGBA8888, QImage::Format_ARGB32_Premultiplied, QImage::Format_RGB888,
-          QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA32FPx4}) {
+          QImage::Format_RGBA64_Premultiplied
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA32FPx4
+#endif
+         }) {
         const QImage source = fixture.convertToFormat(format);
         const QImage expected = source.convertToFormat(QImage::Format_RGBA8888);
         std::vector<uchar> slot(static_cast<std::size_t>(kSlotHeaderBytes + bytes + trailingGuard),

@@ -638,7 +638,7 @@ void verifyThemeIcons(const QTemporaryDir& directory) {
             "editing the dark custom path must preserve the regular custom icon");
     theme.setColorScheme(ThemeScheme::Dark);
     require(source() == darkPath &&
-                tray->icon().pixmap(QSize(32, 32), 1.0).toImage().pixelColor(16, 16) ==
+                snowIconPixmap(tray->icon(), QSize(32, 32), 1.0).toImage().pixelColor(16, 16) ==
                     darkImage.pixelColor(16, 16),
             "a valid dark custom icon must override the dark bundled choice");
     const auto decodeCount = tray->property("customIconDecodeCount").toULongLong();
@@ -669,7 +669,7 @@ void verifyThemeIcons(const QTemporaryDir& directory) {
     controller.setDarkIconSelection(QStringLiteral("snow-light"));
     controller.setQuickActionChecked(GlobalShortcutAction::ToggleGlobalHotkeys, true);
     const auto requireBadge = [&]() {
-        const QColor badge = tray->icon().pixmap(QSize(32, 32), 1.0).toImage().pixelColor(12, 12);
+        const QColor badge = snowIconPixmap(tray->icon(), QSize(32, 32), 1.0).toImage().pixelColor(12, 12);
         require(badge.red() > 180 && badge.green() < 100 && badge.blue() < 100 &&
                     !tray->icon().isMask(),
                 "theme changes must preserve the disabled-shortcuts badge and icon colors");
@@ -1297,7 +1297,7 @@ int main(int argc, char* argv[]) {
                       "Screenshot should use its catalog label");
 #ifdef Q_OS_MACOS
     const QImage screenshotMenuIcon =
-        snowIconPixmap(screenshotMenuAction->icon(), QSize(32, 32), QIcon::Normal).toImage();
+        snowIconPixmap(screenshotMenuAction->icon(), QSize(32, 32), 1.0, QIcon::Normal).toImage();
     require(containsOpaqueColor(screenshotMenuIcon,
                                 menu->palette().color(QPalette::Active, QPalette::Text)) &&
                 containsOpaqueColor(screenshotMenuIcon, QColor(QStringLiteral("#9254de"))) &&

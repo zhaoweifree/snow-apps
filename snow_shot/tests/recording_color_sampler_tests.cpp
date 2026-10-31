@@ -96,7 +96,7 @@ void recordingColorSamplerInteractions() {
                 "the real color sampler protects a docked toolbar from auto-hide");
     };
     const QPointF local(100.25, 80.5);
-    const QPointF global = canvas->mapToGlobal(local);
+    const QPointF global = canvas->mapToGlobal(snowWidgetPosition(local));
     const auto mouse = [&](QEvent::Type type, Qt::MouseButton button, Qt::MouseButtons buttons) {
         QMouseEvent event(type, local, global, button, buttons, Qt::NoModifier);
         QApplication::sendEvent(canvas, &event);

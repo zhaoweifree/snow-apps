@@ -31,7 +31,12 @@ void smallImagesShareNativePixels() {
 void ownedTilesPreserveNativePixelsAndMetadata() {
     for (const auto format :
          {QImage::Format_RGB888, QImage::Format_Indexed8, QImage::Format_Mono,
-          QImage::Format_MonoLSB, QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA32FPx4}) {
+          QImage::Format_MonoLSB, QImage::Format_RGBA64_Premultiplied
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA32FPx4
+#endif
+         }) {
         QImage pixels(37, 9, QImage::Format_RGBA8888);
         for (int y = 0; y < pixels.height(); ++y)
             for (int x = 0; x < pixels.width(); ++x)
@@ -120,7 +125,12 @@ void fractionalCoverageIncludesBothEdges() {
 void nativeFormatsKeepConstantFields() {
     for (const auto format :
          {QImage::Format_ARGB32_Premultiplied, QImage::Format_RGBA8888, QImage::Format_RGB888,
-          QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA32FPx4}) {
+          QImage::Format_RGBA64_Premultiplied
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA32FPx4
+#endif
+         }) {
         QImage native(4096, 13, format);
         native.fill(QColor(103, 71, 211, 97));
         native.setColorSpace(QColorSpace(QColorSpace::SRgbLinear));
@@ -191,7 +201,12 @@ void extremeRatiosAndCancellation() {
 void nativePreviewTilesRespectAllocationBoundary() {
     for (const auto format :
          {QImage::Format_RGB888, QImage::Format_Indexed8, QImage::Format_Mono,
-          QImage::Format_MonoLSB, QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA32FPx4}) {
+          QImage::Format_MonoLSB, QImage::Format_RGBA64_Premultiplied
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA32FPx4
+#endif
+         }) {
         // The exact ratio exercises Qt tiles, the coprime ratio exercises rational row caches,
         // and the tall image exercises native tiles that end at the last source scanline.
         for (const QSize size : {QSize(65536, 3), QSize(65537, 3), QSize(3, 65536)}) {

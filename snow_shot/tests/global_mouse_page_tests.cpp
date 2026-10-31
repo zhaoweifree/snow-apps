@@ -900,7 +900,7 @@ void globalMousePopupStaysAboveModalDuringLayout() {
             "modal selectors use a separate QtTool popup surface");
     for (int i = 0; i < 3; ++i) {
         const QPointF local = viewport->rect().center();
-        SnowEnterEvent hover(local, viewport->mapTo(viewport->window(), local.toPoint()),
+        SnowEnterEventInstance hover(local, viewport->mapTo(viewport->window(), local.toPoint()),
                           viewport->mapToGlobal(local.toPoint()));
         QApplication::sendEvent(viewport, &hover);
         QEvent layout(QEvent::LayoutRequest);

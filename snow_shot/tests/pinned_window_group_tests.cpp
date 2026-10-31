@@ -351,8 +351,10 @@ void batchGroupCreationRejectsStaleTargets() {
     require(directory.isValid(), "temporary batch-group manager storage is unavailable");
     storage::PinnedWindowRepository repository(directory.path(), true, 30000);
     presentation::PinnedWindowGroupManager manager(&repository);
-    const QVector<QPointer<::ScreenshotPinnedWindow>> empty;
-    const QVector<QPointer<::ScreenshotPinnedWindow>> stale{QPointer<::ScreenshotPinnedWindow>()};
+    // PinnedWindowGroupManager takes QList; Qt 6 aliases QVector onto QList and
+    // Qt 5 does not, so spell the parameter's own type here.
+    const QList<QPointer<::ScreenshotPinnedWindow>> empty;
+    const QList<QPointer<::ScreenshotPinnedWindow>> stale{QPointer<::ScreenshotPinnedWindow>()};
     int notifications = 0;
     QObject::connect(&manager, &presentation::PinnedWindowGroupManager::groupsChanged, &manager,
                      [&notifications]() { ++notifications; });

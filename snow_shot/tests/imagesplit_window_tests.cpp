@@ -238,7 +238,7 @@ void selectedFilesOpenIndependentWindows() {
                 "write corrupt-image and non-image fixtures");
     }
     auto backend = std::make_shared<SplitSelectedFilesBackend>();
-    backend->result.paths = {first, text, folder, first, second, broken};
+    backend->result.paths = QStringList{first, text, folder, first, second, broken};
     std::atomic_bool entered = false;
     std::atomic_bool release = false;
     backend->onRead = [&](const auto& cancelled) {

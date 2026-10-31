@@ -45,7 +45,7 @@ class ScreenshotFloatingToolPaletteWindowTestAccess {
   public:
     static void setCurrentDpr(ScreenshotFloatingToolPaletteWindow& toolbar, qreal dpr) {
         toolbar.m_testWindowDevicePixelRatio = dpr;
-        QEvent changed(QEvent::DevicePixelRatioChange);
+        QEvent changed(snowDevicePixelRatioChange);
         QApplication::sendEvent(&toolbar, &changed);
     }
 

@@ -70,9 +70,9 @@ QImage image(QSize size = {40, 30}, QColor color = QColor(120, 60, 30, 128)) {
 void sameImage(const QImage& actual, const QImage& expected) {
     if (actual.size() != expected.size() || actual.colorSpace() != expected.colorSpace()) {
         std::cerr << "Actual image: " << actual.width() << 'x' << actual.height() << " profile "
-                  << actual.colorSpace().description().toStdString()
+                  << snowColorSpaceDescription(actual.colorSpace()).toStdString()
                   << "; expected: " << expected.width() << 'x' << expected.height() << " profile "
-                  << expected.colorSpace().description().toStdString() << '\n';
+                  << snowColorSpaceDescription(expected.colorSpace()).toStdString() << '\n';
     }
     require(actual.size() == expected.size() && actual.colorSpace() == expected.colorSpace(),
             "paste retains physical size and color profile");
@@ -112,7 +112,10 @@ void files(const QStringList& paths) {
 }
 
 void keyPaste(QWidget* receiver, bool repeat = false) {
-    const auto combination = QKeySequence::keyBindings(QKeySequence::Paste).first()[0];
+    // Qt 5's operator[] yields the packed int; snowKeySequenceAt normalises both
+    // spellings to QKeyCombination (rule R35).
+    const auto combination =
+        snowKeySequenceAt(QKeySequence::keyBindings(QKeySequence::Paste).first(), 0);
     PhysicalKeyEvent press(QEvent::KeyPress, combination.key(), combination.keyboardModifiers(), {},
                            repeat);
     QApplication::sendEvent(receiver, &press);

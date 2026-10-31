@@ -519,8 +519,11 @@ void DividerTest::disabledAndInvalidMetricsAreNormalized() {
   tokens.metrics.verticalHeightFactor = qQNaN();
   divider.setComponentTokens(tokens);
   QCOMPARE(divider.orientationMargin(), 0.05);
-  QVERIFY(qIsFinite(divider.sizeHint().width()));
-  QVERIFY(qIsFinite(divider.sizeHint().height()));
+  // QSize::width()/height() are int, and Qt 5.15 spells qIsFinite as two
+  // overloads (double, float) rather than Qt 6's template, so an int argument
+  // is ambiguous there. The cast keeps the same check.
+  QVERIFY(qIsFinite(static_cast<double>(divider.sizeHint().width())));
+  QVERIFY(qIsFinite(static_cast<double>(divider.sizeHint().height())));
 }
 
 void DividerTest::zeroLineWidthPreservesContent() {

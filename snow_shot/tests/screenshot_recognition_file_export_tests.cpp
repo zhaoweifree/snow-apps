@@ -318,8 +318,8 @@ void overwriteButtonsFollowSelectedLanguage() {
         QString sheetName;
         while (!xml.atEnd()) {
             xml.readNext();
-            if (xml.isStartElement() && xml.name() == u"sheet")
-                sheetName = xml.attributes().value(u"name").toString();
+            if (xml.isStartElement() && xml.name() == QStringLiteral("sheet"))
+                sheetName = xml.attributes().value(QStringLiteral("name")).toString();
         }
         require(!xml.hasError() && sheetName == QString::fromUtf8(test.sheetName),
                 "the worksheet name must follow the selected language");
@@ -332,7 +332,7 @@ void overwriteButtonsFollowSelectedLanguage() {
                     continue;
                 inspected = true;
                 labelsMatch =
-                    dialog->testOption(QMessageBox::Option::DontUseNativeDialog) &&
+                    snowMessageBoxUsesQtDialog(dialog) &&
                     dialog->button(QMessageBox::Yes)->text() == QString::fromUtf8(test.replace) &&
                     dialog->button(QMessageBox::No)->text() == QString::fromUtf8(test.cancel) &&
                     dialog->defaultButton() == dialog->button(QMessageBox::No);

@@ -197,12 +197,9 @@ void pointerPresentationRespectsOverlayInputGate() {
     require(sink.pointerCalls == 0,
             "rejected startup pointer input must not alter presentation state");
 
-    QPointingDevice pen(QStringLiteral("overlay tablet"), 91, QInputDevice::DeviceType::Stylus,
-                        QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(91);
     const auto sendTabletMove = [&](const QPointF& position) {
-        QTabletEvent event(QEvent::TabletMove, &pen, position,
+        QTabletEvent event = snowTabletEvent(QEvent::TabletMove, pen, position,
                            QPointF(overlay.captureGeometry().topLeft()) + position, 0.5, 0, 0, 0, 0,
                            0, Qt::NoModifier, Qt::NoButton, Qt::LeftButton);
         QApplication::sendEvent(canvas, &event);
@@ -246,13 +243,10 @@ void nativeTabletBarrelButtonsPreserveOverlayBrushOwnership() {
     QApplication::processEvents();
     canvas->setInteractionEnabled(true);
     require(canvas->setCanvasTool(SnowCanvasTool::FreeDraw), "activate the overlay tablet brush");
-    QPointingDevice pen(QStringLiteral("overlay barrel tablet"), 94,
-                        QInputDevice::DeviceType::Stylus, QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(94);
     const auto pointer = [&](QEvent::Type type, QPointF point, Qt::MouseButton button,
                              Qt::MouseButtons buttons) {
-        QTabletEvent event(type, &pen, point, canvas->mapToGlobal(point), 0.6, 0, 0, 0, 0, 0,
+        QTabletEvent event = snowTabletEvent(type, pen, point, canvas->mapToGlobal(snowWidgetPosition(point)), 0.6, 0, 0, 0, 0, 0,
                            Qt::NoModifier, button, buttons);
         event.setAccepted(false);
         QApplication::sendEvent(canvas, &event);
@@ -583,6 +577,7 @@ void physicalViewportRenderingPreservesEveryPixelAtFractionalDprs() {
     }
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
 void overlayCanvasCoversDisplaySafeAreas() {
     // Supply the same QPA inset Cocoa reports for a notched screen, without
     // requiring that hardware or a desktop session. Only synchronous layout
@@ -647,6 +642,15 @@ void overlayCanvasCoversDisplaySafeAreas() {
         overlay.releaseNativeSurface();
     }
 }
+#else
+// QPlatformWindow::safeAreaMargins() and QEvent::SafeAreaMarginsChange are 6.9
+// additions. Qt 5.15 has no display safe area at all -- every platform it runs
+// on reports a full rectangle -- so there is no behaviour here to assert. Say
+// that out loud instead of passing quietly and letting the coverage look real.
+void overlayCanvasCoversDisplaySafeAreas() {
+    std::cout << "[skip] overlay safe-area coverage needs Qt 6.9+\n";
+}
+#endif
 
 void overlayReceivesDisplayBoundaryInput(bool native) {
     class Sink final : public NoopOverlayEventSink {
@@ -5430,7 +5434,9 @@ void ocrGlyphCachingPreservesOriginalAndCffFontCoverage() {
         }
     };
     verify(text, ScreenshotOcrTextDirection::Horizontal, false, false);
-    for (const QString& family : QFontDatabase::families()) {
+    // Qt 5 keeps families() on an instance and Qt 6 turned it into a static; a
+    // temporary satisfies both spellings.
+    for (const QString& family : QFontDatabase().families()) {
         QFont font(family);
         const QRawFont raw = QRawFont::fromFont(font);
         if (raw.fontTable("CFF ").isEmpty() && raw.fontTable("CFF2").isEmpty()) {
@@ -6401,9 +6407,9 @@ void mergedParagraphWrapsAndFillsAnalyzedRegion() {
                                "inside its original image region");
     line.paragraph = true;
     line.quad = snowPolygonF({QPointF(-100, -60), QPointF(100, -60), QPointF(100, 60), QPointF(-100, 60)});
-    line.sourceLineQuads = {
-        {QPointF(-100, -60), QPointF(100, -60), QPointF(100, -40), QPointF(-100, -40)},
-        {QPointF(-100, 40), QPointF(100, 40), QPointF(100, 60), QPointF(-100, 60)}};
+    line.sourceLineQuads = QVector<QPolygonF>{
+        snowPolygonF({QPointF(-100, -60), QPointF(100, -60), QPointF(100, -40), QPointF(-100, -40)}),
+        snowPolygonF({QPointF(-100, 40), QPointF(100, 40), QPointF(100, 60), QPointF(-100, 60)})};
     presentation->lines.push_back(line);
     presentation->prepareForRendering();
     renderer.setOcrPresentation(presentation);

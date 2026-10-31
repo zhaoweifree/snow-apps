@@ -1489,7 +1489,8 @@ void dpiScaledSizeMessagePreservesThePhysicalWindowSize() {
     message.message = WM_GETDPISCALEDSIZE;
     message.wParam = MAKELPARAM(192, 192);
     message.lParam = reinterpret_cast<LPARAM>(&requestedSize);
-    qintptr result = 0;
+    // AdNativeEventResult is `long` on Qt 5 and `qintptr` on Qt 6.
+    adqt::widgets::AdNativeEventResult result = 0;
     const bool handled =
         adqt::widgets::AdDpiStableWindowController::enforceStablePhysicalSizeForMessage(
             &message, testWindowId, stablePhysicalWindowSize, true, &result);

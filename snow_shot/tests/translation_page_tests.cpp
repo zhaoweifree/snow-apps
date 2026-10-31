@@ -770,7 +770,7 @@ void editorAndShortcutBehavior() {
     QEvent leave(QEvent::Leave);
     QApplication::sendEvent(floating, &leave);
     QCursor::setPos(menu->mapToGlobal(menu->actionGeometry(copy).center()));
-    SnowEnterEvent actionHover(QPointF(5, 5), QPointF(5, 5),
+    SnowEnterEventInstance actionHover(QPointF(5, 5), QPointF(5, 5),
                             menu->mapToGlobal(menu->actionGeometry(copy).center()));
     QApplication::sendEvent(menu, &actionHover);
     flushEvents();

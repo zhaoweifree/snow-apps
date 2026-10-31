@@ -90,6 +90,17 @@ QUrl dataUrl(const QImage& image) {
   image.save(&buffer, "PNG");
   return QUrl(QStringLiteral("data:image/png;base64,") + QString::fromLatin1(bytes.toBase64()));
 }
+// `QTest::failOnWarning` arrived in Qt 6.5. The two tests below use it to pin the
+// "QIODevice::read ... device not open" warning Qt prints when a TLS connection
+// drops mid-read. Qt 5.15 has no such facility, so the warning is tolerated there
+// and the functional assertions -- the reply fails cleanly, the replacement image
+// survives -- are what the test actually checks.
+void failOnDeviceReadWarning() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+  QTest::failOnWarning(QRegularExpression(QStringLiteral("QIODevice::read.*device not open")));
+#endif
+}
+
 }  // namespace
 
 class ImageTests final : public QObject {
@@ -97,7 +108,7 @@ class ImageTests final : public QObject {
 
  private slots:
   void closedTlsConnectionFailsCleanly() {
-    QTest::failOnWarning(QRegularExpression(QStringLiteral("QIODevice::read.*device not open")));
+    failOnDeviceReadWarning();
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));
     connect(&server, &QTcpServer::newConnection, &server, [&server]() {
@@ -119,7 +130,7 @@ class ImageTests final : public QObject {
   }
 
   void reloadDuringTlsHandshakeKeepsReplacementImage() {
-    QTest::failOnWarning(QRegularExpression(QStringLiteral("QIODevice::read.*device not open")));
+    failOnDeviceReadWarning();
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));
     bool handshakeStarted = false;

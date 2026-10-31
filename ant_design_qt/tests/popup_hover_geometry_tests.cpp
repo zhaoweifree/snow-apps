@@ -335,7 +335,7 @@ int main(int argc, char** argv) {
   tooltip.setHoverOpenDelayMs(10);
   const QPoint tipPoint(8, 8);
   QCursor::setPos(mainTrigger.mapToGlobal(tipPoint));
-  SnowEnterEvent tipEnter(tipPoint, mainTrigger.mapTo(&window, tipPoint),
+  SnowEnterEventInstance tipEnter(tipPoint, mainTrigger.mapTo(&window, tipPoint),
                        mainTrigger.mapToGlobal(tipPoint));
   QApplication::sendEvent(&mainTrigger, &tipEnter);
   require(QTest::qWaitFor([&] { return tooltip.isVisible(); }, 1000),

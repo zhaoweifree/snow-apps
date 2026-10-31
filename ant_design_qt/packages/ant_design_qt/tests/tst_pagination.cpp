@@ -555,7 +555,11 @@ void PaginationTest::pooledButtonsClearInactiveState() {
   for (const QAbstractButton* button : buttons) {
     if (button->isHidden()) {
       QVERIFY(button->objectName().isEmpty());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+      // QWidget::accessibleIdentifier() is Qt 6.9; Qt 5.15 has no such property at
+      // all, so there is nothing to be empty and the assertion would only restate that.
       QVERIFY(button->accessibleIdentifier().isEmpty());
+#endif
       QVERIFY(button->accessibleName().isEmpty());
       QVERIFY(button->accessibleDescription().isEmpty());
     }

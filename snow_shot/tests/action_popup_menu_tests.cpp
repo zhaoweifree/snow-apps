@@ -40,7 +40,8 @@ void sendPointerHover(QWidget* receiver, QEvent::Type type, const QPoint& local)
         QMouseEvent event(type, local, global, Qt::NoButton, Qt::NoButton, Qt::NoModifier);
         QApplication::sendEvent(receiver, &event);
     } else {
-        QHoverEvent event(type, local, global, QPointF(-1, -1), Qt::NoModifier);
+        QHoverEvent event = snowHoverEvent(type, local, global, QPointF(-1, -1),
+                                          Qt::NoModifier);
         QApplication::sendEvent(receiver, &event);
     }
 }
@@ -61,8 +62,9 @@ void hoverEventsRespectClippingAndEnabledState() {
     owner.show();
     QCoreApplication::processEvents();
     const auto hoverPosition = [&](const QPoint& local) {
-        QHoverEvent event(QEvent::HoverMove, local, receiver.mapToGlobal(local), QPointF(-1, -1),
-                          Qt::NoModifier);
+        QHoverEvent event = snowHoverEvent(QEvent::HoverMove, local,
+                                          receiver.mapToGlobal(snowWidgetPosition(local)),
+                                          QPointF(-1, -1), Qt::NoModifier);
         return pointerHoverPositionWithin(&receiver, &event);
     };
     require(hoverPosition(QPoint(5, 5)) == receiver.mapToGlobal(QPoint(5, 5)),

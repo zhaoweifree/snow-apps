@@ -507,7 +507,8 @@ void validateOptimizationSource(const ScreenshotAnimationSource& source, QSize s
     const QColorSpace srgb(QColorSpace::SRgb);
     const QImage expected =
         source.firstFrame.colorSpace().isValid() && source.firstFrame.colorSpace() != srgb
-            ? source.firstFrame.convertedToColorSpace(srgb, QImage::Format_ARGB32_Premultiplied)
+            ? snowImageConvertedToColorSpace(source.firstFrame, srgb,
+                                             QImage::Format_ARGB32_Premultiplied)
             : source.firstFrame.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     optimizationRequire(source.firstDisplayFrame == expected,
                         "Optimization initial display changed normalized pixels.");

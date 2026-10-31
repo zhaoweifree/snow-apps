@@ -13,6 +13,7 @@
 #endif
 
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -29,6 +30,42 @@ bool isIconGreen(const QColor& color) {
     return color.alpha() >= 180 && color.green() > color.red() + 25 &&
            color.green() > color.blue() + 50;
 }
+
+#ifdef Q_OS_WIN
+// QImage::fromHICON() is a Qt 6 addition; Qt 5.15 ships no HICON conversion at
+// all (grep over its QtGui headers finds neither fromHICON nor fromWinHICON).
+// Drawing the icon into a 32-bpp DIB gives the same pixels through the same
+// compositing path Shell uses, so the colour assertions below keep testing the
+// resource rather than a stub.
+QImage iconToImage(HICON icon, int size) {
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = size;
+    info.bmiHeader.biHeight = -size; // top-down rows, matching QImage's order
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HDC screen = GetDC(nullptr);
+    HBITMAP target = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    HDC canvas = CreateCompatibleDC(screen);
+    HGDIOBJ previous = SelectObject(canvas, target);
+    std::memset(bits, 0, size_t(size) * size_t(size) * 4U);
+    const BOOL drawn = DrawIconEx(canvas, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
+    SelectObject(canvas, previous);
+    DeleteDC(canvas);
+    ReleaseDC(nullptr, screen);
+
+    QImage image;
+    if (drawn) {
+        image = QImage(static_cast<uchar*>(bits), size, size, size * 4, QImage::Format_ARGB32)
+                    .copy();
+    }
+    DeleteObject(target);
+    return image;
+}
+#endif
 
 bool containsGreenNearBorder(const QImage& image) {
     const int border = std::max(1, image.width() / 5);
@@ -145,7 +182,11 @@ void executableIconResourcePreservesItsGreenTaskbarBorder() {
         HICON icon = static_cast<HICON>(
             LoadImageW(module, MAKEINTRESOURCEW(101), IMAGE_ICON, size, size, LR_DEFAULTCOLOR));
         require(icon != nullptr, "Snow Shot executable did not contain its application icon");
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         const QImage image = QImage::fromHICON(icon);
+#else
+        const QImage image = iconToImage(icon, size);
+#endif
         DestroyIcon(icon);
         require(!image.isNull() && containsGreenNearBorder(image),
                 "embedded Snow Shot application icon should preserve its green border");

@@ -523,7 +523,7 @@ if(SNOW_DRAW_ENGINE_QT_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/crates/snow-draw-engine-c/include"
     )
     target_link_libraries(snow-canvas-shape-text-tests PRIVATE snow_draw_engine_qt_canvas)
-    qt_import_plugins(snow-canvas-shape-text-tests INCLUDE Qt6::QOffscreenIntegrationPlugin)
+    qt_import_plugins(snow-canvas-shape-text-tests INCLUDE ${SNOW_QT_NS}::QOffscreenIntegrationPlugin)
     add_test(NAME snow-canvas-shape-text-tests COMMAND snow-canvas-shape-text-tests)
     set_tests_properties(snow-canvas-shape-text-tests PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"

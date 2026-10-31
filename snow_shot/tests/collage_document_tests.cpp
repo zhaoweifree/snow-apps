@@ -450,8 +450,10 @@ void transformedRowsPreserveNativePixelsAndBoundMemory() {
                                         expected.constScanLine(first + row),
                                         size_t(expected.width()) * 4) == 0,
                             "random transformed row pixels match native reference");
+                    // Qt 5 has both operator[](int) and operator[](uint) on
+                    // QByteArray, so a qsizetype index is ambiguous (C2666).
                     for (qsizetype x = expected.width() * 4; x < stride; ++x)
-                        require(storage[row * stride + x] == char(0x5a),
+                        require(storage[static_cast<int>(row * stride + x)] == char(0x5a),
                                 "transformed row reads leave destination padding untouched");
                 }
             }
@@ -527,7 +529,7 @@ void regionReadsAndLazyResize() {
                                         size_t(region.width()) * 4) == 0,
                             "native region matches full composition without alpha changes");
                     for (qsizetype x = region.width() * 4; x < stride; ++x)
-                        require(storage[y * stride + x] == char(0x5a),
+                        require(storage[static_cast<int>(y * stride + x)] == char(0x5a),
                                 "native regions preserve destination padding");
                 }
             }

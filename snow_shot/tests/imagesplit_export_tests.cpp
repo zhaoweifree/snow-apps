@@ -253,7 +253,13 @@ void croppedNativeRowsRespectAllocationBoundary() {
          {QImage::Format_RGB888, QImage::Format_BGR888, QImage::Format_RGB16,
           QImage::Format_Grayscale8, QImage::Format_Indexed8, QImage::Format_Mono,
           QImage::Format_MonoLSB, QImage::Format_ARGB32_Premultiplied,
-          QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA32FPx4}) {
+          QImage::Format_RGBA64_Premultiplied
+          // Qt 6.2 added the float rasters; Qt 5.15 stops at 16-bit integers.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA32FPx4
+#endif
+         }) {
         for (const QSize size : {QSize(37, 1), QSize(37, 9), QSize(16421, 9)}) {
             QImage source = fixture()
                                 .scaled(size, Qt::IgnoreAspectRatio, Qt::FastTransformation)
@@ -295,8 +301,12 @@ void boundedNativeFormatAndColorConversion() {
          {QImage::Format_RGBA8888, QImage::Format_ARGB32_Premultiplied,
           QImage::Format_RGBA8888_Premultiplied, QImage::Format_RGB888, QImage::Format_RGB32,
           QImage::Format_RGB16, QImage::Format_RGBA64, QImage::Format_RGBA64_Premultiplied,
-          QImage::Format_RGBA16FPx4, QImage::Format_RGBA32FPx4, QImage::Format_Indexed8,
-          QImage::Format_Mono, QImage::Format_MonoLSB}) {
+          QImage::Format_Indexed8, QImage::Format_Mono, QImage::Format_MonoLSB
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA16FPx4, QImage::Format_RGBA32FPx4
+#endif
+         }) {
         for (const auto& space :
              {QColorSpace{}, QColorSpace(QColorSpace::SRgb), QColorSpace(QColorSpace::DisplayP3),
               QColorSpace(QColorSpace::SRgbLinear)}) {
@@ -353,8 +363,14 @@ void largeProfileConversionMatchesFullNormalization() {
     settings.columns = 2;
     const auto layout = calculateImageSplitLayout(reference.size(), settings);
     int ordinal = 0;
-    for (const auto format : {QImage::Format_RGBA8888, QImage::Format_ARGB32_Premultiplied,
-                              QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA32FPx4}) {
+    for (const auto format :
+         {QImage::Format_RGBA8888, QImage::Format_ARGB32_Premultiplied,
+          QImage::Format_RGBA64_Premultiplied
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA32FPx4
+#endif
+         }) {
         QImage native = reference.convertToFormat(format);
         native.setColorSpace(QColorSpace(QColorSpace::DisplayP3));
         // Each crop exceeds Qt's 64K-pixel threshold. Noisy low-alpha colors expose differences
@@ -424,7 +440,7 @@ void failuresRetranslate() {
             "helper failures retain their original translation key and initial display message");
     ImageSplitExportResult indexed;
     indexed.errorSource = QStringLiteral("Image %1 could not be saved: %2");
-    indexed.errorArguments = {QStringLiteral("7"), QStringLiteral("native detail")};
+    indexed.errorArguments = QStringList{QStringLiteral("7"), QStringLiteral("native detail")};
     indexed.error = indexed.errorMessage();
     for (const auto* catalog : {":/i18n/snow_shot_zh_CN.qm", ":/i18n/snow_shot_zh_TW.qm"}) {
         QTranslator translator;

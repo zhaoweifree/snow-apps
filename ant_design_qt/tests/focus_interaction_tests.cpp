@@ -45,7 +45,20 @@ void scrollRestorationAllowsAreaRetirement() {
     area->horizontalScrollBar()->setValue(50);
     area->verticalScrollBar()->setValue(50);
   }
-  const QVector<PreservedScrollPosition> positions{{first, 10, 20}, {sibling, 30, 40}};
+  // Qt 6 aliases QVector onto QList, whose initializer_list constructor accepts
+  // a nested braced list for an aggregate element. Qt 5.15's QVector has an
+  // initializer_list constructor too, but MSVC refuses the nested form there
+  // (C2440: cannot convert from 'initializer list' to 'QVector<T>'), so each
+  // element is built explicitly and the vector is initialised from them.
+  const auto scrollPosition = [](const QPointer<QScrollArea>& area, int horizontal, int vertical) {
+    PreservedScrollPosition position;
+    position.area = area;
+    position.horizontalValue = horizontal;
+    position.verticalValue = vertical;
+    return position;
+  };
+  const QVector<PreservedScrollPosition> positions{scrollPosition(first, 10, 20),
+                                                   scrollPosition(sibling, 30, 40)};
   int notifications = 0;
   QObject::connect(first->horizontalScrollBar(), &QScrollBar::valueChanged, qApp, [&](int) {
     ++notifications;

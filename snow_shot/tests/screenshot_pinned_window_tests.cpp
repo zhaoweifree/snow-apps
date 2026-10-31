@@ -721,7 +721,8 @@ class ScreenshotPinnedWindowTestAccess {
         nativeMessage.hwnd = reinterpret_cast<HWND>(window.winId());
         nativeMessage.message = message;
         nativeMessage.lParam = parameter;
-        qintptr result = 0;
+        // nativeEvent's result is `long*` on Qt 5 and `qintptr*` on Qt 6.
+        snowNativeEventResult result = 0;
         static_cast<void>(PinnedWindowWindowsEvents::handle(
             window, QByteArrayLiteral("windows_generic_MSG"), &nativeMessage, &result));
     }
@@ -753,7 +754,8 @@ class ScreenshotPinnedWindowTestAccess {
         message.hwnd = reinterpret_cast<HWND>(window.winId());
         message.message = WM_MOVING;
         message.lParam = reinterpret_cast<LPARAM>(&proposed);
-        qintptr result = 0;
+        // nativeEvent's result is `long*` on Qt 5 and `qintptr*` on Qt 6.
+        snowNativeEventResult result = 0;
         const bool handled =
             window.nativeEvent(QByteArrayLiteral("windows_generic_MSG"), &message, &result);
         const bool continued = window.m_windowDragActive &&
@@ -775,7 +777,8 @@ class ScreenshotPinnedWindowTestAccess {
         message.message = WM_SIZING;
         message.wParam = WMSZ_BOTTOMRIGHT;
         message.lParam = reinterpret_cast<LPARAM>(&proposed);
-        qintptr result = 0;
+        // nativeEvent's result is `long*` on Qt 5 and `qintptr*` on Qt 6.
+        snowNativeEventResult result = 0;
         const bool handled =
             window.nativeEvent(QByteArrayLiteral("windows_generic_MSG"), &message, &result);
         const bool continued = window.m_nativeGeometryController->hasInteractiveTransaction();
@@ -5801,7 +5804,7 @@ void pinnedControlsMatchReferenceStyle(SnowCanvasRuntime&) {
                      "pinned edit button should use the theme primary color on hover");
 
     const QPointF closeCenter(closeButton->rect().center());
-    SnowEnterEvent closeEnter(closeCenter, closeCenter,
+    SnowEnterEventInstance closeEnter(closeCenter, closeCenter,
                            QPointF(closeButton->mapToGlobal(closeCenter.toPoint())));
     QCoreApplication::sendEvent(closeButton, &closeEnter);
     const QColor error = adqt::theme::ThemeManager::instance().resolveTheme(closeButton).colorError;
@@ -7629,11 +7632,11 @@ void pinnedOcrDoubleClickCopiesLocally() {
         ScreenshotOcrLine{
             QStringLiteral("This is the first line"),
             0.95,
-            {QPointF(680, 405), QPointF(860, 405), QPointF(860, 425), QPointF(680, 425)}},
+            snowPolygonF({QPointF(680, 405), QPointF(860, 405), QPointF(860, 425), QPointF(680, 425)})},
         ScreenshotOcrLine{
             QStringLiteral("continued on the next line"),
             0.95,
-            {QPointF(680, 429), QPointF(890, 429), QPointF(890, 449), QPointF(680, 449)}},
+            snowPolygonF({QPointF(680, 429), QPointF(890, 429), QPointF(890, 449), QPointF(680, 449)})},
     };
     source->prepareForRendering();
     auto translation = std::make_shared<ScreenshotOcrPresentation>();
@@ -14304,7 +14307,7 @@ void pinnedHiddenFormattedTextSelectionOffscreen() {
             window.activateWindow();
             QApplication::processEvents();
             const QPoint textPoint = layer->viewport()->mapTo(&window, point(1));
-            SnowEnterEvent enter(QPointF(textPoint), QPointF(textPoint),
+            SnowEnterEventInstance enter(QPointF(textPoint), QPointF(textPoint),
                               window.mapToGlobal(textPoint));
             QApplication::sendEvent(window.windowHandle(), &enter);
             const auto hover = [&](QPoint position, Qt::CursorShape cursor) {
@@ -14616,9 +14619,9 @@ void pinnedCopyDefaultsCoverHiddenSelectionAndAutomation() {
     auto smartConfig = cachedOcrPinConfig(nullptr);
     smartConfig.recognitionResults.text->presentation->lines = {
         ScreenshotOcrLine{
-            QStringLiteral("trans-"), 1.0, {{680, 405}, {780, 405}, {780, 425}, {680, 425}}},
+            QStringLiteral("trans-"), 1.0, snowPolygonF({{680, 405}, {780, 405}, {780, 425}, {680, 425}})},
         ScreenshotOcrLine{
-            QStringLiteral("lation!"), 1.0, {{680, 429}, {780, 429}, {780, 449}, {680, 449}}},
+            QStringLiteral("lation!"), 1.0, snowPolygonF({{680, 429}, {780, 429}, {780, 449}, {680, 449}})},
     };
     smartConfig.recognitionResults.text->presentation->prepareForRendering();
     ScreenshotPinnedWindow smartWindow;
@@ -16119,7 +16122,8 @@ void pinnedCtrlHoverKeepsWindowCursorOffscreen() {
         message.hwnd = nativeWindow;
         message.message = WM_NCHITTEST;
         message.lParam = MAKELPARAM(static_cast<WORD>(point.x()), static_cast<WORD>(point.y()));
-        qintptr result = 0;
+        // nativeEvent's result is `long*` on Qt 5 and `qintptr*` on Qt 6.
+        snowNativeEventResult result = 0;
         require(PinnedWindowWindowsEvents::handle(window, QByteArrayLiteral("windows_generic_MSG"),
                                                   &message, &result),
                 "native hover hit test handled");
@@ -16277,7 +16281,8 @@ void pinnedOcrBoxSelectionNativeRouting() {
         message.hwnd = toNativeHwnd(window.winId());
         message.message = type;
         message.lParam = target;
-        qintptr result = 0;
+        // nativeEvent's result is `long*` on Qt 5 and `qintptr*` on Qt 6.
+        snowNativeEventResult result = 0;
         static_cast<void>(PinnedWindowWindowsEvents::handle(
             window, QByteArrayLiteral("windows_generic_MSG"), &message, &result));
     };
@@ -18418,7 +18423,8 @@ void pinnedImportedColorsMatchLiveRendering() {
                 "pin import must preserve source pixels and profile");
         const QImage expected =
             space.isValid()
-                ? source.convertedToColorSpace(srgb, QImage::Format_ARGB32_Premultiplied)
+                ? snowImageConvertedToColorSpace(source, srgb,
+                                                 QImage::Format_ARGB32_Premultiplied)
                 : source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
         require(!expected.isNull(), "profile fixture must convert to sRGB");
         for (const auto presentation :
@@ -18798,7 +18804,7 @@ void pinnedPassiveCorrectionPreservesPublishedPixels() {
     message.hwnd = position.hwnd;
     message.message = WM_WINDOWPOSCHANGING;
     message.lParam = reinterpret_cast<LPARAM>(&position);
-    qintptr result = -1;
+    snowNativeEventResult result = -1;
     require(PinnedWindowWindowsEvents::handle(window, QByteArrayLiteral("windows_generic_MSG"),
                                               &message, &result) &&
                 result == 0 &&
@@ -22363,7 +22369,7 @@ void pinnedMultiSelectionGroupModalManagerTeardown() {
     auto manager =
         std::make_unique<snow_shot::presentation::PinnedWindowGroupManager>(&fixture.repository);
     manager->openCreateGroupModal(&first,
-                                  QVector<QPointer<ScreenshotPinnedWindow>>{&first, &second});
+                                  QList<QPointer<ScreenshotPinnedWindow>>{&first, &second});
     auto* modal =
         first.findChild<adqt::widgets::AdModal*>(QStringLiteral("pinnedWindowGroupCreateModal"));
     auto* form = modal ? qobject_cast<adqt::widgets::AdForm*>(modal->contentWidget()) : nullptr;
@@ -22688,13 +22694,10 @@ void pinnedMarginProtectsContentGestures() {
     require(Access::dragDocument(window) == document && !Access::exportGesture(window),
             "a margin press and release must not create annotations or export gestures");
 
-    QPointingDevice pen(QStringLiteral("pinned tablet"), 92, QInputDevice::DeviceType::Stylus,
-                        QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(92);
     const auto tablet = [&](QEvent::Type type, QPointF point, Qt::MouseButtons buttons) {
         const auto button = type == QEvent::TabletMove ? Qt::NoButton : Qt::LeftButton;
-        QTabletEvent event(type, &pen, point, canvas->mapToGlobal(point), 0.5, 0, 0, 0, 0, 0,
+        QTabletEvent event = snowTabletEvent(type, pen, point, canvas->mapToGlobal(snowWidgetPosition(point)), 0.5, 0, 0, 0, 0, 0,
                            Qt::NoModifier, button, buttons);
         QApplication::sendEvent(canvas, &event);
     };
@@ -22772,8 +22775,8 @@ void pinnedMarginProtectsContentGestures() {
             "recognition children must remain inside the content viewport");
     const auto ocrMouse = [&](QEvent::Type type, QPointF point, Qt::MouseButtons buttons) {
         const Qt::MouseButton button = type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton;
-        QMouseEvent event(type, point, recognition->mapToGlobal(point), button, buttons,
-                          Qt::NoModifier);
+        QMouseEvent event(type, point, recognition->mapToGlobal(snowWidgetPosition(point)), button,
+                          buttons, Qt::NoModifier);
         QApplication::sendEvent(recognition, &event);
     };
     auto* ocrCanvas = ocrWindow.findChild<SnowCanvasWidget*>();

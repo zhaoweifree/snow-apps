@@ -1713,7 +1713,7 @@ if(SNOW_SHOT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:${SNOW_QT_NS}::Core>")
     if(WIN32)
         set_tests_properties(snow-shot-image-split-icon-tests PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>")
+            ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:${SNOW_QT_NS}::QWindowsIntegrationPlugin>")
     endif()
 endif()
 if(SNOW_APPS_BUILD_BENCHMARKS)
@@ -4228,6 +4228,9 @@ if(SNOW_SHOT_BUILD_TESTS)
     )
     target_include_directories(snow-shot-capture-workflow-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        # The selection model pulls in the draw engine's snapping header, which is
+        # only reachable through this root.
+        "${CMAKE_SOURCE_DIR}/snow_draw_engine_qt/include"
     )
     target_link_libraries(snow-shot-capture-workflow-tests PRIVATE
         Qt::Gui
@@ -5608,8 +5611,13 @@ if(SNOW_SHOT_BUILD_TESTS)
         src/presentation/services/screenshotclipboarddibdecoder_avx2.cpp
     )
     target_include_directories(snow-shot-file-pin-batch-tests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    target_link_libraries(snow-shot-file-pin-batch-tests PRIVATE snow_shot_storage snow_shot_image_codec Qt::Widgets
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        # pinnedtextstylecapture.cpp reaches into the design system for the theme
+        # tokens it captures, so this target needs the same two roots the app
+        # gets through its own include list.
+        "${CMAKE_SOURCE_DIR}/ant_design_qt/packages/ant_design_qt/src")
+    target_link_libraries(snow-shot-file-pin-batch-tests PRIVATE snow_shot_storage
+        snow_shot_image_codec ant_design_qt Qt::Widgets
         ${SNOW_SELECTED_FILES_LIBRARIES})
     if(APPLE)
         target_link_libraries(snow-shot-file-pin-batch-tests PRIVATE snow_shot_rust_ffi_selector)

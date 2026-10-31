@@ -205,8 +205,8 @@ void rasterOperationsPreservePixelsAndReleasePages() {
     source.setColorSpace(QColorSpace::DisplayP3);
     QImage color = snowCanvasColorConvertedImage(source, QColorSpace::SRgb,
                                                  QImage::Format_ARGB32_Premultiplied);
-    require(color == source.convertedToColorSpace(QColorSpace::SRgb,
-                                                  QImage::Format_ARGB32_Premultiplied),
+    require(color == snowImageConvertedToColorSpace(source, QColorSpace::SRgb,
+                                                    QImage::Format_ARGB32_Premultiplied),
             "bounded color conversion must exactly match Qt");
     checkRelease(color);
     const QRect crop(-3, -2, 1030, 520);
@@ -365,7 +365,8 @@ void requireRgbaRowsEquivalent(const QImage& source, int firstRow, int rowCount,
         target.isValid() && reference.pixelFormat().premultiplied() == QPixelFormat::Premultiplied
             ? reference.convertedToColorSpace(target).convertToFormat(QImage::Format_RGBA8888,
                                                                       flags)
-        : target.isValid() ? reference.convertedToColorSpace(target, QImage::Format_RGBA8888, flags)
+        : target.isValid()
+              ? snowImageConvertedToColorSpace(reference, target, QImage::Format_RGBA8888, flags)
                            : reference.convertToFormat(QImage::Format_RGBA8888, flags);
     require(!expected.isNull(), "row reference must convert");
     const qsizetype rowBytes = qsizetype(source.width()) * 4;
@@ -385,7 +386,8 @@ void requireRgbaRowsEquivalent(const QImage& source, int firstRow, int rowCount,
                         static_cast<std::size_t>(rowBytes)) != 0) {
             std::cerr << "row conversion source=" << source.format() << " size=" << source.width()
                       << 'x' << source.height() << " target=" << target.isValid()
-                      << " source-profile=" << source.colorSpace().description().toStdString()
+                      << " source-profile="
+                      << snowColorSpaceDescription(source.colorSpace()).toStdString()
                       << " equal-profile=" << (source.colorSpace() == target)
                       << " first=" << firstRow << " count=" << rowCount << " row=" << row << '\n';
             for (qsizetype byte = 0; byte < rowBytes; ++byte)
@@ -422,8 +424,14 @@ void requireRgbaRowsEquivalent(const QImage& source, int firstRow, int rowCount,
 void colorConvertedPremultipliedRowsKeepStraightAlpha() {
     for (const auto format :
          {QImage::Format_ARGB32_Premultiplied, QImage::Format_RGBA8888_Premultiplied,
-          QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA16FPx4_Premultiplied,
-          QImage::Format_RGBA32FPx4_Premultiplied}) {
+          QImage::Format_RGBA64_Premultiplied
+          // Half-float and float rasters arrived in Qt 6.2; Qt 5.15 has no such
+          // formats at all, so the list ends here instead of failing to compile.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA16FPx4_Premultiplied, QImage::Format_RGBA32FPx4_Premultiplied
+#endif
+         }) {
         QImage source(257, 129, format);
         source.fill(QColor(190, 40, 20, 110));
         source.setColorSpace(QColorSpace::DisplayP3);
@@ -469,9 +477,13 @@ void borrowedRgbaRowsMatchQt() {
         const QImage fixture = alphaFixture(size);
         for (const auto format :
              {QImage::Format_RGBA8888, QImage::Format_ARGB32_Premultiplied,
-              QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA16FPx4_Premultiplied,
-              QImage::Format_RGBA32FPx4, QImage::Format_Grayscale16, QImage::Format_Mono,
-              QImage::Format_MonoLSB, QImage::Format_Indexed8}) {
+              QImage::Format_RGBA64_Premultiplied, QImage::Format_Grayscale16,
+              QImage::Format_Mono, QImage::Format_MonoLSB, QImage::Format_Indexed8
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+              ,
+              QImage::Format_RGBA16FPx4_Premultiplied, QImage::Format_RGBA32FPx4
+#endif
+             }) {
             const QImage source = fixture.convertToFormat(format);
             requireRgbaRowsEquivalent(source, 1, source.height() - 2);
             requireRgbaRowsEquivalent(source, 1, source.height() - 2, QColorSpace::SRgb);
@@ -577,7 +589,7 @@ void requireEquivalent(QImage actual, const QImage& expected, const char* messag
 
 QImage nativeColorResult(const QImage& source, QImage::Format format,
                          Qt::ImageConversionFlags flags = Qt::AutoColor) {
-    QImage expected = source.convertedToColorSpace(QColorSpace::SRgb, format, flags);
+    QImage expected = snowImageConvertedToColorSpace(source, QColorSpace::SRgb, format, flags);
     // The managed helper promises source metadata preservation. Qt's color
     // converter copies physical resolution and text but drops placement offset.
     expected.setOffset(source.offset());
@@ -606,13 +618,15 @@ void formatsAndAlphaBoundariesMatchQt() {
                              QImage::Format_RGBA64,
                              QImage::Format_RGBA64_Premultiplied,
                              QImage::Format_RGBX64,
-                             QImage::Format_RGBX16FPx4,
-                             QImage::Format_RGBA16FPx4,
-                             QImage::Format_RGBA16FPx4_Premultiplied,
-                             QImage::Format_RGBX32FPx4,
-                             QImage::Format_RGBA32FPx4,
-                             QImage::Format_RGBA32FPx4_Premultiplied,
-                             QImage::Format_CMYK8888};
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+                             QImage::Format_RGBX16FPx4, QImage::Format_RGBA16FPx4,
+                             QImage::Format_RGBA16FPx4_Premultiplied, QImage::Format_RGBX32FPx4,
+                             QImage::Format_RGBA32FPx4, QImage::Format_RGBA32FPx4_Premultiplied,
+#endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+                             QImage::Format_CMYK8888,
+#endif
+                             };
     for (const auto format : formats) {
         const QImage source = smallFixture.convertToFormat(format);
         require(!source.isNull(), "format fixture must convert");
@@ -641,8 +655,12 @@ void formatsAndAlphaBoundariesMatchQt() {
     for (const auto format :
          {QImage::Format_RGB32, QImage::Format_ARGB32, QImage::Format_RGBA8888,
           QImage::Format_ARGB32_Premultiplied, QImage::Format_RGBA8888_Premultiplied,
-          QImage::Format_RGBA64, QImage::Format_RGBA64_Premultiplied, QImage::Format_RGBA32FPx4,
-          QImage::Format_RGBA32FPx4_Premultiplied}) {
+          QImage::Format_RGBA64, QImage::Format_RGBA64_Premultiplied
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+          ,
+          QImage::Format_RGBA32FPx4, QImage::Format_RGBA32FPx4_Premultiplied
+#endif
+         }) {
         const QImage source = large.convertToFormat(format);
         for (const auto target :
              {QImage::Format_ARGB32_Premultiplied, QImage::Format_RGBA8888_Premultiplied})

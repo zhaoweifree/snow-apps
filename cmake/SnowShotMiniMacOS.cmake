@@ -47,7 +47,7 @@ install(PROGRAMS "$<TARGET_FILE:snow_ocr_process>" DESTINATION "${_mini_bindir}"
 install(DIRECTORY "$<TARGET_FILE_DIR:snow_shot_mini>/assets/ocr"
     DESTINATION "${_mini_bindir}/assets" COMPONENT SnowShotMini PATTERN models EXCLUDE)
 if(NOT SNOW_SHOT_QT_STATIC)
-    install(FILES "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
+    install(FILES "$<TARGET_FILE:${SNOW_QT_NS}::QOffscreenIntegrationPlugin>"
         DESTINATION "snow_shot_mini.app/Contents/PlugIns/platforms" COMPONENT SnowShotMini)
 endif()
 if(SNOW_SHOT_RELEASE_STATIC)

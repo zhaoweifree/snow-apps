@@ -128,14 +128,16 @@ void verifyDib(const QImage& source, const QByteArray& bytes) {
     }
     for (qsizetype offset = qsizetype(sizeof(header)) + header.biSizeImage; offset < bytes.size();
          ++offset)
-        require(bytes[offset] == 0, "DIB allocator padding must be initialized");
+        require(bytes[static_cast<int>(offset)] == 0,
+                "DIB allocator padding must be initialized");
 }
 
 void verifyPng(const ScreenshotClipboardPayload& payload) {
     const QByteArray bytes = ScreenshotClipboardPayloadTestAccess::png(payload);
     require(bytes.startsWith(payload.pngBytes()), "native PNG bytes must preserve the payload");
     for (qsizetype offset = payload.pngBytes().size(); offset < bytes.size(); ++offset)
-        require(bytes[offset] == 0, "PNG allocator padding must be initialized");
+        require(bytes[static_cast<int>(offset)] == 0,
+                "PNG allocator padding must be initialized");
 }
 
 QByteArray nativeBytes(UINT format) {

@@ -3,6 +3,7 @@
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QTabletEvent>
@@ -10,6 +11,26 @@
 #include <QWindow>
 #include <private/qhighdpiscaling_p.h>
 #include <qpa/qwindowsysteminterface.h>
+
+namespace {
+// Qt 5.15 has no timestamp-free handleMouseEvent template: the first argument
+// after the window is `ulong timestamp` there, so the Qt 6 spelling
+// (window, local, global, state, button, type) finds no candidate at all. The
+// timestamp only orders deliveries inside the platform queue, and the routing
+// under test keys off the arguments, so "now" is a faithful stand-in.
+template <typename Delivery>
+bool sendSyntheticMouse(QWindow* window, const QPointF& local, const QPointF& global,
+                        Qt::MouseButtons state, Qt::MouseButton button, QEvent::Type type) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return QWindowSystemInterface::handleMouseEvent<Delivery>(window, local, global, state, button,
+                                                              type);
+#else
+    return QWindowSystemInterface::handleMouseEvent<Delivery>(
+        window, static_cast<ulong>(QDateTime::currentMSecsSinceEpoch()), local, global, state,
+        button, type);
+#endif
+}
+} // namespace
 
 #include <cstdlib>
 #include <iostream>
@@ -94,7 +115,7 @@ class InputCanvas final : public SnowCanvasWidget {
     bool event(QEvent* event) override {
         if (event->type() == QEvent::MouseButtonPress) {
             ++presses;
-            lastPress = static_cast<QMouseEvent*>(event)->position();
+            lastPress = snowPointerPos(static_cast<QMouseEvent*>(event));
             require(static_cast<QMouseEvent*>(event)->timestamp() == 1234,
                     "edge routing must preserve mouse timestamps");
         }
@@ -109,18 +130,16 @@ void runScreenshotOverlayInputTests() {
     ScreenshotOverlayWindow overlay(sink, canvas);
     const auto mouse = [&](QEvent::Type type, const QPointF& point, Qt::MouseButton button,
                            Qt::MouseButtons buttons, bool throughWindow = true) {
-        const QPointF windowPoint = canvas->mapTo(&overlay, point);
-        QMouseEvent event(type, windowPoint, windowPoint, canvas->mapToGlobal(point), button,
+        const QPointF windowPoint = canvas->mapTo(&overlay, snowWidgetPosition(point));
+        QMouseEvent event(type, windowPoint, windowPoint,
+                          canvas->mapToGlobal(snowWidgetPosition(point)), button,
                           buttons, Qt::ShiftModifier, Qt::MouseEventSynthesizedBySystem);
         event.setTimestamp(1234);
         QApplication::sendEvent(throughWindow ? static_cast<QObject*>(overlay.windowHandle())
                                               : static_cast<QObject*>(&overlay),
                                 &event);
     };
-    QPointingDevice pen(QStringLiteral("edge tablet"), 95, QInputDevice::DeviceType::Stylus,
-                        QPointingDevice::PointerType::Pen,
-                        QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1,
-                        3);
+    SnowTabletDevice pen(95);
     for (const QRect display : {QRect(80, 60, 320, 240), QRect(-320, -240, 320, 240)}) {
         for (int surface = 0; surface < 2; ++surface) {
             overlay.setCaptureGeometry(display);
@@ -163,7 +182,7 @@ void runScreenshotOverlayInputTests() {
                 }
             }
             const QPointF edge(319.75, 239.75);
-            const QPointF windowEdge = canvas->mapTo(&overlay, edge);
+            const QPointF windowEdge = canvas->mapTo(&overlay, snowWidgetPosition(edge));
             sink.presses.clear();
             sink.moves.clear();
             sink.releases.clear();
@@ -176,7 +195,8 @@ void runScreenshotOverlayInputTests() {
                         sink.releases == QVector<QPointF>{outside},
                     "an edge drag must retain its implicit grab outside the canvas");
             const int wheels = sink.wheels;
-            QWheelEvent wheel(windowEdge, canvas->mapToGlobal(edge), QPoint(0, 2), QPoint(0, 4),
+            QWheelEvent wheel(windowEdge, canvas->mapToGlobal(snowWidgetPosition(edge)), QPoint(0, 2),
+                              QPoint(0, 4),
                               Qt::NoButton, Qt::NoModifier, Qt::ScrollMomentum, false,
                               Qt::MouseEventSynthesizedBySystem);
             wheel.setTimestamp(1234);
@@ -186,7 +206,7 @@ void runScreenshotOverlayInputTests() {
             sink.presses.clear();
             sink.releases.clear();
             for (const auto type : {QEvent::TabletPress, QEvent::TabletRelease}) {
-                QTabletEvent tablet(type, &pen, windowEdge, canvas->mapToGlobal(edge), 0.6, 4, 5, 0,
+                QTabletEvent tablet = snowTabletEvent(type, pen, windowEdge, canvas->mapToGlobal(snowWidgetPosition(edge)), 0.6, 4, 5, 0,
                                     0, 0, Qt::NoModifier, Qt::LeftButton,
                                     type == QEvent::TabletPress ? Qt::LeftButton : Qt::NoButton);
                 QApplication::sendEvent(overlay.windowHandle(), &tablet);
@@ -240,10 +260,10 @@ void runScreenshotOverlayInputTests() {
                     "synthetic edge input must respect startup suppression");
             QWindow* window = overlay.windowHandle();
             for (const auto type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
-                QWindowSystemInterface::handleMouseEvent<
-                    QWindowSystemInterface::SynchronousDelivery>(
+                sendSyntheticMouse<QWindowSystemInterface::SynchronousDelivery>(
                     window, QHighDpi::toNativeLocalPosition(windowEdge, window),
-                    QHighDpi::toNativePixels(canvas->mapToGlobal(edge), window),
+                    QHighDpi::toNativePixels(
+                        canvas->mapToGlobal(snowWidgetPosition(edge)), window),
                     type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton,
                     Qt::LeftButton, type);
             }

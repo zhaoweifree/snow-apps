@@ -1098,9 +1098,10 @@ void toolbarHoverKeepsScreenshotGuidesResponsive() {
         QCoreApplication::processEvents();
         const auto sendMove = [](QWidget* receiver, const QPointF& local,
                                  Qt::MouseButtons buttons = Qt::NoButton) {
-            const QPointF global = receiver->mapToGlobal(local);
-            QMouseEvent event(QEvent::MouseMove, local, receiver->window()->mapFromGlobal(global),
-                              global, Qt::NoButton, buttons, Qt::NoModifier);
+            const QPointF global = receiver->mapToGlobal(snowWidgetPosition(local));
+            QMouseEvent event(QEvent::MouseMove, local,
+                              receiver->window()->mapFromGlobal(snowWidgetPosition(global)), global,
+                              Qt::NoButton, buttons, Qt::NoModifier);
             QApplication::sendEvent(receiver, &event);
         };
         const auto requireGuideAt = [&](QWidget* receiver, const QPoint& local) {
@@ -1292,7 +1293,7 @@ void toolbarPopoversSuppressPickerAcrossWindowBoundaries() {
                 "crossing the canvas gap must be able to reveal the screenshot picker");
 
         const QPoint popupPoint = surface->mapToGlobal(surface->rect().center());
-        SnowEnterEvent enter(surface->mapFromGlobal(popupPoint), surface->mapFromGlobal(popupPoint),
+        SnowEnterEventInstance enter(surface->mapFromGlobal(popupPoint), surface->mapFromGlobal(popupPoint),
                           popupPoint);
         QApplication::sendEvent(surface, &enter);
         require(!coordinator.colorPicker()->isVisible(),
@@ -1366,7 +1367,8 @@ void toolbarPopoversSuppressPickerAcrossWindowBoundaries() {
                 "moving inside a popup child must also hide the picker");
         for (auto type : {QEvent::HoverEnter, QEvent::HoverMove}) {
             revealPickerOnCanvas();
-            QHoverEvent hover(type, local, global, QPointF(-1, -1), Qt::NoModifier);
+            QHoverEvent hover = snowHoverEvent(type, local, global, QPointF(-1, -1),
+                                              Qt::NoModifier);
             QApplication::sendEvent(content, &hover);
             require(!coordinator.colorPicker()->isVisible(),
                     "hover events in popup children must hide the picker");

@@ -204,7 +204,7 @@ QImage apply(const Options& options, const QImage& source) {
             return snowCanvasColorConvertedImage(source, QColorSpace::SRgb,
                                                  QImage::Format_RGBA8888);
 #endif
-        return source.convertedToColorSpace(QColorSpace::SRgb, QImage::Format_RGBA8888);
+        return snowImageConvertedToColorSpace(source, QColorSpace::SRgb, QImage::Format_RGBA8888);
     }
     if (operation == "rotate90" || operation == "rotate17_smooth" ||
         operation == "flip_horizontal" || operation == "flip_horizontal_smooth") {
@@ -256,7 +256,8 @@ void copyBorrowedRows(const Options& options, const QImage& source, QImage& dest
     }
 #endif
     const QImage converted = target.isValid()
-                                 ? source.convertedToColorSpace(target, QImage::Format_RGBA8888)
+                                 ? snowImageConvertedToColorSpace(source, target,
+                                                                  QImage::Format_RGBA8888)
                                  : source.convertToFormat(QImage::Format_RGBA8888);
     if (converted.isNull())
         throw std::runtime_error("native borrowed row conversion failed");
@@ -317,7 +318,8 @@ int main(int argc, char** argv) {
             if (borrowedRowsScenario(options)) {
                 const QImage reference =
                     options.scenario == "color_p3_srgb_rows_reuse"
-                        ? source.convertedToColorSpace(QColorSpace::SRgb, QImage::Format_RGBA8888)
+                        ? snowImageConvertedToColorSpace(source, QColorSpace::SRgb,
+                                                         QImage::Format_RGBA8888)
                         : source.convertToFormat(QImage::Format_RGBA8888);
                 copyBorrowedRows(options, source, reused);
                 const auto hash = checksum(reused);

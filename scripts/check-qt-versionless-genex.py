@@ -17,9 +17,19 @@ find `Qt6Core.dll`), and every one of them named the versionless target.
 
 The fix is `${SNOW_QT_NS}::Core` -- the namespace the Qt resolution layer already
 publishes, and the spelling `cmake/SnowQtOffscreenTest.cmake` has used all along.
-This gate keeps the two halves honest: no file-expression on a versionless Qt
-target, and `SNOW_QT_NS` really assigned for both routes (an empty substitution
-would fail just as loudly, one layer further away).
+The same expression written with a literal version is the mirror image of that
+mistake: `$<TARGET_FILE_DIR:Qt6::Core>` is correct on the Qt 6 route and
+unresolvable on the Qt 5 one, where no `Qt6::` target exists at all. It cost a
+configure in the `windows-qt5-tests` rung (the expression sits in `if(WIN32)`
+inside the test block, so nothing on the Qt 5 route had ever evaluated it).
+Both spellings are therefore rejected: a file expression never names a Qt
+version literally, and never names a versionless target either. What it names is
+`${SNOW_QT_NS}::<name>`, on both routes, always.
+
+This gate keeps the three halves honest: no versionless target in a file
+expression, no literal `Qt5::`/`Qt6::` in one either, and `SNOW_QT_NS` really
+assigned for both routes (an empty substitution would fail just as loudly, one
+layer further away).
 
 Usage: `python scripts/check-qt-versionless-genex.py` (the Linux packaging gate
 runs it as well).
@@ -57,6 +67,12 @@ VERSIONLESS = re.compile(
     r"\$<\s*(?:" + "|".join(FILE_EXPRESSIONS) + r"):\s*(Qt::[A-Za-z0-9_]+)"
 )
 
+# A literal `Qt5::`/`Qt6::` inside a file expression hard-codes one route. The
+# namespace variable is the only spelling that satisfies both.
+PINNED = re.compile(
+    r"\$<\s*(?:" + "|".join(FILE_EXPRESSIONS) + r"):\s*(Qt[56]::[A-Za-z0-9_]+)"
+)
+
 failures: list[str] = []
 
 
@@ -89,6 +105,8 @@ def genex_targets_in_file(path: Path):
             continue
         for match in VERSIONLESS.finditer(line):
             yield number, match.group(0), match.group(1)
+        for match in PINNED.finditer(line):
+            yield number, match.group(0), match.group(1)
 
 
 def main() -> int:
@@ -100,10 +118,14 @@ def main() -> int:
             offenders += 1
             relative = path.relative_to(REPO)
             print(f"FAIL {relative}:{number}: {expression}")
-            print(f"     {target} is an INTERFACE target on the Qt 5 route; "
-                  f"use ${{SNOW_QT_NS}}::{target.split('::', 1)[1]} instead")
-    check(f"no file generator expression names a versionless Qt target "
-          f"({scanned} CMake file(s) scanned)", offenders == 0,
+            if target.startswith("Qt::"):
+                print(f"     {target} is an INTERFACE target on the Qt 5 route; "
+                      f"use ${{SNOW_QT_NS}}::{target.split('::', 1)[1]} instead")
+            else:
+                print(f"     {target} only exists on one route; "
+                      f"use ${{SNOW_QT_NS}}::{target.split('::', 1)[1]} instead")
+    check(f"no file generator expression hard-codes or versionless-names a Qt "
+          f"target ({scanned} CMake file(s) scanned)", offenders == 0,
           f"{offenders} occurrence(s)")
 
     # The substitution above is only safe while the namespace is assigned on

@@ -1094,8 +1094,9 @@ void historyHoverMovementDoesNotRequireSelectionOrEnter() {
             // repeated visits to the first row before its selection bar opens.
             for (int visit = 0; visit < 2; ++visit) {
                 const QPoint local(more->width() / 2, 0);
-                QHoverEvent move(QEvent::HoverMove, local, more->mapToGlobal(local),
-                                 QPointF(local.x(), -1), Qt::NoModifier);
+                QHoverEvent move =
+                    snowHoverEvent(QEvent::HoverMove, local, more->mapToGlobal(snowWidgetPosition(local)),
+                                   QPointF(local.x(), -1), Qt::NoModifier);
                 QApplication::sendEvent(more, &move);
                 auto* menu = row->findChild<adqt::widgets::AdContextMenu*>(
                     QStringLiteral("screenshotHistoryEntryMoreMenu"));

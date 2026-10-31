@@ -104,7 +104,7 @@ void setDragMime(QMimeData& mime, const CollageDocument& document, quint64 id) {
 
 bool enter(QWidget* target, QMimeData* mime, QPoint position,
            Qt::DropActions actions = Qt::MoveAction) {
-    QDragEnterEvent event(QPointF(position), actions, mime, Qt::LeftButton, Qt::NoModifier);
+    QDragEnterEvent event(snowWidgetPosition(QPointF(position)), actions, mime, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(target, &event);
     return event.isAccepted();
 }

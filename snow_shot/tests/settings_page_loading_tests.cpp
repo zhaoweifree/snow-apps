@@ -655,7 +655,11 @@ void variableDescriptionLinks(const settings::SettingsRegistry& registry,
         auto* modal = field->viewWidget()->findChild<adqt::widgets::AdModal*>(
             QStringLiteral("settingsVariableDescriptionModal"));
         require(modal && modal->isOpen() && modal->centered() &&
-                    modal->standardButtons() == adqt::widgets::AdModal::StandardButton::Ok &&
+                    // Compare flag-set to flag-set: Qt 5's QFlags has no
+                    // operator== against a bare enumerator (Qt 6 added one).
+                    modal->standardButtons() ==
+                        adqt::widgets::AdModal::StandardButtons(
+                            adqt::widgets::AdModal::StandardButton::Ok) &&
                     modal->text().startsWith(QStringLiteral("{YYYY}: Current time")),
                 "keyboard activation must open a centered modal with the variable description and "
                 "one button");

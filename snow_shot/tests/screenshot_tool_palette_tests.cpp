@@ -1328,7 +1328,8 @@ void recordingExportSettingsAndDrawingAvailabilityFollowSessionState() {
                 "recording settings must retain the shared toolbar button size at every scale");
         for (QLabel* icon : {trailIcon, clickIcon}) {
             require(icon->size() == QSize(controlSize, controlSize) &&
-                        snowLabelPixmap(icon).deviceIndependentSize() == QSizeF(iconSize, iconSize),
+                        snowPixmapDeviceIndependentSize(snowLabelPixmap(icon)) ==
+                            QSizeF(iconSize, iconSize),
                     "mouse effect icons should match drawing style controls at every scale");
         }
         for (auto* picker : {trail, click}) {
@@ -4054,7 +4055,7 @@ void tableBusyStatePreservesSiblingGroupPopovers(bool recoverFromMove = false) {
                              }
                          });
         const QPoint local = trigger->rect().center();
-        SnowEnterEvent enter(local, trigger->mapTo(trigger->window(), local),
+        SnowEnterEventInstance enter(local, trigger->mapTo(trigger->window(), local),
                           trigger->mapToGlobal(local));
         if (recoverFromMove) {
             QMouseEvent move(QEvent::MouseMove, local, trigger->mapToGlobal(local), Qt::NoButton,
@@ -9725,7 +9726,7 @@ void filterStyleEditorsMatchShapeAndSpotlightMetrics() {
         snapshot.panelHeight = palette.stylePanel()->height();
         snapshot.iconSize = icon->size();
         snapshot.sliderSize = slider->size();
-        snapshot.pixmap = icon->pixmap();
+        snapshot.pixmap = snowLabelPixmap(icon);
         return snapshot;
     };
     const auto pixmapHasVisiblePixel = [](const QPixmap& pixmap) {
@@ -17628,11 +17629,14 @@ void strokeRenderingSelectionEditUsesHistoryAndRemembersOnlyItsProperty() {
         content.remove(QStringLiteral("revision"));
         return content;
     };
-    const QJsonValue before = document();
+    // document() is a QJsonObject: naming the variables QJsonObject keeps every
+    // comparison in this block same-type. Qt 5 has no cross-type operator== to
+    // fall back on (Qt 6 finds one through the implicit QJsonValue conversion).
+    const QJsonObject before = document();
     strokeRenderingButtons(row).at(1)->click();
     auto expected = defaults;
     expected.rectangle.strokeRenderingStyle = SnowCanvasStrokeRenderingStyle::Artist;
-    const QJsonValue after = document();
+    const QJsonObject after = document();
     require(
         after != before && saves == 1 && binding.lastSaveSucceeded() == true &&
             canvas.canvasStyleToolbarState().shapeStyle.strokeRenderingStyle ==
@@ -17646,7 +17650,7 @@ void strokeRenderingSelectionEditUsesHistoryAndRemembersOnlyItsProperty() {
         screenshotCanvasToolStyleDefaults() != expected) {
         std::cerr << "Rendering undo result=" << undone << ", saves=" << saves
                   << ", preferences=" << (screenshotCanvasToolStyleDefaults() == expected)
-                  << "\nBefore: " << QJsonDocument(before.toObject()).toJson().constData()
+                  << "\nBefore: " << QJsonDocument(before).toJson().constData()
                   << "\nRestored: " << QJsonDocument(document()).toJson().constData() << '\n';
     }
     require(undone && document() == before && saves == 1 &&
@@ -18531,7 +18535,8 @@ void fontFamilyListIsCachedForEditorBuilds() {
             "font family cache should expose the registered application font");
 
     QStringList expected;
-    const QStringList systemFamilies = QFontDatabase::families();
+    // Qt 6 made families() static; Qt 5 keeps it on an instance.
+    const QStringList systemFamilies = QFontDatabase().families();
     expected.reserve(systemFamilies.size());
     for (const QString& family : systemFamilies) {
         const QString trimmed = family.trimmed();
@@ -19419,8 +19424,10 @@ void layoutCompactionToolbar() {
         });
     palette.setSelectionBackgroundOpacityState(0, true);
     const QPoint opacityPoint(5, 5);
-    QHoverEvent opacityMove(QEvent::HoverMove, opacityPoint, opacity->mapToGlobal(opacityPoint),
-                            QPointF(-1, -1), Qt::NoModifier);
+    QHoverEvent opacityMove =
+        snowHoverEvent(QEvent::HoverMove, opacityPoint,
+                       opacity->mapToGlobal(snowWidgetPosition(opacityPoint)), QPointF(-1, -1),
+                       Qt::NoModifier);
     QCoreApplication::sendEvent(opacity, &opacityMove);
     require(opacityPreview, "opacity hover movement without Enter activates the effects preview");
     QEvent opacityLeave(QEvent::HoverLeave);

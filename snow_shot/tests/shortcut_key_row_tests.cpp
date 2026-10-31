@@ -2118,7 +2118,7 @@ void adjustableDelayUsesWheelAndClampsRange() {
             "scrolling over the delay title must persist and publish a one-second increment");
 
     const QPoint titlePoint = delayTitleLabel->rect().center();
-    SnowEnterEvent enterEvent(QPointF(titlePoint), QPointF(delayTitleLabel->mapTo(&row, titlePoint)),
+    SnowEnterEventInstance enterEvent(QPointF(titlePoint), QPointF(delayTitleLabel->mapTo(&row, titlePoint)),
                            QPointF(delayTitleLabel->mapToGlobal(titlePoint)));
     QCoreApplication::sendEvent(delayTitleLabel, &enterEvent);
     require(delayUnderline->isVisible() && delayUnderline->height() == 2 &&

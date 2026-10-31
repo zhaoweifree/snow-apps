@@ -48,7 +48,7 @@ void migrate(const QString& destination, bool existingData) {
 int archiveFixture(const QString& root) {
     diagnostics::DiagnosticsService logger;
     diagnostics::DiagnosticsOptions options;
-    options.directories = {QDir(root).filePath(QStringLiteral("source/logs"))};
+    options.directories = QStringList{QDir(root).filePath(QStringLiteral("source/logs"))};
     options.handlerPath = QStringLiteral(SNOW_TEST_CRASHPAD_HANDLER);
     options.mirrorToConsole = false;
     require(logger.initialize(options) && logger.status().crashCaptureAvailable,
@@ -64,7 +64,7 @@ int fixture(const QString& root, bool stableDatabase) {
             "fixture storage initializes");
     auto& logger = diagnostics::DiagnosticsService::instance();
     diagnostics::DiagnosticsOptions options;
-    options.directories = {QDir(source).filePath(QStringLiteral("logs"))};
+    options.directories = QStringList{QDir(source).filePath(QStringLiteral("logs"))};
     options.handlerPath = QStringLiteral(SNOW_TEST_CRASHPAD_HANDLER);
     if (stableDatabase)
         options.crashCaptureDirectory = QDir(root).filePath(QStringLiteral("runtime/crashes"));
@@ -159,7 +159,7 @@ void verifyMigration(bool stableDatabase) {
                 bytes.contains(completed.readAll()),
             "post-migration dump retains the current session and breadcrumbs");
     diagnostics::DiagnosticsOptions recoveryOptions;
-    recoveryOptions.directories = {directory.filePath(QStringLiteral("second/logs"))};
+    recoveryOptions.directories = QStringList{directory.filePath(QStringLiteral("second/logs"))};
     recoveryOptions.crashCaptureDirectory = directory.filePath(
         stableDatabase ? QStringLiteral("runtime/crashes") : QStringLiteral("source/logs/crashes"));
     recoveryOptions.enableCrashCapture = false;

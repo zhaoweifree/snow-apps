@@ -490,7 +490,7 @@ void failedRequestsIdentifyTheirKindWithoutContent() {
     // deliberately rejects symbolic-link ancestors, so supply the real isolated path.
     const QString diagnosticsRoot = QFileInfo(temporary.path()).canonicalFilePath();
     require(!diagnosticsRoot.isEmpty(), "network diagnostics need a canonical isolated directory");
-    options.directories = {diagnosticsRoot};
+    options.directories = QStringList{diagnosticsRoot};
     options.enableCrashCapture = false;
     options.mirrorToConsole = false;
     options.installMessageHandler = false;

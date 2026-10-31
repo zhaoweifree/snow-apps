@@ -180,8 +180,11 @@ int main(int argc, char** argv) {
                                                   QString::fromLatin1(name)) >= 0,
                 "search test fonts should load");
     }
-    QFontDatabase::setApplicationFallbackFontFamilies(QChar::Script_Han,
-                                                      {QStringLiteral("Snow Recording Test Han")});
+    // Qt 5 has no application fallback list (rule R53), so it picks a Han face
+    // from the platform's own substitution table. The assertions below are about
+    // layout, not about which face wins.
+    snowSetApplicationFallbackFontFamilies(QChar::Script_Han,
+                                          {QStringLiteral("Snow Recording Test Han")});
     snow_shot::presentation::styles::ThemeManager::instance().initialize(application);
 
     searchTagsUseSpaceLeftByShortTitles();
