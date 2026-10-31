@@ -279,11 +279,13 @@ void sourceMaskAndValidation() {
     require(prepared.pixelColor(120, 110) == Qt::white && prepared.pixelColor(50, 50) == Qt::black,
             "preparation masks excluded pixels without adding screenshot decoration");
     f.start();
-    f.complete({{QStringLiteral("inside"), quad(20, 20)},
+    // Qt 5's QList has no deduction for a braced list spanning several
+    // aggregate elements here, so the container type is named.
+    f.complete(QList<ScreenshotQrDetection>{{QStringLiteral("inside"), quad(20, 20)},
                 {QStringLiteral("hole"), quad(110, 100)},
                 {QStringLiteral("crossing"), quad(90, 90)},
                 {QStringLiteral("outside"), quad(390, 290)},
-                {QStringLiteral("bad"), {QPointF(10, 10)}}});
+                {QStringLiteral("bad"), snowPolygonF({QPointF(10, 10)})}});
     require(f.markers().size() == 1, "entire quadrilateral must lie within selection");
     f.start();
     f.decoder.callbacks.last()({{}, QStringLiteral("detector failure"), {}});
@@ -554,7 +556,9 @@ void hoverMovementOpensWithoutRestartingTheDelay() {
     auto* marker = f.marker(0);
     const auto hover = [](QWidget* widget, QEvent::Type type) {
         const QPoint local = widget->rect().center();
-        QHoverEvent event(type, local, widget->mapToGlobal(local), QPointF(-1, -1), Qt::NoModifier);
+        QHoverEvent event = snowHoverEvent(type, local,
+                                          widget->mapToGlobal(snowWidgetPosition(local)),
+                                          QPointF(-1, -1), Qt::NoModifier);
         QApplication::sendEvent(widget, &event);
     };
     hover(marker, QEvent::HoverMove);

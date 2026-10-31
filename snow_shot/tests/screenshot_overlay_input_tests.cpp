@@ -1,3 +1,5 @@
+#include "synthetic_mouse_test_support.h"
+
 #include "snow_shot/presentation/screenshotoverlayeventsink.h"
 #include "snow_shot/presentation/screenshotoverlaywindow.h"
 #include "snow_draw_engine_qt/snow_canvas_widget.h"
@@ -11,26 +13,6 @@
 #include <QWindow>
 #include <private/qhighdpiscaling_p.h>
 #include <qpa/qwindowsysteminterface.h>
-
-namespace {
-// Qt 5.15 has no timestamp-free handleMouseEvent template: the first argument
-// after the window is `ulong timestamp` there, so the Qt 6 spelling
-// (window, local, global, state, button, type) finds no candidate at all. The
-// timestamp only orders deliveries inside the platform queue, and the routing
-// under test keys off the arguments, so "now" is a faithful stand-in.
-template <typename Delivery>
-bool sendSyntheticMouse(QWindow* window, const QPointF& local, const QPointF& global,
-                        Qt::MouseButtons state, Qt::MouseButton button, QEvent::Type type) {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    return QWindowSystemInterface::handleMouseEvent<Delivery>(window, local, global, state, button,
-                                                              type);
-#else
-    return QWindowSystemInterface::handleMouseEvent<Delivery>(
-        window, static_cast<ulong>(QDateTime::currentMSecsSinceEpoch()), local, global, state,
-        button, type);
-#endif
-}
-} // namespace
 
 #include <cstdlib>
 #include <iostream>

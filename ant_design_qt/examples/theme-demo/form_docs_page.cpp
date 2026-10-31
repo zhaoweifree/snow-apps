@@ -349,7 +349,7 @@ QWidget* FormDocsPage::buildDynamicValidationDemo() {
     const QString text = value.toString().trimmed();
     if (text.size() < 4) {
       result.status = AdFormItem::ValidateStatus::Error;
-      result.errors = {"Username must be at least 4 characters."};
+      result.errors = QStringList{"Username must be at least 4 characters."};
     }
     return result;
   });
@@ -363,7 +363,7 @@ QWidget* FormDocsPage::buildDynamicValidationDemo() {
     const QString text = value.toString().trimmed();
     if (!text.contains(QLatin1Char('@'))) {
       result.status = AdFormItem::ValidateStatus::Error;
-      result.errors = {"Email must contain @."};
+      result.errors = QStringList{"Email must contain @."};
     }
     return result;
   });
@@ -442,7 +442,7 @@ QWidget* FormDocsPage::buildFieldPathDependencyDemo() {
     const QString text = value.toString().trimmed();
     if (!text.contains(QLatin1Char('@'))) {
       result.status = AdFormItem::ValidateStatus::Error;
-      result.errors = {"Email must contain @."};
+      result.errors = QStringList{"Email must contain @."};
     }
     return result;
   });
@@ -475,7 +475,7 @@ QWidget* FormDocsPage::buildFieldPathDependencyDemo() {
         formWidget ? formWidget->fieldValue("account.password").toString() : QString();
     if (!password.isEmpty() && value.toString() != password) {
       result.status = AdFormItem::ValidateStatus::Error;
-      result.errors = {"The two passwords do not match."};
+      result.errors = QStringList{"The two passwords do not match."};
     }
     return result;
   });
@@ -571,7 +571,7 @@ QWidget* FormDocsPage::buildFormListDemo() {
     for (int i = 0; i < rows.size(); ++i) {
       if (rows.at(i).toString().trimmed().isEmpty()) {
         result.status = AdFormItem::ValidateStatus::Error;
-        result.errors = {QStringLiteral("Passenger %1 is empty.").arg(i + 1)};
+        result.errors = QStringList{QStringLiteral("Passenger %1 is empty.").arg(i + 1)};
         break;
       }
     }

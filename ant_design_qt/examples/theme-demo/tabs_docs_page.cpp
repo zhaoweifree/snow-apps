@@ -199,7 +199,7 @@ QWidget* TabsDocsPage::buildPlacementDemo() {
   controls->addStretch();
   auto* tabs = makeThreeTabs();
   tabs->setMinimumHeight(190);
-  connect(placement, &QComboBox::currentIndexChanged, tabs, [tabs](int index) {
+  connect(placement, QOverload<int>::of(&QComboBox::currentIndexChanged), tabs, [tabs](int index) {
     static const AdTabs::Placement placements[] = {
         AdTabs::Placement::Top, AdTabs::Placement::Bottom, AdTabs::Placement::Start,
         AdTabs::Placement::End};

@@ -166,7 +166,10 @@ QWidget* PaginationDocsPage::buildControlledDemo() {
   auto* page = new QSpinBox();
   page->setRange(1, 10);
   page->setValue(1);
-  connect(page, &QSpinBox::valueChanged, pagination, &AdPagination::setCurrentPage);
+  // Qt 5's QSpinBox carries both an int and a QString valueChanged overload;
+  // Qt 6 kept only the int one. Naming it works on both.
+  connect(page, QOverload<int>::of(&QSpinBox::valueChanged), pagination,
+          &AdPagination::setCurrentPage);
   connect(pagination, &AdPagination::currentPageChanged, page, &QSpinBox::setValue);
   layout->addWidget(pagination, 1);
   layout->addWidget(page);

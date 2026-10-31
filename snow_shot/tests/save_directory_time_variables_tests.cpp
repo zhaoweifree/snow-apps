@@ -27,7 +27,8 @@ void require(bool condition, const char* message) {
 }
 
 void windowVariables(const QTemporaryDir& temporary) {
-    const QDateTime timestamp(QDate(2026, 10, 16), QTime(12, 34, 56), QTimeZone::UTC);
+    // QTimeZone::UTC the enumerator is Qt 6.5; utc() exists in both.
+    const QDateTime timestamp(QDate(2026, 10, 16), QTime(12, 34, 56), QTimeZone::utc());
     const storage::ScreenshotWindowNames names{QStringLiteral("Google Chrome"),
                                                QStringLiteral("文档: A/B")};
     require(storage::containsScreenshotWindowVariables(QStringLiteral("/{AN}/image")) &&
@@ -125,7 +126,7 @@ void windowVariables(const QTemporaryDir& temporary) {
             "configure an unusable named recording directory");
     auto blockedDirectories = recording::screenRecordingDirectories(timestamp, names);
     const QString fallback = temporary.filePath(QStringLiteral("window-fallback"));
-    blockedDirectories = {blockedDirectories.constFirst(), fallback};
+    blockedDirectories = QStringList{blockedDirectories.constFirst(), fallback};
     require(recording::screenRecordingOutputPath(blockedDirectories, videoBase,
                                                  QStringLiteral("mp4")) ==
                 QDir(fallback).filePath(videoBase + QStringLiteral(".mp4")),
@@ -133,7 +134,7 @@ void windowVariables(const QTemporaryDir& temporary) {
 }
 
 void timeDirectories(const QTemporaryDir& temporary) {
-    const QDateTime before(QDate(2026, 12, 31), QTime(23, 59, 59), QTimeZone::UTC);
+    const QDateTime before(QDate(2026, 12, 31), QTime(23, 59, 59), QTimeZone::utc());
     const QDateTime after = before.addSecs(1);
     const QString pattern = temporary.filePath(QStringLiteral("output/{YYYY}/{MM}/{DD}"));
     require(storage::expandTimeVariables(QStringLiteral(" {YYYY-MM-DD_HH-mm-ss} "), before) ==
@@ -225,7 +226,7 @@ void timeDirectories(const QTemporaryDir& temporary) {
 }
 
 void longWindowNames(const QTemporaryDir& temporary) {
-    const QDateTime timestamp(QDate(2026, 10, 16), QTime(12, 34, 56), QTimeZone::UTC);
+    const QDateTime timestamp(QDate(2026, 10, 16), QTime(12, 34, 56), QTimeZone::utc());
     QImage image(2, 2, QImage::Format_RGB32);
     image.fill(Qt::red);
     const QString longStem = QString::fromUtf8("文😀").repeated(100);

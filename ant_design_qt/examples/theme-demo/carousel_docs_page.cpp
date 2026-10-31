@@ -149,7 +149,7 @@ QWidget* CarouselDocsPage::buildPlacementDemo() {
   controls->addStretch();
   auto* carousel = makeCarousel();
   carousel->setArrowsVisible(true);
-  connect(placement, &QComboBox::currentIndexChanged, carousel, [carousel](int index) {
+  connect(placement, QOverload<int>::of(&QComboBox::currentIndexChanged), carousel, [carousel](int index) {
     static const AdCarousel::DotPlacement placements[] = {
         AdCarousel::DotPlacement::Bottom, AdCarousel::DotPlacement::Top,
         AdCarousel::DotPlacement::Start, AdCarousel::DotPlacement::End};

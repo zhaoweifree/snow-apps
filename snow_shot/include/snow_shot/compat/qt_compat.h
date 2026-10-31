@@ -2726,4 +2726,35 @@ inline void snowSetApplicationFallbackFontFamilies(QChar::Script script,
 
 #endif // SNOW_COMPAT_HAS_GUI
 
+
+// --- 26. QTimer::id() is Qt 6.8 (rule R57) ---------------------------------
+//
+//     Qt 5.15 names the timer's runtime id `timerId()`; Qt 6 renamed it to
+//     `id()` and made it return the strong `Qt::TimerId` type, keeping
+//     `timerId()` only as a deprecated alias. QTimerEvent takes whichever
+//     spelling the version has, and `Qt::TimerId` has an explicit constructor,
+//     so an `int` cannot stand in on Qt 6 -- which is why this returns a type
+//     alias rather than an int.
+//
+//     Rule R57: `<timer>->id()` -> `snowTimerId(<timer>)`, and the result goes
+//     straight into a QTimerEvent.
+//
+//     <QTimer> is normally pulled in by the SnowChronoTimer fallback, which only
+//     exists for GUI targets, so a Qt::Core-only translation unit would not have
+//     the type in scope here.
+#  include <QTimer>
+#if SNOW_QT6
+using SnowTimerId = Qt::TimerId;
+#else
+using SnowTimerId = int;
+#endif
+[[nodiscard]] inline SnowTimerId snowTimerId(const QTimer* timer)
+{
+#if SNOW_QT6
+    return timer->id();
+#else
+    return timer->timerId();
+#endif
+}
+
 #endif // !SNOW_COMPAT_INERT

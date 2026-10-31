@@ -27,6 +27,14 @@
 #include <qt_windows.h>
 
 namespace {
+// The project compiles with _MBCS, so the stock-cursor macros expand to
+// MAKEINTRESOURCEA and carry a `char *`; LoadCursorW wants LPCWSTR. The payload
+// is a resource id rather than a string, so reinterpreting the pointer is the
+// conversion Win32 itself performs in the UNICODE build.
+HCURSOR loadStockCursor(LPCSTR resource) {
+    return LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(resource));
+}
+
 void require(bool condition, const char* message) {
     if (!condition) {
         throw std::runtime_error(message);
@@ -165,7 +173,7 @@ int runNativeEditor(QApplication& app) {
     const bool stockCrosshair = app.arguments().contains(QStringLiteral("--stock-crosshair"));
     // LoadCursorW returns a borrowed shared resource. Only the marker cursor is owned here.
     const HCURSOR cursor =
-        stockCrosshair ? LoadCursorW(nullptr, IDC_CROSS) : createNativeMarkerCursor();
+        stockCrosshair ? loadStockCursor(IDC_CROSS) : createNativeMarkerCursor();
     require(cursor != nullptr, "native editor cursor was unavailable");
     WNDCLASSW klass{};
     klass.lpfnWndProc = nativeEditorWindowProcedure;
@@ -344,7 +352,7 @@ struct StockCrosshairGeometry {
 };
 
 StockCrosshairGeometry stockCrosshairGeometry() {
-    const HCURSOR cursor = LoadCursorW(nullptr, IDC_CROSS);
+    const HCURSOR cursor = loadStockCursor(IDC_CROSS);
     require(cursor != nullptr, "stock crosshair was unavailable");
     ICONINFO icon{};
     require(GetIconInfo(cursor, &icon), "stock crosshair geometry was unavailable");
@@ -551,7 +559,7 @@ void runRecapture(QApplication& app) {
             capturePoint = QPoint(capturedPosition.x, capturedPosition.y);
             if (app.arguments().contains(QStringLiteral("--change-after-ready"))) {
                 QTimer::singleShot(0, &refreshLoop, [&] {
-                    SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+                    SetCursor(loadStockCursor(IDC_WAIT));
                     laterCursorChanged = true;
                 });
             }
@@ -670,7 +678,8 @@ void runSameThreadRecapture(QApplication& app) {
                    qRound(logical.y() * overlay.devicePixelRatioF())};
     ClientToScreen(reinterpret_cast<HWND>(overlay.winId()), &position);
     waitForEntry(overlay, [&] { stationary.confine(QPoint(position.x, position.y)); });
-    const HCURSOR expected = LoadCursorW(nullptr, sameCursor || nonClient ? IDC_ARROW : IDC_IBEAM);
+    const HCURSOR expected =
+        loadStockCursor(sameCursor || nonClient ? IDC_ARROW : IDC_IBEAM);
     for (int iteration = 0; iteration < 3; ++iteration) {
         // Move between clicks to avoid turning successive recaptures into a native
         // double-click. Keep the pointer stationary throughout each handover.

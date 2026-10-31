@@ -1806,7 +1806,7 @@ QWidget* DatePickerDocsPage::buildPlacementDemo() {
     range->setPlacement(placement);
   };
   applyPlacement();
-  connect(placementBox, &QComboBox::currentIndexChanged, single, applyPlacement);
+  connect(placementBox, QOverload<int>::of(&QComboBox::currentIndexChanged), single, applyPlacement);
 
   row->addWidget(placementBox);
   row->addWidget(single);
@@ -1826,7 +1826,7 @@ QWidget* DatePickerDocsPage::buildPopupLayerModeDemo() {
   modeBox->addItem(QStringLiteral("QtTool"), static_cast<int>(AdPopupLayerMode::QtTool));
 
   auto* picker = makePicker(QDate::currentDate());
-  connect(modeBox, &QComboBox::currentIndexChanged, picker, [modeBox, picker]() {
+  connect(modeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), picker, [modeBox, picker]() {
     picker->setPopupLayerMode(static_cast<AdPopupLayerMode>(modeBox->currentData().toInt()));
   });
 

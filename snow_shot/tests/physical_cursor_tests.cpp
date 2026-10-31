@@ -1,3 +1,5 @@
+#include "synthetic_mouse_test_support.h"
+
 #include "snow_shot/platform/physicalcursor.h"
 
 #include <QPoint>
@@ -96,7 +98,8 @@ void silentWarpsDeliverMovementThroughQt() {
                 surface.lastGlobalPosition == desktop && surface.lastButtons == Qt::NoButton,
             "a silent Retina warp must deliver fractional hover movement to the child");
 
-    const QPointF pressLocal = window.windowHandle()->mapFromGlobal(desktop);
+    const QPointF pressLocal =
+        window.windowHandle()->mapFromGlobal(snowWidgetPosition(desktop));
     QMouseEvent press(QEvent::MouseButtonPress, pressLocal, pressLocal, desktop, Qt::LeftButton,
                       Qt::LeftButton, Qt::ShiftModifier);
     QCoreApplication::sendEvent(window.windowHandle(), &press);
@@ -126,7 +129,8 @@ void silentWarpsDeliverMovementThroughQt() {
     static_cast<void>(cursor.moveOnePixel(PhysicalCursorDirection::Right));
     require(surface.moves == 4 && otherSurface.moves == 0 && surface.lastGlobalPosition == desktop,
             "a keyboard-driven drag must remain with its owner across top-level windows");
-    const QPointF releaseLocal = window.windowHandle()->mapFromGlobal(desktop);
+    const QPointF releaseLocal =
+        window.windowHandle()->mapFromGlobal(snowWidgetPosition(desktop));
     QMouseEvent release(QEvent::MouseButtonRelease, releaseLocal, releaseLocal, desktop,
                         Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
     QCoreApplication::sendEvent(window.windowHandle(), &release);
@@ -151,8 +155,9 @@ void warpsKeepNativePointerStateSynchronized() {
     QWindow* window = surface.windowHandle();
     const QPointF original = surface.mapToGlobal(snowWidgetPosition(QPointF(40, 50)));
     const auto nativeMove = [&](const QPointF& global) {
-        QWindowSystemInterface::handleMouseEvent<QWindowSystemInterface::SynchronousDelivery>(
-            window, QHighDpi::toNativeLocalPosition(window->mapFromGlobal(global), window),
+        sendSyntheticMouse<QWindowSystemInterface::SynchronousDelivery>(
+            window, QHighDpi::toNativeLocalPosition(window->mapFromGlobal(snowWidgetPosition(global)),
+                                                    window),
             QHighDpi::toNativePixels(global, window), Qt::NoButton, Qt::NoButton,
             QEvent::MouseMove);
     };

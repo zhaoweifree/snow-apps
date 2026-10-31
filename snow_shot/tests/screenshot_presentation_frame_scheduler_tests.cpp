@@ -236,7 +236,9 @@ void qtBackendArmsOnlyTheRemainingDeadline() {
     int callbacks = 0;
     ScreenshotPresentationFrameScheduler scheduler([&] { return now; }, [&] { ++callbacks; },
                                                    Backend::QtTimer);
-    auto* timer = qobject_cast<SnowChronoTimer*>(scheduler.wakeupObject());
+    // SnowChronoTimer is the Qt 5 fallback class and carries no Q_OBJECT, so
+    // qobject_cast cannot name it there; the timer is a QTimer in both worlds.
+    auto* timer = static_cast<SnowChronoTimer*>(qobject_cast<QTimer*>(scheduler.wakeupObject()));
     require(timer && timer->isSingleShot() && timer->timerType() == Qt::PreciseTimer,
             "the Qt backend must retain a precise single-shot timer");
     WakeupObserver observer(timer);
@@ -245,7 +247,7 @@ void qtBackendArmsOnlyTheRemainingDeadline() {
         timer->isActive() && timer->interval() == std::chrono::milliseconds(25),
         "the Qt timer must wait for the remaining deadline instead of polling every millisecond");
 
-    QTimerEvent earlyWakeup(timer->id());
+    QTimerEvent earlyWakeup(snowTimerId(timer));
     QCoreApplication::sendEvent(timer, &earlyWakeup);
     require(callbacks == 0 && scheduler.active() && timer->isActive() &&
                 timer->interval() == std::chrono::milliseconds(25),
@@ -256,7 +258,7 @@ void qtBackendArmsOnlyTheRemainingDeadline() {
     require(timer->isActive() && timer->interval() == std::chrono::milliseconds(7),
             "replacing a deadline must restart the same timer for the new remaining interval");
     now = 22000000;
-    QTimerEvent dueWakeup(timer->id());
+    QTimerEvent dueWakeup(snowTimerId(timer));
     QCoreApplication::sendEvent(timer, &dueWakeup);
     require(callbacks == 1 && !scheduler.active() && !timer->isActive(),
             "the delivered Qt deadline must leave both the scheduler and timer inactive");
