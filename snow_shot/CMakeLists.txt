@@ -530,19 +530,23 @@ set_target_properties(snow_shot_image_codec_backend PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
 )
-if(UNIX AND NOT APPLE AND NOT SNOW_SHOT_IMAGE_CODEC_BACKEND_STATIC)
+if(UNIX AND NOT APPLE AND NOT SNOW_SHOT_IMAGE_CODEC_BACKEND_STATIC
+   AND SNOW_IMAGE_CODEC_WEBP)
     # On ELF the backend reached libwebpmux only through the static snow_image
     # archive's link interface, which lands the WebP libraries *before* the
     # archive on the link line; `--as-needed` then drops libwebpmux and the .so
     # is left with an undefined WebPAnimEncoderSetChunk. Anything that links the
     # .so without independently pulling libwebpmux -- snow-shot-scrolling-result-
     # async-benchmark, for one -- then fails with that single undefined symbol.
-    # Naming the libraries here appends them after the archive, so the .so
-    # records its own DT_NEEDED and every consumer links cleanly.
-    if(TARGET WebP::libwebpmux)
-        target_link_libraries(snow_shot_image_codec_backend PRIVATE
-            WebP::webp WebP::webpdemux WebP::libwebpmux)
-    endif()
+    #
+    # find_package has to be called here: imported targets are directory
+    # scoped, so the WebP::* targets snow_image created in its own subdirectory
+    # are not visible in this one and a bare `if(TARGET ...)` guard would have
+    # silently linked nothing. Naming the libraries after the archive makes the
+    # .so record its own DT_NEEDED, so every consumer links cleanly.
+    find_package(WebP CONFIG REQUIRED)
+    target_link_libraries(snow_shot_image_codec_backend PRIVATE
+        WebP::webp WebP::webpdemux WebP::libwebpmux)
 endif()
 
 set(SNOW_SHOT_IMAGE_CODEC_SOURCES
